@@ -1,0 +1,173 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": { "includes": ["apps/**", "packages/**", "scripts/**", "npm/**", "!**/node_modules", "!**/dist", "!!spikes", "!!.claude", "!!lint/fixtures"] },
+  "formatter": { "indentStyle": "space", "lineWidth": 110 },
+  // Custom rules (ADR 0036), in GritQL. Each message says how to fix the code. `lint/fixtures` proves they bite.
+  "plugins": [
+    "./lint/no-as-cast.grit",
+    "./lint/no-swallowed-catch.grit",
+    // Config files and scripts read the environment; everything else takes the value as a parameter. npm's
+    // launcher is a script too: it hands its environment to the executable it starts (ADR 0061).
+    {
+      "path": "./lint/env-only-in-config.grit",
+      "includes": ["**", "!**/*.config.ts", "!**/config.ts", "!**/scripts/**", "!**/npm/bin/lookover.js"]
+    },
+    // Frozen names (ADR 0032) are spelled in one file; everything else imports them.
+    {
+      "path": "./lint/frozen-names-only-in-frozen.grit",
+      "includes": ["**", "!**/packages/contracts/src/frozen.ts"]
+    }
+  ],
+  "css": { "linter": { "enabled": false } },
+  "linter": {
+    "rules": {
+      "style": { "noNonNullAssertion": "error" },
+      "suspicious": {
+        "noTsIgnore": "error",
+        "noExplicitAny": "error",
+        "noFocusedTests": "error",
+        "noSkippedTests": "error",
+        "noImportCycles": "error"
+      },
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error",
+        "useExhaustiveSwitchCases": "error"
+      },
+      "performance": { "noReExportAll": "error" },
+      "complexity": {
+        "noUselessCatch": "error",
+        "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 15 } }
+      },
+      "a11y": {
+        "useSemanticElements": "off",
+        "noStaticElementInteractions": "off",
+        "useKeyWithClickEvents": "off",
+        "noNoninteractiveTabindex": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      // npm's launcher is CommonJS: the `lookover` package it ships in has no `"type": "module"`, so its
+      // "use strict" counts. Biome reads it by the root package.json's `"type"` instead, as a module.
+      "includes": ["npm/bin/**"],
+      "linter": { "rules": { "suspicious": { "noRedundantUseStrict": "off" } } }
+    },
+    // Import boundaries (ADR 0033, enforced as ADR 0036 says). A later override's options replace an
+    // earlier one's for the same rule, so each file set below has exactly ONE `noRestrictedImports`
+    // override and the file sets never overlap. The package level (which packages each may import, and
+    // which are pure) is in each package.json's "lookover" field, checked by `scripts/check-deps.ts`.
+    {
+      // The shared vocabulary: every package imports it, and it imports nothing.
+      "includes": ["packages/contracts/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [":NODE:", ":BUN:", "bun", "!bun:test"],
+                    "message": "contracts is pure: no node: or bun: module. It holds types and the snapshot reducer only (ADR 0033, ADR 0037)."
+                  },
+                  {
+                    "group": ["@lookover/*", "@lookover/*/**"],
+                    "message": "contracts imports nothing: every other package imports it (ADR 0033)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // The pure core: Lookover's rules, on contracts alone.
+      "includes": ["packages/core/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [":NODE:", ":BUN:", "bun", "!bun:test"],
+                    "message": "core is pure: no node: or bun: module. Take time, IDs or I/O as a port from @lookover/contracts, passed in as a parameter (ADR 0033)."
+                  },
+                  {
+                    "group": ["@lookover/*", "!@lookover/contracts"],
+                    "message": "core imports only @lookover/contracts, never an adapter or another package. Depend on the port in contracts (ADR 0033)."
+                  },
+                  {
+                    "group": ["@lookover/*/**"],
+                    "message": "No deep imports: import the package by name, its src/index.ts is the only public entry (ADR 0033)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // The other pure packages: each declares `"pure": true` in its package.json, and `bun run imports` fails
+      // until its `src/**` is listed here. Which packages each may import is in its package.json too.
+      "includes": [
+        "packages/diff/src/**",
+        "packages/publish/src/**",
+        "packages/review/src/**",
+        "packages/settings/src/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [":NODE:", ":BUN:", "bun", "!bun:test"],
+                    "message": "A pure package: no node: or bun: module. Take time, IDs or I/O as a port from @lookover/contracts, passed in as a parameter (ADR 0033)."
+                  },
+                  {
+                    "group": ["@lookover/*/**"],
+                    "message": "No deep imports: import the package by name, its src/index.ts is the only public entry (ADR 0033)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // The web app, its entry file and dev area included: contracts only. The screens talk to LookoverApi; the
+      // drawer to the demo driver over HTTP, through contracts' demo.ts.
+      "includes": ["apps/web/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@lookover/*", "!@lookover/contracts"],
+                    "message": "The UI talks only to LookoverApi from @lookover/contracts, and the dev area to the demo driver over HTTP through contracts' demo.ts (ADR 0033, ADR 0046)."
+                  },
+                  {
+                    "group": ["@lookover/*/**"],
+                    "message": "No deep imports: import the package by name, its src/index.ts is the only public entry (ADR 0033)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

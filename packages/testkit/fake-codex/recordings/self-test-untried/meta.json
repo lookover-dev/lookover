@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#91 review, re-derived for #137 and #250): notes/inside.txt read, no command names written.txt: the write was never tried. The self-test is inconclusive: the wall wasn't tested.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

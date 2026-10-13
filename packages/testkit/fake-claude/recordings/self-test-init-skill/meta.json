@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#137, I-080): the passing run, its init line naming a project skill (.claude/skills/canary) named canary. The self-test fails: loaded.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

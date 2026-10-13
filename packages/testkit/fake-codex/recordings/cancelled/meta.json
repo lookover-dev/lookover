@@ -1,0 +1,13 @@
+{
+  "source": "Derived from the ok recording by scripts/record-codex.ts: its first two events (thread.started, turn.started), then the program never answers. The caller's signal ends it.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": true
+  }
+}

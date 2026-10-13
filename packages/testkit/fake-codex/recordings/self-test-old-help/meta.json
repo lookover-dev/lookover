@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#91, re-derived for #137 and #250): the passing run, with a help.txt that lacks --ignore-user-config, as a version without it would print. The self-test fails: flags, and the run is not made.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

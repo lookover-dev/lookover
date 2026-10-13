@@ -1,0 +1,17 @@
+{
+  "session": "codex-find",
+  "text": "I read the change.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/prices.ts\",\n      \"side\": \"head\",\n      \"line\": 3,\n      \"end_line\": null,\n      \"severity\": \"blocking\",\n      \"category\": \"correctness\",\n      \"title\": \"The first price is left out of the sum\",\n      \"body\": \"i starts at 1: prices[0] never reaches total.\",\n      \"defect_key\": \"first_price_skipped\",\n      \"suggestion\": null,\n      \"pre_existing\": false\n    }\n  ],\n  \"earlier\": []\n}\n```\n",
+  "json": null,
+  "usage": {
+    "inputTokens": 17000,
+    "outputTokens": 550
+  },
+  "wallMs": 82000,
+  "cli": {
+    "name": "codex",
+    "version": "0.50.0",
+    "model": "gpt-5.5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

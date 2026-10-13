@@ -1,0 +1,10 @@
+language js
+
+// Casts only, by syntax node: `import { a as b }` and `export { a as b }` are renames and pass.
+or {
+  TsAsExpression(expression = $value, ty = $type),
+  TsTypeAssertionExpression(expression = $value, ty = $type)
+} where {
+  not $type <: r"^const$",
+  register_diagnostic(span = $value, message = "No `as` cast: it hides a wrong type instead of fixing it. Narrow with a check or a type guard, type the declaration, or parse unknown data where it enters. `as const` is fine.", severity = "error")
+}

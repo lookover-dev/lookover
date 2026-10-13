@@ -1,0 +1,56 @@
+id: ts-receipt-header
+language: typescript
+summary: Adds a header naming the customer to each order's receipt.
+base:
+  - path: src/users.ts
+    content: |
+      export interface User {
+        id: string;
+        name: string;
+        email: string;
+      }
+
+      const users = new Map<string, User>();
+
+      export function addUser(user: User): void {
+        users.set(user.id, user);
+      }
+
+      export function removeUser(id: string): void {
+        users.delete(id);
+      }
+
+      export function findUser(id: string): User | undefined {
+        return users.get(id);
+      }
+  - path: src/orders.ts
+    content: |
+      export interface Order {
+        id: string;
+        userId: string;
+        totalCents: number;
+      }
+
+      const orders: Order[] = [];
+
+      export function placeOrder(order: Order): void {
+        orders.push(order);
+      }
+
+      export function ordersOf(userId: string): Order[] {
+        return orders.filter((order) => order.userId === userId);
+      }
+change:
+  - path: src/receipts.ts
+    content: |
+      import type { Order } from "./orders.ts";
+      import { findUser } from "./users.ts";
+
+      export function receiptHeader(order: Order): string {
+        const user = findUser(order.userId)!;
+        return `Order ${order.id} for ${user.name} <${user.email}>, ${order.totalCents} cents`;
+      }
+planted:
+  path: src/receipts.ts
+  ranges: [[5, 6]]
+  what: findUser gives undefined once the customer has been removed, as removeUser allows after an order, and the non-null assertion hides it, so receiptHeader throws reading user.name.

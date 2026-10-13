@@ -1,0 +1,41 @@
+{
+  "name": "lookover",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "bun scripts/dev.ts",
+    "build": "bun scripts/build.ts",
+    "build:program": "bun run --filter @lookover/web build:program",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test ./packages ./apps --parallel",
+    "lint": "biome check --error-on-warnings apps packages scripts npm",
+    "lint:files": "biome check --error-on-warnings --no-errors-on-unmatched",
+    "format": "biome check --write apps packages scripts npm",
+    "ignores": "bun scripts/check-ignores.ts",
+    "imports": "bun scripts/check-deps.ts",
+    "knip": "knip --cache",
+    "check": "bun run typecheck && bun run lint && bun run ignores && bun run imports && bun run knip && bun run test",
+    "proof": "bun scripts/proof.ts",
+    "check:full": "bun run typecheck && bun run lint && bun run ignores && bun run imports && bun run knip && bun run test && bun run test:scripts",
+    "test:scripts": "GIT_DIR=no-such-git-dir bun test ./scripts",
+    "lookover": "bun apps/service/src/main.ts",
+    "migrations": "bun scripts/migrations.ts",
+    "release:dry-run": "bun scripts/release-dry-run.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@lookover/contracts": "workspace:*",
+    "@lookover/service": "workspace:*",
+    "@lookover/store": "workspace:*",
+    "@types/bun": "^1.4.2",
+    "knip": "6.39.0",
+    "playwright": "^1.63.0",
+    "typescript": "^7.0.2"
+  }
+}

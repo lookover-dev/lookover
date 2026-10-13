@@ -1,0 +1,12 @@
+{
+  "caseHash": "80fa4d7514d3330288d5f7cc7ba53c1fbb5332e4533f6f24ac506e12f63c0170",
+  "head": "e035ce85db0b40fdcab00f4f5b97f83219deb605",
+  "diff": "diff --git a/src/handlers.ts b/src/handlers.ts\nindex eba8220..a39e4bb 100644\n--- a/src/handlers.ts\n+++ b/src/handlers.ts\n@@ -1,4 +1,5 @@\n import { randomUUID } from \"node:crypto\";\n+import { audit } from \"./audit.ts\";\n import { type Note, saveNote } from \"./notes.ts\";\n \n export interface Reply {\n@@ -8,6 +9,11 @@ export interface Reply {\n \n export async function createNote(input: { title: string; body: string }): Promise<Reply> {\n   const note: Note = { id: randomUUID(), title: input.title, body: input.body };\n-  await saveNote(note);\n+  try {\n+    await saveNote(note);\n+    await audit(\"note.created\", note.id);\n+  } catch (error) {\n+    console.warn(\"audit entry not written\", error);\n+  }\n   return { status: 201, body: note };\n }\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "91ac97f6f4d505eee36971ebde844ad2e8847add"
+    }
+  ]
+}

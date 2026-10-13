@@ -1,0 +1,52 @@
+id: py-rename-subtotal
+language: python
+summary: Renames the subtotal function and adds type hints, its callers and tests following.
+base:
+  - path: app/pricing.py
+    content: |
+      def calc(lines):
+          return sum(price * quantity for price, quantity in lines)
+
+
+      def describe(lines):
+          return f"{len(lines)} lines, {calc(lines)} cents"
+  - path: tests/test_pricing.py
+    content: |
+      from app.pricing import calc, describe
+
+
+      def test_calc_sums_each_line():
+          assert calc([(250, 2), (100, 1)]) == 600
+
+
+      def test_calc_of_nothing_is_zero():
+          assert calc([]) == 0
+
+
+      def test_describe_counts_lines():
+          assert describe([(250, 2)]) == "1 lines, 500 cents"
+change:
+  - path: app/pricing.py
+    content: |
+      def subtotal_cents(lines: list[tuple[int, int]]) -> int:
+          return sum(price * quantity for price, quantity in lines)
+
+
+      def describe(lines: list[tuple[int, int]]) -> str:
+          return f"{len(lines)} lines, {subtotal_cents(lines)} cents"
+  - path: tests/test_pricing.py
+    content: |
+      from app.pricing import describe, subtotal_cents
+
+
+      def test_subtotal_sums_each_line():
+          assert subtotal_cents([(250, 2), (100, 1)]) == 600
+
+
+      def test_subtotal_of_nothing_is_zero():
+          assert subtotal_cents([]) == 0
+
+
+      def test_describe_counts_lines():
+          assert describe([(250, 2)]) == "1 lines, 500 cents"
+clean: true

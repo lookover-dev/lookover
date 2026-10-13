@@ -1,0 +1,53 @@
+id: ts-daily-takings
+language: typescript
+summary: Adds each day's change in takings to the sales summary.
+base:
+  - path: src/sales.ts
+    content: |
+      export interface Sale {
+        day: string;
+        cents: number;
+      }
+
+      export function totalCents(sales: Sale[]): number {
+        return sales.reduce((sum, sale) => sum + sale.cents, 0);
+      }
+  - path: src/report.ts
+    content: |
+      import { type Sale, totalCents } from "./sales.ts";
+
+      export function summary(sales: Sale[]): string {
+        return `${sales.length} days, ${totalCents(sales)} cents`;
+      }
+change:
+  - path: src/sales.ts
+    content: |
+      export interface Sale {
+        day: string;
+        cents: number;
+      }
+
+      export function totalCents(sales: Sale[]): number {
+        return sales.reduce((sum, sale) => sum + sale.cents, 0);
+      }
+
+      /** How much more, or less, each day took than the day before it, for days given in order. */
+      export function dailyChanges(sales: Sale[]): number[] {
+        const changes: number[] = [];
+        for (let i = 1; i <= sales.length; i++) {
+          changes.push(sales[i].cents - sales[i - 1].cents);
+        }
+        return changes;
+      }
+  - path: src/report.ts
+    content: |
+      import { dailyChanges, type Sale, totalCents } from "./sales.ts";
+
+      export function summary(sales: Sale[]): string {
+        const changes = dailyChanges(sales).map((change) => (change > 0 ? `+${change}` : `${change}`));
+        return [`${sales.length} days, ${totalCents(sales)} cents`, ...changes].join("\n");
+      }
+planted:
+  path: src/sales.ts
+  ranges: [[13, 14]]
+  what: The loop runs to i = sales.length, so its last pass reads sales[sales.length], which is undefined, and throws on every summary of one day or more.

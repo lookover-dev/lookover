@@ -1,0 +1,16 @@
+# Every `bun` started in this repository exits when the process that started it dies, even force-killed,
+# and on exit kills every process it started (Bun 1.4, `--no-orphans`). Without it, closing the terminal or
+# the agent session that ran `bun dev` leaves the service and Vite running, holding the worktree's ports.
+[run]
+noOrphans = true
+
+# Every `bun test` started here (`bun run test`, `test:scripts`, `gates`, `live`) first runs this file, which marks
+# the process as a test's: the real start at login refuses to run there whatever `NODE_ENV` says (ADR 0045).
+[test]
+preload = ["./scripts/test-preload.ts"]
+
+# A dependency version reaches this repository only once it has been on npm for three days (ADR 0061, SR-18 in
+# ADR 0056): most poisoned releases are found and pulled within hours. Seconds. `bun install --frozen-lockfile`
+# installs what bun.lock already holds; only a new resolution waits.
+[install]
+minimumReleaseAge = 259200

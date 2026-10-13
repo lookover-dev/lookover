@@ -1,0 +1,12 @@
+{
+  "caseHash": "af5ec8cb13079a689a022153dc36b6100417411db38c97b96e6921af510c510a",
+  "head": "01f8a96c87d4ac867ae25eb569b6f871da76c78d",
+  "diff": "diff --git a/app/shipping.py b/app/shipping.py\nindex 14efe99..fa3c97d 100644\n--- a/app/shipping.py\n+++ b/app/shipping.py\n@@ -1,5 +1,14 @@\n+import csv\n+from collections.abc import Mapping\n+\n RATES_CENTS = {\"local\": 300, \"national\": 650, \"abroad\": 1500}\n \n \n-def shipping_cents(region: str) -> int:\n-    return RATES_CENTS[region]\n+def shipping_cents(region: str, rates: Mapping[str, int] | None = None) -> int:\n+    return (RATES_CENTS if rates is None else rates)[region]\n+\n+\n+class RatesFile:\n+    def __init__(self, path: str) -> None:\n+        self.handle = open(path, encoding=\"utf-8\", newline=\"\")\n+        self.cents = {row[\"region\"]: int(row[\"cents\"]) for row in csv.DictReader(self.handle)}\ndiff --git a/tests/test_shipping.py b/tests/test_shipping.py\nindex 4523c49..e5ed3ce 100644\n--- a/tests/test_shipping.py\n+++ b/tests/test_shipping.py\n@@ -1,5 +1,13 @@\n-from app.shipping import shipping_cents\n+from app.shipping import RatesFile, shipping_cents\n \n \n def test_shipping_by_region():\n     assert shipping_cents(\"national\") == 650\n+\n+\n+def test_shipping_from_a_rates_file(tmp_path):\n+    path = tmp_path / \"rates.csv\"\n+    path.write_text(\"region,cents\\nlocal,300\\nnational,700\\n\", encoding=\"utf-8\")\n+    rates = RatesFile(str(path))\n+    assert rates.cents == {\"local\": 300, \"national\": 700}\n+    assert shipping_cents(\"national\", rates.cents) == 700\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "1e92a80b7f6bbe505b69e280fc2e5c1589a2ff7c"
+    }
+  ]
+}

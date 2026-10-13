@@ -1,0 +1,13 @@
+{
+  "source": "codex 0.162.1 on win32, 2026-10-11, model gpt-5.6-luna at effort low: run with an empty prompt: no turn, an error on stderr, a non-zero exit. Recorded with scripts/record-codex.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 1,
+    "hang": false
+  }
+}

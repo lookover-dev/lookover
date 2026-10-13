@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#137 review): the passing run, its answer followed by a second json block holding AGENTS.md's canary word. The self-test fails: followed (only the answer's own block is set aside).",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

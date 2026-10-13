@@ -1,0 +1,74 @@
+id: ts-order-discount
+language: typescript
+summary: Adds an order's total after a percentage off, with its test.
+base:
+  - path: src/orders.ts
+    content: |
+      export interface Line {
+        sku: string;
+        unitCents: number;
+        quantity: number;
+      }
+
+      export interface Order {
+        id: string;
+        lines: Line[];
+      }
+
+      export function subtotalCents(order: Order): number {
+        return order.lines.reduce((sum, line) => sum + line.unitCents * line.quantity, 0);
+      }
+  - path: src/orders.test.ts
+    content: |
+      import { expect, test } from "bun:test";
+      import { subtotalCents } from "./orders.ts";
+
+      const order = { id: "o1", lines: [{ sku: "mug", unitCents: 450, quantity: 2 }, { sku: "tea", unitCents: 100, quantity: 1 }] };
+
+      test("the subtotal sums every line", () => {
+        expect(subtotalCents(order)).toBe(1000);
+      });
+change:
+  - path: src/orders.ts
+    content: |
+      export interface Line {
+        sku: string;
+        unitCents: number;
+        quantity: number;
+      }
+
+      export interface Order {
+        id: string;
+        lines: Line[];
+      }
+
+      export function subtotalCents(order: Order): number {
+        return order.lines.reduce((sum, line) => sum + line.unitCents * line.quantity, 0);
+      }
+
+      /** The order's total after a percentage off, from 0 to 100. */
+      export function discountedCents(order: Order, percentOff: number): number {
+        if (!(percentOff >= 0 && percentOff <= 100)) throw new RangeError(`percentOff ${percentOff} is not between 0 and 100`);
+        return subtotalCents(order) * (1 - percentOff / 100);
+      }
+  - path: src/orders.test.ts
+    content: |
+      import { expect, test } from "bun:test";
+      import { discountedCents, subtotalCents } from "./orders.ts";
+
+      const order = { id: "o1", lines: [{ sku: "mug", unitCents: 450, quantity: 2 }, { sku: "tea", unitCents: 100, quantity: 1 }] };
+
+      test("the subtotal sums every line", () => {
+        expect(subtotalCents(order)).toBe(1000);
+      });
+
+      test("a discount takes its share off the subtotal", () => {
+        expect(discountedCents(order, 10)).toBe(900);
+      });
+planted:
+  path: src/orders.ts
+  ranges: [[19, 19]]
+  also:
+    - path: src/orders.test.ts
+      ranges: [[11, 11]]
+  what: The discounted total is a floating-point number of cents (999 cents at 15 % off gives 849.15), breaking REVIEW.md's rule that amounts are integer cents.

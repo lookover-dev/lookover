@@ -1,0 +1,17 @@
+{
+  "session": "codex-confirms-both",
+  "text": "C1 and C3 are confirmed duplicates: the new INFO log exposes the API key, violating R1 and blocking merge. C2 is confirmed: the test passes despite the leak and should check that the key is absent.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"The URL contains the API key and is logged at INFO without redaction, violating R1.\",\n      \"evidence\": [\"app/weather.py:19\", \"app/weather.py:20\"],\n      \"severity\": \"blocking\"\n    },\n    {\n      \"id\": \"C2\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"The test captures the leaking INFO message but asserts only that the city appears, so it passes with the API key exposed.\",\n      \"evidence\": [\"tests/test_weather.py:12\", \"tests/test_weather.py:13\", \"tests/test_weather.py:15\", \"app/weather.py:20\"],\n      \"severity\": \"should_fix\"\n    },\n    {\n      \"id\": \"C3\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"Every forecast call with INFO logging enabled logs the URL containing the API key, violating R1, while the test checks only the city.\",\n      \"evidence\": [\"app/weather.py:19\", \"app/weather.py:20\", \"tests/test_weather.py:15\"],\n      \"severity\": \"blocking\"\n    }\n  ]\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 24765,
+    "outputTokens": 393
+  },
+  "wallMs": 16061,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

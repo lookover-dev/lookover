@@ -1,0 +1,17 @@
+{
+  "session": "codex-find",
+  "text": "The change adds invoice charging and retries when receipt delivery cannot reach the mail service. The retry also repeats the payment, creating a blocking risk of duplicate charges.\n\n`charge()` posts a new payment without an idempotency key. If payment succeeds but `sendReceipt()` throws `Unreachable`, the next attempt charges the customer again. Three failed receipt attempts can therefore produce three charges before the function throws. Charge once before the retry loop and reuse that charge ID for receipt retries.\n\nThe checkout contains no tests covering this failure path.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/billing.ts\",\n      \"side\": \"head\",\n      \"line\": 18,\n      \"end_line\": 19,\n      \"line_text\": \"      const chargeId = await charge(invoice.customerId, invoice.totalCents);\",\n      \"severity\": \"blocking\",\n      \"category\": \"correctness\",\n      \"title\": \"Receipt retries charge the customer again\",\n      \"body\": \"When charging succeeds but sendReceipt throws Unreachable, the catch retries the entire loop, including charge(). The gateway creates a new payment with each POST and supplies no idempotency key, so a mail outage can charge the customer up to three times for one invoice. Move the charge outside the retry loop and retry receipt delivery using the original charge ID.\",\n      \"defect_key\": \"retry_duplicates_payment\",\n      \"suggestion\": null,\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 36857,
+    "outputTokens": 623
+  },
+  "wallMs": 31965,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

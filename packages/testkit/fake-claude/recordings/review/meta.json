@@ -1,0 +1,13 @@
+{
+  "source": "claude 2.1.283 on win32, 2026-10-08, model default (opus): review's find pass on the planted sandbox's pull request #1 (plantSandbox), 3 findings. Recorded with scripts/record-claude.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

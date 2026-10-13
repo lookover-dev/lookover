@@ -1,0 +1,6 @@
+{
+  "source": "Copied by hand, not recorded: a real run folder of bun run live, claude 2.1.283 on win32, 2026-10-07, model opus, while another Claude Code process on the machine was refreshing the shared sign-in. The CLI couldn't refresh its OAuth token: the assistant event carries error server_error (not authentication_failed) and the result, is_error true, says Failed to refresh OAuth token; nothing on stderr, exit 1. Its cwd and scratchpad path scrubbed; version.txt and auth.txt are the ok recording's (auth status still reports loggedIn: the stored sign-in is there, only its refresh failed). Can't be made on demand: replace it with a real one the next time a run hits it (see scripts/record-claude.ts).",
+  "version": { "exitCode": 0 },
+  "auth": { "exitCode": 0 },
+  "run": { "exitCode": 1, "hang": false }
+}

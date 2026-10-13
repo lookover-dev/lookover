@@ -1,0 +1,13 @@
+{
+  "source": "codex 0.162.1 on win32, 2026-10-11, model gpt-5.6-luna at effort low: signed out (an empty CODEX_HOME): login status says Not logged in on stderr with exit 1; the run retries a 401 Unauthorized, then turn.failed, exit 1. Recorded with scripts/record-codex.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 1
+  },
+  "run": {
+    "exitCode": 1,
+    "hang": false
+  }
+}

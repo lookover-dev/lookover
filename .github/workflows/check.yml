@@ -1,0 +1,36 @@
+# The checks, on every pull request and every push to main: the exact dependencies in bun.lock, then `bun run check`
+# (types, Biome, the import rules, knip and the tests), as CONTRIBUTING.md asks before a commit. A pull request here
+# is ported by hand to the repository Lookover is made in (CONTRIBUTING.md); this says it is green first.
+#
+# Hardening: actions pinned to full commit SHAs (the tag in the comment), the token reads contents
+# only, checkout keeps no credentials, no pull_request_target, no cache.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same pull request (or to main) cancels the run still going.
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: bun run check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+          no-cache: true
+      - run: bun install --frozen-lockfile
+      - run: bun run check

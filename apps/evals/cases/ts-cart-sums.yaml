@@ -1,0 +1,84 @@
+id: ts-cart-sums
+language: typescript
+summary: Folds the cart's two summing loops into one helper.
+base:
+  - path: src/cart.ts
+    content: |
+      export interface Item {
+        name: string;
+        unitCents: number;
+        quantity: number;
+      }
+
+      export function cartTotal(items: Item[]): number {
+        let total = 0;
+        for (const item of items) {
+          total += item.unitCents * item.quantity;
+        }
+        return total;
+      }
+
+      export function cartCount(items: Item[]): number {
+        let count = 0;
+        for (const item of items) {
+          count += item.quantity;
+        }
+        return count;
+      }
+
+      export function cartLabel(items: Item[]): string {
+        const count = cartCount(items);
+        return `${count} ${count === 1 ? "item" : "items"}, ${cartTotal(items)} cents`;
+      }
+  - path: src/cart.test.ts
+    content: |
+      import { expect, test } from "bun:test";
+      import { cartCount, cartLabel, cartTotal } from "./cart.ts";
+
+      const items = [
+        { name: "mug", unitCents: 450, quantity: 2 },
+        { name: "tea", unitCents: 100, quantity: 1 },
+      ];
+
+      test("the total sums each item's price", () => {
+        expect(cartTotal(items)).toBe(1000);
+      });
+
+      test("the count sums the quantities", () => {
+        expect(cartCount(items)).toBe(3);
+      });
+
+      test("the label says one item in the singular", () => {
+        expect(cartLabel([{ name: "tea", unitCents: 100, quantity: 1 }])).toBe("1 item, 100 cents");
+      });
+
+      test("an empty cart is zero items", () => {
+        expect(cartLabel([])).toBe("0 items, 0 cents");
+      });
+change:
+  - path: src/cart.ts
+    content: |
+      export interface Item {
+        name: string;
+        unitCents: number;
+        quantity: number;
+      }
+
+      /** The sum of `value` over every item, 0 for none. */
+      function sumOf(items: Item[], value: (item: Item) => number): number {
+        return items.reduce((sum, item) => sum + value(item), 0);
+      }
+
+      export function cartTotal(items: Item[]): number {
+        return sumOf(items, (item) => item.unitCents * item.quantity);
+      }
+
+      export function cartCount(items: Item[]): number {
+        return sumOf(items, (item) => item.quantity);
+      }
+
+      export function cartLabel(items: Item[]): string {
+        const count = cartCount(items);
+        return `${count} ${count === 1 ? "item" : "items"}, ${cartTotal(items)} cents`;
+      }
+clean: true

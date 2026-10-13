@@ -1,0 +1,12 @@
+{
+  "caseHash": "143c6c3c7dd7363915641f62f48763eec07d49061f9eb902bf30745563f8ca7d",
+  "head": "283063438d280f0ee5273e7443557a87e0c73295",
+  "diff": "diff --git a/src/checkout.ts b/src/checkout.ts\nindex 2159890..5378720 100644\n--- a/src/checkout.ts\n+++ b/src/checkout.ts\n@@ -4,3 +4,12 @@ export async function checkout(order: Order): Promise<string> {\n   await saveOrder(order);\n   return `order ${order.id} placed`;\n }\n+\n+export async function checkoutAll(orders: Order[]): Promise<string[]> {\n+  const placed: string[] = [];\n+  for (const order of orders) {\n+    saveOrder(order);\n+    placed.push(order.id);\n+  }\n+  return placed;\n+}\ndiff --git a/src/store.ts b/src/store.ts\nindex 24f6163..dcac50a 100644\n--- a/src/store.ts\n+++ b/src/store.ts\n@@ -9,9 +9,10 @@ const saved = new Map<string, Order>();\n export async function saveOrder(order: Order): Promise<void> {\n   if (order.items.length === 0) throw new Error(`order ${order.id} has no items`);\n   await new Promise((resolve) => setTimeout(resolve, 10));\n-  saved.set(order.id, order);\n+  saved.set(order.id, { ...order, items: [...order.items] });\n }\n \n export function findOrder(id: string): Order | undefined {\n-  return saved.get(id);\n+  const order = saved.get(id);\n+  return order && { ...order, items: [...order.items] };\n }\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "f413a347cd3ff269a7c9013ce1dd6d80fc54bd07"
+    }
+  ]
+}

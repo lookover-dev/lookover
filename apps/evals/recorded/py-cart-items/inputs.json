@@ -1,0 +1,12 @@
+{
+  "caseHash": "46b4a563a9b40dee9f937b7ade66f9acd189be993c0a6f12ec8c21ef00e595a9",
+  "head": "f3b26c4a9e7636152fbbe642ee3dd52a1acb746f",
+  "diff": "diff --git a/app/cart.py b/app/cart.py\nindex 850c82f..6b8dea6 100644\n--- a/app/cart.py\n+++ b/app/cart.py\n@@ -9,9 +9,9 @@ class Item:\n \n \n class Cart:\n-    def __init__(self, owner: str) -> None:\n+    def __init__(self, owner: str, items: list[Item] = []) -> None:\n         self.owner = owner\n-        self.items: list[Item] = []\n+        self.items = items\n \n     def add(self, item: Item) -> None:\n         self.items.append(item)\ndiff --git a/tests/test_cart.py b/tests/test_cart.py\nindex fbde654..a6aa2b4 100644\n--- a/tests/test_cart.py\n+++ b/tests/test_cart.py\n@@ -6,3 +6,8 @@ def test_total_sums_each_item():\n     cart.add(Item(\"mug\", 450, 2))\n     cart.add(Item(\"tea\", 100, 1))\n     assert cart.total_cents() == 1000\n+\n+\n+def test_a_cart_can_start_with_items():\n+    cart = Cart(\"bo\", [Item(\"mug\", 450, 1)])\n+    assert cart.total_cents() == 450\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "638536e1cd185ce23e8358d3f337cf4c976eba79"
+    }
+  ]
+}

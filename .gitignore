@@ -1,0 +1,48 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local research scratch (cloned third-party repos, raw dumps)
+.research/
+
+# Secrets — never commit
+.env
+.env.*
+*.pem
+*.key
+# The names the public tree must never hold (ADR 0061): the owner's other projects, clients and people
+.private-names
+
+# Dependencies / build output (future)
+node_modules/
+dist/
+build/
+target/
+__pycache__/
+.venv/
+*.log
+
+# Spike outputs that contain the user's local CLI config, paths or work data: keep local only
+spikes/02-engines/runs/
+spikes/02-engines/testrepo/
+spikes/19-output-mode/runs/
+*.tmp
+
+# Dev launcher state and visual proof output
+.dev/
+.proof/
+
+# Local tooling for coding agents (worktrees, local settings). The shared agent hooks (ADR 0036) and the
+# subagent definitions and project skills are committed.
+.claude/*
+!.claude/settings.json
+!.claude/agents/
+!.claude/skills/
+
+# GitHub spike: the test App's private key and raw API logs stay local
+spikes/03-github/.secret/
+spikes/03-github/log/
+*.tsbuildinfo

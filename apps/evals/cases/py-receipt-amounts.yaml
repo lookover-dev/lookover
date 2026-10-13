@@ -1,0 +1,50 @@
+id: py-receipt-amounts
+language: python
+summary: Shows a receipt's amounts in euros and adds a total line, with its tests.
+base:
+  - path: app/receipt.py
+    content: |
+      def receipt_lines(items: list[tuple[str, int]]) -> list[str]:
+          return [f"{name}: {cents} cents" for name, cents in items]
+  - path: tests/test_receipt.py
+    content: |
+      from app.receipt import receipt_lines
+
+
+      def test_one_line_per_item():
+          assert receipt_lines([("mug", 900), ("tea", 100)]) == ["mug: 900 cents", "tea: 100 cents"]
+change:
+  - path: app/receipt.py
+    content: |
+      def format_cents(cents: int) -> str:
+          sign = "-" if cents < 0 else ""
+          euros, rest = divmod(abs(cents), 100)
+          return f"{sign}{euros}.{rest:02d} EUR"
+
+
+      def receipt_lines(items: list[tuple[str, int]]) -> list[str]:
+          lines = [f"{name}: {format_cents(cents)}" for name, cents in items]
+          total = sum(cents for _, cents in items)
+          return [*lines, f"Total: {format_cents(total)}"]
+  - path: tests/test_receipt.py
+    content: |
+      from app.receipt import format_cents, receipt_lines
+
+
+      def test_one_line_per_item_and_the_total():
+          assert receipt_lines([("mug", 900), ("tea", 105)]) == [
+              "mug: 9.00 EUR",
+              "tea: 1.05 EUR",
+              "Total: 10.05 EUR",
+          ]
+
+
+      def test_an_empty_receipt_totals_zero():
+          assert receipt_lines([]) == ["Total: 0.00 EUR"]
+
+
+      def test_format_cents_pads_and_signs():
+          assert format_cents(5) == "0.05 EUR"
+          assert format_cents(1234) == "12.34 EUR"
+          assert format_cents(-5) == "-0.05 EUR"
+clean: true

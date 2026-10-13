@@ -1,0 +1,13 @@
+{
+  "source": "codex 0.162.1 on win32, 2026-10-11, model gpt-5.6-luna at effort low: a one-sentence answer ending in a fenced json block. Recorded with scripts/record-codex.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "session": "codex-find",
+  "text": "The change adds optional custom shipping rates and CSV loading. One problem: `RatesFile` keeps the file open after loading all its contents. An in-memory check confirmed the handle remains open. Retained instances consume file descriptors and can prevent file deletion or replacement on Windows. The new test checks only the loaded values, so it misses this.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"app/shipping.py\",\n      \"side\": \"head\",\n      \"line\": 13,\n      \"end_line\": 14,\n      \"line_text\": \"        self.handle = open(path, encoding=\\\"utf-8\\\", newline=\\\"\\\")\",\n      \"severity\": \"should_fix\",\n      \"category\": \"reliability\",\n      \"title\": \"Close the rates file after loading its contents\",\n      \"body\": \"When a RatesFile instance remains alive, its file handle stays open even though parsing has finished. Retained instances unnecessarily consume file descriptors and can prevent deletion or replacement of the CSV on Windows. The new test verifies values but never checks that the handle closes. Use a context manager so the file also closes if parsing raises an exception.\",\n      \"defect_key\": \"unclosed_file_handle\",\n      \"suggestion\": \"        with open(path, encoding=\\\"utf-8\\\", newline=\\\"\\\") as handle:\\n            self.cents = {row[\\\"region\\\"]: int(row[\\\"cents\\\"]) for row in csv.DictReader(handle)}\",\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 38033,
+    "outputTokens": 1056
+  },
+  "wallMs": 43893,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

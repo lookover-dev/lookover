@@ -1,0 +1,62 @@
+id: ts-document-list
+language: typescript
+summary: Lists only the documents the user may see.
+base:
+  - path: src/documents.ts
+    content: |
+      export interface User {
+        id: string;
+        admin: boolean;
+      }
+
+      export interface Doc {
+        id: string;
+        ownerId: string;
+        private: boolean;
+        title: string;
+      }
+
+      export function canEdit(user: User, doc: Doc): boolean {
+        return user.admin || doc.ownerId === user.id;
+      }
+  - path: src/listing.ts
+    content: |
+      import type { Doc } from "./documents.ts";
+
+      export function listTitles(docs: Doc[]): string[] {
+        return docs.map((doc) => doc.title);
+      }
+change:
+  - path: src/documents.ts
+    content: |
+      export interface User {
+        id: string;
+        admin: boolean;
+      }
+
+      export interface Doc {
+        id: string;
+        ownerId: string;
+        private: boolean;
+        title: string;
+      }
+
+      export function canEdit(user: User, doc: Doc): boolean {
+        return user.admin || doc.ownerId === user.id;
+      }
+
+      /** The documents a user may see: every public one, and the private ones they can edit. */
+      export function visibleDocuments(user: User, docs: Doc[]): Doc[] {
+        return docs.filter((doc) => !doc.private || !canEdit(user, doc));
+      }
+  - path: src/listing.ts
+    content: |
+      import { type Doc, type User, visibleDocuments } from "./documents.ts";
+
+      export function listTitles(user: User, docs: Doc[]): string[] {
+        return visibleDocuments(user, docs).map((doc) => doc.title);
+      }
+planted:
+  path: src/documents.ts
+  ranges: [[19, 19]]
+  what: The filter negates canEdit, so a private document is listed to everyone who can't edit it and hidden from its owner and the admins.

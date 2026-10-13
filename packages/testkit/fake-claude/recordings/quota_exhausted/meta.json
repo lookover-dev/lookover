@@ -1,0 +1,6 @@
+{
+  "source": "Written by hand, not recorded: a plan limit can't be hit on demand (exploration 02 never saw one). The init event of claude 2.1.283 from the ok recording, then a rate_limit_event with status rejected (its resetsAt 1791327600: 1 am in Paris on 2026-10-07, the time the result names) and a result with is_error true naming the limit, exit 1. Replace it with a real one the first time a live run hits the limit (copy the run folder, see scripts/record-claude.ts).",
+  "version": { "exitCode": 0 },
+  "auth": { "exitCode": 0 },
+  "run": { "exitCode": 1, "hang": false }
+}

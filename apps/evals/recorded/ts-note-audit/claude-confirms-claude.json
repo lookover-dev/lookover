@@ -1,0 +1,17 @@
+{
+  "session": "claude-confirms-claude",
+  "text": "**C1 is confirmed.** In `src/handlers.ts:12-17`, the call to `saveNote` is inside the same `try` as `audit`. `saveNote` calls `mkdir` and `writeFile` (`src/notes.ts:13-14`), and either one can throw. When that happens, the `catch` swallows the error and logs the wrong message, \"audit entry not written\". The handler then returns 201 even though the note was never saved, which loses data without any sign of it. Before this change, a save error reached the caller. The fix is to move `await saveNote(note)` above the `try`, so the `try` only wraps `audit`.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"saveNote is inside the try/catch meant for audit, so a mkdir or writeFile failure is caught, logged as an audit failure, and the handler still returns 201 for a note that was never saved.\",\n      \"evidence\": [\"src/handlers.ts:12\", \"src/handlers.ts:13\", \"src/handlers.ts:16\", \"src/handlers.ts:18\", \"src/notes.ts:13\", \"src/notes.ts:14\"],\n      \"severity\": \"blocking\"\n    }\n  ]\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 19459,
+    "outputTokens": 669
+  },
+  "wallMs": 9756,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

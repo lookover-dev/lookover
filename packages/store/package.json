@@ -1,0 +1,20 @@
+{
+  "name": "@lookover/store",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./migration-name": "./src/migration-name.ts"
+  },
+  "dependencies": {
+    "@lookover/contracts": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "lookover": {
+    "imports": {},
+    "entries": {
+      "./migration-name": "bun run migrations: how a migration's file is named, shared with the generator of the embedded list, which must read it while that list is stale (ADR 0032)"
+    }
+  }
+}

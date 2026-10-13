@@ -1,0 +1,298 @@
+{
+  "date": "2026-10-10",
+  "runs": 1,
+  "clis": [
+    {
+      "name": "claude",
+      "version": "2.1.283",
+      "model": "claude-opus-4-1"
+    },
+    {
+      "name": "codex",
+      "version": "0.50.0",
+      "model": "gpt-5.5"
+    }
+  ],
+  "scores": {
+    "compared": ["replay-rename-total", "replay-sum-prices"],
+    "incomplete": [],
+    "setups": {
+      "quick": {
+        "kept": {
+          "planted": 1,
+          "found": 1,
+          "findings": 3,
+          "duplicates": 0,
+          "noise": 1,
+          "recall": 1,
+          "precision": 0.3333333333333333,
+          "f05": 0.3846153846153846
+        },
+        "all": {
+          "planted": 1,
+          "found": 1,
+          "findings": 3,
+          "duplicates": 0,
+          "noise": 1,
+          "recall": 1,
+          "precision": 0.3333333333333333,
+          "f05": 0.3846153846153846
+        },
+        "confirm": null,
+        "cost": {
+          "sessions": 2,
+          "inputTokens": 30000,
+          "outputTokens": 1250,
+          "unknownUsage": 0,
+          "wallMs": 164000
+        },
+        "missed": []
+      },
+      "quick-codex": {
+        "kept": {
+          "planted": 1,
+          "found": 1,
+          "findings": 1,
+          "duplicates": 0,
+          "noise": 0,
+          "recall": 1,
+          "precision": 1,
+          "f05": 1
+        },
+        "all": {
+          "planted": 1,
+          "found": 1,
+          "findings": 1,
+          "duplicates": 0,
+          "noise": 0,
+          "recall": 1,
+          "precision": 1,
+          "f05": 1
+        },
+        "confirm": null,
+        "cost": {
+          "sessions": 2,
+          "inputTokens": 32000,
+          "outputTokens": 950,
+          "unknownUsage": 0,
+          "wallMs": 164000
+        },
+        "missed": []
+      },
+      "standard-one": {
+        "kept": {
+          "planted": 1,
+          "found": 1,
+          "findings": 2,
+          "duplicates": 0,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.5,
+          "f05": 0.5555555555555556
+        },
+        "all": {
+          "planted": 1,
+          "found": 1,
+          "findings": 2,
+          "duplicates": 0,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.5,
+          "f05": 0.5555555555555556
+        },
+        "confirm": {
+          "confirmer": "claude",
+          "plantedRefuted": 0,
+          "unmatchedRefuted": 1,
+          "demoted": 0
+        },
+        "cost": {
+          "sessions": 4,
+          "inputTokens": 48000,
+          "outputTokens": 1850,
+          "unknownUsage": 0,
+          "wallMs": 328000
+        },
+        "missed": []
+      },
+      "standard-cross": {
+        "kept": {
+          "planted": 1,
+          "found": 0,
+          "findings": 2,
+          "duplicates": 0,
+          "noise": 1,
+          "recall": 0,
+          "precision": 0,
+          "f05": 0
+        },
+        "all": {
+          "planted": 1,
+          "found": 0,
+          "findings": 2,
+          "duplicates": 0,
+          "noise": 1,
+          "recall": 0,
+          "precision": 0,
+          "f05": 0
+        },
+        "confirm": {
+          "confirmer": "codex",
+          "plantedRefuted": 1,
+          "unmatchedRefuted": 0,
+          "demoted": 0
+        },
+        "cost": {
+          "sessions": 4,
+          "inputTokens": 48000,
+          "outputTokens": 1850,
+          "unknownUsage": 0,
+          "wallMs": 328000
+        },
+        "missed": ["replay-sum-prices"]
+      },
+      "deep": {
+        "kept": {
+          "planted": 1,
+          "found": 1,
+          "findings": 2,
+          "duplicates": 0,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.5,
+          "f05": 0.5555555555555556
+        },
+        "all": {
+          "planted": 1,
+          "found": 1,
+          "findings": 2,
+          "duplicates": 0,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.5,
+          "f05": 0.5555555555555556
+        },
+        "confirm": {
+          "confirmer": "codex",
+          "plantedRefuted": 0,
+          "unmatchedRefuted": 1,
+          "demoted": 0
+        },
+        "cost": {
+          "sessions": 6,
+          "inputTokens": 80000,
+          "outputTokens": 2800,
+          "unknownUsage": 0,
+          "wallMs": 410000
+        },
+        "missed": []
+      }
+    },
+    "findings": [
+      {
+        "caseId": "replay-rename-total",
+        "setup": "quick",
+        "file": "app/total.py",
+        "line": 2,
+        "title": "total_cents() of no amounts is 0",
+        "kept": true,
+        "match": "unmatched",
+        "fromAlso": false
+      },
+      {
+        "caseId": "replay-rename-total",
+        "setup": "standard-cross",
+        "file": "app/total.py",
+        "line": 2,
+        "title": "total_cents() of no amounts is 0",
+        "kept": true,
+        "match": "unmatched",
+        "fromAlso": false
+      },
+      {
+        "caseId": "replay-sum-prices",
+        "setup": "quick",
+        "file": "src/prices.ts",
+        "line": 3,
+        "title": "sum() skips the first price",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "replay-sum-prices",
+        "setup": "quick",
+        "file": "src/prices.ts",
+        "line": 8,
+        "title": "average() of an empty list is NaN",
+        "kept": true,
+        "match": "unmatched",
+        "fromAlso": false
+      },
+      {
+        "caseId": "replay-sum-prices",
+        "setup": "quick-codex",
+        "file": "src/prices.ts",
+        "line": 3,
+        "title": "The first price is left out of the sum",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "replay-sum-prices",
+        "setup": "standard-one",
+        "file": "src/prices.ts",
+        "line": 3,
+        "title": "sum() skips the first price",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "replay-sum-prices",
+        "setup": "standard-one",
+        "file": "src/prices.ts",
+        "line": 8,
+        "title": "average() of an empty list is NaN",
+        "kept": true,
+        "match": "unmatched",
+        "fromAlso": false
+      },
+      {
+        "caseId": "replay-sum-prices",
+        "setup": "standard-cross",
+        "file": "src/prices.ts",
+        "line": 8,
+        "title": "average() of an empty list is NaN",
+        "kept": true,
+        "match": "unmatched",
+        "fromAlso": false
+      },
+      {
+        "caseId": "replay-sum-prices",
+        "setup": "deep",
+        "file": "src/prices.ts",
+        "line": 3,
+        "title": "sum() skips the first price",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "replay-sum-prices",
+        "setup": "deep",
+        "file": "src/prices.ts",
+        "line": 8,
+        "title": "average() of an empty list is NaN",
+        "kept": true,
+        "match": "unmatched",
+        "fromAlso": false
+      }
+    ]
+  },
+  "decision": {
+    "verdict": "no_verdict",
+    "compared": 2
+  }
+}

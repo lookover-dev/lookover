@@ -1,0 +1,23 @@
+{
+  "name": "@lookover/review",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@lookover/contracts": "workspace:*",
+    "@lookover/diff": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@lookover/testkit": "workspace:*"
+  },
+  "lookover": {
+    "pure": true,
+    "imports": {
+      "@lookover/diff": "re-anchors each finding by its line's text (ADR 0044, I-158)"
+    }
+  }
+}

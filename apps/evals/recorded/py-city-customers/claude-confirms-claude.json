@@ -1,0 +1,17 @@
+{
+  "session": "claude-confirms-claude",
+  "text": "Both problems are real.\n\n**C1: confirmed, blocking.** Line 24 of `app/customers.py` puts `city` straight into the SQL text with an f-string. That breaks rule R3, which says a query takes its values as parameters. Because of this, a value with an apostrophe makes the query fail, and a crafted value can rewrite the query and read other customers or tables. The same file already does it the right way at line 14, where `add_customer` passes its values with `?` placeholders.\n\n**C2: confirmed, consider.** The new test only checks the city \"Lyon\". It passes even with the injection bug, so it gives no protection against it. The real fix is the parameterised query from C1; adding test cases for a name with an apostrophe and for an injection value is a useful extra but not essential.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"customers_in puts city into the SQL text with an f-string instead of binding it as a parameter, which breaks R3 and allows SQL injection.\",\n      \"evidence\": [\"app/customers.py:24\", \"app/customers.py:14\"],\n      \"severity\": \"blocking\"\n    },\n    {\n      \"id\": \"C2\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"The new test only uses the plain city name \\\"Lyon\\\", so a city with an apostrophe and injection values are never tested and the bug goes unnoticed.\",\n      \"evidence\": [\"tests/test_customers.py:11\", \"tests/test_customers.py:16\"],\n      \"severity\": \"consider\"\n    }\n  ]\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 14142,
+    "outputTokens": 750
+  },
+  "wallMs": 11172,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

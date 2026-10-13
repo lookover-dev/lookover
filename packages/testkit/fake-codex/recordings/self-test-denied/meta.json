@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#91, re-derived for #137 and #250): the read of notes/inside.txt denied (the shell command's output says so), the answer gives no inside file. The self-test fails: inside_unread, denied.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

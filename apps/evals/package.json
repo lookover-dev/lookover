@@ -1,0 +1,32 @@
+{
+  "name": "@lookover/evals",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@lookover/contracts": "workspace:*",
+    "@lookover/core": "workspace:*",
+    "@lookover/retrieval": "workspace:*",
+    "@lookover/review": "workspace:*",
+    "@lookover/settings": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@lookover/process": "workspace:*",
+    "@lookover/testkit": "workspace:*"
+  },
+  "lookover": {
+    "note": "The evaluation harness (ADR 0050): it takes its adapters as parameters and never wires a real engine; `scripts/eval.ts` does.",
+    "imports": {
+      "@lookover/core": "a setup's confirm judgments are core's `Judged`; a setup is composed of core's round rules (mergeFinds, toConfirm, confirmPolicy, reconcile, parseRules), and the runner asks a confirm what `toConfirm` asks, after `mergeFinds`",
+      "@lookover/process": "its tests only: the real retrieval a case is prepared through runs git through process",
+      "@lookover/retrieval": "a case is prepared through retrieval's `prepare`, as the service prepares a change",
+      "@lookover/review": "a session's failure is review's `ReviewFailure`; the runner runs each session through `createReview` and `createConfirm`, and a setup reads each stored answer through them",
+      "@lookover/settings": "a setup keeps what the round would post at Lookover's default strictness, as settings resolves it",
+      "@lookover/testkit": "its tests only: the runner's sessions run on `FakeEngines`"
+    }
+  }
+}

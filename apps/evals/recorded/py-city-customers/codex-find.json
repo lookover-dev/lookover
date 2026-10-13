@@ -1,0 +1,17 @@
+{
+  "session": "codex-find",
+  "text": "The change adds a function that returns customer names for a city, sorted by name, and a test for filtering and sorting.\n\nThere is one blocking problem: the city is interpolated directly into SQL. I verified that input `' OR 1=1 --` returns every customer, bypassing the city filter, while a valid city such as `L'Isle` raises `sqlite3.OperationalError`. This violates R3. The new test covers neither case; use a query parameter and add regression coverage for both.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"app/customers.py\",\n      \"side\": \"head\",\n      \"line\": 24,\n      \"end_line\": 24,\n      \"line_text\": \"    rows = conn.execute(f\\\"SELECT name FROM customers WHERE city = '{city}' ORDER BY name\\\").fetchall()\",\n      \"severity\": \"blocking\",\n      \"category\": \"security\",\n      \"title\": \"Parameterize the city to prevent SQL injection and apostrophe failures\",\n      \"body\": \"When city contains SQL such as \\\"' OR 1=1 --\\\", the query returns all customers because the value is interpolated into SQL text. Ordinary city names containing apostrophes, such as L'Isle, also raise sqlite3.OperationalError. The new test uses only simple city names and misses both failures. This violates R3.\",\n      \"defect_key\": \"sql_injection\",\n      \"suggestion\": \"    rows = conn.execute(\\\"SELECT name FROM customers WHERE city = ? ORDER BY name\\\", (city,)).fetchall()\",\n      \"pre_existing\": false,\n      \"rule\": \"R3\"\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 37278,
+    "outputTokens": 648
+  },
+  "wallMs": 26863,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

@@ -1,0 +1,17 @@
+{
+  "session": "claude-confirms-claude",
+  "text": "I read the change.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"refuted\",\n      \"reason\": \"Summing nothing to 0 is what sum() does; nothing reads it as missing.\",\n      \"evidence\": [],\n      \"severity\": \"should_fix\"\n    }\n  ]\n}\n```\n",
+  "json": null,
+  "usage": {
+    "inputTokens": 9000,
+    "outputTokens": 300
+  },
+  "wallMs": 82000,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-4-1"
+  },
+  "outcome": "ok",
+  "failure": null
+}

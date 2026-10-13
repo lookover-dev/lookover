@@ -1,0 +1,8 @@
+{
+  "loggedIn": false,
+  "authMethod": "none",
+  "apiProvider": "firstParty",
+  "analyticsDisabled": false,
+  "projectsDirectory": "~\\AppData\\Local\\Temp\\lookover-record-hzmFeT\\config-5S5vtM\\projects",
+  "configDirectory": "~\\AppData\\Local\\Temp\\lookover-record-hzmFeT\\config-5S5vtM"
+}

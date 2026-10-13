@@ -1,0 +1,17 @@
+{
+  "session": "codex-find",
+  "text": "The change adds loyalty point calculation and batch crediting. There is one blocking bug: orders for the same customer overwrite each other’s credits.\n\nUsing the test’s memory store, an initial balance of 3 and orders worth 12 and 4 points produce 7 instead of 19. Both concurrent updates read 3 before either writes. The tests miss this because they use different customers. Serialize updates per customer, or use an atomic increment.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/loyalty.ts\",\n      \"side\": \"head\",\n      \"line\": 17,\n      \"end_line\": 17,\n      \"line_text\": \"  await Promise.all(orders.map((order) => addPoints(store, order.customerId, pointsFor(order))));\",\n      \"severity\": \"blocking\",\n      \"category\": \"data_safety\",\n      \"title\": \"Concurrent credits lose points when orders share a customer\",\n      \"body\": \"When a batch contains multiple orders for the same customer, addPoints calls read the same balance and overwrite each other's updates. With the test's memory store, an initial balance of 3 and orders worth 12 and 4 points leave 7 instead of 19. The existing test only covers different customers. Serialize updates per customer or use an atomic increment.\",\n      \"defect_key\": \"lost_update\",\n      \"suggestion\": null,\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 50863,
+    "outputTokens": 770
+  },
+  "wallMs": 31631,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

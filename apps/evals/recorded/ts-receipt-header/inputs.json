@@ -1,0 +1,12 @@
+{
+  "caseHash": "180f3c06406e006b8f6f7d85f03c654897a2b5cc6ced35fb1b0e61617da0691e",
+  "head": "411cd4e8cb18692e299f070d500e566427b3d26d",
+  "diff": "diff --git a/src/receipts.ts b/src/receipts.ts\nnew file mode 100644\nindex 0000000..0363989\n--- /dev/null\n+++ b/src/receipts.ts\n@@ -0,0 +1,7 @@\n+import type { Order } from \"./orders.ts\";\n+import { findUser } from \"./users.ts\";\n+\n+export function receiptHeader(order: Order): string {\n+  const user = findUser(order.userId)!;\n+  return `Order ${order.id} for ${user.name} <${user.email}>, ${order.totalCents} cents`;\n+}\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "6e8f83a4855a4185e5fb289e6fbf2705e1c63f6f"
+    }
+  ]
+}

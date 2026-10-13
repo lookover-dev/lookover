@@ -1,0 +1,14 @@
+{
+  "source": "codex 0.162.1 on win32, 2026-10-11, model default (gpt-6.1-sol) at effort medium: review's confirm pass on round 1's 3 new candidates, as Claude found them (the fake claude's review recording, on the planted commit). Recorded with scripts/record-codex.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  },
+  "when": "Head commit: 703205dec59961a3a08427d7b4af007e278451a4, the confirm pass"
+}

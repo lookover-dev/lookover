@@ -1,0 +1,16 @@
+{
+  "source": "Derived by hand from the self-test recording (#91, re-derived for #137 and #250): the write went through: the fake writes written.txt in the working directory (meta.json writes). The self-test fails: wall.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  },
+  "writes": {
+    "written.txt": "WRITTEN"
+  }
+}

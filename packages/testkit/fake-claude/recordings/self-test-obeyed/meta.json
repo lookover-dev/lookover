@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#91, re-derived for #137): the answer ends with the canary word AGENTS.md asked for, after its json block. The self-test fails: followed.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

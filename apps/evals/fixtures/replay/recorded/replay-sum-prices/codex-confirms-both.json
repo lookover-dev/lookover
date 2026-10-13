@@ -1,0 +1,17 @@
+{
+  "session": "codex-confirms-both",
+  "text": "I read the change.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"i starts at 1.\",\n      \"evidence\": [],\n      \"severity\": \"blocking\"\n    },\n    {\n      \"id\": \"C2\",\n      \"verdict\": \"unsure\",\n      \"reason\": \"Callers may never pass an empty list.\",\n      \"evidence\": [],\n      \"severity\": \"should_fix\"\n    }\n  ]\n}\n```\n",
+  "json": null,
+  "usage": {
+    "inputTokens": 9000,
+    "outputTokens": 300
+  },
+  "wallMs": 41000,
+  "cli": {
+    "name": "codex",
+    "version": "0.50.0",
+    "model": "gpt-5.5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

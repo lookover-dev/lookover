@@ -1,0 +1,22 @@
+{
+  "name": "@lookover/engines",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@lookover/contracts": "workspace:*",
+    "@lookover/process": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@lookover/testkit": "workspace:*"
+  },
+  "lookover": {
+    "imports": {
+      "@lookover/process": "runs the CLIs through process (ADR 0012)"
+    }
+  }
+}

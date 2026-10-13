@@ -1,0 +1,7 @@
+{
+  "name": "@lookover/contracts",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "lookover": { "pure": true, "imports": {} }
+}

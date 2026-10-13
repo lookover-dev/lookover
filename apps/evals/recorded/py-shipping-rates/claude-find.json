@@ -1,0 +1,17 @@
+{
+  "session": "claude-find",
+  "text": "## What the change does\n\n`shipping_cents` now takes an optional `rates` mapping, and the default table is still used when none is given. A new `RatesFile` class reads a `region,cents` CSV into `self.cents` as integer cents, which follows R2. A test loads a temporary CSV and checks the parsed rates and a lookup against them.\n\n## Problem: the rates file is never closed\n\n`RatesFile.__init__` opens the file and saves the handle on `self.handle`. The dict comprehension reads every row, but nothing ever closes the handle:\n\n- There is no `with` block, no `close()` method and no context-manager support.\n- Because the object keeps a reference to the handle, it stays open for as long as the `RatesFile` lives. Each instance leaks one file descriptor.\n- On Windows, where this repo is checked out, an open handle locks the file. Nothing can then replace or delete the rates file, including pytest's `tmp_path` cleanup, until the object is garbage-collected. CPython also emits a `ResourceWarning`.\n- The handle is never used again after parsing, so there is no reason to keep it.\n\nThe fix is to read the file inside a `with` block and keep only the parsed dict.\n\n## What the tests miss\n\nThe new test only reads a well-formed file. It never checks that the file is released after loading. Nothing else stood out: no rule is broken and nothing is logged.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"app/shipping.py\",\n      \"side\": \"head\",\n      \"line\": 13,\n      \"end_line\": 14,\n      \"line_text\": \"        self.handle = open(path, encoding=\\\"utf-8\\\", newline=\\\"\\\")\",\n      \"severity\": \"should_fix\",\n      \"category\": \"reliability\",\n      \"title\": \"RatesFile opens the CSV and never closes it, leaking the handle for the object's lifetime\",\n      \"body\": \"When a RatesFile is built, the file opened in __init__ is kept on self.handle and never closed: there is no with block, no close() and no context-manager support. Every instance leaks a file descriptor and raises a ResourceWarning. On Windows the open handle locks the file, so the rates file cannot be replaced or deleted (including by pytest's tmp_path cleanup) until garbage collection runs. The handle is not needed once the rows are parsed.\",\n      \"defect_key\": \"unclosed_file_handle\",\n      \"suggestion\": \"        with open(path, encoding=\\\"utf-8\\\", newline=\\\"\\\") as handle:\\n            self.cents = {row[\\\"region\\\"]: int(row[\\\"cents\\\"]) for row in csv.DictReader(handle)}\",\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 6752,
+    "outputTokens": 1047
+  },
+  "wallMs": 12509,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

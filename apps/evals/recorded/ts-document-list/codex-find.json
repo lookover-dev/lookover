@@ -1,0 +1,17 @@
+{
+  "session": "codex-find",
+  "text": "The change adds document visibility filtering and applies it to title listings. The private-document check is inverted: users see other users’ private documents, while owners and admins lose access to private documents they can edit. No tests are present to catch these cases.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/documents.ts\",\n      \"side\": \"head\",\n      \"line\": 19,\n      \"end_line\": 19,\n      \"line_text\": \"  return docs.filter((doc) => !doc.private || !canEdit(user, doc));\",\n      \"severity\": \"blocking\",\n      \"category\": \"security\",\n      \"title\": \"Inverted permission check exposes private documents to unauthorized users\",\n      \"body\": \"When a document is private and the user is neither its owner nor an admin, canEdit returns false, so the negated check includes that document and listTitles exposes its title. Conversely, owners and admins have their private documents excluded. The documented visibility policy requires canEdit to be true for private documents.\",\n      \"defect_key\": \"inverted_permission_check\",\n      \"suggestion\": \"  return docs.filter((doc) => !doc.private || canEdit(user, doc));\",\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 37348,
+    "outputTokens": 553
+  },
+  "wallMs": 25430,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

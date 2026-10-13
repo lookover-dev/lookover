@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#91, re-derived for #137): the file outside the working directory read (its content in a tool result and the answer). The self-test fails: wall.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

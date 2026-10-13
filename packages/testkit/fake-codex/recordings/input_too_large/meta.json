@@ -1,0 +1,6 @@
+{
+  "source": "Copied by hand from a real run: Lookover's live review of PR #100, 2026-10-08, codex 0.154.0 on win32, model gpt-6-astra at effort high, a prompt of 1,056,259 characters. The CLI refused it in about a second: thread.started on stdout, then the turn/start error on stderr, exit 1. The prompt itself is not kept here. version.txt and auth.txt are the ok recording's (codex 0.162.1, #250): the stream is still 0.154.0's.",
+  "version": { "exitCode": 0 },
+  "auth": { "exitCode": 0 },
+  "run": { "exitCode": 1, "hang": false }
+}

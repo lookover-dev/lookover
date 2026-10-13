@@ -1,0 +1,36 @@
+{
+  "name": "@lookover/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./standalone": "./src/standalone.ts"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:program": "VITE_LOOKOVER_MODE=program vite build"
+  },
+  "dependencies": {
+    "@fontsource-variable/figtree": "^5.3.0",
+    "@fontsource-variable/hanken-grotesk": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@lookover/contracts": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.2"
+  },
+  "lookover": {
+    "note": "The app on the service alone (ADR 0046): it talks to it through LookoverApi, the drawer through contracts' demo.ts.",
+    "imports": {},
+    "entries": {
+      "./standalone": "the service's stand-alone pages (ADR 0058): the design system's stylesheet, the eyes and the theme's key, as text, read by Bun only"
+    }
+  }
+}

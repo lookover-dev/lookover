@@ -1,0 +1,260 @@
+/* The mock GitHub view. GitHub's own colours and system font, on purpose: it must not read as Lookover. */
+.gh {
+  --gh-bg: #0d1117;
+  --gh-surface: #151b23;
+  --gh-border: #3d444d;
+  --gh-text: #f0f6fc;
+  --gh-muted: #9198a1;
+  --gh-green: #3fb950;
+  --gh-red: #f85149;
+  --gh-yellow: #d29922;
+  --gh-blue: #4493f8;
+  min-height: 100vh;
+  background: var(--gh-bg);
+  color: var(--gh-text);
+  font:
+    14px / 1.5 -apple-system,
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+}
+:root[data-theme="light"] .gh {
+  --gh-bg: #ffffff;
+  --gh-surface: #f6f8fa;
+  --gh-border: #d1d9e0;
+  --gh-text: #1f2328;
+  --gh-muted: #59636e;
+  --gh-green: #1a7f37;
+  --gh-red: #d1242f;
+  --gh-yellow: #9a6700;
+  --gh-blue: #0969da;
+}
+.gh a {
+  color: var(--gh-blue);
+}
+.gh code,
+.gh pre {
+  font:
+    12px / 1.5 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+.gh-strip {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--gh-muted);
+  background: var(--gh-surface);
+  border-bottom: 1px dashed var(--gh-border);
+}
+.gh-strip button {
+  appearance: none;
+  font: 600 13px inherit;
+  font-family: inherit;
+  color: var(--gh-text);
+  background: transparent;
+  border: 1px solid var(--gh-border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.gh-strip button:hover {
+  background: var(--gh-bg);
+}
+.gh-page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+  display: grid;
+  gap: 16px;
+}
+.gh h1 {
+  font: 400 28px / 1.25 inherit;
+  font-family: inherit;
+  margin: 0;
+}
+.gh-muted {
+  color: var(--gh-muted);
+}
+.gh-sub {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--gh-border);
+}
+.gh-state {
+  background: var(--gh-green);
+  color: #fff;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-weight: 600;
+}
+.gh-timeline {
+  display: grid;
+  gap: 12px;
+  border-left: 2px solid var(--gh-border);
+  margin-left: 20px;
+  padding-left: 20px;
+}
+.gh-event {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+  position: relative;
+}
+.gh-dot {
+  position: absolute;
+  left: -27px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--gh-bg);
+  border: 2px solid var(--gh-border);
+}
+.gh-box {
+  border: 1px solid var(--gh-border);
+  border-radius: 6px;
+  background: var(--gh-bg);
+  min-width: 0;
+}
+.gh-comment-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--gh-surface);
+  border-bottom: 1px solid var(--gh-border);
+  border-radius: 6px 6px 0 0;
+  font-size: 13px;
+}
+.gh-body {
+  padding: 12px 16px;
+  display: grid;
+  gap: 8px;
+}
+.gh-body p,
+.gh-comment p {
+  margin: 0;
+}
+.gh-body ul {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 4px;
+}
+.gh-label {
+  border: 1px solid var(--gh-border);
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 12px;
+  color: var(--gh-muted);
+}
+.gh-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--gh-border);
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.gh-avatar.bot {
+  border-radius: 6px;
+  background: #16130f;
+  color: #f7f6f2;
+  padding: 3px;
+}
+.gh-avatar.small {
+  width: 20px;
+  height: 20px;
+}
+.gh-avatar svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.gh-thread summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--gh-surface);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.gh-thread[open] summary {
+  border-bottom: 1px solid var(--gh-border);
+  border-radius: 6px 6px 0 0;
+}
+.gh-code {
+  margin: 0;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--gh-yellow) 12%, transparent);
+  border-bottom: 1px solid var(--gh-border);
+  overflow-x: auto;
+}
+.gh-code span {
+  color: var(--gh-muted);
+  margin-right: 16px;
+  user-select: none;
+}
+.gh-comment {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 10px;
+  padding: 12px;
+}
+.gh-comment + .gh-comment {
+  border-top: 1px solid var(--gh-border);
+}
+.gh-resolved {
+  padding: 8px 12px;
+  border-top: 1px solid var(--gh-border);
+  font-size: 13px;
+  color: var(--gh-muted);
+}
+.gh-checks {
+  padding: 12px 16px;
+}
+.gh-check {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.gh-check-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--gh-muted);
+}
+.gh-check.ok .gh-check-icon {
+  background: var(--gh-green);
+}
+.gh-check.fail .gh-check-icon {
+  background: var(--gh-red);
+}
+.gh-check.pending .gh-check-icon {
+  background: var(--gh-yellow);
+}
+.gh-term {
+  padding: 12px 16px;
+  display: grid;
+  gap: 6px;
+  border-style: dashed;
+}
+.gh-term pre {
+  margin: 0;
+  white-space: pre-wrap;
+}

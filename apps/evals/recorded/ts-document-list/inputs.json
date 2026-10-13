@@ -1,0 +1,12 @@
+{
+  "caseHash": "4fb55581ef01d60f6532c671200afa3fe587f9d3422a02e58159a75490d148a7",
+  "head": "4274878b4a79b4d5c4da265e0b65ac827365f50a",
+  "diff": "diff --git a/src/documents.ts b/src/documents.ts\nindex d771919..11bc2cf 100644\n--- a/src/documents.ts\n+++ b/src/documents.ts\n@@ -13,3 +13,8 @@ export interface Doc {\n export function canEdit(user: User, doc: Doc): boolean {\n   return user.admin || doc.ownerId === user.id;\n }\n+\n+/** The documents a user may see: every public one, and the private ones they can edit. */\n+export function visibleDocuments(user: User, docs: Doc[]): Doc[] {\n+  return docs.filter((doc) => !doc.private || !canEdit(user, doc));\n+}\ndiff --git a/src/listing.ts b/src/listing.ts\nindex 07b79ca..21d1a64 100644\n--- a/src/listing.ts\n+++ b/src/listing.ts\n@@ -1,5 +1,5 @@\n-import type { Doc } from \"./documents.ts\";\n+import { type Doc, type User, visibleDocuments } from \"./documents.ts\";\n \n-export function listTitles(docs: Doc[]): string[] {\n-  return docs.map((doc) => doc.title);\n+export function listTitles(user: User, docs: Doc[]): string[] {\n+  return visibleDocuments(user, docs).map((doc) => doc.title);\n }\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "4a7f70846fa2efe3c0455521b4ebddb0d6add839"
+    }
+  ]
+}

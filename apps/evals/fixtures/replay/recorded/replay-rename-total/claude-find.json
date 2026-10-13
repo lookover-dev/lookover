@@ -1,0 +1,17 @@
+{
+  "session": "claude-find",
+  "text": "I read the change.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"app/total.py\",\n      \"side\": \"head\",\n      \"line\": 2,\n      \"end_line\": null,\n      \"severity\": \"should_fix\",\n      \"category\": \"correctness\",\n      \"title\": \"total_cents() of no amounts is 0\",\n      \"body\": \"An empty list sums to 0, which hides a missing basket.\",\n      \"defect_key\": \"empty_total_zero\",\n      \"suggestion\": null,\n      \"pre_existing\": false\n    }\n  ],\n  \"earlier\": []\n}\n```\n",
+  "json": null,
+  "usage": {
+    "inputTokens": 14000,
+    "outputTokens": 550
+  },
+  "wallMs": 82000,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-4-1"
+  },
+  "outcome": "ok",
+  "failure": null
+}

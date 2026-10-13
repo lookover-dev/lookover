@@ -1,0 +1,70 @@
+id: ts-note-audit
+language: typescript
+summary: Writes an audit entry when a note is created.
+base:
+  - path: src/notes.ts
+    content: |
+      import { mkdir, writeFile } from "node:fs/promises";
+      import { join } from "node:path";
+
+      export interface Note {
+        id: string;
+        title: string;
+        body: string;
+      }
+
+      const DIR = "data/notes";
+
+      export async function saveNote(note: Note): Promise<void> {
+        await mkdir(DIR, { recursive: true });
+        await writeFile(join(DIR, `${note.id}.json`), JSON.stringify(note));
+      }
+  - path: src/audit.ts
+    content: |
+      import { appendFile, mkdir } from "node:fs/promises";
+
+      export async function audit(event: string, subject: string): Promise<void> {
+        await mkdir("data", { recursive: true });
+        await appendFile("data/audit.log", `${new Date().toISOString()} ${event} ${subject}\n`);
+      }
+  - path: src/handlers.ts
+    content: |
+      import { randomUUID } from "node:crypto";
+      import { type Note, saveNote } from "./notes.ts";
+
+      export interface Reply {
+        status: number;
+        body: unknown;
+      }
+
+      export async function createNote(input: { title: string; body: string }): Promise<Reply> {
+        const note: Note = { id: randomUUID(), title: input.title, body: input.body };
+        await saveNote(note);
+        return { status: 201, body: note };
+      }
+change:
+  - path: src/handlers.ts
+    content: |
+      import { randomUUID } from "node:crypto";
+      import { audit } from "./audit.ts";
+      import { type Note, saveNote } from "./notes.ts";
+
+      export interface Reply {
+        status: number;
+        body: unknown;
+      }
+
+      export async function createNote(input: { title: string; body: string }): Promise<Reply> {
+        const note: Note = { id: randomUUID(), title: input.title, body: input.body };
+        try {
+          await saveNote(note);
+          await audit("note.created", note.id);
+        } catch (error) {
+          console.warn("audit entry not written", error);
+        }
+        return { status: 201, body: note };
+      }
+planted:
+  path: src/handlers.ts
+  ranges: [[13, 13], [15, 18]]
+  what: The try around the audit also holds saveNote, so a note that failed to save is logged as a missed audit entry and answered 201 as if created.

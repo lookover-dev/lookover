@@ -1,0 +1,8 @@
+{
+  "name": "@lookover/store",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./store": "./src/store.ts" },
+  "dependencies": { "@lookover/core": "workspace:*" },
+  "lookover": { "imports": { "@lookover/core": "the store keeps what the rules decide" } }
+}

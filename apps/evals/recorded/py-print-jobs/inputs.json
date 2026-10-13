@@ -1,0 +1,12 @@
+{
+  "caseHash": "3281d8491b03e2f812023142fa624a67e2fad1cc134897d4c9fe1ae77f2537e8",
+  "head": "d004628bf88a941ee56211935d653640af8a7b64",
+  "diff": "diff --git a/app/printing.py b/app/printing.py\nindex d532a34..3301b45 100644\n--- a/app/printing.py\n+++ b/app/printing.py\n@@ -10,3 +10,19 @@ class Job:\n \n def total_pages(jobs: list[Job]) -> int:\n     return sum(job.pages for job in jobs)\n+\n+\n+def sheets_for(job: Job, double_sided: bool) -> int:\n+    if double_sided:\n+        return job.pages // 2\n+    return job.pages\n+\n+\n+def jobs_that_fit(jobs: list[Job], sheets_left: int, double_sided: bool) -> list[Job]:\n+    jobs = sorted(jobs, key=lambda job: (job.pages, job.submitted), reverse=True)\n+    chosen = []\n+    while jobs and sheets_for(jobs[-1], double_sided) <= sheets_left:\n+        job = jobs.pop()\n+        sheets_left -= sheets_for(job, double_sided)\n+        chosen.append(job)\n+    return chosen\ndiff --git a/tests/test_printing.py b/tests/test_printing.py\nindex d3f9549..820002a 100644\n--- a/tests/test_printing.py\n+++ b/tests/test_printing.py\n@@ -1,5 +1,20 @@\n-from app.printing import Job, total_pages\n+from app.printing import Job, jobs_that_fit, total_pages\n \n \n def test_total_pages_sums_each_job():\n     assert total_pages([Job(\"memo\", 3, 1), Job(\"report\", 12, 2)]) == 15\n+\n+\n+def test_one_sided_jobs_take_a_sheet_a_page():\n+    jobs = [Job(\"report\", 12, 1), Job(\"memo\", 3, 2), Job(\"poster\", 1, 3)]\n+    assert jobs_that_fit(jobs, 5, double_sided=False) == [Job(\"poster\", 1, 3), Job(\"memo\", 3, 2)]\n+\n+\n+def test_jobs_of_the_same_length_print_in_the_order_they_came():\n+    jobs = [Job(\"b\", 2, 2), Job(\"a\", 2, 1), Job(\"c\", 2, 3)]\n+    assert jobs_that_fit(jobs, 4, double_sided=False) == [Job(\"a\", 2, 1), Job(\"b\", 2, 2)]\n+\n+\n+def test_two_sided_jobs_take_a_sheet_for_two_pages():\n+    jobs = [Job(\"report\", 12, 1), Job(\"flyer\", 2, 2)]\n+    assert jobs_that_fit(jobs, 7, double_sided=True) == [Job(\"flyer\", 2, 2), Job(\"report\", 12, 1)]\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "d0f4d259205ca1604faaf131be705f3b4fe10f69"
+    }
+  ]
+}

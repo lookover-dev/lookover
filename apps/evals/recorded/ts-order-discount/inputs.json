@@ -1,0 +1,12 @@
+{
+  "caseHash": "8e1d382b52c9ba1b66f7d484658a3f339e82fbef6fb4096af707d4d6e6e4eded",
+  "head": "881658a78928de1737241a2a636ed8a96eb64062",
+  "diff": "diff --git a/src/orders.test.ts b/src/orders.test.ts\nindex 6473e31..f73fdb5 100644\n--- a/src/orders.test.ts\n+++ b/src/orders.test.ts\n@@ -1,8 +1,12 @@\n import { expect, test } from \"bun:test\";\n-import { subtotalCents } from \"./orders.ts\";\n+import { discountedCents, subtotalCents } from \"./orders.ts\";\n \n const order = { id: \"o1\", lines: [{ sku: \"mug\", unitCents: 450, quantity: 2 }, { sku: \"tea\", unitCents: 100, quantity: 1 }] };\n \n test(\"the subtotal sums every line\", () => {\n   expect(subtotalCents(order)).toBe(1000);\n });\n+\n+test(\"a discount takes its share off the subtotal\", () => {\n+  expect(discountedCents(order, 10)).toBe(900);\n+});\ndiff --git a/src/orders.ts b/src/orders.ts\nindex 8701985..5149919 100644\n--- a/src/orders.ts\n+++ b/src/orders.ts\n@@ -12,3 +12,9 @@ export interface Order {\n export function subtotalCents(order: Order): number {\n   return order.lines.reduce((sum, line) => sum + line.unitCents * line.quantity, 0);\n }\n+\n+/** The order's total after a percentage off, from 0 to 100. */\n+export function discountedCents(order: Order, percentOff: number): number {\n+  if (!(percentOff >= 0 && percentOff <= 100)) throw new RangeError(`percentOff ${percentOff} is not between 0 and 100`);\n+  return subtotalCents(order) * (1 - percentOff / 100);\n+}\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "e100e9a3a933c3651772955175941dbd28e1ae1e"
+    }
+  ]
+}

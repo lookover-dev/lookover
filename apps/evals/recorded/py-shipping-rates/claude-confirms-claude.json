@@ -1,0 +1,17 @@
+{
+  "session": "claude-confirms-claude",
+  "text": "**C1: confirmed.** At `app/shipping.py:13`, `__init__` opens the CSV with a plain `open()` and keeps the result on `self.handle`. Nothing ever closes it: there is no `with` block, no `close()`, and no `__enter__`/`__exit__` or `__del__`. Because the object keeps a reference to the handle, the file stays open for as long as the `RatesFile` instance exists, not just until the end of `__init__`. The handle is only used to read the rows into `self.cents` on line 14, so it isn't needed after that. Nothing else in the code uses `handle`; the test only builds the object (`tests/test_shipping.py:11`). This is a real resource leak and causes file locking on Windows, but it doesn't make results wrong. The fix is to read the file inside a `with open(...)` block and not store the handle.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"RatesFile keeps the file opened in __init__ on self.handle and never closes it (no with block, close(), or context-manager support), so the descriptor stays open for the instance's lifetime even though it is only needed to parse rows.\",\n      \"evidence\": [\"app/shipping.py:13\", \"app/shipping.py:14\", \"tests/test_shipping.py:11\"],\n      \"severity\": \"should_fix\"\n    }\n  ]\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 26630,
+    "outputTokens": 872
+  },
+  "wallMs": 16477,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

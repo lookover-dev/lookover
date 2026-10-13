@@ -1,0 +1,48 @@
+{
+  "name": "@lookover/service",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun src/main.ts serve"
+  },
+  "dependencies": {
+    "@lookover/agent-cli": "workspace:*",
+    "@lookover/contracts": "workspace:*",
+    "@lookover/core": "workspace:*",
+    "@lookover/diff": "workspace:*",
+    "@lookover/engines": "workspace:*",
+    "@lookover/github": "workspace:*",
+    "@lookover/process": "workspace:*",
+    "@lookover/publish": "workspace:*",
+    "@lookover/retrieval": "workspace:*",
+    "@lookover/review": "workspace:*",
+    "@lookover/settings": "workspace:*",
+    "@lookover/store": "workspace:*",
+    "@lookover/testkit": "workspace:*",
+    "@lookover/web": "workspace:*",
+    "hono": "^4.12.0",
+    "zod": "^4.6.5"
+  },
+  "lookover": {
+    "note": "The composition root: the one place that wires modules together, so it may import any of them.",
+    "imports": {
+      "@lookover/agent-cli": "the one `lookover` command hands `wait`, `feedback` and `reply` to its `run` (ADR 0054); the demo world's tests run `lookover wait` against the service on one FakeGitHost (spec #69)",
+      "@lookover/core": "wired by the composition root",
+      "@lookover/diff": "the demo driver reads each fixture's diff for the lines the fake host accepts comments on (ADR 0046)",
+      "@lookover/engines": "wired by the composition root",
+      "@lookover/github": "wired by the composition root",
+      "@lookover/process": "wired by the composition root",
+      "@lookover/publish": "wired by the composition root",
+      "@lookover/retrieval": "wired by the composition root",
+      "@lookover/review": "wired by the composition root",
+      "@lookover/settings": "wired by the composition root",
+      "@lookover/store": "wired by the composition root",
+      "@lookover/testkit": "the fakes demo mode runs on, through its ./demo entry (ADR 0039)",
+      "@lookover/web": "the pages GitHub's redirects reach look like Lookover (ADR 0058): its ./standalone entry gives the design system's stylesheet, the eyes and the theme's key as text, one source, no copy"
+    }
+  }
+}

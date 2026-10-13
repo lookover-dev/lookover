@@ -1,0 +1,17 @@
+{
+  "session": "claude-find",
+  "text": "## What the change does\n\nIt adds `src/receipts.ts` with one function, `receiptHeader(order)`. The function looks up the order's user with `findUser(order.userId)` and returns a line like `Order <id> for <name> <<email>>, <totalCents> cents`.\n\n## Problems\n\n**1. The user lookup can fail, and the code assumes it never does (blocking).**\n`findUser` returns `User | undefined` (`src/users.ts:17-19`). The users module also exports `removeUser` (`src/users.ts:13-15`), which deletes a user from the map. Removing a user does nothing to their orders: `orders` in `src/orders.ts` is a separate array with no link back. So an order can easily outlive its user, and an order can also be placed with a `userId` that was never added.\n\nThe `!` after `findUser(order.userId)` only tells the compiler to stop checking. It does nothing at runtime. When the user is missing, `user` is `undefined`, and reading `user.name` throws `TypeError: Cannot read properties of undefined`. Receipts for orders from deleted users would crash instead of being produced or failing with a clear error.\n\n**2. No tests (should_fix).**\nThe change adds no tests at all, so neither the normal case nor the missing-user case is checked.\n\n**Repository rules:** None are broken. The amount stays in integer cents (R2), nothing is logged (R1), and there is no SQL (R3).\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/receipts.ts\",\n      \"side\": \"head\",\n      \"line\": 5,\n      \"end_line\": 6,\n      \"line_text\": \"  const user = findUser(order.userId)!;\",\n      \"severity\": \"blocking\",\n      \"category\": \"correctness\",\n      \"title\": \"Non-null assertion on findUser crashes receiptHeader for orders whose user was removed or never added\",\n      \"body\": \"When an order's userId has no entry in the users map (e.g. after removeUser, which leaves that user's orders in place), findUser returns undefined; the `!` only silences the type checker, so `user.name` throws a TypeError at runtime instead of producing a receipt or a clear error.\",\n      \"defect_key\": \"unchecked_non_null_assertion\",\n      \"suggestion\": \"  const user = findUser(order.userId);\\n  if (!user) {\\n    throw new Error(`Order ${order.id} references unknown user ${order.userId}`);\\n  }\\n  return `Order ${order.id} for ${user.name} <${user.email}>, ${order.totalCents} cents`;\",\n      \"pre_existing\": false,\n      \"rule\": null\n    },\n    {\n      \"path\": \"src/receipts.ts\",\n      \"side\": \"head\",\n      \"line\": 4,\n      \"end_line\": 7,\n      \"line_text\": \"export function receiptHeader(order: Order): string {\",\n      \"severity\": \"should_fix\",\n      \"category\": \"tests\",\n      \"title\": \"receiptHeader ships without tests, including the missing-user case\",\n      \"body\": \"No test covers receiptHeader, so neither the formatted output nor the behaviour when findUser returns undefined (a removed user) is checked; the crash above would go unnoticed.\",\n      \"defect_key\": \"missing_tests\",\n      \"suggestion\": null,\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 13227,
+    "outputTokens": 1383
+  },
+  "wallMs": 14607,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

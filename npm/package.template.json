@@ -1,0 +1,21 @@
+{
+  "name": "lookover",
+  "version": "0.0.0",
+  "description": "A second look before merge: Lookover reviews your GitHub pull requests with Claude and ChatGPT, on the subscriptions you already pay for.",
+  "keywords": ["code-review", "pull-request", "github", "claude", "codex", "ai"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/lookover-dev/lookover.git" },
+  "homepage": "https://github.com/lookover-dev/lookover#readme",
+  "bugs": "https://github.com/lookover-dev/lookover/issues",
+  "bin": { "lookover": "bin/lookover.js" },
+  "files": ["bin/lookover.js"],
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" },
+  "optionalDependencies": {
+    "@lookover/win32-x64": "0.0.0",
+    "@lookover/darwin-arm64": "0.0.0",
+    "@lookover/darwin-x64": "0.0.0",
+    "@lookover/linux-x64": "0.0.0",
+    "@lookover/linux-arm64": "0.0.0"
+  }
+}

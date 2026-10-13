@@ -1,0 +1,17 @@
+{
+  "session": "claude-find",
+  "text": "The change adds a module logger to `app/weather.py` and logs every forecast request at INFO level. It also adds a test that checks the request gets logged.\n\n**Problem 1: the API key is written to the logs (R1, blocking).** In `forecast`, the URL is built with `urlencode({'city': city, 'key': self._api_key})`. The new line `log.info(\"forecast request: %s\", url)` then logs that full URL, so every forecast call writes `key=<api key>` in plain text to whatever handlers are set up. Log files, log shippers and anyone who can read the logs would get the key. R1 says: \"Never log a secret: an API key, a token or a password.\" Only the city should be logged.\n\n**Problem 2: the new test hides the leak instead of catching it (should_fix).** `test_forecast_logs_its_request` only checks that `\"city=Lyon\"` is in `caplog.text`. Its captured log actually contains `key=fake-key-0000`, and the test still passes. It should also check that the key is absent, so the leak can't come back.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"app/weather.py\",\n      \"side\": \"head\",\n      \"line\": 20,\n      \"end_line\": 20,\n      \"line_text\": \"        log.info(\\\"forecast request: %s\\\", url)\",\n      \"severity\": \"blocking\",\n      \"category\": \"repo_rule\",\n      \"title\": \"Logged request URL contains the API key in its `key` query parameter\",\n      \"body\": \"When forecast() runs with INFO logging on, the full URL is logged, and it includes `key=<api_key>` from urlencode. So the secret API key is written to every log handler and to anything that ships or stores logs.\",\n      \"defect_key\": \"secret_logged\",\n      \"suggestion\": \"        log.info(\\\"forecast request: city=%s\\\", city)\",\n      \"pre_existing\": false,\n      \"rule\": \"R1\"\n    },\n    {\n      \"path\": \"tests/test_weather.py\",\n      \"side\": \"head\",\n      \"line\": 15,\n      \"end_line\": 15,\n      \"line_text\": \"    assert \\\"city=Lyon\\\" in caplog.text\",\n      \"severity\": \"should_fix\",\n      \"category\": \"tests\",\n      \"title\": \"Logging test does not check that the API key is kept out of the log\",\n      \"body\": \"The test only checks that the city appears in the log. The captured text also contains `key=fake-key-0000`, and the test passes anyway, so it hides the secret leak instead of catching it.\",\n      \"defect_key\": \"missing_secret_absence_assertion\",\n      \"suggestion\": \"    assert \\\"city=Lyon\\\" in caplog.text\\n    assert \\\"fake-key-0000\\\" not in caplog.text\",\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 6803,
+    "outputTokens": 950
+  },
+  "wallMs": 10524,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

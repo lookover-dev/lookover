@@ -1,0 +1,17 @@
+{
+  "session": "codex-find",
+  "text": "I read the change.\n\n```json\n{\n  \"findings\": [],\n  \"earlier\": []\n}\n```\n",
+  "json": null,
+  "usage": {
+    "inputTokens": 15000,
+    "outputTokens": 400
+  },
+  "wallMs": 82000,
+  "cli": {
+    "name": "codex",
+    "version": "0.50.0",
+    "model": "gpt-5.5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

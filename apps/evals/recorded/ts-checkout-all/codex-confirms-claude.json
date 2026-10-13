@@ -1,0 +1,17 @@
+{
+  "session": "codex-confirms-claude",
+  "text": "C1 is confirmed and blocking: `checkoutAll` returns IDs before the delayed saves finish and leaves save rejections unhandled, including those for empty orders.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"checkoutAll discards saveOrder's promise and returns IDs before storage completes, so immediate lookups of new orders fail and empty-order rejections go unhandled.\",\n      \"evidence\": [\"src/checkout.ts:11\", \"src/checkout.ts:12\", \"src/checkout.ts:14\", \"src/store.ts:10\", \"src/store.ts:11\", \"src/store.ts:12\", \"src/store.ts:16\"],\n      \"severity\": \"blocking\"\n    }\n  ]\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 35205,
+    "outputTokens": 333
+  },
+  "wallMs": 19946,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

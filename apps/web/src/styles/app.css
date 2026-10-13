@@ -1,0 +1,1579 @@
+/* App layout and the additions the screens needed on top of the design system (system.css).
+   Each addition is listed in docs/product/design-system.md, "Added for the app". */
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+a {
+  color: var(--ink);
+  text-underline-offset: 2px;
+}
+p {
+  margin: 0;
+}
+button {
+  font-family: inherit;
+}
+
+/* ---- shell ---- */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.app > .top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: 10px var(--s-5);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 15;
+}
+.top .mk {
+  width: 28px;
+  height: 28px;
+  color: var(--ink);
+  display: block;
+  border-radius: var(--r-1);
+}
+.top .mk svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.top .navtop {
+  margin-left: 2px;
+}
+.top > .anchor {
+  margin-left: auto;
+}
+.pill i.mute {
+  background: var(--muted);
+}
+.route {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.page {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: var(--s-8) var(--s-5) var(--s-16);
+  display: grid;
+  gap: var(--s-5);
+  align-content: start;
+  animation: page-in var(--d-4) var(--e-out);
+}
+.page.narrow {
+  max-width: 680px;
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.page-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+/* Repositories: each repository that left the App's installation, one notice each, above the table. */
+.departed {
+  display: grid;
+  gap: var(--s-2);
+}
+.foot {
+  font-size: var(--t-13);
+  color: var(--muted);
+  padding-top: var(--s-2);
+}
+.foot a,
+.crumb a {
+  color: var(--muted);
+}
+.foot a:hover,
+.crumb a:hover {
+  color: var(--ink);
+}
+
+/* phone: the same three destinations at the bottom */
+.tabbar {
+  display: none;
+}
+@media (max-width: 640px) {
+  .app > .top .navtop,
+  .app > .top .navsep {
+    display: none;
+  }
+  .app > .top {
+    padding: 10px var(--s-4);
+  }
+  .page {
+    padding: var(--s-5) var(--s-4) 96px;
+  }
+  .tabbar {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 15;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  }
+  .tabbar a {
+    display: grid;
+    justify-items: center;
+    gap: 3px;
+    padding: 6px 4px;
+    border-radius: var(--r-2);
+    font: 600 var(--t-12) / 1 var(--body);
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .tabbar a[aria-current="page"] {
+    color: var(--ink);
+    background: var(--raised);
+  }
+  .tabbar .ic {
+    width: 20px;
+    height: 20px;
+  }
+  .rowi {
+    grid-template-columns: 1fr auto;
+    row-gap: 6px;
+  }
+  .rowi > .chip,
+  .rowi > .sev-label {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  .setrow {
+    grid-template-columns: 1fr;
+  }
+  .sentence-row {
+    flex-wrap: wrap;
+  }
+  .pill-menu {
+    position: fixed !important;
+    left: 8px !important;
+    right: 8px !important;
+    top: 56px !important;
+  }
+  .toasts {
+    left: 16px;
+    bottom: 84px;
+  }
+  .toast {
+    min-width: 0;
+  }
+  .sel {
+    width: 100% !important;
+  }
+  .filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .tbl.repos th:nth-child(2),
+  .tbl.repos td:nth-child(2) {
+    display: none;
+  }
+}
+
+/* ---- sentence ---- */
+.sentence-row {
+  display: flex;
+  gap: var(--s-4);
+  align-items: center;
+}
+.sentence-row .sentence {
+  flex: 1;
+  min-width: 0;
+}
+.sentence-row > .eyes {
+  flex: none;
+  color: var(--muted);
+}
+.sentence-row > .btn,
+.sentence-row > .switch {
+  flex: none;
+}
+
+/* ---- rows ---- */
+.rowi-main {
+  min-width: 0;
+}
+.rowi.static {
+  cursor: default;
+}
+.rowi.static:hover {
+  border-color: var(--line);
+  background: var(--surface);
+}
+.rowi:focus-visible {
+  border-color: var(--line-2);
+  background: var(--raised);
+}
+.rowi .me .wrap {
+  white-space: normal;
+}
+.rowi > .ic {
+  color: var(--muted);
+}
+.list-search {
+  margin-bottom: 10px;
+}
+.filters {
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.filters .search {
+  flex: 1;
+  min-width: 180px;
+}
+.sev-label {
+  font: 700 11px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--acc-text);
+  white-space: nowrap;
+}
+.sev-label.fix {
+  color: var(--warn-text);
+}
+.dotc {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.dotc.warn {
+  background: var(--warn);
+}
+.tabs .n {
+  font: 600 var(--t-12) var(--mono);
+  color: var(--muted);
+}
+/* The review rules' headers stay on one line, so the header row lines up ("Acted on" never wraps). */
+.tbl.rules th {
+  white-space: nowrap;
+}
+.tbl-wrap {
+  overflow-x: auto;
+}
+.tbl .num {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.tbl tr.clickable {
+  cursor: pointer;
+}
+.tbl a {
+  text-decoration: none;
+}
+.tbl a:hover {
+  text-decoration: underline;
+}
+
+/* ---- status pill menu ---- */
+.pill-menu {
+  padding: var(--s-1);
+}
+.menu .st {
+  gap: var(--s-2);
+}
+/* a row is a small button's height (--h-sm): the dot and the first line of text are centred in it, so a line
+   that wraps keeps its dot on its first line */
+.menu .st > span,
+.menu .st-block > span {
+  display: flex;
+  gap: var(--s-2);
+  align-items: flex-start;
+  min-height: var(--h-sm);
+}
+.menu .st i {
+  flex: none;
+  margin-top: calc((var(--h-sm) - var(--dot)) / 2);
+}
+.menu .st .st-text {
+  flex: 1;
+  min-width: 0;
+  padding-block: calc((var(--h-sm) - 1lh) / 2);
+}
+.menu .st small,
+.st-note {
+  display: block;
+  font-size: var(--t-12);
+  color: var(--muted);
+  padding-left: 15px;
+  max-width: 34ch;
+}
+.st-note {
+  padding: 2px 10px 8px;
+}
+.menu .st-link {
+  all: unset;
+  cursor: pointer;
+  font-size: var(--t-12);
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  margin: 4px 0 2px 15px;
+  border-radius: var(--r-1);
+}
+.menu .st-link:focus-visible {
+  box-shadow: var(--focus);
+}
+.menu .st .btn {
+  width: auto;
+  flex: none;
+  font: 600 var(--t-13) / 1 var(--body);
+  padding: 0 var(--s-3);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  justify-content: center;
+}
+.menu .st .btn:hover {
+  background: var(--raised);
+}
+.menu .pause {
+  display: flex;
+  gap: 6px;
+  padding: 2px 10px 6px;
+  flex-wrap: wrap;
+}
+.menu .pause .btn {
+  width: auto;
+  font: 600 var(--t-13) / 1 var(--body);
+  padding: 0 var(--s-3);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+}
+.menu .pause .btn:hover {
+  background: var(--raised);
+}
+.menu .checks {
+  padding-top: 0;
+}
+.menu button .eyes {
+  color: var(--muted);
+}
+.menu button .ic {
+  color: var(--muted);
+}
+
+/* ---- popover ---- */
+.pop .menu button {
+  display: grid;
+  gap: 2px;
+}
+.pop .menu button .r {
+  margin-left: 0;
+}
+.pop-acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ---- command palette, shortcuts ---- */
+.cmdk .menu button[data-active="true"] {
+  background: var(--raised);
+}
+.cmdk .menu button:hover {
+  background: transparent;
+}
+.cmdk .menu button[data-active="true"]:hover {
+  background: var(--raised);
+}
+.cmdk-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.cmdk .menu .r {
+  white-space: nowrap;
+}
+.cmdk-none {
+  padding: var(--s-5);
+  color: var(--muted);
+  text-align: center;
+}
+.cmdk .search .ic {
+  position: absolute;
+  left: 14px;
+  color: var(--muted);
+}
+.cmdk .search .input {
+  padding-left: 40px;
+  width: 100%;
+}
+.keys {
+  width: min(560px, calc(100vw - 32px));
+}
+.keys-grid {
+  display: grid;
+  gap: var(--s-5);
+  margin-top: var(--s-4);
+}
+.keys-grid section {
+  display: grid;
+  gap: 2px;
+}
+.keys-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: var(--t-14);
+  color: var(--ink-2);
+}
+.keys-k {
+  display: flex;
+  gap: 4px;
+}
+
+/* ---- review ---- */
+.finding p {
+  margin: 0;
+}
+.findings {
+  gap: var(--s-3);
+}
+.verdict {
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.verdict .eyes {
+  color: var(--ok-text);
+  flex: none;
+}
+.verdict details {
+  flex-basis: 100%;
+  font-size: var(--t-13);
+  color: var(--ink-2);
+}
+.verdict summary,
+.more summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--t-13);
+  border-radius: var(--r-1);
+}
+.verdict summary:hover,
+.more summary:hover {
+  color: var(--ink);
+}
+.verdict details p,
+.more p {
+  margin-top: 8px;
+  max-width: 64ch;
+  font-size: var(--t-13);
+  color: var(--ink-2);
+}
+.running {
+  display: grid;
+  gap: var(--s-4);
+}
+.running-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.steplist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.steplist li {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+}
+.steplist li.done,
+.steplist li.active {
+  color: var(--ink);
+}
+/* The posting step's text: exactly two lines held, whatever its outbox says (ADR 0055), its words centred in them
+   and cut with an ellipsis rather than move the list. */
+.steplist .two-lines {
+  height: 2lh;
+  display: flex;
+  align-items: center;
+}
+.steplist .two-lines > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.steplist li.done .ic {
+  color: var(--ok-text);
+}
+.steplist .dot,
+.substep .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-2);
+  justify-self: center;
+  display: block;
+}
+.steplist code {
+  font-size: var(--t-12);
+  color: var(--muted);
+  text-align: right;
+}
+.detail {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  min-width: 0;
+}
+.detail summary {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: var(--s-3);
+  align-items: center;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: var(--r-2);
+}
+.detail summary::-webkit-details-marker {
+  display: none;
+}
+.detail summary:hover {
+  background: var(--raised);
+}
+.detail .k {
+  font-size: var(--t-13);
+  color: var(--muted);
+}
+.detail .v {
+  font-size: var(--t-12);
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.detail[open] summary {
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--r-2) var(--r-2) 0 0;
+}
+.detail > :not(summary) {
+  margin: 12px;
+}
+.detail dl {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 6px var(--s-3);
+  font-size: var(--t-13);
+}
+.detail dt {
+  color: var(--muted);
+}
+.detail dd {
+  margin: 0;
+}
+.detail .code {
+  border: 0;
+  border-radius: var(--r-1);
+}
+.code .hl {
+  margin: 0;
+  padding: 0 4px;
+  width: auto;
+  border-radius: 2px;
+}
+
+/* ---- settings ---- */
+.setcard {
+  padding: 4px var(--s-4);
+}
+.setcard > div[id] {
+  border-top: 1px solid var(--line);
+}
+.setcard > div[id]:first-child {
+  border-top: 0;
+}
+.setcard > div[id] .setrow {
+  border-top: 0;
+}
+.setcard > div[data-target] {
+  animation: target 1.6s var(--e-out);
+}
+@keyframes target {
+  0%,
+  40% {
+    background: var(--raised);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.stack {
+  display: grid;
+  gap: 8px;
+}
+.differs,
+.origin-line {
+  display: block;
+  margin-top: 6px;
+  font-size: var(--t-12) !important;
+  color: var(--muted);
+}
+.origin-line .t-small {
+  font-size: var(--t-12);
+}
+.differs a {
+  color: var(--ink-2);
+}
+.override {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+.advanced-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ---- setup ---- */
+.setup .steps {
+  margin-left: var(--s-2);
+  flex-wrap: wrap;
+}
+.steps-item {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.steps .done {
+  color: var(--ok-text);
+}
+.setup-acts {
+  display: flex;
+  gap: var(--s-3);
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.setup-acts .t-small {
+  margin-right: auto;
+}
+.engine .lg .ic {
+  color: var(--ok-text);
+}
+.engine .lg .eyes {
+  color: var(--ink);
+}
+.substep.todo {
+  opacity: 0.6;
+}
+.checklist {
+  display: grid;
+  gap: 14px;
+}
+.checklist .check {
+  align-items: flex-start;
+}
+.checklist .check > span {
+  display: grid;
+  gap: 2px;
+}
+.background-note {
+  display: grid;
+  gap: 10px;
+}
+.background-note h4 {
+  margin: 0;
+}
+.background-note p {
+  max-width: 64ch;
+  color: var(--ink-2);
+}
+.first-result {
+  font-size: var(--t-16);
+}
+
+/* ---- dev: scenario drawer (dashed = not part of the product) ---- */
+:root[data-drawer] body {
+  padding-right: 340px;
+}
+:root[data-drawer] .toasts {
+  right: 356px;
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  z-index: 40;
+  background: var(--bg);
+  border-left: 1px dashed var(--line-2);
+  display: flex;
+  flex-direction: column;
+  font-size: var(--t-13);
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px var(--s-4);
+  border-bottom: 1px dashed var(--line-2);
+}
+.drawer-x {
+  all: unset;
+  cursor: pointer;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-1);
+}
+.drawer-x:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
+.drawer-x:focus-visible {
+  box-shadow: var(--focus);
+}
+.drawer-body {
+  overflow-y: auto;
+  padding: var(--s-4);
+  display: grid;
+  gap: var(--s-3);
+  align-content: start;
+}
+.drawer-scn {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.drawer-scn button,
+.drawer-faults button {
+  appearance: none;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font: 500 var(--t-12) / 1.25 var(--body);
+  padding: 6px 8px;
+  border-radius: var(--r-2);
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.drawer-scn button:hover,
+.drawer-faults button:hover {
+  border-color: var(--faint);
+  color: var(--ink);
+}
+.drawer-scn button[aria-pressed="true"] {
+  background: var(--raised);
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+.drawer-scn code {
+  font-size: 11px;
+  color: var(--muted);
+}
+.drawer-what {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  padding: var(--s-3);
+  display: grid;
+  gap: 6px;
+}
+.drawer-what p {
+  color: var(--ink-2);
+}
+.drawer-what ol,
+.try-card ol {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  display: grid;
+  gap: 4px;
+}
+.drawer-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.drawer-faults {
+  display: grid;
+  gap: 4px;
+}
+.drawer-scn button:disabled,
+.drawer-faults button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* A refused verb's line: always there, two lines tall, so nothing under it moves when it is said or cleared. */
+.dev-said {
+  min-height: calc(2em * 1.45);
+}
+.drawer-links {
+  display: flex;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+  align-items: center;
+  color: var(--muted);
+  padding-top: var(--s-2);
+  border-top: 1px dashed var(--line-2);
+}
+.drawer-tab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  appearance: none;
+  font: 600 11px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-pill);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.drawer-tab:hover {
+  color: var(--ink);
+  border-color: var(--faint);
+}
+@media (max-width: 900px) {
+  :root[data-drawer] body {
+    padding-right: 0;
+  }
+  .drawer {
+    width: min(340px, 100vw);
+    box-shadow: var(--shadow-dialog);
+  }
+  .drawer-tab {
+    bottom: 84px;
+  }
+}
+.phone-page {
+  min-height: 100vh;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--s-4);
+  padding: var(--s-5);
+}
+.phone {
+  width: 390px;
+  height: 780px;
+  max-height: calc(100vh - 100px);
+  border: 1px solid var(--line-2);
+  border-radius: 28px;
+  background: var(--bg);
+}
+.try-notes {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-2);
+  max-width: 70ch;
+}
+.try-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s-4);
+  align-items: start;
+}
+.try-card > div {
+  display: grid;
+  gap: 6px;
+}
+.try-card p {
+  color: var(--ink-2);
+}
+
+/* ---- fixes on top of the system's own rules ---- */
+dialog.cmdk {
+  padding: 0;
+}
+.cmdk .menu button {
+  min-width: 0;
+}
+.cmdk .menu button .chip {
+  flex: none;
+}
+/* The chip has its own column, as in a row, so the titles line up. */
+.cmdk-lead {
+  display: flex;
+  flex: none;
+  width: 96px;
+}
+.cmdk-label {
+  flex: 1;
+}
+.setrow span span,
+.setrow span a {
+  display: inline;
+}
+.setrow .tag {
+  display: inline-flex;
+}
+.setrow .anchor {
+  display: inline-block;
+}
+.setrow .switch,
+.setrow .check {
+  font-size: var(--t-14);
+  color: var(--ink);
+}
+.setrow .switch i,
+.setrow .check span {
+  display: block;
+}
+.setrow .check span code {
+  display: inline;
+}
+.setrow .seg {
+  justify-self: end;
+}
+@media (max-width: 640px) {
+  .sentence-row > .btn-ghost {
+    display: none;
+  }
+  .setrow .seg {
+    justify-self: start;
+  }
+  .override {
+    justify-items: start;
+  }
+  /* A phone has no keyboard to press them with: the keys stay listed under `?` (06b §1, rule 9). */
+  .btn .kbd {
+    display: none;
+  }
+}
+
+/* =====================================================================
+   Feedback round 1 (2026-10-03). See docs/product/ux-feedback.md.
+   ===================================================================== */
+
+/* Nothing shifts: sizes are reserved before content arrives or changes. */
+.hidden {
+  visibility: hidden;
+}
+
+/* ---- top bar: the nav runs the full height so its bar sits on the edge ---- */
+.app > .top {
+  padding-block: 0;
+  min-height: 52px;
+}
+.app > .top .navsep {
+  align-self: center;
+}
+
+/* ---- alert band: what needs the person, above every page, never a row ---- */
+.alerts {
+  background: var(--raised);
+  border-bottom: 1px solid var(--line-2);
+  animation: page-in var(--d-4) var(--e-out);
+}
+.alerts-in {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: var(--s-2) var(--s-5);
+  display: grid;
+}
+.alert {
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  gap: var(--s-3);
+  align-items: center;
+  padding: var(--s-2) 0;
+  font-size: var(--t-14);
+  color: var(--ink-2);
+}
+.alert + .alert {
+  border-top: 1px solid var(--line-2);
+}
+.alert b {
+  color: var(--ink);
+}
+.alert-label {
+  font: 700 11px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--acc-text);
+}
+.alert.warn .alert-label {
+  color: var(--warn-text);
+}
+/* The button keeps its width while it waits. */
+.alert .btn {
+  width: 208px;
+  justify-content: center;
+}
+
+/* ---- rows: the status chip has its own column, so titles line up ---- */
+.rowi.status {
+  grid-template-columns: 96px 1fr auto;
+}
+.rowi.status > .chip {
+  justify-self: start;
+}
+.rowi.nolead {
+  grid-template-columns: 1fr auto;
+}
+.rowi > .ac > .ic {
+  color: var(--muted);
+  display: block;
+}
+.rowi:has(.sev-label) {
+  grid-template-columns: 96px 1fr auto;
+}
+
+/* ---- "All reviews": a row-sized way on, not a text link ---- */
+.more-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--s-3);
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    border-color var(--d-1),
+    background var(--d-1);
+}
+.more-row:hover {
+  background: var(--surface);
+  border-color: var(--faint);
+}
+.more-row .ic {
+  color: var(--muted);
+}
+.more-row .t-small {
+  font-weight: 400;
+}
+
+/* ---- disclosure: depth that opens in place, smoothly ---- */
+.disc-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: var(--t-13);
+  color: var(--muted);
+  padding: 4px 8px 4px 4px;
+  margin-left: -4px;
+  border-radius: var(--r-1);
+  transition:
+    color var(--d-1),
+    background var(--d-1);
+}
+.disc-btn:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
+.disc-btn:focus-visible {
+  box-shadow: var(--focus);
+}
+.disc-btn .ic {
+  transition: transform var(--d-2) var(--e-out);
+}
+.disc.open > .disc-btn .ic {
+  transform: rotate(90deg);
+}
+.disc.open > .disc-btn {
+  color: var(--ink);
+}
+.disc-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--d-3) var(--e-out);
+}
+.disc.open > .disc-body {
+  grid-template-rows: 1fr;
+}
+.disc-body > div {
+  overflow: hidden;
+  min-height: 0;
+}
+.disc-in {
+  padding: 6px 0 4px 22px;
+  font-size: var(--t-13);
+  color: var(--ink-2);
+  max-width: 66ch;
+  opacity: 0;
+  transition: opacity var(--d-3) var(--e-out);
+}
+.disc.open > .disc-body .disc-in {
+  opacity: 1;
+}
+.disc-group {
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+}
+.disc-group .disc {
+  width: 100%;
+}
+.verdict .disc {
+  flex-basis: 100%;
+}
+/* the row style: a row whose summary says the key number */
+.disc-row {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  min-width: 0;
+  transition: border-color var(--d-1);
+}
+.disc-row:hover {
+  border-color: var(--line-2);
+}
+.disc-row > .disc-btn {
+  display: grid;
+  grid-template-columns: 16px 140px 1fr;
+  gap: var(--s-2);
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-2);
+  color: var(--ink);
+}
+.disc-row > .disc-btn:hover {
+  background: var(--raised);
+}
+.disc-row .disc-btn .ic {
+  color: var(--muted);
+}
+.disc-row .disc-k {
+  font-size: var(--t-13);
+  color: var(--ink-2);
+}
+.disc-row .disc-v {
+  font-size: var(--t-12);
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.disc-row .disc-in {
+  padding: 4px 12px 12px 36px;
+  max-width: none;
+}
+.disc-row .disc-in dl {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 6px var(--s-3);
+  margin: 0;
+}
+.disc-row .disc-in dt {
+  color: var(--muted);
+}
+.disc-row .disc-in dd {
+  margin: 0;
+}
+
+/* ---- setup ---- */
+.steps button {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border-radius: var(--r-1);
+  color: var(--muted);
+  transition:
+    color var(--d-1),
+    background var(--d-1);
+}
+.steps button.done {
+  color: var(--ok-text);
+}
+.steps button:hover {
+  color: var(--ink);
+  background: var(--raised);
+}
+.steps button:focus-visible {
+  box-shadow: var(--focus);
+}
+.steps .ic {
+  width: 14px;
+  height: 14px;
+}
+/* One colour per state: a done square is green all the way, never a green tick on grey. */
+.engine .lg.done {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok-text);
+}
+.engine .lg.done .ic {
+  color: var(--ok-text);
+}
+.engine .lg.busy {
+  color: var(--ink);
+}
+.substep.later {
+  opacity: 0.55;
+}
+.substep.todo {
+  opacity: 1;
+}
+/* The primary button and the line beside it keep their place when the label changes. */
+.setup-acts .btn-lg {
+  min-width: 168px;
+  justify-content: center;
+}
+
+/* ---- command palette ---- */
+.cmdk .menu button {
+  width: 100%;
+}
+.cmdk .menu > div {
+  min-width: 0;
+}
+
+/* ---- settings and repositories ---- */
+.repo-lede {
+  margin-bottom: var(--s-3);
+}
+.repo-setting .status-line {
+  display: flex !important;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: var(--t-13);
+  color: var(--muted);
+  min-height: 24px;
+}
+.repo-setting .same {
+  color: var(--faint);
+}
+.repo-setting .override {
+  min-width: 240px;
+}
+.tbl.repos td .t-small {
+  margin-top: 2px;
+}
+.rv-acts {
+  align-items: center;
+}
+/* A button whose label changes keeps the width of its widest label: every label in one cell, one seen (`SameWidth`). */
+.same-width {
+  display: inline-grid;
+}
+.same-width-slot {
+  grid-area: 1 / 1;
+  display: flex;
+}
+.same-width-slot > .btn {
+  flex: 1;
+  justify-content: center;
+}
+.same-width-slot[aria-hidden="true"] {
+  visibility: hidden;
+}
+@media (max-width: 640px) {
+  .alert {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .alert .btn {
+    justify-self: start;
+  }
+  .alerts-in {
+    padding-inline: var(--s-4);
+  }
+  .rowi.status {
+    grid-template-columns: 1fr auto;
+  }
+  .disc-row > .disc-btn {
+    grid-template-columns: 16px 1fr;
+  }
+  .disc-row .disc-v {
+    grid-column: 2;
+  }
+}
+@media (max-width: 640px) {
+  /* The sentence takes the line; its action goes under it. */
+  .sentence-row .sentence {
+    flex-basis: 100%;
+  }
+  .sentence-row > .eyes {
+    display: none;
+  }
+}
+
+/* =====================================================================
+   Feedback round 2 (2026-10-05). See docs/product/ux-feedback.md.
+   ===================================================================== */
+
+/* ---- setup steps: a marker of fixed size, a number that becomes a check in place ---- */
+.steps .steps-step,
+.steps button.steps-step {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border-radius: var(--r-1);
+  font: 500 var(--t-13) / 1 var(--body);
+  color: var(--muted);
+  transition:
+    color var(--d-1),
+    background var(--d-1);
+}
+.steps button.steps-step {
+  cursor: pointer;
+}
+.steps button.steps-step:hover {
+  color: var(--ink);
+  background: var(--raised);
+}
+.steps button.steps-step:focus-visible {
+  box-shadow: var(--focus);
+}
+.steps-mark {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-2);
+  display: grid;
+  place-items: center;
+  font: 600 10px / 1 var(--mono);
+  color: var(--muted);
+  transition:
+    background var(--d-2) var(--e-out),
+    border-color var(--d-2) var(--e-out);
+}
+.steps-mark .ic {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2;
+}
+.steps-step.current {
+  color: var(--ink);
+}
+.steps-step.current .steps-mark {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.steps-step.done .steps-mark,
+.steps-step.done.current .steps-mark {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  border-color: transparent;
+  color: var(--ok-text);
+}
+
+/* ---- all reviews: the filter and the search are the same height ---- */
+.filters .seg {
+  height: 36px;
+  align-items: stretch;
+}
+.filters .seg button {
+  padding-block: 0;
+}
+
+/* ---- repositories: columns keep their width whatever a row says ---- */
+.tbl.repos {
+  table-layout: fixed;
+}
+.tbl.repos th:nth-child(1) {
+  width: 36%;
+}
+.tbl.repos th:nth-child(3) {
+  width: 120px;
+}
+.tbl.repos td {
+  height: 62px;
+}
+
+/* ---- saved, said quietly ---- */
+.save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 84px;
+  flex: none;
+  font-size: var(--t-12);
+  color: var(--faint);
+}
+.save-state .ic {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---- icon button, and the one way back on a repository setting ---- */
+.icon-btn {
+  all: unset;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-1);
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    color var(--d-1),
+    background var(--d-1);
+}
+.icon-btn:hover {
+  color: var(--ink);
+  background: var(--raised);
+}
+.icon-btn:focus-visible {
+  box-shadow: var(--focus);
+}
+.repo-setting .status-line {
+  gap: 4px;
+}
+.setrow .tip {
+  display: block;
+  max-width: none;
+  font-size: var(--t-12);
+  color: var(--ink);
+}
+
+/* =====================================================================
+   Feedback round 3 (2026-10-05). See docs/product/ux-feedback.md.
+   ===================================================================== */
+
+/* A whole-pixel line on an even-sized circle: a 1.5 px ring drew blurred. */
+.steps-mark {
+  width: 20px;
+  height: 20px;
+  border-width: 1px;
+}
+
+/* ---- repository setting: one line; the way back has its own room beside the control ---- */
+.repo-setting .override {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.revert-slot {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: block !important;
+}
+.repo-setting .tip {
+  left: auto;
+  right: 0;
+  transform: translate(0, 3px) scale(0.98);
+  transform-origin: bottom right;
+}
+.repo-setting .anchor:hover .tip,
+.repo-setting .anchor:focus-within .tip {
+  transform: none;
+}
+
+/* ---- number field with its own up and down ---- */
+.stepper {
+  position: relative;
+}
+.stepper .input {
+  padding-right: 28px;
+  font-variant-numeric: tabular-nums;
+}
+.stepper-btns {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 24px;
+  display: grid !important;
+  grid-template-rows: 1fr 1fr;
+  border-left: 1px solid var(--line-2);
+}
+.stepper-btns button {
+  all: unset;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--muted);
+}
+.stepper-btns button:hover {
+  color: var(--ink);
+  background: var(--raised);
+}
+.stepper-btns button[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+.stepper-btns button:first-child {
+  border-radius: 0 5px 0 0;
+}
+.stepper-btns button:first-child .ic {
+  transform: rotate(180deg);
+}
+.stepper-btns button:last-child {
+  border-radius: 0 0 5px 0;
+  border-top: 1px solid var(--line-2);
+}
+.stepper-btns .ic {
+  width: 12px;
+  height: 12px;
+}
+
+/* ---- status menu: the three pause choices stay on one line ---- */
+.menu .pause {
+  flex-wrap: nowrap;
+}
+.menu .pause .btn {
+  flex: 1;
+  justify-content: center;
+  white-space: nowrap;
+  padding: 0 var(--s-2);
+}
+@media (max-width: 340px) {
+  .menu .pause {
+    flex-wrap: wrap;
+  }
+}

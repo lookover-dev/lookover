@@ -1,0 +1,89 @@
+id: py-city-customers
+language: python
+summary: Lists the names of the customers in a city, with its test.
+base:
+  - path: app/customers.py
+    content: |
+      import sqlite3
+
+
+      def connect(path: str) -> sqlite3.Connection:
+          conn = sqlite3.connect(path)
+          conn.execute(
+              "CREATE TABLE IF NOT EXISTS customers"
+              " (id INTEGER PRIMARY KEY, name TEXT NOT NULL, city TEXT NOT NULL)"
+          )
+          return conn
+
+
+      def add_customer(conn: sqlite3.Connection, name: str, city: str) -> None:
+          conn.execute("INSERT INTO customers (name, city) VALUES (?, ?)", (name, city))
+          conn.commit()
+
+
+      def count_customers(conn: sqlite3.Connection) -> int:
+          (count,) = conn.execute("SELECT COUNT(*) FROM customers").fetchone()
+          return count
+  - path: tests/test_customers.py
+    content: |
+      from app.customers import add_customer, connect, count_customers
+
+
+      def test_added_customers_are_counted():
+          conn = connect(":memory:")
+          add_customer(conn, "Ana", "Lyon")
+          add_customer(conn, "Bo", "Nantes")
+          assert count_customers(conn) == 2
+change:
+  - path: app/customers.py
+    content: |
+      import sqlite3
+
+
+      def connect(path: str) -> sqlite3.Connection:
+          conn = sqlite3.connect(path)
+          conn.execute(
+              "CREATE TABLE IF NOT EXISTS customers"
+              " (id INTEGER PRIMARY KEY, name TEXT NOT NULL, city TEXT NOT NULL)"
+          )
+          return conn
+
+
+      def add_customer(conn: sqlite3.Connection, name: str, city: str) -> None:
+          conn.execute("INSERT INTO customers (name, city) VALUES (?, ?)", (name, city))
+          conn.commit()
+
+
+      def count_customers(conn: sqlite3.Connection) -> int:
+          (count,) = conn.execute("SELECT COUNT(*) FROM customers").fetchone()
+          return count
+
+
+      def customers_in(conn: sqlite3.Connection, city: str) -> list[str]:
+          rows = conn.execute(f"SELECT name FROM customers WHERE city = '{city}' ORDER BY name").fetchall()
+          return [name for (name,) in rows]
+  - path: tests/test_customers.py
+    content: |
+      from app.customers import add_customer, connect, count_customers, customers_in
+
+
+      def test_added_customers_are_counted():
+          conn = connect(":memory:")
+          add_customer(conn, "Ana", "Lyon")
+          add_customer(conn, "Bo", "Nantes")
+          assert count_customers(conn) == 2
+
+
+      def test_customers_in_a_city_by_name():
+          conn = connect(":memory:")
+          add_customer(conn, "Cleo", "Lyon")
+          add_customer(conn, "Ana", "Lyon")
+          add_customer(conn, "Bo", "Nantes")
+          assert customers_in(conn, "Lyon") == ["Ana", "Cleo"]
+planted:
+  path: app/customers.py
+  ranges: [[24, 24]]
+  also:
+    - path: tests/test_customers.py
+      ranges: [[16, 16]]
+  what: The city is pasted into the SQL text instead of passed as a parameter, so a city with a quote breaks the query or injects SQL, against REVIEW.md's rule.

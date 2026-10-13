@@ -1,0 +1,17 @@
+{
+  "session": "claude-find",
+  "text": "The change adds `billInvoice`, which charges an invoice and then mails the receipt. If the mail service can't be reached, it tries again, up to 3 attempts in total.\n\n**The customer gets charged again on every retry (blocking).** The call to `charge(...)` sits inside the retry loop at `src/billing.ts:18`. When `sendReceipt` throws `Unreachable` (`src/mailer.ts:15`), the payment has already gone through. The loop then goes back to the top and calls `charge` again. One mail outage can charge the same invoice up to three times.\n\nIt gets worse on the last attempt. That attempt rethrows the error, so the caller sees a failed bill even though the customer may have paid three times. A caller that retries failed bills would charge them again.\n\nI checked the other files: `src/gateway.ts` has no `Unreachable` in it. So only the mail step is meant to be retried, and the charge should run once, before the loop.\n\nThe repository's rules (R1 to R3) aren't broken here. Nothing is logged, the amount is integer cents, and there's no SQL.\n\n**What the tests miss:** the change adds no tests. A test where `sendReceipt` fails once and then succeeds would catch this bug: it would show `charge` being called twice.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/billing.ts\",\n      \"side\": \"head\",\n      \"line\": 18,\n      \"end_line\": 19,\n      \"line_text\": \"      const chargeId = await charge(invoice.customerId, invoice.totalCents);\",\n      \"severity\": \"blocking\",\n      \"category\": \"correctness\",\n      \"title\": \"Retrying a failed receipt mail charges the customer again on every attempt\",\n      \"body\": \"When sendReceipt throws Unreachable after charge has succeeded, the loop starts over and calls charge again. The customer can be billed up to ATTEMPTS (3) times for one invoice. If the last attempt also fails, the error is rethrown even though the money was taken, so a caller that retries failed bills charges the customer once more. Only the mail step should be retried: charge once, before the loop.\",\n      \"defect_key\": \"non_idempotent_operation_in_retry_loop\",\n      \"suggestion\": null,\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 13628,
+    "outputTokens": 1002
+  },
+  "wallMs": 12786,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

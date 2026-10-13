@@ -1,0 +1,81 @@
+id: ts-role-permissions
+language: typescript
+summary: Gives each document role a list of permissions and checks them, with its tests.
+base:
+  - path: src/roles.ts
+    content: |
+      export type Role = "viewer" | "editor" | "owner";
+
+      export function canEdit(role: Role): boolean {
+        return role === "editor" || role === "owner";
+      }
+  - path: src/documents.ts
+    content: |
+      import { canEdit, type Role } from "./roles.ts";
+
+      export interface Document {
+        title: string;
+        body: string;
+      }
+
+      export function rename(document: Document, title: string, role: Role): Document {
+        if (!canEdit(role)) throw new Error("Only an editor or the owner can rename a document.");
+        return { ...document, title };
+      }
+change:
+  - path: src/roles.ts
+    content: |
+      export type Role = "viewer" | "editor" | "owner";
+
+      export type Permission = "read" | "comment" | "edit" | "share" | "delete";
+
+      export function permissionsOf(role: Role): Permission[] {
+        const permissions: Permission[] = [];
+        switch (role) {
+          case "owner":
+            permissions.push("share", "delete");
+          case "editor":
+            permissions.push("edit");
+          case "viewer":
+            permissions.push("read", "comment");
+        }
+        return permissions;
+      }
+
+      export function can(role: Role, permission: Permission): boolean {
+        return permissionsOf(role).includes(permission);
+      }
+  - path: src/documents.ts
+    content: |
+      import { can, type Role } from "./roles.ts";
+
+      export interface Document {
+        title: string;
+        body: string;
+      }
+
+      export function rename(document: Document, title: string, role: Role): Document {
+        if (!can(role, "edit")) throw new Error("Only an editor or the owner can rename a document.");
+        return { ...document, title };
+      }
+  - path: src/roles.test.ts
+    content: |
+      import { expect, test } from "bun:test";
+      import { can, permissionsOf } from "./roles.ts";
+
+      test("a viewer reads and comments", () => {
+        expect(permissionsOf("viewer")).toEqual(["read", "comment"]);
+      });
+
+      test("an editor edits, reads and comments", () => {
+        expect(permissionsOf("editor")).toEqual(["edit", "read", "comment"]);
+      });
+
+      test("an owner shares, deletes, edits, reads and comments", () => {
+        expect(permissionsOf("owner")).toEqual(["share", "delete", "edit", "read", "comment"]);
+      });
+
+      test("only the owner deletes", () => {
+        expect([can("viewer", "delete"), can("editor", "delete"), can("owner", "delete")]).toEqual([false, false, true]);
+      });
+clean: true

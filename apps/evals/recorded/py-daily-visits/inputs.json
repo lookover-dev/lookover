@@ -1,0 +1,12 @@
+{
+  "caseHash": "8e4f0fdf658d5abbaaeb81fa12e1c74ab3a40a168286d1c1e6aa8853768493d7",
+  "head": "6bbd955a1d202a6bb6cb190631b44e29ec8a22c2",
+  "diff": "diff --git a/app/visits.py b/app/visits.py\nindex 8fe02ad..ab93719 100644\n--- a/app/visits.py\n+++ b/app/visits.py\n@@ -1,3 +1,4 @@\n+from collections import Counter\n from datetime import datetime, timezone\n \n \n@@ -5,3 +6,9 @@ def day_start(day: str) -> int:\n     \"\"\"The first second of a UTC day, as a Unix timestamp.\"\"\"\n     start = datetime.strptime(day, \"%Y-%m-%d\").replace(tzinfo=timezone.utc)\n     return int(start.timestamp())\n+\n+\n+def visits_by_day(timestamps: list[int]) -> dict[str, int]:\n+    \"\"\"How many visits each UTC day had, from their Unix timestamps.\"\"\"\n+    days = Counter(datetime.fromtimestamp(ts).date().isoformat() for ts in timestamps)\n+    return dict(days)\ndiff --git a/tests/test_visits.py b/tests/test_visits.py\nindex 98c1d91..4c4bbae 100644\n--- a/tests/test_visits.py\n+++ b/tests/test_visits.py\n@@ -1,5 +1,11 @@\n-from app.visits import day_start\n+from app.visits import day_start, visits_by_day\n \n \n def test_day_start_is_utc_midnight():\n     assert day_start(\"2026-10-10\") == 1791590400\n+\n+\n+def test_visits_are_counted_by_day():\n+    noon = day_start(\"2026-10-10\") + 12 * 3600\n+    next_noon = day_start(\"2026-10-11\") + 12 * 3600\n+    assert list(visits_by_day([noon, noon + 60, next_noon]).values()) == [2, 1]\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "6a434d1293885b4115d38a41be327b2532ac6658"
+    }
+  ]
+}

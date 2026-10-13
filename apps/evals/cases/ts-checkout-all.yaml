@@ -1,0 +1,76 @@
+id: ts-checkout-all
+language: typescript
+summary: Adds a checkout of several orders at once; the store now keeps its own copy of each order and hands out copies.
+base:
+  - path: src/store.ts
+    content: |
+      export interface Order {
+        id: string;
+        items: string[];
+        totalCents: number;
+      }
+
+      const saved = new Map<string, Order>();
+
+      export async function saveOrder(order: Order): Promise<void> {
+        if (order.items.length === 0) throw new Error(`order ${order.id} has no items`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        saved.set(order.id, order);
+      }
+
+      export function findOrder(id: string): Order | undefined {
+        return saved.get(id);
+      }
+  - path: src/checkout.ts
+    content: |
+      import { type Order, saveOrder } from "./store.ts";
+
+      export async function checkout(order: Order): Promise<string> {
+        await saveOrder(order);
+        return `order ${order.id} placed`;
+      }
+change:
+  - path: src/store.ts
+    content: |
+      export interface Order {
+        id: string;
+        items: string[];
+        totalCents: number;
+      }
+
+      const saved = new Map<string, Order>();
+
+      export async function saveOrder(order: Order): Promise<void> {
+        if (order.items.length === 0) throw new Error(`order ${order.id} has no items`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        saved.set(order.id, { ...order, items: [...order.items] });
+      }
+
+      export function findOrder(id: string): Order | undefined {
+        const order = saved.get(id);
+        return order && { ...order, items: [...order.items] };
+      }
+  - path: src/checkout.ts
+    content: |
+      import { type Order, saveOrder } from "./store.ts";
+
+      export async function checkout(order: Order): Promise<string> {
+        await saveOrder(order);
+        return `order ${order.id} placed`;
+      }
+
+      export async function checkoutAll(orders: Order[]): Promise<string[]> {
+        const placed: string[] = [];
+        for (const order of orders) {
+          saveOrder(order);
+          placed.push(order.id);
+        }
+        return placed;
+      }
+planted:
+  path: src/checkout.ts
+  ranges: [[11, 11]]
+  also:
+    - path: src/store.ts
+      ranges: [[9, 13]]
+  what: checkoutAll calls saveOrder without await, so an order is reported placed before it is saved and a failed save is an unhandled rejection.

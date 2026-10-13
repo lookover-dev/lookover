@@ -1,0 +1,17 @@
+{
+  "session": "codex-find",
+  "text": "The change adds a percentage-discount function and a test for a 10% discount on 1,000 cents.\n\nThe function can return fractional cents: 10% off 101 cents returns 90.9. Floating-point arithmetic can also turn an exact-cent result into 669.9999999999999 for 33% off 1,000 cents. This violates R2. The new test uses values that conceal both problems; the implementation needs a defined rounding policy and tests covering these cases.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/orders.ts\",\n      \"side\": \"head\",\n      \"line\": 18,\n      \"end_line\": 18,\n      \"line_text\": \"  return subtotalCents(order) * (1 - percentOff / 100);\",\n      \"severity\": \"blocking\",\n      \"category\": \"repo_rule\",\n      \"title\": \"Discounted amounts must remain integer cents\",\n      \"body\": \"When a discount does not divide evenly into cents, this function returns a fractional amount: a 101-cent subtotal with 10% off returns 90.9 cents. Floating-point precision also makes 33% off 1,000 cents return 669.9999999999999. Both violate R2 and can break downstream integer-cent calculations or storage. Define the rounding policy and implement integer-cent output; the added test only covers a calculation that returns an exact integer.\",\n      \"defect_key\": \"fractional_cents\",\n      \"suggestion\": null,\n      \"pre_existing\": false,\n      \"rule\": \"R2\"\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 36790,
+    "outputTokens": 701
+  },
+  "wallMs": 34201,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

@@ -1,0 +1,12 @@
+{
+  "caseHash": "1f778cf8db5b96beb44be008bd963c7f15c612fbc8c375db5a77c262eadaf31d",
+  "head": "ecb2e3fcc22a26abcc51f3e00072dbcccbc63aa0",
+  "diff": "diff --git a/app/pricing.py b/app/pricing.py\nindex 2e0d8ad..ff20d69 100644\n--- a/app/pricing.py\n+++ b/app/pricing.py\n@@ -1,6 +1,6 @@\n-def calc(lines):\n+def subtotal_cents(lines: list[tuple[int, int]]) -> int:\n     return sum(price * quantity for price, quantity in lines)\n \n \n-def describe(lines):\n-    return f\"{len(lines)} lines, {calc(lines)} cents\"\n+def describe(lines: list[tuple[int, int]]) -> str:\n+    return f\"{len(lines)} lines, {subtotal_cents(lines)} cents\"\ndiff --git a/tests/test_pricing.py b/tests/test_pricing.py\nindex f8a4f61..680180b 100644\n--- a/tests/test_pricing.py\n+++ b/tests/test_pricing.py\n@@ -1,12 +1,12 @@\n-from app.pricing import calc, describe\n+from app.pricing import describe, subtotal_cents\n \n \n-def test_calc_sums_each_line():\n-    assert calc([(250, 2), (100, 1)]) == 600\n+def test_subtotal_sums_each_line():\n+    assert subtotal_cents([(250, 2), (100, 1)]) == 600\n \n \n-def test_calc_of_nothing_is_zero():\n-    assert calc([]) == 0\n+def test_subtotal_of_nothing_is_zero():\n+    assert subtotal_cents([]) == 0\n \n \n def test_describe_counts_lines():\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "346343e3926ea003eb461faef3da253d0d759333"
+    }
+  ]
+}

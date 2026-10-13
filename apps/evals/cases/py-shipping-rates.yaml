@@ -1,0 +1,54 @@
+id: py-shipping-rates
+language: python
+summary: Lets the shipping rates come from a CSV file, the built-in ones staying the default, with its test.
+base:
+  - path: app/shipping.py
+    content: |
+      RATES_CENTS = {"local": 300, "national": 650, "abroad": 1500}
+
+
+      def shipping_cents(region: str) -> int:
+          return RATES_CENTS[region]
+  - path: tests/test_shipping.py
+    content: |
+      from app.shipping import shipping_cents
+
+
+      def test_shipping_by_region():
+          assert shipping_cents("national") == 650
+change:
+  - path: app/shipping.py
+    content: |
+      import csv
+      from collections.abc import Mapping
+
+      RATES_CENTS = {"local": 300, "national": 650, "abroad": 1500}
+
+
+      def shipping_cents(region: str, rates: Mapping[str, int] | None = None) -> int:
+          return (RATES_CENTS if rates is None else rates)[region]
+
+
+      class RatesFile:
+          def __init__(self, path: str) -> None:
+              self.handle = open(path, encoding="utf-8", newline="")
+              self.cents = {row["region"]: int(row["cents"]) for row in csv.DictReader(self.handle)}
+  - path: tests/test_shipping.py
+    content: |
+      from app.shipping import RatesFile, shipping_cents
+
+
+      def test_shipping_by_region():
+          assert shipping_cents("national") == 650
+
+
+      def test_shipping_from_a_rates_file(tmp_path):
+          path = tmp_path / "rates.csv"
+          path.write_text("region,cents\nlocal,300\nnational,700\n", encoding="utf-8")
+          rates = RatesFile(str(path))
+          assert rates.cents == {"local": 300, "national": 700}
+          assert shipping_cents("national", rates.cents) == 700
+planted:
+  path: app/shipping.py
+  ranges: [[13, 14]]
+  what: The rates file is opened without a with block and its handle kept on the RatesFile, never closed, so the file stays open (and locked on Windows) for as long as the rates are kept.

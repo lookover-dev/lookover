@@ -1,0 +1,81 @@
+id: ts-loyalty-points
+language: typescript
+summary: Credits loyalty points for a batch of orders, one point per whole euro, with its test.
+base:
+  - path: src/store.ts
+    content: |
+      /** The app's key-value database. */
+      export interface Store {
+        get(key: string): Promise<number | undefined>;
+        set(key: string, value: number): Promise<void>;
+      }
+  - path: src/orders.ts
+    content: |
+      export interface Order {
+        id: string;
+        customerId: string;
+        totalCents: number;
+      }
+change:
+  - path: src/loyalty.ts
+    content: |
+      import type { Order } from "./orders.ts";
+      import type { Store } from "./store.ts";
+
+      /** One point per whole euro the order took. */
+      export function pointsFor(order: Order): number {
+        return Math.floor(order.totalCents / 100);
+      }
+
+      async function addPoints(store: Store, customerId: string, points: number): Promise<void> {
+        const key = `points:${customerId}`;
+        const balance = (await store.get(key)) ?? 0;
+        await store.set(key, balance + points);
+      }
+
+      /** Credits each order's points to its customer's balance. */
+      export async function creditOrders(store: Store, orders: Order[]): Promise<void> {
+        await Promise.all(orders.map((order) => addPoints(store, order.customerId, pointsFor(order))));
+      }
+  - path: src/loyalty.test.ts
+    content: |
+      import { expect, test } from "bun:test";
+      import { creditOrders, pointsFor } from "./loyalty.ts";
+      import type { Store } from "./store.ts";
+
+      function memoryStore(): Store & { values: Map<string, number> } {
+        const values = new Map<string, number>();
+        return {
+          values,
+          get: async (key) => values.get(key),
+          set: async (key, value) => {
+            values.set(key, value);
+          },
+        };
+      }
+
+      test("an order earns one point per whole euro", () => {
+        expect(pointsFor({ id: "o1", customerId: "ana", totalCents: 1299 })).toBe(12);
+      });
+
+      test("each order credits its customer's balance", async () => {
+        const store = memoryStore();
+        store.values.set("points:ana", 3);
+        await creditOrders(store, [
+          { id: "o1", customerId: "ana", totalCents: 1250 },
+          { id: "o2", customerId: "bo", totalCents: 499 },
+        ]);
+        expect(store.values).toEqual(
+          new Map([
+            ["points:ana", 15],
+            ["points:bo", 4],
+          ]),
+        );
+      });
+planted:
+  path: src/loyalty.ts
+  ranges: [[11, 12], [17, 17]]
+  also:
+    - path: src/loyalty.test.ts
+      ranges: [[23, 32]]
+  what: The orders are credited at once, each reading its customer's balance and writing it back across two awaits, so two orders of the same customer in one batch both read the old balance and the second write drops the first one's points.

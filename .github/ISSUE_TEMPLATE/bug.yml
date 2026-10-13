@@ -1,0 +1,62 @@
+name: Bug
+description: Lookover did something wrong, or stopped where it shouldn't.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Never paste a token, a private key or private code.**
+        A security flaw goes to [private reporting](https://github.com/lookover-dev/lookover/security/advisories/new), not here.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead (the screen, the message, the exit code).
+      placeholder: |
+        I opened a pull request. I expected a review, but ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Lookover version
+      description: What `lookover --version` prints.
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you run it
+      options:
+        - npm install -g lookover
+        - The executable from a GitHub release
+        - From a clone (bun run lookover)
+    validations:
+      required: true
+
+  - type: input
+    id: engines
+    attributes:
+      label: claude and codex versions
+      description: What `claude --version` and `codex --version` print, if the bug is in a review.
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to see it again
+      description: The smallest steps that show it. A public repository or a small pull request helps most.

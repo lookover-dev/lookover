@@ -1,0 +1,17 @@
+{
+  "session": "claude-confirms-claude",
+  "text": "**C1: confirmed.** `checkoutAll` calls `saveOrder(order)` at `src/checkout.ts:11` without `await` and pushes the id right away (line 12). `saveOrder` is async: it waits a 10 ms `setTimeout` (`src/store.ts:11`) before it stores the order (`src/store.ts:12`). So when `checkoutAll` returns, no order has been saved yet, and `findOrder` (`src/store.ts:15-17`) gives back `undefined`.\n\nFor an order with no items, `saveOrder` throws at `src/store.ts:10`. Because the function is async, the throw becomes a rejected promise that nothing handles. The caller still gets that id back as placed, and Node's default unhandled-rejection behaviour stops the process. `checkout` awaits the same call on line 4, so only `checkoutAll` is wrong. This is a real bug: it reports orders as placed that may never be saved, and it can crash the process. It should block the merge.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"saveOrder is async, waits 10 ms before storing and can reject on empty items, but checkoutAll calls it without await, so it returns ids as placed before any save and leaves rejections unhandled.\",\n      \"evidence\": [\"src/checkout.ts:11\", \"src/checkout.ts:12\", \"src/store.ts:10\", \"src/store.ts:11\", \"src/store.ts:12\"],\n      \"severity\": \"blocking\"\n    }\n  ]\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 19252,
+    "outputTokens": 851
+  },
+  "wallMs": 13792,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

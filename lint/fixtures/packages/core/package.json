@@ -1,0 +1,8 @@
+{
+  "name": "@lookover/core",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@lookover/store": "workspace:*", "@lookover/testkit": "workspace:*" },
+  "lookover": { "pure": true, "imports": {} }
+}

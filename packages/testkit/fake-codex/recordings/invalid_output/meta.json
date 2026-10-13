@@ -1,0 +1,13 @@
+{
+  "source": "codex 0.162.1 on win32, 2026-10-11, model no-such-model at effort low: run with --model no-such-model: the API refuses the turn, turn.failed with its error, exit 1. Recorded with scripts/record-codex.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 1,
+    "hang": false
+  }
+}

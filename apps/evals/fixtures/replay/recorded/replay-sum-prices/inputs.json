@@ -1,0 +1,12 @@
+{
+  "caseHash": "46fc3e8ea94405c7f12a49b117f249d64e4535fa7a9ae2728af27ad5bbde37c3",
+  "head": "6a3768581425f18fad89d88eafbf58b27b2592d4",
+  "diff": "diff --git a/src/prices.ts b/src/prices.ts\nindex b2510dc..d89eeaf 100644\n--- a/src/prices.ts\n+++ b/src/prices.ts\n@@ -1,5 +1,9 @@\n export function sum(prices: number[]): number {\n   let total = 0;\n-  for (let i = 0; i < prices.length; i++) total += prices[i];\n+  for (let i = 1; i < prices.length; i++) total += prices[i];\n   return total;\n }\n+\n+export function average(prices: number[]): number {\n+  return sum(prices) / prices.length;\n+}\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Amounts are integer cents, never floating-point numbers.\n",
+      "commit": "faec25cad7ef2445e64d899d8e0c9c23cc12a03c"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "caseHash": "6e2334fa73555ccd7f66da1025b384adefcbf394ef9db6ba52d8edc0aab3d804",
+  "head": "8543cb7a49e67dc404d84c40e0354fc8a76296ed",
+  "diff": "diff --git a/src/billing.ts b/src/billing.ts\nnew file mode 100644\nindex 0000000..96ab14b\n--- /dev/null\n+++ b/src/billing.ts\n@@ -0,0 +1,26 @@\n+import { Unreachable } from \"./errors.ts\";\n+import { charge } from \"./gateway.ts\";\n+import { sendReceipt } from \"./mailer.ts\";\n+\n+export interface Invoice {\n+  customerId: string;\n+  totalCents: number;\n+}\n+\n+const ATTEMPTS = 3;\n+\n+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));\n+\n+/** Charges an invoice and mails its receipt, trying again when the mail service can't be reached. Gives the charge's id. */\n+export async function billInvoice(invoice: Invoice): Promise<string> {\n+  for (let attempt = 1; ; attempt++) {\n+    try {\n+      const chargeId = await charge(invoice.customerId, invoice.totalCents);\n+      await sendReceipt(invoice.customerId, chargeId);\n+      return chargeId;\n+    } catch (error) {\n+      if (!(error instanceof Unreachable) || attempt === ATTEMPTS) throw error;\n+      await pause(500 * attempt);\n+    }\n+  }\n+}\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "d3e674ebfba82d235d277b58b5ed8b05432bcda9"
+    }
+  ]
+}

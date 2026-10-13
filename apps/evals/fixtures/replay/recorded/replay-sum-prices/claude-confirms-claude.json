@@ -1,0 +1,17 @@
+{
+  "session": "claude-confirms-claude",
+  "text": "I read the change.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"range(1, n) leaves prices[0] out.\",\n      \"evidence\": [],\n      \"severity\": \"blocking\"\n    },\n    {\n      \"id\": \"C2\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"Division by prices.length with no guard.\",\n      \"evidence\": [],\n      \"severity\": \"should_fix\"\n    }\n  ]\n}\n```\n",
+  "json": null,
+  "usage": {
+    "inputTokens": 9000,
+    "outputTokens": 300
+  },
+  "wallMs": 82000,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-4-1"
+  },
+  "outcome": "ok",
+  "failure": null
+}

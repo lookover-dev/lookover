@@ -1,0 +1,14 @@
+{
+  "source": "Derived from the confirm recording by scripts/record-codex.ts: its block answers C2 unsure and C3 refuted, so demo mode shows each verdict and round 2 meets the ledger the fake claude's review-round-2 was recorded against.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  },
+  "when": "Head commit: 703205dec59961a3a08427d7b4af007e278451a4, the confirm pass"
+}

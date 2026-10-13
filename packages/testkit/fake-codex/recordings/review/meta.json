@@ -1,0 +1,13 @@
+{
+  "source": "codex 0.162.1 on win32, 2026-10-11, model default (gpt-6.1-sol, effort high): review's find pass on the planted sandbox's pull request #1 (plantSandbox), 2 findings. Recorded with scripts/record-codex.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "source": "codex 0.162.1 on win32, 2026-10-11, model gpt-5.6-luna at effort low: Lookover's self-test, passed (the inside file read, the write refused, nothing planted loaded or obeyed). Recorded with scripts/record-codex.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  },
+  "when": "Lookover's self-test"
+}

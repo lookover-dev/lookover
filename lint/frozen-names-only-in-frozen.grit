@@ -1,0 +1,7 @@
+language js
+
+// A string or template text holding `lookover:<name>`, a frozen marker (ADR 0032), such as `lookover:summary`.
+or { JsStringLiteralExpression(), JsTemplateChunkElement() } as $text where {
+  $text <: r"(?s).*lookover:[a-z].*",
+  register_diagnostic(span = $text, message = "A frozen name (ADR 0032) is written only in packages/contracts/src/frozen.ts. Import the constant from @lookover/contracts instead of spelling the `lookover:` marker here.", severity = "error")
+}

@@ -1,0 +1,13 @@
+{
+  "source": "Derived from the ok recording by scripts/record-claude.ts: its init event, then the program never answers. The caller's signal ends it.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": true
+  }
+}

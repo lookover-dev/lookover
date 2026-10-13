@@ -1,0 +1,17 @@
+{
+  "session": "claude-find",
+  "text": "I read the change.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/prices.ts\",\n      \"side\": \"head\",\n      \"line\": 3,\n      \"end_line\": null,\n      \"severity\": \"blocking\",\n      \"category\": \"correctness\",\n      \"title\": \"sum() skips the first price\",\n      \"body\": \"The loop starts at 1, so prices[0] is never added and every total is short.\",\n      \"defect_key\": \"loop_starts_at_one\",\n      \"suggestion\": null,\n      \"pre_existing\": false\n    },\n    {\n      \"path\": \"src/prices.ts\",\n      \"side\": \"head\",\n      \"line\": 8,\n      \"end_line\": null,\n      \"severity\": \"should_fix\",\n      \"category\": \"correctness\",\n      \"title\": \"average() of an empty list is NaN\",\n      \"body\": \"With no prices, sum is 0 and prices.length is 0: the average is NaN, not an error.\",\n      \"defect_key\": \"average_divides_by_zero\",\n      \"suggestion\": null,\n      \"pre_existing\": false\n    }\n  ],\n  \"earlier\": []\n}\n```\n",
+  "json": null,
+  "usage": {
+    "inputTokens": 16000,
+    "outputTokens": 700
+  },
+  "wallMs": 82000,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-4-1"
+  },
+  "outcome": "ok",
+  "failure": null
+}

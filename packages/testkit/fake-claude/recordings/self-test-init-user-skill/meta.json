@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#235): the passing run, its init line naming a skill of the user's own (~/.claude/skills/grill-me), neither planted nor from the project. The self-test fails: loaded.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

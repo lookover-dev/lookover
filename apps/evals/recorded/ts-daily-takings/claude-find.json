@@ -1,0 +1,17 @@
+{
+  "session": "claude-find",
+  "text": "**What the change does:** It adds `dailyChanges(sales)` to `src/sales.ts`. The function returns how much each day's `cents` went up or down from the day before. `summary()` in `src/report.ts` now adds those changes, one per line and signed, under the totals line.\n\n**Problem: off-by-one in the loop bound, so `summary()` crashes for any non-empty input.** The loop runs `for (let i = 1; i <= sales.length; i++)`. On the last pass `i === sales.length`, so `sales[i]` is `undefined`, and `sales[i].cents` throws `TypeError: Cannot read properties of undefined`.\n\n- This happens for every array with at least one sale. With one sale, the very first pass reads `sales[1]`.\n- Only the empty array works: the loop never runs and the result is `[]`.\n- `summary()` calls `dailyChanges` without a guard. So for any real data, `summary()` now throws where it used to return a string.\n\nThe fix is `i < sales.length`.\n\n**Missing tests:** The repository has no test files, and the change adds none. A single test with two sales would have caught this crash.\n\n**Repository rules:** None are broken. The changes are integer differences of integer cents (R2). There is no logging (R1) and no SQL (R3).\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/sales.ts\",\n      \"side\": \"head\",\n      \"line\": 13,\n      \"end_line\": 14,\n      \"line_text\": \"  for (let i = 1; i <= sales.length; i++) {\",\n      \"severity\": \"blocking\",\n      \"category\": \"correctness\",\n      \"title\": \"Off-by-one loop bound reads sales[sales.length] and throws for any non-empty input\",\n      \"body\": \"When `sales` has one or more entries, the last pass has `i === sales.length`, so `sales[i]` is undefined and `sales[i].cents` throws a TypeError. `summary()` calls `dailyChanges` without a guard, so it now throws for all real data where it used to return a string. The bound should be `i < sales.length`.\",\n      \"defect_key\": \"off_by_one_loop_bound\",\n      \"suggestion\": \"  for (let i = 1; i < sales.length; i++) {\",\n      \"pre_existing\": false,\n      \"rule\": null\n    },\n    {\n      \"path\": \"src/sales.ts\",\n      \"side\": \"head\",\n      \"line\": 11,\n      \"end_line\": null,\n      \"line_text\": \"export function dailyChanges(sales: Sale[]): number[] {\",\n      \"severity\": \"should_fix\",\n      \"category\": \"tests\",\n      \"title\": \"New dailyChanges and the changed summary output have no tests\",\n      \"body\": \"The repository has no tests, and this change adds none for `dailyChanges` or the new multi-line `summary` output. One test with two sales would have caught the crash on any non-empty input. Add tests for the empty, one-sale and several-sale cases.\",\n      \"defect_key\": \"missing_tests\",\n      \"suggestion\": null,\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 13498,
+    "outputTokens": 1191
+  },
+  "wallMs": 13996,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

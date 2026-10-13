@@ -1,0 +1,28 @@
+name: Feature
+description: Something Lookover should do, or do differently.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Lookover stays small on purpose: a second look at your pull requests, on the subscriptions you already pay for.
+        Saying what you are trying to do helps more than a design.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The review you want, and where Lookover gets in the way.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: The setting, command or screen you have in mind, if any.
+
+  - type: textarea
+    id: today
+    attributes:
+      label: How you work around it today

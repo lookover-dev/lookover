@@ -1,0 +1,17 @@
+{
+  "session": "claude-find",
+  "text": "## What the change does\n\n`is_open` now handles opening hours that run past midnight. When `closes < opens` (for example 18:00 to 02:00), it returns true when `now >= opens` or `now < closes`. Otherwise it keeps the old check, `opens <= now < closes`.\n\n## Checking it\n\n- **Overnight window, 18:00 to 02:00:**\n  - 23:30 is open (`>= opens`).\n  - 01:00 is open (`< closes`).\n  - 02:00 is closed, because the closing time is excluded, the same as in the daytime case.\n  - 10:00 is closed.\n  - 18:00 is open, because the opening time is included.\n- **Opening and closing at the same time:** `closes < opens` is false, so the old check runs. `opens <= now < closes` can never be true, so the place is always closed. That is a choice: someone could read equal times as \"open 24 hours\". The new test `test_closed_when_opening_and_closing_at_the_same_time` states the choice outright, so it is deliberate, not an accident.\n- **Daytime hours:** these behave as before, and the existing tests still cover them.\n- **Tests:** the new tests cover both sides of midnight, the closing time and a daytime hour in the overnight case, and equal times. The only edge they leave out is `now == opens` in the overnight case (18:00 with 18:00 to 02:00). The code handles it correctly, so this isn't a problem.\n\nNone of the repository's rules apply: there is no logging, no money and no SQL here.\n\n```json\n{\n  \"findings\": [],\n  \"empty_reason\": \"The overnight check (now >= opens or now < closes when closes < opens) is correct at every edge: the opening time is included and the closing time excluded, the same as in the daytime case. Equal opening and closing times mean always closed, and a test pins that down on purpose. The new tests cover the new code path, and no repository rule applies to this change.\"\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 6620,
+    "outputTokens": 792
+  },
+  "wallMs": 10604,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

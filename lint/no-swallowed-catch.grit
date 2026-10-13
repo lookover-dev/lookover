@@ -1,0 +1,10 @@
+language js
+
+or {
+  `try { $body } catch ($err) { }`,
+  `try { $body } catch { }`,
+  `try { $body } catch ($err) { console.$method($args) }`,
+  `try { $body } catch { console.$method($args) }`
+} as $stmt where {
+  register_diagnostic(span = $stmt, message = "Don't swallow an error: an empty or log-only catch hides the failure. Handle it (return a fallback, retry), rethrow it with context, or let it throw.", severity = "error")
+}

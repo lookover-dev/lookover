@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#100 review, re-derived for #137 and #250): the passing run, with AGENTS.override.md printed by a command first (its canary instruction in the command's output), quoted in the answer's instructions and not obeyed. The self-test passes: what a command showed is data, not loaded.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

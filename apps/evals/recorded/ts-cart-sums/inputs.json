@@ -1,0 +1,12 @@
+{
+  "caseHash": "5cecefbeb4da9c56727bd909e1fcdfae9b9fab490d22928eba521b8267943d48",
+  "head": "fc7b2e3cffee806d58644f1d68987c939e6dfb59",
+  "diff": "diff --git a/src/cart.ts b/src/cart.ts\nindex 0f3fb62..c73f476 100644\n--- a/src/cart.ts\n+++ b/src/cart.ts\n@@ -4,20 +4,17 @@ export interface Item {\n   quantity: number;\n }\n \n+/** The sum of `value` over every item, 0 for none. */\n+function sumOf(items: Item[], value: (item: Item) => number): number {\n+  return items.reduce((sum, item) => sum + value(item), 0);\n+}\n+\n export function cartTotal(items: Item[]): number {\n-  let total = 0;\n-  for (const item of items) {\n-    total += item.unitCents * item.quantity;\n-  }\n-  return total;\n+  return sumOf(items, (item) => item.unitCents * item.quantity);\n }\n \n export function cartCount(items: Item[]): number {\n-  let count = 0;\n-  for (const item of items) {\n-    count += item.quantity;\n-  }\n-  return count;\n+  return sumOf(items, (item) => item.quantity);\n }\n \n export function cartLabel(items: Item[]): string {\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "9680da1b469e01aa761beba5781c1fd79e07e152"
+    }
+  ]
+}

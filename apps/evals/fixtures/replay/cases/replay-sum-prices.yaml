@@ -1,0 +1,27 @@
+id: replay-sum-prices
+language: typescript
+summary: Adds the average of a list of prices.
+base:
+  - path: src/prices.ts
+    content: |
+      export function sum(prices: number[]): number {
+        let total = 0;
+        for (let i = 0; i < prices.length; i++) total += prices[i];
+        return total;
+      }
+change:
+  - path: src/prices.ts
+    content: |
+      export function sum(prices: number[]): number {
+        let total = 0;
+        for (let i = 1; i < prices.length; i++) total += prices[i];
+        return total;
+      }
+
+      export function average(prices: number[]): number {
+        return sum(prices) / prices.length;
+      }
+planted:
+  path: src/prices.ts
+  ranges: [[3, 3]]
+  what: The loop starts at 1, so the first price is never added.

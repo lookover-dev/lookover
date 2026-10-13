@@ -1,0 +1,17 @@
+{
+  "session": "claude-confirms-claude",
+  "text": "**C1 — confirmed.** At `app/printing.py:17`, `job.pages // 2` rounds down, so a double-sided job with an odd page count is given one sheet too few. I checked the claim's example by hand. `jobs_that_fit([Job('a',1,1), Job('b',3,2)], 1, True)` sorts the jobs to `[b, a]`. Job `a` comes off first and costs 0 sheets, leaving 1. Then `b` costs 1 sheet (it really needs 2), leaving 0. Both jobs are returned, but they really need 3 sheets and only 1 was available. It should round up: `(job.pages + 1) // 2`. The function plans more paper than there is, so this is a real bug.\n\n**C2 — confirmed.** The only double-sided test (`tests/test_printing.py:18-20`) uses jobs of 12 and 2 pages. Both are even, so rounding down and rounding up give the same answer, and the test passes despite the C1 bug. A 1-page or 3-page double-sided case would catch it.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"Floor division `job.pages // 2` gives a 1-page double-sided job 0 sheets and a 3-page job 1 sheet, so jobs_that_fit picks jobs that need more paper than sheets_left (the given example returns both jobs, which need 3 sheets, with only 1 available).\",\n      \"evidence\": [\"app/printing.py:17\", \"app/printing.py:24\", \"app/printing.py:26\"],\n      \"severity\": \"blocking\"\n    },\n    {\n      \"id\": \"C2\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"The only double-sided test uses even page counts (12 and 2), where rounding down and rounding up agree, so the odd-page rounding bug passes untested.\",\n      \"evidence\": [\"tests/test_printing.py:18\", \"tests/test_printing.py:19\", \"tests/test_printing.py:20\"],\n      \"severity\": \"should_fix\"\n    }\n  ]\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 14394,
+    "outputTokens": 944
+  },
+  "wallMs": 11711,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

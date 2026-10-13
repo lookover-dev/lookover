@@ -1,0 +1,10 @@
+{
+  "name": "@lookover/testkit",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./demo": "./src/demo.ts", "./bare": "./src/bare.ts" },
+  "lookover": {
+    "imports": {},
+    "entries": { "./demo": "demo mode, outside any test", "./bare": "an entry without its header" }
+  }
+}

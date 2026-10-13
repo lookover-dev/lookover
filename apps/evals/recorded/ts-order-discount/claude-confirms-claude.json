@@ -1,0 +1,17 @@
+{
+  "session": "claude-confirms-claude",
+  "text": "**C1: confirmed, must fix before merge.** Line 19 of `src/orders.ts` is `subtotalCents(order) * (1 - percentOff / 100)`, and nothing rounds the result. Any discount that doesn't divide evenly gives fractional cents: 999 cents at 10% is 999 × 0.9 = 899.1. So the function returns a non-integer amount, which breaks R2 (\"Amounts are integer cents, never floating-point numbers\"). The 7% float-error example only makes it worse; the 999-cent case is enough on its own.\n\n**C2: confirmed, should fix.** The only discount test is 1000 cents at 10% (line 11 of `src/orders.test.ts`). 1 − 0.1 is exactly 0.9 as a float, so the result is exactly 900 and the test passes. It never hits a non-round result, so it can't catch the C1 bug. It also doesn't test the RangeError for values below 0, above 100, or NaN.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"discountedCents multiplies integer cents by a fractional factor and never rounds, so for example 999 cents at 10% returns 899.1, which breaks R2's rule that amounts are integer cents.\",\n      \"evidence\": [\"src/orders.ts:19\"],\n      \"severity\": \"blocking\"\n    },\n    {\n      \"id\": \"C2\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"The only discount test is 1000 cents at 10%, which comes out to exactly 900, so it can't catch fractional-cent results and it doesn't test the RangeError guard.\",\n      \"evidence\": [\"src/orders.test.ts:10\", \"src/orders.test.ts:11\"],\n      \"severity\": \"should_fix\"\n    }\n  ]\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 14148,
+    "outputTokens": 1080
+  },
+  "wallMs": 12548,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

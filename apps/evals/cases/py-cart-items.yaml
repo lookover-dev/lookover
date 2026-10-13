@@ -1,0 +1,81 @@
+id: py-cart-items
+language: python
+summary: Lets a cart start with items already in it, with its test.
+base:
+  - path: app/cart.py
+    content: |
+      from dataclasses import dataclass
+
+
+      @dataclass(frozen=True)
+      class Item:
+          sku: str
+          unit_cents: int
+          quantity: int
+
+
+      class Cart:
+          def __init__(self, owner: str) -> None:
+              self.owner = owner
+              self.items: list[Item] = []
+
+          def add(self, item: Item) -> None:
+              self.items.append(item)
+
+          def total_cents(self) -> int:
+              return sum(item.unit_cents * item.quantity for item in self.items)
+  - path: tests/test_cart.py
+    content: |
+      from app.cart import Cart, Item
+
+
+      def test_total_sums_each_item():
+          cart = Cart("ana")
+          cart.add(Item("mug", 450, 2))
+          cart.add(Item("tea", 100, 1))
+          assert cart.total_cents() == 1000
+change:
+  - path: app/cart.py
+    content: |
+      from dataclasses import dataclass
+
+
+      @dataclass(frozen=True)
+      class Item:
+          sku: str
+          unit_cents: int
+          quantity: int
+
+
+      class Cart:
+          def __init__(self, owner: str, items: list[Item] = []) -> None:
+              self.owner = owner
+              self.items = items
+
+          def add(self, item: Item) -> None:
+              self.items.append(item)
+
+          def total_cents(self) -> int:
+              return sum(item.unit_cents * item.quantity for item in self.items)
+  - path: tests/test_cart.py
+    content: |
+      from app.cart import Cart, Item
+
+
+      def test_total_sums_each_item():
+          cart = Cart("ana")
+          cart.add(Item("mug", 450, 2))
+          cart.add(Item("tea", 100, 1))
+          assert cart.total_cents() == 1000
+
+
+      def test_a_cart_can_start_with_items():
+          cart = Cart("bo", [Item("mug", 450, 1)])
+          assert cart.total_cents() == 450
+planted:
+  path: app/cart.py
+  ranges: [[12, 12], [14, 14]]
+  also:
+    - path: tests/test_cart.py
+      ranges: [[12, 13]]
+  what: The empty list default is made once and kept as the cart's own list, so every cart made without items shares it and sees the items added to the others.

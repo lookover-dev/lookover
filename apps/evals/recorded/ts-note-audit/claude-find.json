@@ -1,0 +1,17 @@
+{
+  "session": "claude-find",
+  "text": "The change adds an audit entry for each new note, but the new `try` block also wraps `saveNote`, so a failed save is now hidden and the note is lost.\n\n**What the change does:** after a note is saved, `createNote` now writes a `note.created` line to `data/audit.log` through `audit()`. The goal is that an audit failure should not fail the request, so the call is wrapped in `try/catch` and the error is only logged as a warning.\n\n**Problem: a failed save is hidden and the client is told it worked (blocking).** The `try` block covers both `saveNote(note)` and `audit(...)`. If `saveNote` throws (for example, `mkdir` or `writeFile` fails because the disk is full, permission is denied, or the path is bad), three things happen:\n- The catch logs the misleading message \"audit entry not written\".\n- The handler still returns `{ status: 201, body: note }`.\n\nSo the client is told the note was created, with an id, but no file exists under `data/notes/`. That is silent data loss. Before this change, a `saveNote` error reached the caller and the request failed. Only the `audit` call should be inside the `try`.\n\n**Tests:** the repository has no tests, and the change adds none. Nothing checks that a failed save still fails the request, or that a failed audit write still returns 201.\n\n**Repository rules:** none are broken. The audit line holds only the event name and the note's UUID: no secrets (R1), no amounts (R2), no SQL (R3).\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/handlers.ts\",\n      \"side\": \"head\",\n      \"line\": 12,\n      \"end_line\": 17,\n      \"line_text\": \"  try {\",\n      \"severity\": \"blocking\",\n      \"category\": \"data_safety\",\n      \"title\": \"saveNote failures are swallowed and the handler still returns 201\",\n      \"body\": \"When saveNote throws (for example, mkdir or writeFile fails), the catch meant for audit errors swallows it, logs the misleading 'audit entry not written', and createNote returns 201 with the note. The client thinks the note was created, but nothing was saved. Before this change the save error reached the caller. Only the audit call should be inside the try.\",\n      \"defect_key\": \"swallowed_persistence_error\",\n      \"suggestion\": \"  await saveNote(note);\\n  try {\\n    await audit(\\\"note.created\\\", note.id);\\n  } catch (error) {\\n    console.warn(\\\"audit entry not written\\\", error);\\n  }\",\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 20228,
+    "outputTokens": 1193
+  },
+  "wallMs": 14827,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

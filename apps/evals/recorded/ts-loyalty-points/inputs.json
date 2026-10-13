@@ -1,0 +1,12 @@
+{
+  "caseHash": "fb888e503b39764de465dd0eda95d8fe1824ee2dade74cafe9bfaf64fa9d3cb6",
+  "head": "fa5d205e9602ed03727e4214ade85fbc07b135d0",
+  "diff": "diff --git a/src/loyalty.test.ts b/src/loyalty.test.ts\nnew file mode 100644\nindex 0000000..7ee3c29\n--- /dev/null\n+++ b/src/loyalty.test.ts\n@@ -0,0 +1,33 @@\n+import { expect, test } from \"bun:test\";\n+import { creditOrders, pointsFor } from \"./loyalty.ts\";\n+import type { Store } from \"./store.ts\";\n+\n+function memoryStore(): Store & { values: Map<string, number> } {\n+  const values = new Map<string, number>();\n+  return {\n+    values,\n+    get: async (key) => values.get(key),\n+    set: async (key, value) => {\n+      values.set(key, value);\n+    },\n+  };\n+}\n+\n+test(\"an order earns one point per whole euro\", () => {\n+  expect(pointsFor({ id: \"o1\", customerId: \"ana\", totalCents: 1299 })).toBe(12);\n+});\n+\n+test(\"each order credits its customer's balance\", async () => {\n+  const store = memoryStore();\n+  store.values.set(\"points:ana\", 3);\n+  await creditOrders(store, [\n+    { id: \"o1\", customerId: \"ana\", totalCents: 1250 },\n+    { id: \"o2\", customerId: \"bo\", totalCents: 499 },\n+  ]);\n+  expect(store.values).toEqual(\n+    new Map([\n+      [\"points:ana\", 15],\n+      [\"points:bo\", 4],\n+    ]),\n+  );\n+});\ndiff --git a/src/loyalty.ts b/src/loyalty.ts\nnew file mode 100644\nindex 0000000..b60aeae\n--- /dev/null\n+++ b/src/loyalty.ts\n@@ -0,0 +1,18 @@\n+import type { Order } from \"./orders.ts\";\n+import type { Store } from \"./store.ts\";\n+\n+/** One point per whole euro the order took. */\n+export function pointsFor(order: Order): number {\n+  return Math.floor(order.totalCents / 100);\n+}\n+\n+async function addPoints(store: Store, customerId: string, points: number): Promise<void> {\n+  const key = `points:${customerId}`;\n+  const balance = (await store.get(key)) ?? 0;\n+  await store.set(key, balance + points);\n+}\n+\n+/** Credits each order's points to its customer's balance. */\n+export async function creditOrders(store: Store, orders: Order[]): Promise<void> {\n+  await Promise.all(orders.map((order) => addPoints(store, order.customerId, pointsFor(order))));\n+}\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "d04b55fda3aaee4f8cc8a1b62a2ef89387ab2304"
+    }
+  ]
+}

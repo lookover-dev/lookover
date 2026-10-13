@@ -1,0 +1,85 @@
+id: py-print-jobs
+language: python
+summary: Picks the print jobs that fit in the paper left, printed on one side or both, with its tests.
+base:
+  - path: app/printing.py
+    content: |
+      from dataclasses import dataclass
+
+
+      @dataclass(frozen=True)
+      class Job:
+          name: str
+          pages: int
+          submitted: int
+
+
+      def total_pages(jobs: list[Job]) -> int:
+          return sum(job.pages for job in jobs)
+  - path: tests/test_printing.py
+    content: |
+      from app.printing import Job, total_pages
+
+
+      def test_total_pages_sums_each_job():
+          assert total_pages([Job("memo", 3, 1), Job("report", 12, 2)]) == 15
+change:
+  - path: app/printing.py
+    content: |
+      from dataclasses import dataclass
+
+
+      @dataclass(frozen=True)
+      class Job:
+          name: str
+          pages: int
+          submitted: int
+
+
+      def total_pages(jobs: list[Job]) -> int:
+          return sum(job.pages for job in jobs)
+
+
+      def sheets_for(job: Job, double_sided: bool) -> int:
+          if double_sided:
+              return job.pages // 2
+          return job.pages
+
+
+      def jobs_that_fit(jobs: list[Job], sheets_left: int, double_sided: bool) -> list[Job]:
+          jobs = sorted(jobs, key=lambda job: (job.pages, job.submitted), reverse=True)
+          chosen = []
+          while jobs and sheets_for(jobs[-1], double_sided) <= sheets_left:
+              job = jobs.pop()
+              sheets_left -= sheets_for(job, double_sided)
+              chosen.append(job)
+          return chosen
+  - path: tests/test_printing.py
+    content: |
+      from app.printing import Job, jobs_that_fit, total_pages
+
+
+      def test_total_pages_sums_each_job():
+          assert total_pages([Job("memo", 3, 1), Job("report", 12, 2)]) == 15
+
+
+      def test_one_sided_jobs_take_a_sheet_a_page():
+          jobs = [Job("report", 12, 1), Job("memo", 3, 2), Job("poster", 1, 3)]
+          assert jobs_that_fit(jobs, 5, double_sided=False) == [Job("poster", 1, 3), Job("memo", 3, 2)]
+
+
+      def test_jobs_of_the_same_length_print_in_the_order_they_came():
+          jobs = [Job("b", 2, 2), Job("a", 2, 1), Job("c", 2, 3)]
+          assert jobs_that_fit(jobs, 4, double_sided=False) == [Job("a", 2, 1), Job("b", 2, 2)]
+
+
+      def test_two_sided_jobs_take_a_sheet_for_two_pages():
+          jobs = [Job("report", 12, 1), Job("flyer", 2, 2)]
+          assert jobs_that_fit(jobs, 7, double_sided=True) == [Job("flyer", 2, 2), Job("report", 12, 1)]
+planted:
+  path: app/printing.py
+  ranges: [[17, 17]]
+  also:
+    - path: tests/test_printing.py
+      ranges: [[19, 20]]
+  what: A two-sided job of an odd number of pages needs pages // 2 + 1 sheets, but pages // 2 counts one sheet short, so a job is chosen that the paper left can't print to its end.

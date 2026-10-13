@@ -1,0 +1,7 @@
+{
+  "name": "@lookover/web",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@lookover/contracts": "workspace:*" },
+  "lookover": { "imports": {} }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@lookover/process",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./terminal": "./src/terminal.ts",
+    "./background": "./src/background.ts"
+  },
+  "dependencies": {
+    "@lookover/contracts": "workspace:*"
+  },
+  "lookover": {
+    "note": "OS process trees; engines and retrieval run their programs through it.",
+    "imports": {},
+    "entries": {
+      "./terminal": "sign-in: the service opens the vendor's login in a visible terminal, the one process started outside the runner, uncontained (ADR 0047)",
+      "./background": "lookover start: the service started in the background, out of the terminal's job, and the browser opened on its link (ADR 0054)"
+    }
+  }
+}

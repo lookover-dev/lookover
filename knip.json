@@ -1,0 +1,8 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "workspaces": {
+    ".": { "entry": ["scripts/*.ts"], "project": ["scripts/**/*.ts"] },
+    "packages/*": { "project": ["src/**/*.ts"] },
+    "apps/web": { "project": ["src/**/*.{ts,tsx}"] }
+  }
+}

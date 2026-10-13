@@ -1,0 +1,20 @@
+{
+  "name": "@lookover/testkit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./demo": "./src/demo.ts"
+  },
+  "dependencies": {
+    "@lookover/contracts": "workspace:*"
+  },
+  "lookover": {
+    "note": "The fakes and the port suites: they implement contracts' ports and know no real adapter (ADR 0039).",
+    "imports": {},
+    "entries": {
+      "./demo": "demo mode: the fake host, the demo clock, the scripted retrieval, the scripted engines, the fake claude and the planted sandbox, never the test runner (ADR 0031, ADR 0046)"
+    }
+  }
+}

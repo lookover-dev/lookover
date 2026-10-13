@@ -1,0 +1,14 @@
+id: replay-rename-total
+language: python
+summary: Renames the total function.
+base:
+  - path: app/total.py
+    content: |
+      def calc(cents):
+          return sum(cents)
+change:
+  - path: app/total.py
+    content: |
+      def total_cents(cents: list[int]) -> int:
+          return sum(cents)
+clean: true

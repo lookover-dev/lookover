@@ -1,0 +1,12 @@
+{
+  "caseHash": "f914497e2b6d1cbc72efffc6eeeafc565f548b3bf3f484ccb122c21fd7942267",
+  "head": "a5b4799416a34960c3e80b9617a3f9fbf7f549f7",
+  "diff": "diff --git a/app/total.py b/app/total.py\nindex f917e2a..992eb55 100644\n--- a/app/total.py\n+++ b/app/total.py\n@@ -1,2 +1,2 @@\n-def calc(cents):\n+def total_cents(cents: list[int]) -> int:\n     return sum(cents)\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Amounts are integer cents, never floating-point numbers.\n",
+      "commit": "226764b1d09a06d9d23f31ebb02a81a28b8fecbc"
+    }
+  ]
+}

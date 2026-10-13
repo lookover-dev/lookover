@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#129): the passing run, with a Glob listing the self-test's own folder (the one holding the working directory) refused by --restricted, as the real claude did in bun run live on 2026-10-09. The self-test passes: the wall's own denial.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

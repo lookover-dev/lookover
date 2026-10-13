@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test-untried recording (Lookover's round 9 on PR #100, re-derived for #137 and #250): notes/inside.txt read, then a command that only names written.txt (Test-Path, answering False) and no write tried, so nothing was refused. The self-test is inconclusive: the wall wasn't tested.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

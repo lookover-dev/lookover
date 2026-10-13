@@ -1,0 +1,12 @@
+{
+  "caseHash": "59a6ea86ecdf647666f8ca6d3cf21a5af6a3f223842fd94606db88d86ae15a4d",
+  "head": "049dd74d3ce2082c43f9b6fd6cddff0878fa08cd",
+  "diff": "diff --git a/app/receipt.py b/app/receipt.py\nindex 83d8233..108c4c1 100644\n--- a/app/receipt.py\n+++ b/app/receipt.py\n@@ -1,2 +1,10 @@\n+def format_cents(cents: int) -> str:\n+    sign = \"-\" if cents < 0 else \"\"\n+    euros, rest = divmod(abs(cents), 100)\n+    return f\"{sign}{euros}.{rest:02d} EUR\"\n+\n+\n def receipt_lines(items: list[tuple[str, int]]) -> list[str]:\n-    return [f\"{name}: {cents} cents\" for name, cents in items]\n+    lines = [f\"{name}: {format_cents(cents)}\" for name, cents in items]\n+    total = sum(cents for _, cents in items)\n+    return [*lines, f\"Total: {format_cents(total)}\"]\ndiff --git a/tests/test_receipt.py b/tests/test_receipt.py\nindex 26f4bee..514a145 100644\n--- a/tests/test_receipt.py\n+++ b/tests/test_receipt.py\n@@ -1,5 +1,19 @@\n-from app.receipt import receipt_lines\n+from app.receipt import format_cents, receipt_lines\n \n \n-def test_one_line_per_item():\n-    assert receipt_lines([(\"mug\", 900), (\"tea\", 100)]) == [\"mug: 900 cents\", \"tea: 100 cents\"]\n+def test_one_line_per_item_and_the_total():\n+    assert receipt_lines([(\"mug\", 900), (\"tea\", 105)]) == [\n+        \"mug: 9.00 EUR\",\n+        \"tea: 1.05 EUR\",\n+        \"Total: 10.05 EUR\",\n+    ]\n+\n+\n+def test_an_empty_receipt_totals_zero():\n+    assert receipt_lines([]) == [\"Total: 0.00 EUR\"]\n+\n+\n+def test_format_cents_pads_and_signs():\n+    assert format_cents(5) == \"0.05 EUR\"\n+    assert format_cents(1234) == \"12.34 EUR\"\n+    assert format_cents(-5) == \"-0.05 EUR\"\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "f60348f250b9390ca8078f53863a51510e18a020"
+    }
+  ]
+}

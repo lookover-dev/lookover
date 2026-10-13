@@ -1,0 +1,12 @@
+{
+  "caseHash": "22813b45a45cf04ea505bb8b76090ea806de0bac5e459e60eee264f9326d910d",
+  "head": "049ccb20fdcb4bdd58b3c3832b443c2422db2564",
+  "diff": "diff --git a/app/hours.py b/app/hours.py\nindex bbe5487..3a70bd9 100644\n--- a/app/hours.py\n+++ b/app/hours.py\n@@ -2,4 +2,6 @@ from datetime import time\n \n \n def is_open(now: time, opens: time, closes: time) -> bool:\n+    if closes < opens:\n+        return now >= opens or now < closes\n     return opens <= now < closes\ndiff --git a/tests/test_hours.py b/tests/test_hours.py\nindex eae7b76..b5b3fce 100644\n--- a/tests/test_hours.py\n+++ b/tests/test_hours.py\n@@ -9,3 +9,21 @@ def test_open_during_the_day():\n \n def test_closed_from_closing_time():\n     assert not is_open(time(18), time(9), time(18))\n+\n+\n+def test_open_late_in_the_evening():\n+    assert is_open(time(23, 30), time(18), time(2))\n+\n+\n+def test_open_after_midnight():\n+    assert is_open(time(1), time(18), time(2))\n+\n+\n+def test_closed_in_the_morning():\n+    assert not is_open(time(10), time(18), time(2))\n+    assert not is_open(time(2), time(18), time(2))\n+\n+\n+def test_closed_when_opening_and_closing_at_the_same_time():\n+    assert not is_open(time(9), time(9), time(9))\n+    assert not is_open(time(12), time(9), time(9))\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "61de4b1b05169a82d57a8454cefd93bbebc20201"
+    }
+  ]
+}

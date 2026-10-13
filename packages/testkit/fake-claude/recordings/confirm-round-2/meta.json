@@ -1,0 +1,14 @@
+{
+  "source": "claude 2.1.283 on win32, 2026-10-08, model default (opus): review's confirm pass on round 2's 1 new candidates (the review-round-2 recording, on the fix commit). Recorded with scripts/record-claude.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  },
+  "when": "Head commit: 4700cffcc191fa0290cc7d91340f924a74c7f803, the confirm pass"
+}

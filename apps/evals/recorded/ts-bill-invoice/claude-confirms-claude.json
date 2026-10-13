@@ -1,0 +1,17 @@
+{
+  "session": "claude-confirms-claude",
+  "text": "C1 is confirmed. `sendReceipt` turns a network failure into `Unreachable` (`src/mailer.ts:15`). The loop in `billInvoice` catches that error and starts over, and the restart includes the call to `charge` (`src/billing.ts:18`). `charge` sends a new POST each time and passes no idempotency key (`src/gateway.ts:7-11`), so every retry is a new charge. One invoice can be billed up to 3 times. If the third attempt also fails, the error is rethrown even though the money was taken (`src/billing.ts:22`). This charges customers more than once, so it blocks the merge. The fix is to charge once before the loop and retry only `sendReceipt`.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"charge sits inside the retry loop, the mailer's network failures become Unreachable, and charge POSTs a new charge with no idempotency key each time, so a mail outage bills the customer up to 3 times and still throws.\",\n      \"evidence\": [\"src/billing.ts:18\", \"src/billing.ts:19\", \"src/billing.ts:22\", \"src/mailer.ts:15\", \"src/gateway.ts:7\"],\n      \"severity\": \"blocking\"\n    }\n  ]\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 20274,
+    "outputTokens": 763
+  },
+  "wallMs": 10793,
+  "cli": {
+    "name": "claude",
+    "version": "2.1.283",
+    "model": "claude-opus-5-5"
+  },
+  "outcome": "ok",
+  "failure": null
+}

@@ -1,0 +1,13 @@
+{
+  "source": "claude 2.1.283 on win32, 2026-10-06, model haiku: run with an empty prompt: no stream, one error line on stderr, exit 1. Recorded with scripts/record-claude.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 1,
+    "hang": false
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "caseHash": "677658dd3af4dbe5cb4af8b54b6671d78b72e0cfef67bc66fbd675362a719385",
+  "head": "20dee0276051fe03f071bed1fedf82c09b5b87e4",
+  "diff": "diff --git a/src/report.ts b/src/report.ts\nindex c033a13..c2eb090 100644\n--- a/src/report.ts\n+++ b/src/report.ts\n@@ -1,5 +1,6 @@\n-import { type Sale, totalCents } from \"./sales.ts\";\n+import { dailyChanges, type Sale, totalCents } from \"./sales.ts\";\n \n export function summary(sales: Sale[]): string {\n-  return `${sales.length} days, ${totalCents(sales)} cents`;\n+  const changes = dailyChanges(sales).map((change) => (change > 0 ? `+${change}` : `${change}`));\n+  return [`${sales.length} days, ${totalCents(sales)} cents`, ...changes].join(\"\\n\");\n }\ndiff --git a/src/sales.ts b/src/sales.ts\nindex cab95cc..a9c5419 100644\n--- a/src/sales.ts\n+++ b/src/sales.ts\n@@ -6,3 +6,12 @@ export interface Sale {\n export function totalCents(sales: Sale[]): number {\n   return sales.reduce((sum, sale) => sum + sale.cents, 0);\n }\n+\n+/** How much more, or less, each day took than the day before it, for days given in order. */\n+export function dailyChanges(sales: Sale[]): number[] {\n+  const changes: number[] = [];\n+  for (let i = 1; i <= sales.length; i++) {\n+    changes.push(sales[i].cents - sales[i - 1].cents);\n+  }\n+  return changes;\n+}\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "3bd3814dbd4469d66b1f39cc6aeea2d4b8c9223c"
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+id: ts-bill-invoice
+language: typescript
+summary: Bills an invoice and mails its receipt, trying again when the mail service can't be reached.
+base:
+  - path: src/errors.ts
+    content: |
+      /** A service that did not answer: trying again later may work. */
+      export class Unreachable extends Error {}
+  - path: src/gateway.ts
+    content: |
+      const GATEWAY = "https://payments.example.com";
+
+      /** Charges the customer's card and gives the charge's id. */
+      export async function charge(customerId: string, cents: number): Promise<string> {
+        let response: Response;
+        try {
+          response = await fetch(`${GATEWAY}/charges`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ customer: customerId, amount: cents }),
+          });
+        } catch (error) {
+          throw new Error("the payment gateway did not answer", { cause: error });
+        }
+        if (!response.ok) throw new Error(`the charge was refused: ${response.status}`);
+        const { id } = (await response.json()) as { id: string };
+        return id;
+      }
+  - path: src/mailer.ts
+    content: |
+      import { Unreachable } from "./errors.ts";
+
+      const MAILER = "https://mail.example.com";
+
+      /** Mails the customer the receipt of a charge. */
+      export async function sendReceipt(customerId: string, chargeId: string): Promise<void> {
+        let response: Response;
+        try {
+          response = await fetch(`${MAILER}/receipts`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ customer: customerId, charge: chargeId }),
+          });
+        } catch (error) {
+          throw new Unreachable("the mail service did not answer", { cause: error });
+        }
+        if (!response.ok) throw new Error(`the receipt was refused: ${response.status}`);
+      }
+change:
+  - path: src/billing.ts
+    content: |
+      import { Unreachable } from "./errors.ts";
+      import { charge } from "./gateway.ts";
+      import { sendReceipt } from "./mailer.ts";
+
+      export interface Invoice {
+        customerId: string;
+        totalCents: number;
+      }
+
+      const ATTEMPTS = 3;
+
+      const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      /** Charges an invoice and mails its receipt, trying again when the mail service can't be reached. Gives the charge's id. */
+      export async function billInvoice(invoice: Invoice): Promise<string> {
+        for (let attempt = 1; ; attempt++) {
+          try {
+            const chargeId = await charge(invoice.customerId, invoice.totalCents);
+            await sendReceipt(invoice.customerId, chargeId);
+            return chargeId;
+          } catch (error) {
+            if (!(error instanceof Unreachable) || attempt === ATTEMPTS) throw error;
+            await pause(500 * attempt);
+          }
+        }
+      }
+planted:
+  path: src/billing.ts
+  ranges: [[18, 19]]
+  what: The charge and the receipt are retried together, so when the mail service can't be reached after a charge went through, the next attempt charges the customer again.

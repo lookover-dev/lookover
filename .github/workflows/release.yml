@@ -1,0 +1,343 @@
+# The release, with nobody watching: runs on the tag vX.Y.Z, which only the sync of a release and the admins can
+# push (a tag ruleset), and publishes Lookover to npm and to a GitHub release. Only a plain version starts it: a
+# prerelease tag (v1.2.3-rc.1) would become npm's `latest`.
+#
+#   checks   the ref is a tag vX.Y.Z, and package.json's version; the exact dependencies and `bun run check`
+#   build    on five runners, one per platform npm installs: the executable (`--baseline` on x64), its npm
+#            packages, and a smoke test of them installed as a user would (`--version`, `help`, `start`, `status`,
+#            `stop` on a scratch data folder). Every step is one of `scripts/release-dry-run.ts`, which the
+#            repository Lookover is made in runs on every pull request, so a release runs nothing it never rehearsed.
+#            Each runner packs its own platform's package, so the executable keeps its execute bit
+#   attest   build provenance for every executable and package (`gh attestation verify <file> --repo <this>`)
+#   publish  npm, by trusted publishing: npm trades the job's OIDC token for a one-time credential, so no npm token
+#            exists anywhere; with provenance. The five platform packages first, then `lookover`, which names them
+#   verify   on the five runners again: `lookover` installed from npm as a user would and smoke-tested, then
+#            `npm audit signatures` on it, so the release below waits for real installs
+#   release  the GitHub release: made as a draft, every asset uploaded (the five executables and their SHA256SUMS),
+#            then published, which makes it immutable
+#
+# A tag whose push started no run: `gh workflow run release.yml --ref vX.Y.Z` runs it by hand. Every job refuses any
+# other ref (the checks fail, the others run only on a tag), and the `npm` environment deploys from v* tags only.
+#
+# Half-way: only "Re-run failed jobs" finishes a release that failed part way. It reuses the builds' artifacts (kept
+# 7 days), skips what npm already has and finishes a draft release. "Re-run all jobs" rebuilds, and a rebuild isn't
+# the same bytes: npm would hold one build and the GitHub release another. A failure between the platform packages
+# and `lookover` leaves platform packages on npm with no `lookover` naming them; nobody installs those by hand, so
+# users see nothing until the rerun.
+#
+# Hardening: actions pinned to full commit SHAs (the tag in the comment), the token reads contents only (each job
+# that writes says why), checkout keeps no credentials, no install script runs, and no cache anywhere: a poisoned
+# cache is how release credentials have been stolen.
+name: release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # By hand (workflow_dispatch), the run is on whatever ref was asked: only a plain version's tag goes on.
+      - name: The ref is a tag vX.Y.Z
+        run: |
+          if [ "$GITHUB_REF_TYPE" != tag ] || ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::A release runs on a tag vX.Y.Z only, not the $GITHUB_REF_TYPE $GITHUB_REF_NAME."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+          no-cache: true
+
+      - name: The tag is package.json's version
+        id: version
+        run: |
+          version=$(jq -r .version package.json)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME isn't package.json's version, v$version."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install
+        run: bun scripts/release-dry-run.ts install --tree .
+      - name: Checks
+        run: bun scripts/release-dry-run.ts check --tree .
+
+  build:
+    name: build (${{ matrix.platform }})
+    needs: checks
+    if: github.ref_type == 'tag'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32-x64
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: macos-15-intel
+            platform: darwin-x64
+          - os: macos-15
+            platform: darwin-arm64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+          no-cache: true
+
+      - name: Install
+        run: bun scripts/release-dry-run.ts install --tree .
+      - name: Release build
+        run: bun scripts/release-dry-run.ts build --tree .
+      - name: npm packages
+        run: bun scripts/release-dry-run.ts assets --tree .
+      - name: npm install and smoke test
+        run: bun scripts/release-dry-run.ts smoke --tree .
+
+      # The executable under its platform's name, its npm package, and on Linux x64 the main package `lookover`
+      # (the same on every runner but for the launcher's execute bit, which only macOS and Linux keep).
+      - name: Gather the release's files
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ needs.checks.outputs.version }}
+        run: |
+          out="$RUNNER_TEMP/out"
+          mkdir -p "$out"
+          if [ "$PLATFORM" = win32-x64 ]; then
+            cp dist/lookover.exe "$out/lookover-$PLATFORM.exe"
+          else
+            cp dist/lookover "$out/lookover-$PLATFORM"
+          fi
+          cp "dist/npm/lookover-$PLATFORM-$VERSION.tgz" "$out/"
+          if [ "$PLATFORM" = linux-x64 ]; then
+            cp "dist/npm/lookover-$VERSION.tgz" "$out/"
+          fi
+          ls -l "$out"
+
+      # Kept 7 days: a half-way release is finished by "Re-run failed jobs" within them, on these very files.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.platform }}
+          path: ${{ runner.temp }}/out
+          if-no-files-found: error
+          retention-days: 7
+
+  attest:
+    name: attestations
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # nothing beyond the run's own artifacts
+      id-token: write # the Sigstore certificate that signs the provenance
+      attestations: write # the attestations, stored on this repository
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/release
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release/lookover-*
+
+  publish:
+    name: npm
+    needs: [checks, attest]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read # nothing beyond the run's own artifacts
+      id-token: write # trusted publishing: the OIDC token npm trades for a one-time credential, and provenance
+    env:
+      VERSION: ${{ needs.checks.outputs.version }}
+    steps:
+      # No `registry-url`: it writes an .npmrc that hands npm a token, and trusted publishing needs none.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: npm publishes by trusted publishing (11.5.1 or later)
+        run: |
+          npm_version=$(npm --version)
+          node -e "const [a, b, c] = process.argv[1].split('.').map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)" "$npm_version" || {
+            echo "::error::npm $npm_version can't publish by trusted publishing: it needs 11.5.1 or later."
+            exit 1
+          }
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/release
+
+      # `lookover` last: it names the five as optional dependencies at its own version, so they are on npm before it.
+      # A rerun asks the registry for each first (a scoped name's slash written %2f): 200, it is there; 404, it is
+      # published; any other answer stops the job, since publishing blind could fail half-way again.
+      - name: Publish the five platform packages, then lookover
+        working-directory: ${{ runner.temp }}/release
+        run: |
+          publish() {
+            code=$(curl -fsS -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${1/\//%2f}/$VERSION") || true
+            case "$code" in
+              200) echo "$1@$VERSION is already on npm." ;;
+              404) npm publish "$2" --access public --provenance ;;
+              *)
+                echo "::error::The registry answered $code for $1@$VERSION, so whether it is there is unknown."
+                exit 1
+                ;;
+            esac
+          }
+          for platform in win32-x64 linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+            publish "@lookover/$platform" "lookover-$platform-$VERSION.tgz"
+          done
+          publish lookover "lookover-$VERSION.tgz"
+
+  verify:
+    name: verify (${{ matrix.platform }})
+    needs: [checks, publish]
+    if: github.ref_type == 'tag'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32-x64
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: macos-15-intel
+            platform: darwin-x64
+          - os: macos-15
+            platform: darwin-arm64
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.checks.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+          no-cache: true
+
+      # Waits (ten minutes at most) until the registry answers for lookover and its five platform packages.
+      - name: Install lookover from npm and smoke test it
+        run: bun scripts/release-smoke.ts --from-registry "$VERSION" --wait
+
+      # The package this run just published, installed with no lockfile, as a user would.
+      - name: npm audit signatures
+        run: | # zizmor: ignore[adhoc-packages]
+          project="$RUNNER_TEMP/audit"
+          mkdir -p "$project"
+          cd "$project"
+          npm init -y > /dev/null
+          npm install --ignore-scripts --no-audit --no-fund "lookover@$VERSION"
+          npm audit signatures
+
+  release:
+    name: GitHub release
+    needs: [checks, verify]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write # the release on the tag, and its assets
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.checks.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/release
+
+      - name: SHA256SUMS of the executables
+        working-directory: ${{ runner.temp }}/release
+        run: |
+          sha256sum lookover-win32-x64.exe lookover-linux-x64 lookover-linux-arm64 lookover-darwin-x64 \
+            lookover-darwin-arm64 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Release notes
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<NOTES
+          What changed: [CHANGELOG.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/CHANGELOG.md).
+
+          ## Install it
+
+          \`\`\`sh
+          npm install -g lookover@$VERSION
+          \`\`\`
+
+          Or download your platform's executable below.
+
+          ## Verify it
+
+          \`\`\`sh
+          sha256sum -c SHA256SUMS --ignore-missing   # beside the executables you downloaded
+          gh attestation verify lookover-linux-x64 --repo $GITHUB_REPOSITORY
+          gh release verify $GITHUB_REF_NAME --repo $GITHUB_REPOSITORY
+          npm audit signatures                        # in a project that installed lookover
+          \`\`\`
+          NOTES
+
+      # A draft first, every asset uploaded, then published: an immutable release takes no asset once published. A
+      # rerun finishes a draft it finds, and leaves a published release as it is.
+      - name: Draft the release, upload its assets, publish it
+        working-directory: ${{ runner.temp }}/release
+        run: |
+          draft=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null || echo none)
+          if [ "$draft" = false ]; then
+            echo "$GITHUB_REF_NAME is already published."
+            exit 0
+          fi
+          if [ "$draft" = none ]; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+              --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            lookover-win32-x64.exe lookover-linux-x64 lookover-linux-arm64 lookover-darwin-x64 \
+            lookover-darwin-arm64 SHA256SUMS
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

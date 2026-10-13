@@ -1,0 +1,66 @@
+id: py-shop-hours
+language: python
+summary: Supports late-night opening hours, with its tests.
+base:
+  - path: app/hours.py
+    content: |
+      from datetime import time
+
+
+      def is_open(now: time, opens: time, closes: time) -> bool:
+          return opens <= now < closes
+  - path: tests/test_hours.py
+    content: |
+      from datetime import time
+
+      from app.hours import is_open
+
+
+      def test_open_during_the_day():
+          assert is_open(time(12), time(9), time(18))
+
+
+      def test_closed_from_closing_time():
+          assert not is_open(time(18), time(9), time(18))
+change:
+  - path: app/hours.py
+    content: |
+      from datetime import time
+
+
+      def is_open(now: time, opens: time, closes: time) -> bool:
+          if closes < opens:
+              return now >= opens or now < closes
+          return opens <= now < closes
+  - path: tests/test_hours.py
+    content: |
+      from datetime import time
+
+      from app.hours import is_open
+
+
+      def test_open_during_the_day():
+          assert is_open(time(12), time(9), time(18))
+
+
+      def test_closed_from_closing_time():
+          assert not is_open(time(18), time(9), time(18))
+
+
+      def test_open_late_in_the_evening():
+          assert is_open(time(23, 30), time(18), time(2))
+
+
+      def test_open_after_midnight():
+          assert is_open(time(1), time(18), time(2))
+
+
+      def test_closed_in_the_morning():
+          assert not is_open(time(10), time(18), time(2))
+          assert not is_open(time(2), time(18), time(2))
+
+
+      def test_closed_when_opening_and_closing_at_the_same_time():
+          assert not is_open(time(9), time(9), time(9))
+          assert not is_open(time(12), time(9), time(9))
+clean: true

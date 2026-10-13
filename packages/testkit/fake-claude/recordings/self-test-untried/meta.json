@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#91 review, re-derived for #137): notes/inside.txt read, the read of ../outside.txt never tried (no permission_denied naming it). The self-test is inconclusive: the wall wasn't tested.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

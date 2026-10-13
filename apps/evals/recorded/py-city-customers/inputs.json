@@ -1,0 +1,12 @@
+{
+  "caseHash": "89b93c1b5fd64cb31e2e9ac850cb0e00a571f5fd34d09956bd2e9cd4d05b6ec6",
+  "head": "d8f0e9e1f565cd18785303fd8454de2ed825df25",
+  "diff": "diff --git a/app/customers.py b/app/customers.py\nindex b8215f7..af3aed8 100644\n--- a/app/customers.py\n+++ b/app/customers.py\n@@ -18,3 +18,8 @@ def add_customer(conn: sqlite3.Connection, name: str, city: str) -> None:\n def count_customers(conn: sqlite3.Connection) -> int:\n     (count,) = conn.execute(\"SELECT COUNT(*) FROM customers\").fetchone()\n     return count\n+\n+\n+def customers_in(conn: sqlite3.Connection, city: str) -> list[str]:\n+    rows = conn.execute(f\"SELECT name FROM customers WHERE city = '{city}' ORDER BY name\").fetchall()\n+    return [name for (name,) in rows]\ndiff --git a/tests/test_customers.py b/tests/test_customers.py\nindex 68fb8a0..f8d8c01 100644\n--- a/tests/test_customers.py\n+++ b/tests/test_customers.py\n@@ -1,4 +1,4 @@\n-from app.customers import add_customer, connect, count_customers\n+from app.customers import add_customer, connect, count_customers, customers_in\n \n \n def test_added_customers_are_counted():\n@@ -6,3 +6,11 @@ def test_added_customers_are_counted():\n     add_customer(conn, \"Ana\", \"Lyon\")\n     add_customer(conn, \"Bo\", \"Nantes\")\n     assert count_customers(conn) == 2\n+\n+\n+def test_customers_in_a_city_by_name():\n+    conn = connect(\":memory:\")\n+    add_customer(conn, \"Cleo\", \"Lyon\")\n+    add_customer(conn, \"Ana\", \"Lyon\")\n+    add_customer(conn, \"Bo\", \"Nantes\")\n+    assert customers_in(conn, \"Lyon\") == [\"Ana\", \"Cleo\"]\n",
+  "rules": [
+    {
+      "path": "REVIEW.md",
+      "text": "# Review rules\n\n- Never log a secret: an API key, a token or a password.\n- Amounts are integer cents, never floating-point numbers.\n- A query takes its values as parameters, never built into the SQL text.\n",
+      "commit": "bef3dd68eb723f6798db224758d376d68826cb84"
+    }
+  ]
+}

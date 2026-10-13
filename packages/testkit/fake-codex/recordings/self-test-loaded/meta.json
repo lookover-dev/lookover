@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#137, re-derived for #250): the passing run, its answer's instructions quoting AGENTS.override.md's canary line, which no command printed in the run: the program loaded it. The self-test fails: loaded.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

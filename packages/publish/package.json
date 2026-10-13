@@ -1,0 +1,23 @@
+{
+  "name": "@lookover/publish",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@lookover/contracts": "workspace:*",
+    "@lookover/diff": "workspace:*"
+  },
+  "devDependencies": {
+    "@lookover/testkit": "workspace:*"
+  },
+  "lookover": {
+    "note": "ADR 0033 also allows publish -> store; the outbox (ADR 0044) is a structural port the store keeps, so publish imports no store and stays pure.",
+    "pure": true,
+    "imports": {
+      "@lookover/diff": "places findings on the diff's lines"
+    }
+  }
+}

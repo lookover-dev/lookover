@@ -1,0 +1,6 @@
+{
+  "source": "A real run's stream: the self-test of codex 0.162.0-alpha.2 on win32, 2026-10-11, model gpt-5.6-luna at effort low, at the plan's limit (copied from its run folder's stdout.jsonl). An error event and a turn.failed with the limit's message and its reset time (\"try again at Oct 14th, 2026 10:11 AM\", the machine's local time), nothing on stderr, exit 1. version.txt and auth.txt are the ok recording's (codex 0.162.1, #250).",
+  "version": { "exitCode": 0 },
+  "auth": { "exitCode": 0 },
+  "run": { "exitCode": 1, "hang": false }
+}

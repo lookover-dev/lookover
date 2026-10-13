@@ -1,0 +1,19 @@
+{
+  "name": "@lookover/retrieval",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@lookover/contracts": "workspace:*",
+    "@lookover/process": "workspace:*"
+  },
+  "lookover": {
+    "note": "ADR 0033 also allows retrieval -> diff; the edge is added when retrieval imports it.",
+    "imports": {
+      "@lookover/process": "runs git through process"
+    }
+  }
+}

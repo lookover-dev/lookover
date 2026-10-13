@@ -1,0 +1,187 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`what round 1 posts 1`] = `
+[
+  {
+    "checkId": "1",
+    "kind": "check.created",
+    "output": {
+      "summary": "Round 1 is being posted.",
+      "text": "The review, the summary comment and the result follow when the round is posted.",
+      "title": "Looking over a1b2c3d",
+    },
+    "sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+    "status": "in_progress",
+  },
+  {
+    "kind": "review",
+    "number": 42,
+    "review": {
+      "body": 
+"Looked over a1b2c3d. 2 things to fix, starting with send.ts line 43.
+
+One finding is on a line outside the diff: it is in the summary comment.
+
+<!-- lookover:review {"v":1,"run":"run-1","n":1} -->"
+,
+      "comments": [
+        {
+          "body": 
+"**Retry loop never stops on 4xx** · Blocking
+
+When the upstream returns a 4xx, \`sendWithRetry\` retries forever, because only a 5xx is skipped and \`res.ok\` is false.
+
+<!-- lookover:finding {"v":1,"id":"F1","fingerprints":{"location":"loc:F1","meaning":"sem:F1"},"severity":"blocking","sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"} -->"
+,
+          "endLine": null,
+          "line": 43,
+          "path": "src/queue/send.ts",
+          "side": "head",
+        },
+      ],
+      "sha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+    },
+    "reviewId": "2",
+  },
+  {
+    "body": 
+"<!-- lookover:summary -->
+
+**Lookover** · round 1 · looked over a1b2c3d
+Found by Claude, not double-checked.
+
+2 things to fix, starting with send.ts line 43.
+
+One finding stays in Lookover, not on the pull request.
+
+**To fix**
+- F1 · Blocking · \`src/queue/send.ts\` line 43 · Retry loop never stops on 4xx
+
+**Not on a line**
+- F2 · Should fix · \`src/http/client.ts\` line 12 · Missing timeout on fetch
+  When the upstream hangs, the request stays open forever, because the shared client sets no timeout.
+  No comment on the line: the file is not in the diff.
+
+| Round | Commit | Raised | Verified fixed |
+|---|---|---|---|
+| 1 | a1b2c3d | 2 | – |"
+,
+    "commentId": "3",
+    "kind": "summary.created",
+    "number": 42,
+  },
+  {
+    "checkId": "1",
+    "conclusion": "neutral",
+    "kind": "check.completed",
+    "output": {
+      "summary": 
+"2 things to fix, starting with send.ts line 43.
+One finding stays in Lookover, not on the pull request.
+- F1 · Blocking · \`src/queue/send.ts\` line 43 · Retry loop never stops on 4xx
+- F2 · Should fix · \`src/http/client.ts\` line 12 · Missing timeout on fetch"
+,
+      "text": 
+"The review and the summary comment are on the pull request. The last line of this text is the \`lookover.review-result/v1\` result, for coding agents.
+<!-- lookover:result {"schema":"lookover.review-result/v1","change":{"host":"github","repository":"sasensi/demo-app","number":42,"url":"https://github.com/sasensi/demo-app/pull/42","head_sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0","base_sha":"0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3"},"run":{"id":"run-1","state":"done","trigger":"manual","engine":{"finder":"claude","confirmer":null},"ruled_out":0,"started_at":"2026-09-30T10:12:05.000Z","completed_at":"2026-09-30T10:14:41.000Z"},"verdict":{"value":"blocking","conclusion":"neutral","headline":"2 things to fix, starting with send.ts line 43."},"loop":{"state":"open","round":1,"next_action":"fix"},"counts":{"open":{"blocking":1,"should_fix":1,"consider":0},"escalated":0,"verified_fixed":0,"withdrawn":0,"acknowledged":0,"dismissed":0,"obsolete":0,"kept_in_app":1},"findings":[{"id":"F1","fingerprints":{"location":"loc:F1","meaning":"sem:F1"},"status":"open","posted":true,"placement":"inline","needs_action_by":"agent","severity":"blocking","category":"correctness","title":"Retry loop never stops on 4xx","body":"When the upstream returns a 4xx, \`sendWithRetry\` retries forever, because only a 5xx is skipped and \`res.ok\` is false.","location":{"path":"src/queue/send.ts","start_line":43,"end_line":43,"side":"head","sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"placed":{"path":"src/queue/send.ts","start_line":43,"end_line":43,"side":"head"},"rule":null,"raised":{"round":1,"sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"last_checked":{"round":1,"sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"resolution":null,"confirmation":{"verdict":"not_checked","demoted":false}},{"id":"F2","fingerprints":{"location":"loc:F2","meaning":"sem:F2"},"status":"open","posted":true,"placement":"summary","needs_action_by":"agent","severity":"should_fix","category":"reliability","title":"Missing timeout on fetch","body":"When the upstream hangs, the request stays open forever, because the shared client sets no timeout.","location":{"path":"src/http/client.ts","start_line":12,"end_line":12,"side":"head","sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"placed":null,"rule":null,"raised":{"round":1,"sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"last_checked":{"round":1,"sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"resolution":null,"confirmation":{"verdict":"not_checked","demoted":false}},{"id":"F3","fingerprints":{"location":"loc:F3","meaning":"sem:F3"},"status":"open","posted":false,"placement":"check_only","needs_action_by":"none","severity":"consider","category":"maintainability","title":"Magic number for retry delay","body":"\`250\` appears twice; a named constant would make the backoff easier to tune.","location":{"path":"src/queue/send.ts","start_line":44,"end_line":44,"side":"head","sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"placed":null,"rule":null,"raised":{"round":1,"sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"last_checked":{"round":1,"sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"resolution":null,"confirmation":{"verdict":"not_checked","demoted":false}}],"truncated":false} -->"
+,
+      "title": "Looked over a1b2c3d: 2 things to fix",
+    },
+  },
+]
+`;
+
+exports[`what round 2 posts 1`] = `
+[
+  {
+    "checkId": "4",
+    "kind": "check.created",
+    "output": {
+      "summary": "Round 2 is being posted.",
+      "text": "The review, the summary comment and the result follow when the round is posted.",
+      "title": "Looking over c3d4e5f",
+    },
+    "sha": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2",
+    "status": "in_progress",
+  },
+  {
+    "kind": "review",
+    "number": 42,
+    "review": {
+      "body": 
+"Looked over c3d4e5f. One new thing to fix, send.ts line 44.
+
+One finding from an earlier round is still open: it is in the summary comment.
+
+<!-- lookover:review {"v":1,"run":"run-2","n":2} -->"
+,
+      "comments": [
+        {
+          "body": 
+"**Fix drops the last batch item** · Blocking
+
+When a 4xx arrives, the new \`break\` runs before the final \`ack()\`, because it leaves the loop first; the last message is redelivered.
+
+<!-- lookover:finding {"v":1,"id":"F4","fingerprints":{"location":"loc:F4","meaning":"sem:F4"},"severity":"blocking","sha":"c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2"} -->"
+,
+          "endLine": null,
+          "line": 44,
+          "path": "src/queue/send.ts",
+          "side": "head",
+        },
+      ],
+      "sha": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2",
+    },
+    "reviewId": "5",
+  },
+  {
+    "body": 
+"<!-- lookover:summary -->
+
+**Lookover** · round 2 · looked over c3d4e5f
+Found by Claude, not double-checked.
+
+2 things to fix, starting with send.ts line 44.
+
+One finding stays in Lookover, not on the pull request.
+
+**To fix**
+- F4 · Blocking · \`src/queue/send.ts\` line 44 · Fix drops the last batch item
+
+**Not on a line**
+- F2 · Should fix · \`src/http/client.ts\` line 12 · Missing timeout on fetch
+  When the upstream hangs, the request stays open forever, because the shared client sets no timeout.
+  No comment on the line: the file is not in the diff.
+
+**Done**
+- F1 · Retry loop never stops on 4xx · verified fixed in c3d4e5f
+
+| Round | Commit | Raised | Verified fixed |
+|---|---|---|---|
+| 1 | a1b2c3d | 2 | – |
+| 2 | c3d4e5f | 1 | 1 |"
+,
+    "commentId": "3",
+    "kind": "summary.edited",
+    "number": 42,
+  },
+  {
+    "checkId": "4",
+    "conclusion": "neutral",
+    "kind": "check.completed",
+    "output": {
+      "summary": 
+"2 things to fix, starting with send.ts line 44.
+One finding stays in Lookover, not on the pull request.
+- F4 · Blocking · \`src/queue/send.ts\` line 44 · Fix drops the last batch item
+- F2 · Should fix · \`src/http/client.ts\` line 12 · Missing timeout on fetch"
+,
+      "text": 
+"The review and the summary comment are on the pull request. The last line of this text is the \`lookover.review-result/v1\` result, for coding agents.
+<!-- lookover:result {"schema":"lookover.review-result/v1","change":{"host":"github","repository":"sasensi/demo-app","number":42,"url":"https://github.com/sasensi/demo-app/pull/42","head_sha":"c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2","base_sha":"0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3"},"run":{"id":"run-2","state":"done","trigger":"push","engine":{"finder":"claude","confirmer":null},"ruled_out":0,"started_at":"2026-09-30T10:40:00.000Z","completed_at":"2026-09-30T10:42:30.000Z"},"verdict":{"value":"blocking","conclusion":"neutral","headline":"2 things to fix, starting with send.ts line 44."},"loop":{"state":"open","round":2,"next_action":"fix"},"counts":{"open":{"blocking":1,"should_fix":1,"consider":0},"escalated":0,"verified_fixed":1,"withdrawn":0,"acknowledged":0,"dismissed":0,"obsolete":0,"kept_in_app":1},"findings":[{"id":"F4","fingerprints":{"location":"loc:F4","meaning":"sem:F4"},"status":"open","posted":true,"placement":"inline","needs_action_by":"agent","severity":"blocking","category":"correctness","title":"Fix drops the last batch item","body":"When a 4xx arrives, the new \`break\` runs before the final \`ack()\`, because it leaves the loop first; the last message is redelivered.","location":{"path":"src/queue/send.ts","start_line":44,"end_line":44,"side":"head","sha":"c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2"},"placed":{"path":"src/queue/send.ts","start_line":44,"end_line":44,"side":"head"},"rule":null,"raised":{"round":2,"sha":"c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2"},"last_checked":{"round":2,"sha":"c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2"},"resolution":null,"confirmation":{"verdict":"not_checked","demoted":false}},{"id":"F2","fingerprints":{"location":"loc:F2","meaning":"sem:F2"},"status":"open","posted":true,"placement":"summary","needs_action_by":"agent","severity":"should_fix","category":"reliability","title":"Missing timeout on fetch","body":"When the upstream hangs, the request stays open forever, because the shared client sets no timeout.","location":{"path":"src/http/client.ts","start_line":12,"end_line":12,"side":"head","sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"placed":null,"rule":null,"raised":{"round":1,"sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"last_checked":{"round":2,"sha":"c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2"},"resolution":null,"confirmation":{"verdict":"not_checked","demoted":false}},{"id":"F3","fingerprints":{"location":"loc:F3","meaning":"sem:F3"},"status":"open","posted":false,"placement":"check_only","needs_action_by":"none","severity":"consider","category":"maintainability","title":"Magic number for retry delay","body":"\`250\` appears twice; a named constant would make the backoff easier to tune.","location":{"path":"src/queue/send.ts","start_line":44,"end_line":44,"side":"head","sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"placed":null,"rule":null,"raised":{"round":1,"sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"last_checked":{"round":2,"sha":"c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2"},"resolution":null,"confirmation":{"verdict":"not_checked","demoted":false}},{"id":"F1","fingerprints":{"location":"loc:F1","meaning":"sem:F1"},"status":"verified_fixed","posted":true,"placement":"inline","needs_action_by":"none","severity":"blocking","category":"correctness","title":"Retry loop never stops on 4xx","body":"When the upstream returns a 4xx, \`sendWithRetry\` retries forever, because only a 5xx is skipped and \`res.ok\` is false.","location":{"path":"src/queue/send.ts","start_line":43,"end_line":43,"side":"head","sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"placed":{"path":"src/queue/send.ts","start_line":43,"end_line":43,"side":"head"},"rule":null,"raised":{"round":1,"sha":"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"},"last_checked":{"round":2,"sha":"c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2"},"resolution":{"kind":"verified_fixed","round":2},"confirmation":{"verdict":"not_checked","demoted":false}}],"truncated":false} -->"
+,
+      "title": "Looked over c3d4e5f: 2 things to fix",
+    },
+  },
+]
+`;

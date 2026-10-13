@@ -1,0 +1,57 @@
+id: py-daily-visits
+language: python
+summary: Counts the visits of each day from their timestamps, with its test.
+base:
+  - path: app/visits.py
+    content: |
+      from datetime import datetime, timezone
+
+
+      def day_start(day: str) -> int:
+          """The first second of a UTC day, as a Unix timestamp."""
+          start = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+          return int(start.timestamp())
+  - path: tests/test_visits.py
+    content: |
+      from app.visits import day_start
+
+
+      def test_day_start_is_utc_midnight():
+          assert day_start("2026-10-10") == 1791590400
+change:
+  - path: app/visits.py
+    content: |
+      from collections import Counter
+      from datetime import datetime, timezone
+
+
+      def day_start(day: str) -> int:
+          """The first second of a UTC day, as a Unix timestamp."""
+          start = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+          return int(start.timestamp())
+
+
+      def visits_by_day(timestamps: list[int]) -> dict[str, int]:
+          """How many visits each UTC day had, from their Unix timestamps."""
+          days = Counter(datetime.fromtimestamp(ts).date().isoformat() for ts in timestamps)
+          return dict(days)
+  - path: tests/test_visits.py
+    content: |
+      from app.visits import day_start, visits_by_day
+
+
+      def test_day_start_is_utc_midnight():
+          assert day_start("2026-10-10") == 1791590400
+
+
+      def test_visits_are_counted_by_day():
+          noon = day_start("2026-10-10") + 12 * 3600
+          next_noon = day_start("2026-10-11") + 12 * 3600
+          assert list(visits_by_day([noon, noon + 60, next_noon]).values()) == [2, 1]
+planted:
+  path: app/visits.py
+  ranges: [[13, 13]]
+  also:
+    - path: tests/test_visits.py
+      ranges: [[11, 11]]
+  what: datetime.fromtimestamp without a timezone reads each timestamp in the machine's local time, so off UTC a visit near midnight is counted on the next or the previous day.

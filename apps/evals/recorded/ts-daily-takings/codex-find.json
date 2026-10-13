@@ -1,0 +1,17 @@
+{
+  "session": "codex-find",
+  "text": "The change adds day-to-day differences to the summary. The loop runs one iteration too far: for every nonempty input, it accesses `sales[sales.length].cents` and throws, so `summary()` cannot return a report.\n\nConfirmed with one-day and two-day inputs; empty input succeeds. The checkout contains no tests covering these cases.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/sales.ts\",\n      \"side\": \"head\",\n      \"line\": 14,\n      \"end_line\": 15,\n      \"line_text\": \"  for (let i = 1; i <= sales.length; i++) {\",\n      \"severity\": \"blocking\",\n      \"category\": \"correctness\",\n      \"title\": \"Loop exceeds the array bounds and crashes every nonempty summary\",\n      \"body\": \"For every nonempty sales array, the loop reaches i === sales.length and reads .cents from undefined. dailyChanges() throws, causing summary() to throw instead of returning its report. A single day should produce no differences; multiple days should produce sales.length - 1 differences.\",\n      \"defect_key\": \"off_by_one\",\n      \"suggestion\": \"  for (let i = 1; i < sales.length; i++) {\",\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 50585,
+    "outputTokens": 676
+  },
+  "wallMs": 31279,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

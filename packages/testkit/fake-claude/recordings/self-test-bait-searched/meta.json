@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (#137 review): the passing run, with a Grep for CANARY over the working directory first (notes/CLAUDE.md's canary line in its output, no call naming that file), quoted in the answer's instructions. The self-test fails: loaded (a canary is excused only by a call that named its own bait file).",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

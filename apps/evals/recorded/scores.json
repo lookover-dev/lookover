@@ -1,0 +1,1378 @@
+{
+  "date": "2026-10-11",
+  "runs": 1,
+  "clis": [
+    {
+      "name": "claude",
+      "version": "2.1.283",
+      "model": "claude-opus-5-5"
+    },
+    {
+      "name": "codex",
+      "version": "0.162.1",
+      "model": "gpt-6.1-sol"
+    }
+  ],
+  "scores": {
+    "compared": [
+      "py-cart-items",
+      "py-city-customers",
+      "py-daily-visits",
+      "py-forecast-client",
+      "py-print-jobs",
+      "py-receipt-amounts",
+      "py-rename-subtotal",
+      "py-shipping-rates",
+      "py-shop-hours",
+      "ts-bill-invoice",
+      "ts-cart-sums",
+      "ts-checkout-all",
+      "ts-daily-takings",
+      "ts-document-list",
+      "ts-loyalty-points",
+      "ts-note-audit",
+      "ts-order-discount",
+      "ts-receipt-header",
+      "ts-role-permissions"
+    ],
+    "incomplete": [],
+    "setups": {
+      "quick": {
+        "kept": {
+          "planted": 14,
+          "found": 14,
+          "findings": 25,
+          "duplicates": 10,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.9333333333333333,
+          "f05": 0.9459459459459459
+        },
+        "all": {
+          "planted": 14,
+          "found": 14,
+          "findings": 25,
+          "duplicates": 10,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.9333333333333333,
+          "f05": 0.9459459459459459
+        },
+        "confirm": null,
+        "cost": {
+          "sessions": 19,
+          "inputTokens": 220494,
+          "outputTokens": 21216,
+          "unknownUsage": 0,
+          "wallMs": 253935
+        },
+        "missed": []
+      },
+      "quick-codex": {
+        "kept": {
+          "planted": 14,
+          "found": 14,
+          "findings": 14,
+          "duplicates": 0,
+          "noise": 0,
+          "recall": 1,
+          "precision": 1,
+          "f05": 1
+        },
+        "all": {
+          "planted": 14,
+          "found": 14,
+          "findings": 14,
+          "duplicates": 0,
+          "noise": 0,
+          "recall": 1,
+          "precision": 1,
+          "f05": 1
+        },
+        "confirm": null,
+        "cost": {
+          "sessions": 19,
+          "inputTokens": 844681,
+          "outputTokens": 12716,
+          "unknownUsage": 0,
+          "wallMs": 608411
+        },
+        "missed": []
+      },
+      "standard-one": {
+        "kept": {
+          "planted": 14,
+          "found": 14,
+          "findings": 20,
+          "duplicates": 6,
+          "noise": 0,
+          "recall": 1,
+          "precision": 1,
+          "f05": 1
+        },
+        "all": {
+          "planted": 14,
+          "found": 14,
+          "findings": 25,
+          "duplicates": 10,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.9333333333333333,
+          "f05": 0.9459459459459459
+        },
+        "confirm": {
+          "confirmer": "claude",
+          "plantedRefuted": 0,
+          "unmatchedRefuted": 0,
+          "demoted": 0
+        },
+        "cost": {
+          "sessions": 33,
+          "inputTokens": 474017,
+          "outputTokens": 34359,
+          "unknownUsage": 0,
+          "wallMs": 428610
+        },
+        "missed": []
+      },
+      "standard-cross": {
+        "kept": {
+          "planted": 14,
+          "found": 14,
+          "findings": 24,
+          "duplicates": 9,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.9333333333333333,
+          "f05": 0.9459459459459459
+        },
+        "all": {
+          "planted": 14,
+          "found": 14,
+          "findings": 25,
+          "duplicates": 10,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.9333333333333333,
+          "f05": 0.9459459459459459
+        },
+        "confirm": {
+          "confirmer": "codex",
+          "plantedRefuted": 0,
+          "unmatchedRefuted": 0,
+          "demoted": 0
+        },
+        "cost": {
+          "sessions": 33,
+          "inputTokens": 671582,
+          "outputTokens": 26918,
+          "unknownUsage": 0,
+          "wallMs": 556500
+        },
+        "missed": []
+      },
+      "deep": {
+        "kept": {
+          "planted": 14,
+          "found": 14,
+          "findings": 25,
+          "duplicates": 10,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.9333333333333333,
+          "f05": 0.9459459459459459
+        },
+        "all": {
+          "planted": 14,
+          "found": 14,
+          "findings": 27,
+          "duplicates": 12,
+          "noise": 0,
+          "recall": 1,
+          "precision": 0.9333333333333333,
+          "f05": 0.9459459459459459
+        },
+        "confirm": {
+          "confirmer": "codex",
+          "plantedRefuted": 0,
+          "unmatchedRefuted": 0,
+          "demoted": 0
+        },
+        "cost": {
+          "sessions": 52,
+          "inputTokens": 1527092,
+          "outputTokens": 39698,
+          "unknownUsage": 0,
+          "wallMs": 1147809
+        },
+        "missed": []
+      }
+    },
+    "findings": [
+      {
+        "caseId": "py-cart-items",
+        "setup": "quick",
+        "file": "app/cart.py",
+        "line": 12,
+        "title": "Mutable default `items=[]` makes every cart created without items share one list",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "quick",
+        "file": "app/cart.py",
+        "line": 14,
+        "title": "Cart stores the caller's list by reference, so `add()` changes the caller's list",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "quick",
+        "file": "tests/test_cart.py",
+        "line": 11,
+        "title": "No test checks that two default carts are independent",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "quick-codex",
+        "file": "app/cart.py",
+        "line": 12,
+        "title": "Default item list is shared across carts",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "standard-one",
+        "file": "app/cart.py",
+        "line": 12,
+        "title": "Mutable default `items=[]` makes every cart created without items share one list",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "standard-one",
+        "file": "app/cart.py",
+        "line": 14,
+        "title": "Cart stores the caller's list by reference, so `add()` changes the caller's list",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "standard-one",
+        "file": "tests/test_cart.py",
+        "line": 11,
+        "title": "No test checks that two default carts are independent",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "standard-cross",
+        "file": "app/cart.py",
+        "line": 12,
+        "title": "Mutable default `items=[]` makes every cart created without items share one list",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "standard-cross",
+        "file": "app/cart.py",
+        "line": 14,
+        "title": "Cart stores the caller's list by reference, so `add()` changes the caller's list",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "standard-cross",
+        "file": "tests/test_cart.py",
+        "line": 11,
+        "title": "No test checks that two default carts are independent",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "deep",
+        "file": "app/cart.py",
+        "line": 12,
+        "title": "Mutable default `items=[]` makes every cart created without items share one list",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "deep",
+        "file": "app/cart.py",
+        "line": 14,
+        "title": "Cart stores the caller's list by reference, so `add()` changes the caller's list",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-cart-items",
+        "setup": "deep",
+        "file": "tests/test_cart.py",
+        "line": 11,
+        "title": "No test checks that two default carts are independent",
+        "kept": false,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-city-customers",
+        "setup": "quick",
+        "file": "app/customers.py",
+        "line": 24,
+        "title": "SQL injection: city is interpolated into the SQL text instead of passed as a parameter",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-city-customers",
+        "setup": "quick",
+        "file": "tests/test_customers.py",
+        "line": 16,
+        "title": "Test only covers a plain city name; quotes and injection payloads are untested",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-city-customers",
+        "setup": "quick-codex",
+        "file": "app/customers.py",
+        "line": 24,
+        "title": "Parameterize the city to prevent SQL injection and apostrophe failures",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-city-customers",
+        "setup": "standard-one",
+        "file": "app/customers.py",
+        "line": 24,
+        "title": "SQL injection: city is interpolated into the SQL text instead of passed as a parameter",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-city-customers",
+        "setup": "standard-one",
+        "file": "tests/test_customers.py",
+        "line": 16,
+        "title": "Test only covers a plain city name; quotes and injection payloads are untested",
+        "kept": false,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-city-customers",
+        "setup": "standard-cross",
+        "file": "app/customers.py",
+        "line": 24,
+        "title": "SQL injection: city is interpolated into the SQL text instead of passed as a parameter",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-city-customers",
+        "setup": "standard-cross",
+        "file": "tests/test_customers.py",
+        "line": 16,
+        "title": "Test only covers a plain city name; quotes and injection payloads are untested",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-city-customers",
+        "setup": "deep",
+        "file": "app/customers.py",
+        "line": 24,
+        "title": "SQL injection: city is interpolated into the SQL text instead of passed as a parameter",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-city-customers",
+        "setup": "deep",
+        "file": "tests/test_customers.py",
+        "line": 16,
+        "title": "Test only covers a plain city name; quotes and injection payloads are untested",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-daily-visits",
+        "setup": "quick",
+        "file": "app/visits.py",
+        "line": 13,
+        "title": "visits_by_day buckets by the server's local timezone instead of UTC",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-daily-visits",
+        "setup": "quick",
+        "file": "tests/test_visits.py",
+        "line": 11,
+        "title": "Test ignores the day keys and uses noon timestamps, so it cannot catch timezone bugs",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-daily-visits",
+        "setup": "quick-codex",
+        "file": "app/visits.py",
+        "line": 13,
+        "title": "Group visits using UTC rather than the host timezone",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-daily-visits",
+        "setup": "standard-one",
+        "file": "app/visits.py",
+        "line": 13,
+        "title": "visits_by_day buckets by the server's local timezone instead of UTC",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-daily-visits",
+        "setup": "standard-one",
+        "file": "tests/test_visits.py",
+        "line": 11,
+        "title": "Test ignores the day keys and uses noon timestamps, so it cannot catch timezone bugs",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-daily-visits",
+        "setup": "standard-cross",
+        "file": "app/visits.py",
+        "line": 13,
+        "title": "visits_by_day buckets by the server's local timezone instead of UTC",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-daily-visits",
+        "setup": "standard-cross",
+        "file": "tests/test_visits.py",
+        "line": 11,
+        "title": "Test ignores the day keys and uses noon timestamps, so it cannot catch timezone bugs",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-daily-visits",
+        "setup": "deep",
+        "file": "app/visits.py",
+        "line": 13,
+        "title": "visits_by_day buckets by the server's local timezone instead of UTC",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-daily-visits",
+        "setup": "deep",
+        "file": "tests/test_visits.py",
+        "line": 11,
+        "title": "Test ignores the day keys and uses noon timestamps, so it cannot catch timezone bugs",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-forecast-client",
+        "setup": "quick",
+        "file": "app/weather.py",
+        "line": 20,
+        "title": "Logged request URL contains the API key in its `key` query parameter",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-forecast-client",
+        "setup": "quick",
+        "file": "tests/test_weather.py",
+        "line": 15,
+        "title": "Logging test does not check that the API key is kept out of the log",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-forecast-client",
+        "setup": "quick-codex",
+        "file": "app/weather.py",
+        "line": 20,
+        "title": "Forecast logging exposes the API key",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-forecast-client",
+        "setup": "standard-one",
+        "file": "app/weather.py",
+        "line": 20,
+        "title": "Logged request URL contains the API key in its `key` query parameter",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-forecast-client",
+        "setup": "standard-one",
+        "file": "tests/test_weather.py",
+        "line": 15,
+        "title": "Logging test does not check that the API key is kept out of the log",
+        "kept": false,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-forecast-client",
+        "setup": "standard-cross",
+        "file": "app/weather.py",
+        "line": 20,
+        "title": "Logged request URL contains the API key in its `key` query parameter",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-forecast-client",
+        "setup": "standard-cross",
+        "file": "tests/test_weather.py",
+        "line": 15,
+        "title": "Logging test does not check that the API key is kept out of the log",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-forecast-client",
+        "setup": "deep",
+        "file": "app/weather.py",
+        "line": 20,
+        "title": "Logged request URL contains the API key in its `key` query parameter",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-forecast-client",
+        "setup": "deep",
+        "file": "tests/test_weather.py",
+        "line": 15,
+        "title": "Logging test does not check that the API key is kept out of the log",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-forecast-client",
+        "setup": "deep",
+        "file": "app/weather.py",
+        "line": 20,
+        "title": "Forecast logging exposes the API key",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-print-jobs",
+        "setup": "quick",
+        "file": "app/printing.py",
+        "line": 17,
+        "title": "Double-sided sheet count rounds down, so odd-page jobs are under-counted (a 1-page job takes 0 sheets)",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-print-jobs",
+        "setup": "quick",
+        "file": "tests/test_printing.py",
+        "line": 18,
+        "title": "Double-sided test only uses even page counts, so the odd-page rounding bug goes unnoticed",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-print-jobs",
+        "setup": "quick-codex",
+        "file": "app/printing.py",
+        "line": 17,
+        "title": "Round up double-sided sheet counts for odd page counts",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-print-jobs",
+        "setup": "standard-one",
+        "file": "app/printing.py",
+        "line": 17,
+        "title": "Double-sided sheet count rounds down, so odd-page jobs are under-counted (a 1-page job takes 0 sheets)",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-print-jobs",
+        "setup": "standard-one",
+        "file": "tests/test_printing.py",
+        "line": 18,
+        "title": "Double-sided test only uses even page counts, so the odd-page rounding bug goes unnoticed",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-print-jobs",
+        "setup": "standard-cross",
+        "file": "app/printing.py",
+        "line": 17,
+        "title": "Double-sided sheet count rounds down, so odd-page jobs are under-counted (a 1-page job takes 0 sheets)",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-print-jobs",
+        "setup": "standard-cross",
+        "file": "tests/test_printing.py",
+        "line": 18,
+        "title": "Double-sided test only uses even page counts, so the odd-page rounding bug goes unnoticed",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-print-jobs",
+        "setup": "deep",
+        "file": "app/printing.py",
+        "line": 17,
+        "title": "Double-sided sheet count rounds down, so odd-page jobs are under-counted (a 1-page job takes 0 sheets)",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-print-jobs",
+        "setup": "deep",
+        "file": "tests/test_printing.py",
+        "line": 18,
+        "title": "Double-sided test only uses even page counts, so the odd-page rounding bug goes unnoticed",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "py-shipping-rates",
+        "setup": "quick",
+        "file": "app/shipping.py",
+        "line": 13,
+        "title": "RatesFile opens the CSV and never closes it, leaking the handle for the object's lifetime",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-shipping-rates",
+        "setup": "quick-codex",
+        "file": "app/shipping.py",
+        "line": 13,
+        "title": "Close the rates file after loading its contents",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-shipping-rates",
+        "setup": "standard-one",
+        "file": "app/shipping.py",
+        "line": 13,
+        "title": "RatesFile opens the CSV and never closes it, leaking the handle for the object's lifetime",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-shipping-rates",
+        "setup": "standard-cross",
+        "file": "app/shipping.py",
+        "line": 13,
+        "title": "RatesFile opens the CSV and never closes it, leaking the handle for the object's lifetime",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "py-shipping-rates",
+        "setup": "deep",
+        "file": "app/shipping.py",
+        "line": 13,
+        "title": "RatesFile opens the CSV and never closes it, leaking the handle for the object's lifetime",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-bill-invoice",
+        "setup": "quick",
+        "file": "src/billing.ts",
+        "line": 18,
+        "title": "Retrying a failed receipt mail charges the customer again on every attempt",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-bill-invoice",
+        "setup": "quick-codex",
+        "file": "src/billing.ts",
+        "line": 18,
+        "title": "Receipt retries charge the customer again",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-bill-invoice",
+        "setup": "standard-one",
+        "file": "src/billing.ts",
+        "line": 18,
+        "title": "Retrying a failed receipt mail charges the customer again on every attempt",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-bill-invoice",
+        "setup": "standard-cross",
+        "file": "src/billing.ts",
+        "line": 18,
+        "title": "Retrying a failed receipt mail charges the customer again on every attempt",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-bill-invoice",
+        "setup": "deep",
+        "file": "src/billing.ts",
+        "line": 18,
+        "title": "Retrying a failed receipt mail charges the customer again on every attempt",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-checkout-all",
+        "setup": "quick",
+        "file": "src/checkout.ts",
+        "line": 11,
+        "title": "saveOrder is not awaited: ids returned as placed before saving, and save failures become unhandled rejections",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-checkout-all",
+        "setup": "quick-codex",
+        "file": "src/checkout.ts",
+        "line": 11,
+        "title": "Await each save before reporting an order as placed",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-checkout-all",
+        "setup": "standard-one",
+        "file": "src/checkout.ts",
+        "line": 11,
+        "title": "saveOrder is not awaited: ids returned as placed before saving, and save failures become unhandled rejections",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-checkout-all",
+        "setup": "standard-cross",
+        "file": "src/checkout.ts",
+        "line": 11,
+        "title": "saveOrder is not awaited: ids returned as placed before saving, and save failures become unhandled rejections",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-checkout-all",
+        "setup": "deep",
+        "file": "src/checkout.ts",
+        "line": 11,
+        "title": "saveOrder is not awaited: ids returned as placed before saving, and save failures become unhandled rejections",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-daily-takings",
+        "setup": "quick",
+        "file": "src/sales.ts",
+        "line": 13,
+        "title": "Off-by-one loop bound reads sales[sales.length] and throws for any non-empty input",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-daily-takings",
+        "setup": "quick",
+        "file": "src/sales.ts",
+        "line": 11,
+        "title": "New dailyChanges and the changed summary output have no tests",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-daily-takings",
+        "setup": "quick-codex",
+        "file": "src/sales.ts",
+        "line": 13,
+        "title": "Loop exceeds the array bounds and crashes every nonempty summary",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-daily-takings",
+        "setup": "standard-one",
+        "file": "src/sales.ts",
+        "line": 13,
+        "title": "Off-by-one loop bound reads sales[sales.length] and throws for any non-empty input",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-daily-takings",
+        "setup": "standard-one",
+        "file": "src/sales.ts",
+        "line": 11,
+        "title": "New dailyChanges and the changed summary output have no tests",
+        "kept": false,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-daily-takings",
+        "setup": "standard-cross",
+        "file": "src/sales.ts",
+        "line": 13,
+        "title": "Off-by-one loop bound reads sales[sales.length] and throws for any non-empty input",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-daily-takings",
+        "setup": "standard-cross",
+        "file": "src/sales.ts",
+        "line": 11,
+        "title": "New dailyChanges and the changed summary output have no tests",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-daily-takings",
+        "setup": "deep",
+        "file": "src/sales.ts",
+        "line": 13,
+        "title": "Off-by-one loop bound reads sales[sales.length] and throws for any non-empty input",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-daily-takings",
+        "setup": "deep",
+        "file": "src/sales.ts",
+        "line": 11,
+        "title": "New dailyChanges and the changed summary output have no tests",
+        "kept": false,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-document-list",
+        "setup": "quick",
+        "file": "src/documents.ts",
+        "line": 19,
+        "title": "Inverted check: private docs shown to users who cannot edit them, hidden from owners/admins",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-document-list",
+        "setup": "quick",
+        "file": "src/listing.ts",
+        "line": 4,
+        "title": "New access-control filtering has no tests",
+        "kept": true,
+        "match": "unmatched",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-document-list",
+        "setup": "quick-codex",
+        "file": "src/documents.ts",
+        "line": 19,
+        "title": "Inverted permission check exposes private documents to unauthorized users",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-document-list",
+        "setup": "standard-one",
+        "file": "src/documents.ts",
+        "line": 19,
+        "title": "Inverted check: private docs shown to users who cannot edit them, hidden from owners/admins",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-document-list",
+        "setup": "standard-one",
+        "file": "src/listing.ts",
+        "line": 4,
+        "title": "New access-control filtering has no tests",
+        "kept": false,
+        "match": "unmatched",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-document-list",
+        "setup": "standard-cross",
+        "file": "src/documents.ts",
+        "line": 19,
+        "title": "Inverted check: private docs shown to users who cannot edit them, hidden from owners/admins",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-document-list",
+        "setup": "standard-cross",
+        "file": "src/listing.ts",
+        "line": 4,
+        "title": "New access-control filtering has no tests",
+        "kept": true,
+        "match": "unmatched",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-document-list",
+        "setup": "deep",
+        "file": "src/documents.ts",
+        "line": 19,
+        "title": "Inverted check: private docs shown to users who cannot edit them, hidden from owners/admins",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-document-list",
+        "setup": "deep",
+        "file": "src/listing.ts",
+        "line": 4,
+        "title": "New access-control filtering has no tests",
+        "kept": true,
+        "match": "unmatched",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-loyalty-points",
+        "setup": "quick",
+        "file": "src/loyalty.ts",
+        "line": 17,
+        "title": "Concurrent read-modify-write loses points when a batch has several orders for one customer",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-loyalty-points",
+        "setup": "quick",
+        "file": "src/loyalty.test.ts",
+        "line": 23,
+        "title": "Test never credits two orders to the same customer, so the lost-update race goes untested",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "ts-loyalty-points",
+        "setup": "quick-codex",
+        "file": "src/loyalty.ts",
+        "line": 17,
+        "title": "Concurrent credits lose points when orders share a customer",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-loyalty-points",
+        "setup": "standard-one",
+        "file": "src/loyalty.ts",
+        "line": 17,
+        "title": "Concurrent read-modify-write loses points when a batch has several orders for one customer",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-loyalty-points",
+        "setup": "standard-one",
+        "file": "src/loyalty.test.ts",
+        "line": 23,
+        "title": "Test never credits two orders to the same customer, so the lost-update race goes untested",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "ts-loyalty-points",
+        "setup": "standard-cross",
+        "file": "src/loyalty.ts",
+        "line": 17,
+        "title": "Concurrent read-modify-write loses points when a batch has several orders for one customer",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-loyalty-points",
+        "setup": "standard-cross",
+        "file": "src/loyalty.test.ts",
+        "line": 23,
+        "title": "Test never credits two orders to the same customer, so the lost-update race goes untested",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "ts-loyalty-points",
+        "setup": "deep",
+        "file": "src/loyalty.ts",
+        "line": 17,
+        "title": "Concurrent read-modify-write loses points when a batch has several orders for one customer",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-loyalty-points",
+        "setup": "deep",
+        "file": "src/loyalty.test.ts",
+        "line": 23,
+        "title": "Test never credits two orders to the same customer, so the lost-update race goes untested",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "ts-note-audit",
+        "setup": "quick",
+        "file": "src/handlers.ts",
+        "line": 12,
+        "title": "saveNote failures are swallowed and the handler still returns 201",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-note-audit",
+        "setup": "quick-codex",
+        "file": "src/handlers.ts",
+        "line": 15,
+        "title": "Storage failures are swallowed and reported as successful creation",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-note-audit",
+        "setup": "standard-one",
+        "file": "src/handlers.ts",
+        "line": 12,
+        "title": "saveNote failures are swallowed and the handler still returns 201",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-note-audit",
+        "setup": "standard-cross",
+        "file": "src/handlers.ts",
+        "line": 12,
+        "title": "saveNote failures are swallowed and the handler still returns 201",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-note-audit",
+        "setup": "deep",
+        "file": "src/handlers.ts",
+        "line": 12,
+        "title": "saveNote failures are swallowed and the handler still returns 201",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-note-audit",
+        "setup": "deep",
+        "file": "src/handlers.ts",
+        "line": 15,
+        "title": "Storage failures are swallowed and reported as successful creation",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-order-discount",
+        "setup": "quick",
+        "file": "src/orders.ts",
+        "line": 19,
+        "title": "discountedCents returns a floating-point amount, not integer cents",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-order-discount",
+        "setup": "quick",
+        "file": "src/orders.test.ts",
+        "line": 11,
+        "title": "Discount test only uses a case that divides evenly, so fractional-cent results go unnoticed",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "ts-order-discount",
+        "setup": "quick-codex",
+        "file": "src/orders.ts",
+        "line": 19,
+        "title": "Discounted amounts must remain integer cents",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-order-discount",
+        "setup": "standard-one",
+        "file": "src/orders.ts",
+        "line": 19,
+        "title": "discountedCents returns a floating-point amount, not integer cents",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-order-discount",
+        "setup": "standard-one",
+        "file": "src/orders.test.ts",
+        "line": 11,
+        "title": "Discount test only uses a case that divides evenly, so fractional-cent results go unnoticed",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "ts-order-discount",
+        "setup": "standard-cross",
+        "file": "src/orders.ts",
+        "line": 19,
+        "title": "discountedCents returns a floating-point amount, not integer cents",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-order-discount",
+        "setup": "standard-cross",
+        "file": "src/orders.test.ts",
+        "line": 11,
+        "title": "Discount test only uses a case that divides evenly, so fractional-cent results go unnoticed",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "ts-order-discount",
+        "setup": "deep",
+        "file": "src/orders.ts",
+        "line": 19,
+        "title": "discountedCents returns a floating-point amount, not integer cents",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-order-discount",
+        "setup": "deep",
+        "file": "src/orders.test.ts",
+        "line": 11,
+        "title": "Discount test only uses a case that divides evenly, so fractional-cent results go unnoticed",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": true
+      },
+      {
+        "caseId": "ts-receipt-header",
+        "setup": "quick",
+        "file": "src/receipts.ts",
+        "line": 5,
+        "title": "Non-null assertion on findUser crashes receiptHeader for orders whose user was removed or never added",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-receipt-header",
+        "setup": "quick",
+        "file": "src/receipts.ts",
+        "line": 4,
+        "title": "receiptHeader ships without tests, including the missing-user case",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-receipt-header",
+        "setup": "quick-codex",
+        "file": "src/receipts.ts",
+        "line": 5,
+        "title": "Receipt generation crashes after the order's user is removed",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-receipt-header",
+        "setup": "standard-one",
+        "file": "src/receipts.ts",
+        "line": 5,
+        "title": "Non-null assertion on findUser crashes receiptHeader for orders whose user was removed or never added",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-receipt-header",
+        "setup": "standard-one",
+        "file": "src/receipts.ts",
+        "line": 4,
+        "title": "receiptHeader ships without tests, including the missing-user case",
+        "kept": false,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-receipt-header",
+        "setup": "standard-cross",
+        "file": "src/receipts.ts",
+        "line": 5,
+        "title": "Non-null assertion on findUser crashes receiptHeader for orders whose user was removed or never added",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-receipt-header",
+        "setup": "standard-cross",
+        "file": "src/receipts.ts",
+        "line": 4,
+        "title": "receiptHeader ships without tests, including the missing-user case",
+        "kept": false,
+        "match": "duplicate",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-receipt-header",
+        "setup": "deep",
+        "file": "src/receipts.ts",
+        "line": 5,
+        "title": "Non-null assertion on findUser crashes receiptHeader for orders whose user was removed or never added",
+        "kept": true,
+        "match": "found",
+        "fromAlso": false
+      },
+      {
+        "caseId": "ts-receipt-header",
+        "setup": "deep",
+        "file": "src/receipts.ts",
+        "line": 4,
+        "title": "receiptHeader ships without tests, including the missing-user case",
+        "kept": true,
+        "match": "duplicate",
+        "fromAlso": false
+      }
+    ]
+  },
+  "decision": {
+    "verdict": "ask_owner",
+    "compared": 19
+  }
+}

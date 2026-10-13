@@ -1,0 +1,17 @@
+{
+  "session": "codex-find",
+  "text": "The change adds a receipt header containing the order ID, customer details, and total cents.\n\nIt crashes for orders whose user has been removed. `removeUser` deletes the user while stored orders remain, and `findUser` can return `undefined`. The non-null assertion provides no runtime protection, so accessing `user.name` throws. No tests were added to cover this case.\n\n```json\n{\n  \"findings\": [\n    {\n      \"path\": \"src/receipts.ts\",\n      \"side\": \"head\",\n      \"line\": 5,\n      \"end_line\": 6,\n      \"line_text\": \"  const user = findUser(order.userId)!;\",\n      \"severity\": \"blocking\",\n      \"category\": \"correctness\",\n      \"title\": \"Receipt generation crashes after the order's user is removed\",\n      \"body\": \"When removeUser is called for a user with stored orders, those orders remain available through ordersOf, but findUser returns undefined. The non-null assertion only affects TypeScript checking, so receiptHeader throws when it accesses user.name. Handle the missing user or preserve the customer details needed for historical receipts.\",\n      \"defect_key\": \"missing_null_check\",\n      \"suggestion\": null,\n      \"pre_existing\": false,\n      \"rule\": null\n    }\n  ],\n  \"empty_reason\": null\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 36047,
+    "outputTokens": 553
+  },
+  "wallMs": 25659,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

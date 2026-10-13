@@ -1,0 +1,17 @@
+{
+  "session": "codex-confirms-both",
+  "text": "C1 is confirmed: `checkoutAll` returns IDs before the delayed saves finish and leaves save rejections unhandled. This is a blocking correctness bug.\n\n```json\n{\n  \"verdicts\": [\n    {\n      \"id\": \"C1\",\n      \"verdict\": \"confirmed\",\n      \"reason\": \"checkoutAll neither awaits nor catches saveOrder, so it returns IDs before storage completes and empty orders produce unhandled rejections that can terminate Node under its default behavior.\",\n      \"evidence\": [\"src/checkout.ts:11\", \"src/checkout.ts:12\", \"src/checkout.ts:14\", \"src/store.ts:10\", \"src/store.ts:11\", \"src/store.ts:12\"],\n      \"severity\": \"blocking\"\n    }\n  ]\n}\n```",
+  "json": null,
+  "usage": {
+    "inputTokens": 35209,
+    "outputTokens": 329
+  },
+  "wallMs": 19033,
+  "cli": {
+    "name": "codex",
+    "version": "0.162.1",
+    "model": "gpt-6.1-sol"
+  },
+  "outcome": "ok",
+  "failure": null
+}

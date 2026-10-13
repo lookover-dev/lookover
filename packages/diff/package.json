@@ -1,0 +1,16 @@
+{
+  "name": "@lookover/diff",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@lookover/contracts": "workspace:*"
+  },
+  "lookover": {
+    "pure": true,
+    "imports": {}
+  }
+}

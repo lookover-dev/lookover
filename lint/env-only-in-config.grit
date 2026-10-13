@@ -1,0 +1,5 @@
+language js
+
+or { `process.env`, `Bun.env` } as $env where {
+  register_diagnostic(span = $env, message = "Read the environment only in a config file (*.config.ts, config.ts) or a script under scripts/. Elsewhere, take the value as a parameter from the code that starts the program.", severity = "error")
+}

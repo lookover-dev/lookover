@@ -1,0 +1,13 @@
+{
+  "source": "claude 2.1.283 on win32, 2026-10-06, model haiku: run with --max-budget-usd 0.0001 on a prompt asking for a file read: the result event has is_error true, subtype error_max_budget_usd and no text; exit 1. Recorded with scripts/record-claude.ts.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 1,
+    "hang": false
+  }
+}
