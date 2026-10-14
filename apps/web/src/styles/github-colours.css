@@ -1,0 +1,26 @@
+/* GitHub's own colours, dark and light, for a picture of GitHub (design-system.md, the mock GitHub view and the site's
+   demo card): their one home. On purpose outside the tokens: it must not read as Lookover. The app's mock GitHub view
+   reads them through github.css, which imports this file; the site imports it from `@lookover/web/github-colours.css`.
+   Anything drawn as GitHub carries the `gh` class and follows the page's theme. */
+.gh {
+  --gh-bg: #0d1117;
+  --gh-surface: #151b23;
+  --gh-border: #3d444d;
+  --gh-text: #f0f6fc;
+  --gh-muted: #9198a1;
+  --gh-green: #3fb950;
+  --gh-red: #f85149;
+  --gh-yellow: #d29922;
+  --gh-blue: #4493f8;
+}
+:root[data-theme="light"] .gh {
+  --gh-bg: #ffffff;
+  --gh-surface: #f6f8fa;
+  --gh-border: #d1d9e0;
+  --gh-text: #1f2328;
+  --gh-muted: #59636e;
+  --gh-green: #1a7f37;
+  --gh-red: #d1242f;
+  --gh-yellow: #9a6700;
+  --gh-blue: #0969da;
+}

@@ -1,0 +1,84 @@
+# lookover.dev, the landing page and the docs (ADR 0062, ADR 0064 9), deployed to GitHub Pages from this repository.
+# release.yml calls it as its last job, once the GitHub release is published, so the site says what the released
+# version does; by hand, `gh workflow run pages.yml -f tag=vX.Y.Z` redeploys a tag's site.
+#
+#   build   the tag checked out, the exact dependencies in bun.lock, then `bun run site:check`: it builds the site
+#           into apps/site/dist and checks the built pages (no broken link, nothing wider than a phone, the theme
+#           switch, no other host, nothing moving under reduced motion) in the runner's own Chrome. Then dist is
+#           uploaded as the Pages artifact
+#   deploy  the artifact to GitHub Pages, one deploy at a time, never cancelled half-way
+#
+# The `github-pages` environment must allow the refs a run starts on: the v* tags (release.yml's runs) and the
+# branch a hand run is started from (main).
+#
+# Hardening: actions pinned to full commit SHAs (the tag in the comment), the token reads contents only (the deploy
+# job alone writes, and says why), checkout keeps no credentials, no install script runs, no cache.
+name: pages
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release's tag, vX.Y.Z
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release's tag, vX.Y.Z
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build and check the site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # By hand, the tag is typed: only a plain version's tag goes on.
+      - name: The tag is vX.Y.Z
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The site deploys from a tag vX.Y.Z only, not $TAG."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+          no-cache: true
+
+      - run: bun install --frozen-lockfile
+      - run: bun run site:check
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: apps/site/dist
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write # the deployment of the uploaded artifact
+      id-token: write # the OIDC token deploy-pages proves the deployment with
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

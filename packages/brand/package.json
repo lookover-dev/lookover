@@ -1,0 +1,16 @@
+{
+  "name": "@lookover/brand",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./write": "./src/write.ts"
+  },
+  "lookover": {
+    "imports": {},
+    "entries": {
+      "./write": "bun run brand: writes every copy of the eyes (the brand files, the brand sheet's regions, the app's and the site's copies) from the source (ADR 0063)"
+    }
+  }
+}

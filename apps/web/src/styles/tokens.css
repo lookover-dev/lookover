@@ -1,0 +1,118 @@
+/* The design system's tokens, dark and light: their one home (ADR 0064, 3). The app reads them through system.css,
+   which imports this file; the stand-alone pages get them joined in front of system.css (standalone.ts); the site
+   imports them from `@lookover/web/tokens.css`. Change a token here and in design-system.md (the site's two sizes live only there, not in the HTML reference), never in a copy. */
+
+/* ============ 1. TOKENS ============ */
+:root {
+  /* colour, dark (default) */
+  --bg: #17150f;
+  --surface: #1f1c15;
+  --raised: #27231b;
+  --overlay: #2e2921;
+  --ink: #f4f1ea;
+  --ink-2: #c9c3b6;
+  --muted: #9a948a;
+  --faint: #6b665d;
+  --line: #2f2b23;
+  --line-2: #3e382d;
+  --acc: #ff5c9a;
+  --acc-ink: #17150f;
+  --acc-soft: #3a1e2b;
+  --acc-text: #ff8db8;
+  --ok: #4ccb8f;
+  --ok-soft: #173127;
+  --ok-text: #7fe0b3;
+  --run: #b0adf0;
+  --run-soft: #25243b;
+  --run-text: #c7c5ff;
+  --warn: #f2b01e;
+  --warn-soft: #3a2e12;
+  --warn-text: #ffcb5c;
+  --hl: #5c4a00;
+  --hl-text: #ffe27a;
+  --code-bg: #121009;
+  --sel: #3a2e1f;
+  --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --primary-bg: #f4f1ea;
+  --primary-fg: #17150f;
+  /* type */
+  --display: "Figtree Variable", "Figtree", sans-serif;
+  --body: "Hanken Grotesk Variable", "Hanken Grotesk", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --t-12: 12px;
+  --t-13: 13px;
+  --t-14: 14px;
+  --t-16: 16px;
+  --t-18: 18px;
+  --t-21: 21px;
+  --t-26: 26px;
+  --t-32: 32px;
+  --t-40: 40px;
+  /* the site's two display sizes (design system "The site"): 1.02 / 800 and 1.05 / 800 */
+  --t-site-display-xl: clamp(40px, 6vw, 72px);
+  --t-site-display: clamp(32px, 4.2vw, 48px);
+  /* space, radius, motion */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 10px;
+  --r-4: 14px;
+  --r-pill: 999px;
+  --line-w: 1px;
+  --h-sm: 28px;
+  --dot: 7px;
+  --d-1: 120ms;
+  --d-2: 180ms;
+  --d-3: 240ms;
+  --d-4: 320ms;
+  --e-out: cubic-bezier(0.2, 0, 0, 1);
+  --e-in: cubic-bezier(0.4, 0, 1, 1);
+  --e-io: cubic-bezier(0.4, 0, 0.2, 1);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--acc);
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f7f6f2;
+  --surface: #ffffff;
+  --raised: #ffffff;
+  --overlay: #ffffff;
+  --ink: #16130f;
+  --ink-2: #3f3b33;
+  --muted: #6b6660;
+  --faint: #a39e95;
+  --line: #e3dfd6;
+  --line-2: #cfc9bd;
+  --acc: #e5347b;
+  --acc-ink: #ffffff;
+  --acc-soft: #fbe4ee;
+  --acc-text: #b81e5e;
+  --ok: #1b9a61;
+  --ok-soft: #e1f3e9;
+  --ok-text: #116b43;
+  --run: #4b4a9e;
+  --run-soft: #ecebf8;
+  --run-text: #4b4a9e;
+  --warn: #d98a14;
+  --warn-soft: #fbf0d9;
+  --warn-text: #8a5a0a;
+  --hl: #fff0a8;
+  --hl-text: #5c4a00;
+  --code-bg: #f1efe9;
+  --sel: #fbe4ee;
+  --shadow-float: 0 8px 24px rgba(22, 19, 15, 0.14), 0 1px 2px rgba(22, 19, 15, 0.08);
+  --shadow-dialog: 0 24px 64px rgba(22, 19, 15, 0.22);
+  --primary-bg: #16130f;
+  --primary-fg: #f7f6f2;
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--acc);
+  color-scheme: light;
+}

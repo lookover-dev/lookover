@@ -212,5 +212,7 @@ for (const [kind, words] of Object.entries(PROGRAMS)) {
       expect(ran.err).toBe("");
       expect(JSON.parse(ran.out)).toEqual(["--home=D:/lookover data", "wait", "--json"]);
     },
+    // PowerShell's first start on a fresh Linux runner took over 5 s and failed 0.1.0's release checks once.
+    30_000,
   );
 }

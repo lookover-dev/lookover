@@ -1,0 +1,87 @@
+---
+// lookover.dev's landing page, on the design system's tokens and the brand's own drawings. A page of its own, beside
+// the docs.
+// The styles are imported here, in the frontmatter, so knip sees the packages (it doesn't read CSS imports); Astro
+// bundles the fonts, so nothing is fetched from another host.
+import "@fontsource-variable/figtree";
+import "@fontsource-variable/hanken-grotesk";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
+import "@lookover/web/tokens.css";
+import "@lookover/web/github-colours.css";
+import "../brand/eyes.generated.css";
+import "../styles/landing.css";
+import "../styles/three-sides.css";
+import DemoCard from "../components/landing/DemoCard.astro";
+import FinalCall from "../components/landing/FinalCall.astro";
+import Footer from "../components/landing/Footer.astro";
+import Hero from "../components/landing/Hero.astro";
+import HowItWorks from "../components/landing/HowItWorks.astro";
+import Questions from "../components/landing/Questions.astro";
+import Setup from "../components/landing/Setup.astro";
+import TopBar from "../components/landing/TopBar.astro";
+import Trust from "../components/landing/Trust.astro";
+import WhatItPosts from "../components/landing/WhatItPosts.astro";
+import { storageKey } from "../components/theme.ts";
+
+const description =
+  "Lookover reviews your GitHub pull requests with Claude or ChatGPT, on the subscription you already pay for. It runs on your computer and posts what it finds on GitHub.";
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lookover: every pull request looked over</title>
+    <meta name="description" content={description} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="canonical" href="https://lookover.dev/" />
+    <script is:inline define:vars={{ storageKey }}>
+      // Before the first paint: the theme kept under Starlight's key, as the docs read it, else the system's, dark
+      // when it says nothing. An inline script can't import, so this mirrors theme.ts's `readTheme` and `shownTheme`;
+      // the key is theme.ts's `storageKey`, handed in by `define:vars`. With no reduced-motion preference, `data-motion` lets the page move, "intro" holding
+      // the hero's wordmark at intro A's first frame and the reveals hidden until landing.js wires them and says
+      // "on". A module script runs before the page's DOMContentLoaded: still "intro" then, the script failed to
+      // load or threw, so `data-motion` goes and every element shows its last frame.
+      (() => {
+        const root = document.documentElement;
+        let kept = null;
+        try {
+          kept = localStorage.getItem(storageKey);
+        } catch {
+          // A browser that refuses storage keeps no choice: the system's theme.
+        }
+        root.dataset.theme =
+          kept === "light" || kept === "dark"
+            ? kept
+            : matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+        if (matchMedia("(prefers-reduced-motion: no-preference)").matches) {
+          root.dataset.motion = "intro";
+          document.addEventListener("DOMContentLoaded", () => {
+            if (root.dataset.motion === "intro") delete root.dataset.motion;
+          });
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <TopBar />
+    <main>
+      <Hero />
+      <DemoCard />
+      <Trust />
+      <Setup />
+      <HowItWorks />
+      <WhatItPosts />
+      <FinalCall />
+      <Questions />
+    </main>
+    <Footer />
+    <script>
+      import "../scripts/landing.js";
+    </script>
+  </body>
+</html>

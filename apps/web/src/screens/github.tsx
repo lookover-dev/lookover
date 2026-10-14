@@ -5,7 +5,7 @@ import { type Change, type Finding, isCounted, shortSha } from "@lookover/contra
 import { Fragment } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { reviewPath, useAppState } from "../store.tsx";
-import { Mark } from "../ui/basics.tsx";
+import { BrandIcon } from "../ui/basics.tsx";
 import { severityLabel } from "../view-model/confirm.ts";
 import { placeText } from "../view-model/findings.ts";
 import { clock } from "../view-model/format.ts";
@@ -21,7 +21,7 @@ import { type ChangeReview, changeReviewAt } from "../view-model/select.ts";
 import { timelineText } from "../view-model/timeline.ts";
 
 function Avatar({ bot }: { bot?: boolean }) {
-  return <span className={`gh-avatar ${bot ? "bot" : ""}`}>{bot ? <Mark solid /> : null}</span>;
+  return <span className={`gh-avatar ${bot ? "bot" : ""}`}>{bot ? <BrandIcon /> : null}</span>;
 }
 
 function Inline({ change, finding, bot }: { change: Change; finding: Finding; bot: string }) {
@@ -169,7 +169,7 @@ export function GitHubMock() {
             <div className={`gh-check ${c.tone}`}>
               <span className="gh-check-icon" />
               <span className="gh-avatar bot small">
-                <Mark solid />
+                <BrandIcon />
               </span>
               <b>Lookover</b>
               <span className="gh-muted">

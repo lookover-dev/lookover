@@ -29,6 +29,8 @@ const WEB = join(root, "apps", "web");
 const WEB_DIST = join(WEB, "dist");
 /** What the service's stand-alone pages carry from the web app (`apps/web/src/standalone.ts`). */
 const SYSTEM_CSS = join(WEB, "src", "styles", "system.css");
+const TOKENS_CSS = join(WEB, "src", "styles", "tokens.css");
+const TOKENS_IMPORT = '@import "./tokens.css";';
 const FAVICON = join(WEB, "public", "favicon.svg");
 const SERVICE_SRC = join(root, "apps", "service", "src");
 const MIGRATIONS = join(root, "packages", "store", "src", "migrations");
@@ -158,9 +160,18 @@ async function checkServed(origin: string): Promise<void> {
   // The tab GitHub returns to (ADR 0058): a stand-alone page, the design system's stylesheet and the eyes in it.
   const installed = await fetch(`${origin}${APP_FLOW.installed}`);
   const standalone = await installed.text();
-  const [style, eyes] = await Promise.all([Bun.file(SYSTEM_CSS).text(), Bun.file(FAVICON).text()]);
-  if (installed.status !== 200 || !standalone.includes(style) || !standalone.includes(eyes))
-    failed(`its installed page answered ${installed.status} without system.css and favicon.svg in it`);
+  const [tokens, style, eyes] = await Promise.all([
+    Bun.file(TOKENS_CSS).text(),
+    Bun.file(SYSTEM_CSS).text(),
+    Bun.file(FAVICON).text(),
+  ]);
+  // The page joins the tokens in front of system.css's rules, the lines after its import of them.
+  const rules = style.slice(style.indexOf(TOKENS_IMPORT) + TOKENS_IMPORT.length);
+  const carried = [tokens, rules, eyes].every((part) => standalone.includes(part));
+  if (installed.status !== 200 || !style.includes(TOKENS_IMPORT) || !carried)
+    failed(
+      `its installed page answered ${installed.status} without tokens.css, system.css and favicon.svg in it`,
+    );
 }
 
 /**

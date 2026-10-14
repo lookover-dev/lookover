@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "files": { "includes": ["apps/**", "packages/**", "scripts/**", "npm/**", "!**/node_modules", "!**/dist", "!!spikes", "!!.claude", "!!lint/fixtures"] },
+  "files": { "includes": ["apps/**", "packages/**", "scripts/**", "npm/**", "!**/node_modules", "!**/dist", "!**/.astro", "!!spikes", "!!.claude", "!!lint/fixtures"] },
   "formatter": { "indentStyle": "space", "lineWidth": 110 },
   // Custom rules (ADR 0036), in GritQL. Each message says how to fix the code. `lint/fixtures` proves they bite.
   "plugins": [
@@ -48,6 +48,12 @@
     }
   },
   "overrides": [
+    {
+      // Biome reads an .astro file's frontmatter without its markup, so a component imported there and used in
+      // the template looks unused. Biome's docs advise these two off for Astro (ADR 0064).
+      "includes": ["**/*.astro"],
+      "linter": { "rules": { "correctness": { "noUnusedImports": "off", "noUnusedVariables": "off" } } }
+    },
     {
       // npm's launcher is CommonJS: the `lookover` package it ships in has no `"type": "module"`, so its
       // "use strict" counts. Biome reads it by the root package.json's `"type"` instead, as a module.

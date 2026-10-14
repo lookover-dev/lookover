@@ -1,0 +1,67 @@
+---
+// The questions: five, by value, the first open; the accordion is questions.js. The cost answer says
+// what the code holds: no API key, and a wait for the plan's limit to reset; Lookover can't stop a plan's own paid
+// extra usage, so it says to leave that off, as the terms page does.
+import { DOCS } from "../../landing/facts.ts";
+---
+
+<section class="faq" id="faq">
+  <div class="wrap">
+    <div class="slab">
+      <p class="label">Questions</p>
+      <h2 class="display">Before you run it</h2>
+    </div>
+    <details open>
+      <summary>What does it cost?</summary>
+      <div class="panel">
+        <p>
+          Nothing beyond the Claude or ChatGPT plan you have. A review draws on your plan's limits the way a session in
+          the terminal would. Lookover reviews one pull request at a time per AI, uses no API key, and waits for your
+          plan's limit to reset rather than paying past it. If your plan can buy extra usage, <a href={DOCS.extraUsage}
+            >leave that off</a
+          >.
+        </p>
+      </div>
+    </details>
+    <details>
+      <summary>Which plans work?</summary>
+      <div class="panel">
+        <p>
+          Claude Pro or Max, through the <code>claude</code> CLI; ChatGPT Plus or Pro, through the <code>codex</code> CLI.
+          One is enough. With both, the AI that did not write the code looks first and the other double-checks.
+        </p>
+      </div>
+    </details>
+    <details>
+      <summary>Does my code leave my machine?</summary>
+      <div class="panel">
+        <p>
+          Only where it already goes: to GitHub, and to Claude or ChatGPT through their own CLIs. Nothing to us. No
+          account, no telemetry; the source is open, so you can check. <a href={DOCS.security}
+            >Where your code goes, in the docs.</a
+          >
+        </p>
+      </div>
+    </details>
+    <details>
+      <summary>What does it post on GitHub?</summary>
+      <div class="panel">
+        <p>
+          One review in a few words with the findings on the lines they are about, one summary comment that stays up to
+          date, and a check on the commit. An empty review is one line. It never merges, approves or requests changes.
+        </p>
+      </div>
+    </details>
+    <details>
+      <summary>Is this allowed by Claude's and ChatGPT's terms?</summary>
+      <div class="panel">
+        <p>
+          Lookover only runs the official <code>claude</code> and <code>codex</code> CLIs, signed in through their
+          own flows, on your machine, for your own pull requests. It never reads or stores your tokens. Your plan's terms
+          apply: one subscription, one person, so each colleague runs their own. Lookover is not affiliated with Anthropic
+          or OpenAI. <a href={DOCS.terms}>Your plan's terms, in the docs.</a>
+        </p>
+      </div>
+    </details>
+  </div>
+</section>

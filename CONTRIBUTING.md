@@ -4,11 +4,11 @@ Thanks for helping. Lookover is kept by one maintainer, so a short, focused chan
 
 ## Build and test
 
-You need [Bun](https://bun.sh) and `git`. Nothing here needs `claude`, `codex`, a GitHub App or the network: the tests and demo mode run on fakes.
+You need [Bun](https://bun.sh), `git`, and Edge or Chrome for the site's checks (Edge on Windows, Chrome elsewhere; `CHROME_PATH` names another). Nothing here needs `claude`, `codex`, a GitHub App or the network: the tests and demo mode run on fakes.
 
 ```sh
 bun install           # installs the exact versions in bun.lock
-bun run check         # types, Biome, import rules, knip and the tests
+bun run check         # types, Biome, import rules, knip, the tests, then the site built and checked
 bun run build         # dist/lookover (dist/lookover.exe on Windows), the app inside, then checks it starts
 bun dev               # the service in demo mode on scripted fakes; prints the address to open
 ```

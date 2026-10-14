@@ -11,6 +11,7 @@ import {
 } from "react";
 import type { WithCommand } from "../view-model/format.ts";
 import type { SaveShown } from "../view-model/save.ts";
+import { ICON_TILE, LOADER, MARK } from "./eyes.generated.ts";
 
 const ICONS = {
   search: (
@@ -61,69 +62,86 @@ export function Icon({ name, className = "" }: { name: IconName; className?: str
 /**
  * The only loader. The eyes read a line in three stops and jump back while something runs; `still` looks down
  * and rests. Light on dark the eyes are solid and the pupil is a hole, as in the logo; dark on light they are
- * rings. Both are drawn, the styles show the one that fits the surface.
+ * rings. Both are drawn, the styles show the one that fits the surface. Every number is the source's
+ * (`eyes.generated.ts`, written by `bun run brand`); the box, the rest and the reading are in `system.css`.
  */
 export function Eyes({ still = false, large = false }: { still?: boolean; large?: boolean }) {
   const mask = `eyes-${useId().replace(/:/g, "")}`;
+  const { width, height, centres, cy, hole } = LOADER;
+  const discs = (r: number) => centres.map((cx) => <circle key={cx} cx={cx} cy={cy} r={r} />);
   return (
     <span className={`eyes ${large ? "lg" : ""}`}>
-      <svg viewBox="0 0 64 44" aria-hidden="true" fill="currentColor">
+      <svg viewBox={`0 0 ${width} ${height}`} aria-hidden="true" fill="currentColor">
         <defs>
-          <mask id={mask} maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="44">
-            <rect width="64" height="44" fill="#fff" />
+          <mask id={mask} maskUnits="userSpaceOnUse" x="0" y="0" width={width} height={height}>
+            <rect width={width} height={height} fill="#fff" />
             <g className={still ? "h" : "h read"} fill="#000">
-              <ellipse cx="18" cy="20" rx="5.8" ry="6.46" />
-              <ellipse cx="46" cy="20" rx="5.8" ry="6.46" />
+              {centres.map((cx) => (
+                <ellipse key={cx} cx={cx} cy={cy} rx={hole.rx} ry={hole.ry} />
+              ))}
             </g>
           </mask>
         </defs>
         <g className="e-solid" mask={`url(#${mask})`}>
-          <circle cx="18" cy="20" r="14.25" />
-          <circle cx="46" cy="20" r="14.25" />
+          {discs(LOADER.eye)}
         </g>
         <g className="e-ring">
-          <g fill="none" stroke="currentColor" strokeWidth="4.6">
-            <circle cx="18" cy="20" r="11.95" />
-            <circle cx="46" cy="20" r="11.95" />
+          <g fill="none" stroke="currentColor" strokeWidth={LOADER.ring}>
+            {discs(LOADER.ringRadius)}
           </g>
-          <g className={still ? "p" : "p read"}>
-            <circle cx="18" cy="20" r="4.8" />
-            <circle cx="46" cy="20" r="4.8" />
-          </g>
+          <g className={still ? "p" : "p read"}>{discs(LOADER.dot)}</g>
         </g>
       </svg>
     </span>
   );
 }
 
+/** The mark's two lines: the first as wide as the pair, in `accent`; the second shorter, in `ink`. */
+function MarkLines({ accent, ink }: { accent: string; ink: string }) {
+  const { x, y1, y2, width1, width2, height } = MARK.lines;
+  return (
+    <>
+      <rect x={x} y={y1} width={width1} height={height} fill={accent} />
+      <rect x={x} y={y2} width={width2} height={height} fill={ink} />
+    </>
+  );
+}
+
 /**
  * The mark, in the colour of the text. Light on dark the eyes are solid with the pupil cut out; dark on light
- * they are rings, like the letter. `solid` keeps the solid eyes where the mark sits on its own dark tile.
+ * they are rings, like the letter. Both are drawn, the styles show the one that fits the theme.
  */
-export function Mark({ solid = false }: { solid?: boolean }) {
+export function Mark() {
   return (
     <svg
-      className={`mark ${solid ? "solid" : ""}`}
+      className="mark"
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 64 64"
+      viewBox={`0 0 ${MARK.grid} ${MARK.grid}`}
       role="img"
       aria-label="Lookover"
     >
-      <path
-        className="mark-solid"
-        fillRule="evenodd"
-        fill="currentColor"
-        d="M10 21.25a9.4 9.4 0 1 0 18.8 0a9.4 9.4 0 1 0 -18.8 0zM15.6 23.48a3.8 4.23 0 1 0 7.6 0a3.8 4.23 0 1 0 -7.6 0zM35.2 21.25a9.4 9.4 0 1 0 18.8 0a9.4 9.4 0 1 0 -18.8 0zM40.8 23.48a3.8 4.23 0 1 0 7.6 0a3.8 4.23 0 1 0 -7.6 0z"
-      />
+      <path className="mark-solid" fillRule="evenodd" fill="currentColor" d={MARK.solid} />
       <g className="mark-ring" fill="currentColor">
-        <path
-          fillRule="evenodd"
-          d="M10 21.25a9.4 9.4 0 1 0 18.8 0a9.4 9.4 0 1 0 -18.8 0zM13.6 21.25a5.8 5.8 0 1 0 11.6 0a5.8 5.8 0 1 0 -11.6 0zM35.2 21.25a9.4 9.4 0 1 0 18.8 0a9.4 9.4 0 1 0 -18.8 0zM38.8 21.25a5.8 5.8 0 1 0 11.6 0a5.8 5.8 0 1 0 -11.6 0z"
-        />
-        <path d="M15.9 23.9a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0zM41.1 23.9a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0z" />
+        <path fillRule="evenodd" d={MARK.ring} />
+        <path d={MARK.pupils} />
       </g>
-      <rect x="10" y="38.15" width="44" height="5.1" fill="var(--acc)" />
-      <rect x="10" y="47.05" width="29.04" height="5.1" fill="currentColor" />
+      <MarkLines accent="var(--acc)" ink="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * The icon as its file draws it: the solid mark on its ink tile, in the file's fixed colours, standing for the
+ * image GitHub shows as Lookover's avatar (design-system.md says why these colours are not the theme's).
+ */
+export function BrandIcon() {
+  const { rx, tile, eyes, accent } = ICON_TILE;
+  const { grid } = MARK;
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox={`0 0 ${grid} ${grid}`} role="img" aria-label="Lookover">
+      <rect width={grid} height={grid} rx={rx} fill={tile} />
+      <path fillRule="evenodd" fill={eyes} d={MARK.solid} />
+      <MarkLines accent={accent} ink={eyes} />
     </svg>
   );
 }

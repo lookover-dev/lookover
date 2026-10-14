@@ -23,6 +23,7 @@ import {
   type ServeStarted,
   selfCommand,
   takeInstance,
+  VERSION,
   type WebBuild,
 } from "./index.ts";
 
@@ -176,7 +177,7 @@ test("start runs the service in the background, start again reuses it; status, o
     running: true,
     address: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/),
     home,
-    version: "0.1.0",
+    version: VERSION,
     pid: expect.any(Number),
     since: expect.any(Number),
     startsAtLogin: false,

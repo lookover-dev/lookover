@@ -5,7 +5,7 @@
 // Shots of the same world share one load; a shot whose act changes what the service holds (`alone`) gets a load
 // of its own. Each shot lands on the screen its path routes to, or the one it names (`screen`): a shot that lands
 // elsewhere (the session screen, the setup in place of the app, "No such pull request") fails.
-import { APP_FLOW, type ConnectionCause, DEMO_API, type FaultId } from "@lookover/contracts";
+import { API, APP_FLOW, type ConnectionCause, DEMO_API, type FaultId } from "@lookover/contracts";
 import { HANDED_APP, MADE_APP, REFUSED_PAGES } from "@lookover/service";
 import type { Page } from "playwright";
 
@@ -659,6 +659,18 @@ export const SHOTS: Shot[] = [
       await p.getByText("Saved", { exact: true }).waitFor();
       await p.locator("tbody tr").last().locator(".switch").hover();
       await p.getByRole("tooltip", { name: "Off with the rule it sits in." }).waitFor();
+    },
+  },
+  // The same switch while the service has the change: the stamp says "Saving…" beside the eyes, in the place
+  // "Saved" takes. The command is held in the browser, never sent, so the service's state is S10's as loaded.
+  {
+    name: "settings-rules-saving",
+    scenario: "S10",
+    path: "/settings/rules",
+    act: async (p) => {
+      await p.route(`**${API.commands}`, () => undefined);
+      await p.locator("tbody tr", { hasText: "Amounts stay" }).locator(".switch").click();
+      await p.getByText("Saving…", { exact: true }).waitFor();
     },
   },
   // The key refused: Settings' GitHub group, its App and the slug line, "Use an existing App" open for the new key.

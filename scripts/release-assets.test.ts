@@ -170,7 +170,7 @@ describe.skipIf(npm === null)("the npm packages", () => {
         files: [executableOf(platform)],
         license: "MIT",
         repository: { type: "git", url: "git+https://github.com/lookover-dev/lookover.git" },
-        homepage: "https://github.com/lookover-dev/lookover#readme",
+        homepage: "https://lookover.dev",
         publishConfig: { access: "public" },
       });
       // Bun's Linux executables are linked against glibc: npm skips them on Alpine and other musl Linux.
@@ -191,7 +191,7 @@ describe.skipIf(npm === null)("the npm packages", () => {
       bin: { lookover: "bin/lookover.js" },
       license: "MIT",
       repository: { type: "git", url: "git+https://github.com/lookover-dev/lookover.git" },
-      homepage: "https://github.com/lookover-dev/lookover#readme",
+      homepage: "https://lookover.dev",
       engines: { node: ">=18" },
       publishConfig: { access: "public" },
     });

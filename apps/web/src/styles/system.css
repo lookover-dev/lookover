@@ -1,117 +1,8 @@
 /* Lookover design system v0.2, in code. Copied from docs/exploration/assets/10/lookover-design-system.html,
    which stays the reference: change a token or a component there first, then here. */
 
-/* ============ 1. TOKENS ============ */
-:root {
-  /* colour, dark (default) */
-  --bg: #17150f;
-  --surface: #1f1c15;
-  --raised: #27231b;
-  --overlay: #2e2921;
-  --ink: #f4f1ea;
-  --ink-2: #c9c3b6;
-  --muted: #9a948a;
-  --faint: #6b665d;
-  --line: #2f2b23;
-  --line-2: #3e382d;
-  --acc: #ff5c9a;
-  --acc-ink: #17150f;
-  --acc-soft: #3a1e2b;
-  --acc-text: #ff8db8;
-  --ok: #4ccb8f;
-  --ok-soft: #173127;
-  --ok-text: #7fe0b3;
-  --run: #b0adf0;
-  --run-soft: #25243b;
-  --run-text: #c7c5ff;
-  --warn: #f2b01e;
-  --warn-soft: #3a2e12;
-  --warn-text: #ffcb5c;
-  --hl: #5c4a00;
-  --hl-text: #ffe27a;
-  --code-bg: #121009;
-  --sel: #3a2e1f;
-  --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
-  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.55);
-  --primary-bg: #f4f1ea;
-  --primary-fg: #17150f;
-  /* type */
-  --display: "Figtree Variable", "Figtree", sans-serif;
-  --body: "Hanken Grotesk Variable", "Hanken Grotesk", system-ui, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, monospace;
-  --t-12: 12px;
-  --t-13: 13px;
-  --t-14: 14px;
-  --t-16: 16px;
-  --t-18: 18px;
-  --t-21: 21px;
-  --t-26: 26px;
-  --t-32: 32px;
-  --t-40: 40px;
-  /* space, radius, motion */
-  --s-1: 4px;
-  --s-2: 8px;
-  --s-3: 12px;
-  --s-4: 16px;
-  --s-5: 20px;
-  --s-6: 24px;
-  --s-8: 32px;
-  --s-10: 40px;
-  --s-12: 48px;
-  --s-16: 64px;
-  --r-1: 4px;
-  --r-2: 6px;
-  --r-3: 10px;
-  --r-4: 14px;
-  --r-pill: 999px;
-  --line-w: 1px;
-  --h-sm: 28px;
-  --dot: 7px;
-  --d-1: 120ms;
-  --d-2: 180ms;
-  --d-3: 240ms;
-  --d-4: 320ms;
-  --e-out: cubic-bezier(0.2, 0, 0, 1);
-  --e-in: cubic-bezier(0.4, 0, 1, 1);
-  --e-io: cubic-bezier(0.4, 0, 0.2, 1);
-  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--acc);
-  color-scheme: dark;
-}
-:root[data-theme="light"] {
-  --bg: #f7f6f2;
-  --surface: #ffffff;
-  --raised: #ffffff;
-  --overlay: #ffffff;
-  --ink: #16130f;
-  --ink-2: #3f3b33;
-  --muted: #6b6660;
-  --faint: #a39e95;
-  --line: #e3dfd6;
-  --line-2: #cfc9bd;
-  --acc: #e5347b;
-  --acc-ink: #ffffff;
-  --acc-soft: #fbe4ee;
-  --acc-text: #b81e5e;
-  --ok: #1b9a61;
-  --ok-soft: #e1f3e9;
-  --ok-text: #116b43;
-  --run: #4b4a9e;
-  --run-soft: #ecebf8;
-  --run-text: #4b4a9e;
-  --warn: #d98a14;
-  --warn-soft: #fbf0d9;
-  --warn-text: #8a5a0a;
-  --hl: #fff0a8;
-  --hl-text: #5c4a00;
-  --code-bg: #f1efe9;
-  --sel: #fbe4ee;
-  --shadow-float: 0 8px 24px rgba(22, 19, 15, 0.14), 0 1px 2px rgba(22, 19, 15, 0.08);
-  --shadow-dialog: 0 24px 64px rgba(22, 19, 15, 0.22);
-  --primary-bg: #16130f;
-  --primary-fg: #f7f6f2;
-  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--acc);
-  color-scheme: light;
-}
+/* ============ 1. TOKENS: tokens.css, their one home (ADR 0064) ============ */
+@import "./tokens.css";
 
 /* ============ 2. BASE ============ */
 * {
@@ -335,10 +226,10 @@ pre {
 .mark .mark-ring {
   display: none;
 }
-:root[data-theme="light"] .mark:not(.solid) .mark-solid {
+:root[data-theme="light"] .mark .mark-solid {
   display: none;
 }
-:root[data-theme="light"] .mark:not(.solid) .mark-ring {
+:root[data-theme="light"] .mark .mark-ring {
   display: inline;
 }
 /* loader: the eyes read. Three stops along the line, then back to its start; at rest they look down.
@@ -346,9 +237,6 @@ pre {
    The primary and danger buttons are the surfaces where it is the other way round. */
 .eyes {
   display: inline-block;
-  width: 1.2em;
-  height: 1em;
-  vertical-align: -0.15em;
 }
 .eyes svg {
   width: 100%;
@@ -375,14 +263,25 @@ pre {
 :root[data-theme="light"] .btn-danger .eyes .e-solid {
   display: inline;
 }
+/* Written by `bun run brand` from @lookover/brand (ADR 0063): the loader's box, its rest and its reading.
+   Never edit by hand. */
+.eyes {
+  width: 1.2em;
+  height: 0.825em;
+  vertical-align: -0.0625em;
+}
+.eyes.lg {
+  width: 48px;
+  height: 33px;
+}
 .eyes .p {
-  transform: translateY(5.35px);
+  transform: translateY(3.85px);
 }
 .eyes .p.read {
   animation: read 1.8s infinite;
 }
 .eyes .h {
-  transform: translateY(3.29px);
+  transform: translateY(3.24px);
 }
 .eyes .h.read {
   animation: read-solid 1.8s infinite;
@@ -390,43 +289,40 @@ pre {
 @keyframes read {
   0%,
   21% {
-    transform: translate(-4.8px, 2.4px);
+    transform: translate(-3.34px, 1.93px);
   }
   27%,
   48% {
-    transform: translate(0, 3.9px);
+    transform: translate(0, 3.85px);
   }
   54%,
   75% {
-    transform: translate(4.8px, 2.4px);
+    transform: translate(3.34px, 1.93px);
   }
   87%,
   100% {
-    transform: translate(-4.8px, 2.4px);
+    transform: translate(-3.34px, 1.93px);
   }
 }
 @keyframes read-solid {
   0%,
   21% {
-    transform: translate(-3.5px, 1.65px);
+    transform: translate(-2.81px, 1.62px);
   }
   27%,
   48% {
-    transform: translate(0, 2.47px);
+    transform: translate(0, 3.24px);
   }
   54%,
   75% {
-    transform: translate(3.5px, 1.65px);
+    transform: translate(2.81px, 1.62px);
   }
   87%,
   100% {
-    transform: translate(-3.5px, 1.65px);
+    transform: translate(-2.81px, 1.62px);
   }
 }
-.eyes.lg {
-  width: 48px;
-  height: 40px;
-}
+/* End of what `bun run brand` writes. */
 /* inputs */
 .field {
   display: grid;

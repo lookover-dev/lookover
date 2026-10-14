@@ -1,0 +1,121 @@
+/*
+ * Starlight on the design system's tokens (design-system.md, "The site"). The tokens come from their one home in the
+ * app, `@lookover/web/tokens.css`, imported beside this file in Head.astro; every Starlight colour, font and heading size below names one of them, and the tokens themselves change with
+ * `<html data-theme>`, so one mapping serves both themes. Starlight keeps its own rules in cascade layers, so these
+ * unlayered values win.
+ */
+
+:root {
+  --sl-color-white: var(--ink);
+  --sl-color-gray-1: var(--ink);
+  --sl-color-gray-2: var(--ink-2);
+  --sl-color-gray-3: var(--muted);
+  --sl-color-gray-4: var(--faint);
+  --sl-color-gray-5: var(--line-2);
+  --sl-color-gray-6: var(--line);
+  --sl-color-gray-7: var(--surface);
+  --sl-color-black: var(--bg);
+
+  --sl-color-accent-low: var(--acc-soft);
+  --sl-color-accent: var(--acc);
+  --sl-color-accent-high: var(--acc-text);
+
+  /* The asides: note and tip in the running colour, caution in the warning's, danger in the accent's. */
+  --sl-color-blue-low: var(--run-soft);
+  --sl-color-blue: var(--run);
+  --sl-color-blue-high: var(--run-text);
+  --sl-color-purple-low: var(--run-soft);
+  --sl-color-purple: var(--run);
+  --sl-color-purple-high: var(--run-text);
+  --sl-color-green-low: var(--ok-soft);
+  --sl-color-green: var(--ok);
+  --sl-color-green-high: var(--ok-text);
+  --sl-color-orange-low: var(--warn-soft);
+  --sl-color-orange: var(--warn);
+  --sl-color-orange-high: var(--warn-text);
+  --sl-color-red-low: var(--acc-soft);
+  --sl-color-red: var(--acc);
+  --sl-color-red-high: var(--acc-text);
+
+  --sl-color-text: var(--ink-2);
+  --sl-color-text-accent: var(--acc-text);
+  --sl-color-text-invert: var(--acc-ink);
+  --sl-color-bg: var(--bg);
+  --sl-color-bg-nav: var(--bg);
+  --sl-color-bg-sidebar: var(--bg);
+  --sl-color-bg-inline-code: var(--raised);
+  --sl-color-bg-accent: var(--acc);
+  --sl-color-hairline-light: var(--line-2);
+  --sl-color-hairline: var(--line);
+  --sl-color-hairline-shade: var(--line);
+
+  --sl-font: var(--body);
+  --sl-font-mono: var(--mono);
+
+  /* body-lg: 16 / 1.55 */
+  --sl-text-body: var(--t-16);
+  --sl-line-height: 1.55;
+  --sl-text-h1: var(--t-site-display);
+  --sl-text-h2: var(--t-26);
+  --sl-text-h3: var(--t-21);
+  --sl-text-h4: var(--t-18);
+  --sl-text-h5: var(--t-16);
+  --sl-text-code: var(--t-13);
+}
+
+::selection {
+  background: var(--sel);
+}
+
+/* Headings in the display face at 700, each at its line height in the type scale; the page's title as the site's
+   display style (clamp(32px, 4.2vw, 48px) / 1.05 / 800, -0.02em), sized by the viewport rather than a breakpoint. */
+h1,
+.sl-markdown-content :is(h2, h3, h4, h5) {
+  font-family: var(--display);
+  font-weight: 700;
+}
+h1 {
+  font-size: var(--t-site-display);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+.sl-markdown-content h2 {
+  line-height: 1.15;
+}
+.sl-markdown-content h3 {
+  line-height: 1.25;
+}
+.sl-markdown-content :is(h4, h5) {
+  line-height: 1.3;
+}
+
+/* The page you are on, in the sidebar: a raised row in ink, as a selected row in the app; never an accent block. */
+.sidebar-content a[aria-current="page"] {
+  color: var(--ink);
+  background-color: var(--raised);
+}
+
+/* Code is one colour, the ink: the syntax themes' own colours are not the tokens'. The selector outweighs Expressive
+   Code's per-theme rules (`:root[data-theme] .expressive-code:not(…) .ec-line :where(span)`). */
+:root .expressive-code .ec-line .code span[style^="--"] {
+  color: var(--ink);
+}
+
+/* The header's GitHub icon, as the theme switch beside it: muted at rest, ink on hover and focus. */
+.social-icons a {
+  color: var(--muted);
+}
+.social-icons a:is(:hover, :focus-visible) {
+  color: var(--ink);
+}
+
+/* Nothing moves under reduced motion: Expressive Code's copy button fades its colours and Starlight's sidebar caret
+   turns whatever the system asks; these selectors outweigh theirs (`.expressive-code .copy button`, `.caret`). */
+@media (prefers-reduced-motion: reduce) {
+  :root .expressive-code .copy :is(button, button div),
+  :root .caret {
+    transition: none;
+  }
+}

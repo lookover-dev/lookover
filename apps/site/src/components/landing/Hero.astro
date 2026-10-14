@@ -1,0 +1,29 @@
+---
+// The hero: the wordmark, 400 px, intro A once (landing.js); the eyebrow, the headline with "looked over," on one
+// line; the help line says what you need, as the README does, in one line, its systems from facts.ts.
+import { wordmark } from "../../brand/eyes.generated.ts";
+import { PLATFORMS } from "../../landing/facts.ts";
+import Command from "./Command.astro";
+---
+
+<section class="hero">
+  <div class="wrap">
+    <div class="wm" data-hero-intro><Fragment set:html={wordmark("hero")} /></div>
+    <p class="label">Self-hosted AI code review</p>
+    <h1 class="display-xl">
+      Every pull request <span class="nowrap">looked over,</span> on the AI subscription you already pay for.
+    </h1>
+    <p class="lede">
+      Lookover runs on your own computer, reviews your pull requests with Claude or ChatGPT through their official
+      CLIs, and posts what it finds on GitHub. Built for coding agents: they wait for the review, fix, and ask again.
+    </p>
+    <div class="cta">
+      <Command />
+      <p class="cmd-help">
+        No account to create. Needs a Claude or ChatGPT plan, <code>git</code>, <code>gh</code> and Node.js 18 or later.{
+          " "
+        }{PLATFORMS}
+      </p>
+    </div>
+  </div>
+</section>

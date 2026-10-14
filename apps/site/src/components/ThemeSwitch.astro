@@ -1,0 +1,151 @@
+---
+// The theme switch (design-system.md, "The site"): one round button showing the active theme, the moon in dark
+// and the sun in light; a click, or Enter or Space, goes to the other theme and keeps the choice. Until then the
+// page follows the system. It replaces Starlight's select (the ThemeSelect override in astro.config.mjs) and goes
+// in the landing page's top bar too: one markup, one script. The choice is kept where Starlight keeps its own
+// (theme.ts), so Starlight's head script, and the landing page's, apply it before the first paint; the icon
+// follows the page's `data-theme` in CSS, so it is right before this script runs. So does its name: both are in
+// the markup, visually hidden, and CSS keeps the active theme's one; both are theme.ts's `switchLabel`.
+import { switchLabel } from "./theme.ts";
+---
+
+<lookover-theme-switch>
+  <button type="button">
+    <span class="name when-dark">{switchLabel("dark")}</span>
+    <span class="name when-light">{switchLabel("light")}</span>
+    <svg
+      class="moon"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M13.6 9.5A5.7 5.7 0 1 1 6.5 2.4a4.5 4.5 0 0 0 7.1 7.1z"></path>
+    </svg>
+    <svg
+      class="sun"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="2.75"></circle>
+      <path d="M8 1.5v1.25M8 13.25v1.25M3.4 3.4l.9.9M11.7 11.7l.9.9M1.5 8h1.25M13.25 8h1.25M3.4 12.6l.9-.9M11.7 4.3l.9-.9"></path>
+    </svg>
+  </button>
+</lookover-theme-switch>
+
+<script>
+  import { otherTheme, readTheme, shownTheme, storageKey, switchLabel, type Theme } from "./theme.ts";
+
+  const prefersLight = matchMedia("(prefers-color-scheme: light)");
+
+  /** The choice kept, if any; a browser that refuses storage keeps none, and the page follows the system. */
+  const stored = (): Theme | undefined => {
+    try {
+      return readTheme(localStorage.getItem(storageKey));
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
+   * The choice made on this page, only while the browser refuses to keep it: the next click still goes from it. A
+   * kept choice is read from storage, so a page back from the back-forward cache shows one made on another page since.
+   */
+  let chosen: Theme | undefined;
+
+  const current = (): Theme => shownTheme(chosen ?? stored(), prefersLight.matches);
+
+  /** Shows a theme: the page's, and the tooltip of every switch on the page (CSS picks the name itself). */
+  const show = (theme: Theme): void => {
+    document.documentElement.dataset.theme = theme;
+    for (const button of document.querySelectorAll("lookover-theme-switch button")) {
+      button.setAttribute("title", switchLabel(theme));
+    }
+  };
+
+  class ThemeSwitch extends HTMLElement {
+    connectedCallback(): void {
+      this.querySelector("button")?.addEventListener("click", () => {
+        const next = otherTheme(current());
+        try {
+          localStorage.setItem(storageKey, next);
+          chosen = undefined;
+        } catch {
+          // A browser that refuses storage still switches this page; the choice just isn't kept.
+          chosen = next;
+        }
+        show(next);
+      });
+    }
+  }
+  customElements.define("lookover-theme-switch", ThemeSwitch);
+
+  show(current());
+  // The system's theme, while nothing is chosen.
+  prefersLight.addEventListener("change", () => {
+    if (stored() === undefined && chosen === undefined) show(current());
+  });
+  // A page back from the back-forward cache shows the choice made since.
+  addEventListener("pageshow", (event) => {
+    if (event.persisted) show(current());
+  });
+</script>
+
+<style>
+  lookover-theme-switch {
+    display: inline-flex;
+    flex: none;
+    align-self: center;
+  }
+  button {
+    display: grid;
+    place-items: center;
+    position: relative;
+    width: var(--s-8);
+    height: var(--s-8);
+    padding: 0;
+    border: var(--line-w) solid var(--line-2);
+    border-radius: var(--r-pill);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    button {
+      transition: color var(--d-1) var(--e-out);
+    }
+  }
+  button:hover {
+    color: var(--ink);
+  }
+  button:focus-visible {
+    outline: none;
+    box-shadow: var(--focus);
+  }
+  svg {
+    width: var(--s-4);
+    height: var(--s-4);
+  }
+  /* The name, read by assistive technology and never seen: the icon says it on screen. */
+  .name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /* The active theme's icon and name; the head script sets data-theme before the first paint. */
+  :global(:root[data-theme="light"]) :is(.moon, .when-dark),
+  :global(:root:not([data-theme="light"])) :is(.sun, .when-light) {
+    display: none;
+  }
+</style>

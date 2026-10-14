@@ -4,6 +4,8 @@ A second look before merge. Lookover reviews your GitHub pull requests with Clau
 
 Lookover is in 0.x: it works, and it changes. What it doesn't do yet is below.
 
+The docs are at [lookover.dev](https://lookover.dev/docs/).
+
 ## What it does
 
 - **Reviews each pull request you open,** when it is ready for review. Optionally after every push, when you comment `/lookover review`, or when you click "Review now" in the app.

@@ -2,6 +2,14 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.2.0](https://github.com/lookover-dev/lookover/compare/v0.1.0...v0.2.0) (2026-10-14)
+
+### Features
+
+- **site:** [lookover.dev](https://lookover.dev) is online: what Lookover does, and its docs, from the setup and your coding agent to the commands, where your code goes and what it doesn't do yet.
+- **app:** the eyes you see while Lookover works, and its avatar beside each review, are the logo's own drawing.
+- **install:** npm's page for `lookover` links to lookover.dev.
+
 ## 0.1.0 (2026-10-13)
 
 The first public release.

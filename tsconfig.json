@@ -18,5 +18,5 @@
     "jsx": "react-jsx",
     "types": ["bun"]
   },
-  "include": ["apps/*/src", "apps/*/vite.config.ts", "packages/*/src", "packages/testkit/fake-claude", "scripts"]
+  "include": ["apps/*/src", "apps/*/scripts", "apps/*/vite.config.ts", "packages/*/src", "packages/testkit/fake-claude", "scripts"]
 }

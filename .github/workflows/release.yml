@@ -15,6 +15,7 @@
 #            `npm audit signatures` on it, so the release below waits for real installs
 #   release  the GitHub release: made as a draft, every asset uploaded (the five executables and their SHA256SUMS),
 #            then published, which makes it immutable
+#   pages    lookover.dev, built and checked from the tag and deployed (pages.yml), once the release is published
 #
 # A tag whose push started no run: `gh workflow run release.yml --ref vX.Y.Z` runs it by hand. Every job refuses any
 # other ref (the checks fail, the others run only on a tag), and the `npm` environment deploys from v* tags only.
@@ -341,3 +342,15 @@ jobs:
             lookover-win32-x64.exe lookover-linux-x64 lookover-linux-arm64 lookover-darwin-x64 \
             lookover-darwin-arm64 SHA256SUMS
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+
+  pages:
+    name: lookover.dev
+    needs: release
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: read # the checkout of the tag
+      pages: write # pages.yml's deploy: a called workflow gets no more than this job grants
+      id-token: write # the OIDC token deploy-pages proves the deployment with
+    uses: ./.github/workflows/pages.yml # zizmor: ignore[self-repository] actionlint 1.7.12 refuses $/ ("ref is missing"); this calls the tag's own pages.yml
+    with:
+      tag: ${{ github.ref_name }}

@@ -5,7 +5,7 @@
   "keywords": ["code-review", "pull-request", "github", "claude", "codex", "ai"],
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/lookover-dev/lookover.git" },
-  "homepage": "https://github.com/lookover-dev/lookover#readme",
+  "homepage": "https://lookover.dev",
   "bugs": "https://github.com/lookover-dev/lookover/issues",
   "bin": { "lookover": "bin/lookover.js" },
   "files": ["bin/lookover.js"],

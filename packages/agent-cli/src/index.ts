@@ -22,7 +22,8 @@
 // the machine's (the checkout through `git`, the real clock and streams); `createAgentHost` (`AgentHost` over
 // GitHub's REST API, and its GraphQL API for the threads and resolving, with the agent's token) and `agentToken`
 // (`GH_TOKEN`, `GITHUB_TOKEN`, else `gh auth token`) are what it builds the host from, and what the live suite
-// uses; `USAGE`, what `help` prints, is part of the `lookover` command's help. It has no program of its own: the one
+// uses; `USAGE`, what `help` prints, is part of the `lookover` command's help, and `CLAIMS` the claims' words and
+// openings `reply` takes, which the docs list. It has no program of its own: the one
 // `lookover` command (`apps/service`, ADR 0054) runs it, from a clone with `bun run lookover`, `--app` filled from
 // its data folder when nothing names the App. `SKILL_TEMPLATE` is the loop's skill, `skill/SKILL.md`, as text: the
 // service renders it into the coding agents' folders with Lookover's command (ADR 0058).
@@ -52,7 +53,7 @@ import { report, reportFeedback } from "./report.ts";
 import { EXIT, wait } from "./wait.ts";
 import type { World } from "./world.ts";
 
-export { USAGE } from "./args.ts";
+export { CLAIMS, USAGE } from "./args.ts";
 export { type AgentHostOptions, createAgentHost, type Fetch } from "./github.ts";
 export { agentToken, realWorld } from "./machine.ts";
 export { SKILL_TEMPLATE, skillTemplateOf } from "./skill.ts";

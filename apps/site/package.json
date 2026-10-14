@@ -1,0 +1,31 @@
+{
+  "name": "@lookover/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "dev": "bun scripts/dev.ts",
+    "check": "bun scripts/check.ts",
+    "proof": "bun scripts/proof.ts",
+    "strip": "bun scripts/strip.ts"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.5",
+    "@fontsource-variable/figtree": "^5.3.0",
+    "@fontsource-variable/hanken-grotesk": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@lookover/web": "workspace:*",
+    "astro": "7.3.5"
+  },
+  "devDependencies": {
+    "@lookover/agent-cli": "workspace:*"
+  },
+  "lookover": {
+    "note": "lookover.dev, the landing page and the docs, on Astro and Starlight (ADR 0062, ADR 0064). Built by `bun run site:build` into dist; nothing else in the workspace imports it.",
+    "imports": {
+      "@lookover/web": "the design system's tokens, `@lookover/web/tokens.css`, imported from the site's CSS and Astro files only, so the site's colours and type are the app's (ADR 0064, 3), and `@lookover/web/github-colours.css`, GitHub's colours for the landing page's demo card, as the app's mock GitHub view draws it",
+      "@lookover/agent-cli": "in tests only: the coding agent's page lists every exit code `lookover wait` and `feedback` have and `wait`'s defaults (`USAGE`), and `reply`'s claims (`CLAIMS`), so the page and the command can't drift apart; the landing page's story types only commands `USAGE` takes"
+    }
+  }
+}

@@ -102,9 +102,10 @@ if (!flag("--force") && key !== null && existsSync(stamp) && readFileSync(stamp,
 }
 
 const STEPS = ["typecheck", "lint", "ignores", "docs", "imports", "knip", "test"];
-// Slower steps: tests of the check scripts themselves (they drive real git repos), the gate test
-// (`scripts/gates.test.ts`, also `bun run gates`) among them.
-const FULL_STEPS = ["test:scripts"];
+// Slower steps: the site's build and its checks in the machine's browser (ADR 0064, 8), and the tests of the
+// check scripts themselves (they drive real git repos), the gate test (`scripts/gates.test.ts`, also
+// `bun run gates`) among them.
+const FULL_STEPS = ["site:check", "test:scripts"];
 // `bun test` writes each file's duration here, for the over-budget line.
 const EXTRA_ARGS: Record<string, string[]> = { test: [`--timings=${TIMINGS}`, "--update-timings"] };
 

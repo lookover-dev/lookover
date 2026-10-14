@@ -1,0 +1,43 @@
+---
+// How it works: the agent's section, the page's one tonal band. The three-sided story between the slab and the two
+// paragraphs: played once when it scrolls into view, with "Play again" under it (`scripts/story.js`); on a phone,
+// its five beats as a short list, with GitHub's side of it as a card. The scene is a picture to assistive technology,
+// hidden from it: the beats are what it reads, at every width (visually hidden where the scene shows).
+import { DOCS } from "../../landing/facts.ts";
+import { githubPanelHTML, THREE_SIDES_BEATS, threeSidesHTML } from "../../landing/story.ts";
+---
+
+<section class="how" id="how">
+  <div class="wrap">
+    <div class="slab">
+      <p class="label">How it works · built for coding agents</p>
+      <h2 class="display">Your agent waits for the review, fixes, and stops when it is done.</h2>
+      <p>
+        Every review ends with a check on the commit and findings an agent can read. One command, <code
+          >lookover wait</code
+        >, does the waiting and says what to do next. Here is one pull request, from the agent's terminal to the merge
+        button, with Lookover's own screen beside it.
+      </p>
+    </div>
+    <div class="story" data-story>
+      <div class="story-wide" tabindex="-1">
+        <div class="ts-wrap" aria-hidden="true"><Fragment set:html={threeSidesHTML("story")} /></div>
+        <div class="under"><button type="button" data-replay hidden>Play again</button></div>
+      </div>
+      <ol class="beats">{THREE_SIDES_BEATS.map((beat) => <li>{beat.text}</li>)}</ol>
+      <div class="ts-card"><Fragment set:html={githubPanelHTML()} /></div>
+    </div>
+    <div class="after">
+      <p>
+        <b>The loop settles.</b> "Fixed" is checked on the new commit, never trusted. Nothing runs on half-finished pushes:
+        the agent asks when it is ready. When the agent and the reviewer cannot agree, the check says a person is needed,
+        and the agent stops.
+      </p>
+      <p>
+        <b>Works with the agents you run.</b> A skill makes the loop one sentence for Claude Code or Codex: "get this pull
+        request through review". Anything that can call <code>gh</code> can do the same by hand.{" "}
+        <a href={DOCS.codingAgent} class="ink-2">Setting up your agent, in the docs.</a>
+      </p>
+    </div>
+  </div>
+</section>

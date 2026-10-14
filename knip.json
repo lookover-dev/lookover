@@ -3,6 +3,18 @@
   "workspaces": {
     ".": { "entry": ["scripts/*.ts"], "project": ["scripts/**/*.ts"] },
     "packages/*": { "project": ["src/**/*.ts"] },
-    "apps/web": { "project": ["src/**/*.{ts,tsx}"] }
+    "apps/web": { "project": ["src/**/*.{ts,tsx}"] },
+    "apps/site": {
+      "entry": [
+        "scripts/*.ts",
+        "src/pages/**/*.{astro,ts,js,mjs,mdx}",
+        "src/content.config.mjs",
+        "src/components/**/*.astro",
+        "src/content/**/*.mdx",
+        "src/scripts/**/*.{js,mjs}",
+        "src/brand/*.generated.*"
+      ],
+      "project": ["scripts/**/*.ts", "src/**/*.{ts,js,mjs,astro,mdx}"]
+    }
   }
 }

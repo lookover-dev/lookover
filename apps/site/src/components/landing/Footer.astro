@@ -1,0 +1,18 @@
+---
+// The footer: the wordmark, the licence and the trademarks, GitHub and the docs.
+import { wordmark } from "../../brand/eyes.generated.ts";
+import { DOCS, GITHUB, LICENCE } from "../../landing/facts.ts";
+---
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="stack">
+      <Fragment set:html={wordmark("footer")} />
+      <p class="fine">
+        Open source under the {LICENCE} licence. Claude and ChatGPT are trademarks of their owners; Lookover is not
+        affiliated with Anthropic or OpenAI.
+      </p>
+    </div>
+    <div class="links"><a href={GITHUB}>GitHub</a><a href={DOCS.index}>Docs</a></div>
+  </div>
+</footer>

@@ -1,0 +1,121 @@
+---
+// The setup as a vertical timeline. "Five minutes" was measured on the released package: from
+// `npm install -g lookover` to the first review posted, 5 min 07 s, said rounded down. The terminal shows what npm
+// and `lookover start` print (facts.ts); the setup, not the command, checks the AIs. The App is made by "Create your
+// App" and posts as itself.
+import { eyes, mark } from "../../brand/eyes.generated.ts";
+import { COMMANDS, START_LINES } from "../../landing/facts.ts";
+
+const [install, start] = COMMANDS;
+---
+
+<section class="setup lined" id="setup">
+  <div class="wrap">
+    <div class="slab">
+      <p class="label">Setup</p>
+      <h2 class="display">Up and running in five minutes.</h2>
+      <p class="lede">Three steps. The first review posts for real, on a pull request you pick.</p>
+    </div>
+    <ol class="timeline">
+      <li class="tl rise">
+        <span class="marker">1</span>
+        <div class="text">
+          <h3 class="h3">Install it, start it</h3>
+          <p>
+            Two commands, and the setup opens in your browser. It checks that Claude or ChatGPT is installed and signed
+            in. One AI is enough; two cross-check each other.
+          </p>
+        </div>
+        <div class="shot">
+          <div class="term">
+            <div class="bar"><i></i><i></i><i></i><span>Terminal</span></div>
+            <div class="lines">
+              <span class="l"><span class="p">$ </span>{install}</span>
+              <span class="l out">added 2 packages in 22s</span>
+              <span class="l"><span class="p">$ </span>{start}</span>
+              {START_LINES.map((line) => <span class="l out">{line}</span>)}
+            </div>
+          </div>
+        </div>
+      </li>
+      <li class="tl rise">
+        <span class="marker">2</span>
+        <div class="text">
+          <h3 class="h3">Connect GitHub</h3>
+          <p>
+            Create your App: a GitHub App on your account or an organisation's, which posts the reviews as itself. Then
+            you pick the repositories it reviews.
+          </p>
+        </div>
+        <div class="shot">
+          <div class="setup-card">
+            <div class="sc-h label"><Fragment set:html={mark("setup-github")} />Setup · GitHub</div>
+            <div class="sc-row">
+              <span class="sq ok"
+                ><svg
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"><path d="M3 8.5l3 3 7-7"></path></svg
+                ></span
+              ><span>App created<span class="sub">lookover-q7x2ka posts as itself, never as you.</span></span>
+            </div>
+            <div class="sc-row">
+              <span class="sq ok"
+                ><svg
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"><path d="M3 8.5l3 3 7-7"></path></svg
+                ></span
+              ><span>Reviewing 2 repositories<span class="sub">ledger-api, web</span></span>
+            </div>
+            <div class="sc-row">
+              <span class="sq"><Fragment set:html={eyes("setup-first")} /></span><span
+                >First review<span class="sub">Pick an open pull request</span></span
+              >
+            </div>
+          </div>
+        </div>
+      </li>
+      <li class="tl rise">
+        <span class="marker">3</span>
+        <div class="text">
+          <h3 class="h3">Open pull requests as usual</h3>
+          <p>
+            Each one gets a review on GitHub. Lookover keeps a list of where each stands; fix, push, and ask for another
+            look, or let your agent ask.
+          </p>
+        </div>
+        <div class="shot">
+          <div class="setup-card">
+            <div class="sc-h label"><Fragment set:html={mark("setup-reviews")} />Reviews · ledger-api</div>
+            <div class="pr-list">
+            <div class="pr-row">
+              <span class="chip warn">To fix</span><span class="t"
+                ><span class="num">#148</span>Add rate limiting to /v1/invoices</span
+              ><span class="when">2 min ago</span>
+            </div>
+            <div class="pr-row">
+              <span class="chip ok">Nothing to fix</span><span class="t"
+                ><span class="num">#151</span>Retry the webhook queue</span
+              ><span class="when">1 h ago</span>
+            </div>
+            <div class="pr-row">
+              <span class="chip run">Reviewing</span><span class="t"
+                ><span class="num">#152</span>Split the ledger worker</span
+              ><span class="when">now</span>
+            </div>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>

@@ -937,6 +937,11 @@ test(
     const heard: LogMessage[] = [];
     cleanups.push(api.subscribeLogs((m) => heard.push(m)));
     expect((await api.snapshot()).seq).toBe(68);
+    // The snapshot swapped the first stream for one asking after 68: it follows the log once its answer came. One
+    // asked while the scenario loads waits for the load, and so misses the new room's seed lines (#313).
+    const connected = () => heard.filter((m) => m.type === "connected").length;
+    await until(() => connected() >= 2);
+    expect(connected()).toBe(2);
 
     const drawer = new DemoApi({ base: demo.origin, fetch: withSession });
     await drawer.send({ type: "demo.load", id: "S10" });

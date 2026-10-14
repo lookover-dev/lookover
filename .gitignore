@@ -20,6 +20,8 @@ Thumbs.db
 node_modules/
 dist/
 build/
+# Astro's generated types and caches (the site, apps/site)
+.astro/
 target/
 __pycache__/
 .venv/
