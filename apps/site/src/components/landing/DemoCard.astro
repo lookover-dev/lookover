@@ -1,13 +1,9 @@
 ---
-// The demo card: the loop in one pull request, drawn as GitHub shows it, in GitHub's colours and type (`.gh`,
-// github-colours.css), following the page's theme. Lookover's avatar is the icon file; the App posts as itself, under
-// the name "Create your App" gives it (`lookover-` and six characters). Its words are the ones Lookover posts: the
-// review's top comment, the summary comment with who found and who double-checked, the finding on its line, then the
-// thread resolved once the fix is verified (Lookover posts no reply on a fixed thread), and the check's title. The
-// names (ledger-api, #148, the commits) are demo mode's, shortened.
+// S2's review loop condensed into one card for the site, in GitHub's colours. The caption makes clear that this
+// groups the separate GitHub posts. The App's display name is illustrative; installations have unique slugs.
 import { ICON } from "../../brand/eyes.generated.ts";
 
-const APP = "lookover-q7x2ka";
+const APP = "lookover";
 ---
 
 <section class="demo">
@@ -25,30 +21,12 @@ const APP = "lookover-q7x2ka";
         <div class="cm">
           <span class="av"><Fragment set:html={ICON} /></span>
           <div class="cm-box">
-            <div class="cm-h"><b>{APP}</b> <span class="bot">bot</span> reviewed</div>
+            <div class="cm-h"><b>{APP}</b> <span class="bot">bot</span> <span>reviewed <code>a1f9c2e</code> · round 1</span></div>
             <div class="cm-b">
               <p>
-                Looked over a1f9c2e. One thing to fix, rateLimit.ts line 42. The rest can go.
+                <b>One thing to fix.</b> The rest can go.
               </p>
-            </div>
-          </div>
-        </div>
-        <div class="cm">
-          <span class="av"><Fragment set:html={ICON} /></span>
-          <div class="cm-box">
-            <div class="cm-h"><b>{APP}</b> <span class="bot">bot</span> commented</div>
-            <div class="cm-b">
-              <p><b>Lookover</b> · round 1 · looked over a1f9c2e</p>
               <p class="found-by">Found by Codex, double-checked by Claude.</p>
-              <p>One thing to fix, rateLimit.ts line 42.</p>
-            </div>
-          </div>
-        </div>
-        <div class="cm">
-          <span class="av"><Fragment set:html={ICON} /></span>
-          <div class="cm-box">
-            <div class="cm-h">
-              <b>{APP}</b> <span class="bot">bot</span> commented on <code>src/middleware/rateLimit.ts</code>
             </div>
             <div class="diff">
               <div class="file">src/middleware/rateLimit.ts</div>
@@ -69,17 +47,15 @@ const APP = "lookover-q7x2ka";
               <span><b>agent</b> · Fixed in <code>b2c3d4e</code>: logs the key id only.</span>
               <span><span class="ok">Resolved</span> · verified fixed in <code>b2c3d4e</code></span>
             </div>
+            <div class="check">
+              <span class="dot" aria-hidden="true"></span><span><b>Nothing to fix.</b> Checked <code>b2c3d4e</code> · round 2</span>
+            </div>
           </div>
-        </div>
-        <div class="check">
-          <span class="dot"></span><b>Lookover</b><span>Looked over b2c3d4e: nothing to fix</span><span class="r"
-            >Details</span
-          >
         </div>
       </div>
     </div>
     <p class="cap">
-      One pull request, two rounds: the finding, the fix, the check. Posted by your own GitHub App, as itself.
+      One pull request, two rounds. A condensed preview of the review, the fix and the passing check on GitHub.
     </p>
   </div>
 </section>

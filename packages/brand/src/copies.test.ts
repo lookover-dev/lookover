@@ -34,7 +34,7 @@ test("every copy in this checkout is what the source draws", () => {
   expect(driftedCopies()).toEqual([]);
 });
 
-test("the copies are the eleven brand files, the app's favicon, module and stylesheet, the sheet, and the site's three", () => {
+test("the copies are the eleven brand files, the app's favicon, module and stylesheet, the sheet, and the site's five", () => {
   expect(COPIES.map((c) => c.path)).toEqual([
     "docs/product/brand/lookover-wordmark.svg",
     "docs/product/brand/lookover-wordmark-on-dark.svg",
@@ -52,6 +52,8 @@ test("the copies are the eleven brand files, the app's favicon, module and style
     "apps/web/src/styles/system.css",
     "docs/product/brand/sheet.html",
     "apps/site/public/favicon.svg",
+    "apps/site/public/brand/lookover-wordmark.svg",
+    "apps/site/public/brand/lookover-wordmark-on-dark.svg",
     "apps/site/src/brand/eyes.generated.ts",
     "apps/site/src/brand/eyes.generated.css",
   ]);

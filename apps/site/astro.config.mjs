@@ -17,13 +17,18 @@ export default defineConfig({
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/lookover-dev/lookover" }],
       // The theme switch: one round button, shared with the landing page (design-system.md, "The site").
       // Head adds the fonts, the tokens and site.css (see there why not `customCss`).
-      components: { Head: "./src/components/Head.astro", ThemeSelect: "./src/components/ThemeSwitch.astro" },
+      components: {
+        Head: "./src/components/Head.astro",
+        Header: "./src/components/DocsHeader.astro",
+        MarkdownContent: "./src/components/MarkdownContent.astro",
+        ThemeSelect: "./src/components/ThemeSwitch.astro",
+      },
       // Code blocks on the tokens: Starlight's Expressive Code takes them as plain CSS values.
       expressiveCode: {
         styleOverrides: {
-          borderColor: "var(--line)",
+          borderColor: "var(--line-2)",
           borderRadius: "var(--r-1)",
-          codeBackground: "var(--code-bg)",
+          codeBackground: "var(--line)",
           codeForeground: "var(--ink)",
           codeFontFamily: "var(--mono)",
           codeFontSize: "var(--t-13)",
@@ -32,7 +37,7 @@ export default defineConfig({
           frames: {
             editorActiveTabBackground: "var(--code-bg)",
             editorTabBarBackground: "var(--surface)",
-            terminalBackground: "var(--code-bg)",
+            terminalBackground: "var(--line)",
             terminalTitlebarBackground: "var(--surface)",
             terminalTitlebarBorderBottomColor: "var(--line)",
             terminalTitlebarForeground: "var(--muted)",

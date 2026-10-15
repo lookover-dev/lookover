@@ -16,8 +16,8 @@ const PATTERN = {
   steps: ["Codex looks for problems", "Claude double-checks each finding", "Posted on GitHub"],
 };
 
-/** The App's name on GitHub, as "Create your App" names one: `lookover-` and six characters. */
-const APP = "lookover-q7x2ka";
+/** The display name in the site's illustration, independent of an installation's unique App slug. */
+const APP = "lookover";
 
 /** The story in five beats, at the scene's time (ms): the phone's list, and where each starts. */
 export const THREE_SIDES_BEATS = [
@@ -62,7 +62,7 @@ export function githubPanelHTML(): string {
             <div class="ts-review" data-review>
               <span class="ts-avatar">${ICON}</span>
               <div><div class="ts-rvhead"><b>${APP}</b> <span class="ts-bot">bot</span> <span class="ts-muted">reviewed</span></div>
-                <div class="ts-rvslot"><p class="ts-rvtext" data-verdict="1">Looked over a1f9c2e. One thing to fix, rateLimit.ts line 42. The rest can go.</p><p class="ts-rvtext" data-verdict="2">Looked over b2c3d4e. Nothing new to fix. The rest can go.</p></div></div>
+                <div class="ts-rvslot"><p class="ts-rvtext" data-verdict="1">Looked over <code>a1f9c2e</code>. One thing to fix, rateLimit.ts line 42. The rest can go.</p><p class="ts-rvtext" data-verdict="2">Looked over <code>b2c3d4e</code>. Nothing new to fix. The rest can go.</p></div></div>
             </div>
             <div class="ts-finding" data-finding>
               <div class="ts-fpath"><code>src/middleware/rateLimit.ts</code> line 42</div>

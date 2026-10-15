@@ -1,0 +1,10 @@
+---
+import { mark, wordmark } from "../brand/eyes.generated.ts";
+
+const { id = "site-brand" } = Astro.props;
+---
+
+<a class="brand-link" href="/" aria-label="Lookover home">
+  <span class="brand-wordmark" aria-hidden="true"><Fragment set:html={wordmark(`${id}-wordmark`)} /></span>
+  <span class="brand-mark" aria-hidden="true"><Fragment set:html={mark(`${id}-mark`)} /></span>
+</a>

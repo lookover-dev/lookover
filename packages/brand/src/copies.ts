@@ -36,6 +36,11 @@ export const COPIES: readonly Copy[] = [
   { path: STYLESHEET, render: appStylesheet },
   { path: SHEET, render: sheet },
   { path: SITE_FAVICON, render: siteIcon },
+  { path: "apps/site/public/brand/lookover-wordmark.svg", render: () => wordmark(ink, accent) },
+  {
+    path: "apps/site/public/brand/lookover-wordmark-on-dark.svg",
+    render: () => wordmark(paper, accent, true),
+  },
   { path: SITE_MODULE, render: siteModule },
   { path: SITE_STYLESHEET, render: siteStylesheet },
 ];

@@ -1,0 +1,7 @@
+---
+import Default from "@astrojs/starlight/components/MarkdownContent.astro";
+---
+
+<div class:list={{ "command-reference": Astro.url.pathname.replace(/\/$/, "") === "/docs/commands" }}>
+  <Default><slot /></Default>
+</div>

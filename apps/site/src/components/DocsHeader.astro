@@ -1,0 +1,11 @@
+---
+import Search from "@astrojs/starlight/components/Search.astro";
+import BrandLink from "./BrandLink.astro";
+import HeaderLinks from "./HeaderLinks.astro";
+---
+
+<div class="docs-header">
+  <BrandLink id="docs-brand" />
+  <div class="docs-search"><Search /></div>
+  <HeaderLinks showDocs={false} />
+</div>

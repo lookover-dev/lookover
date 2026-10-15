@@ -1,0 +1,17 @@
+---
+import { DOCS } from "../landing/facts.ts";
+import GitHubLink from "./GitHubLink.astro";
+import ThemeSwitch from "./ThemeSwitch.astro";
+
+interface Props {
+  showDocs?: boolean;
+}
+
+const { showDocs = true } = Astro.props;
+---
+
+<nav class="header-links" aria-label="Site navigation">
+  {showDocs && <a class="docs-link" href={DOCS.index}>Docs</a>}
+  <GitHubLink />
+  <ThemeSwitch />
+</nav>

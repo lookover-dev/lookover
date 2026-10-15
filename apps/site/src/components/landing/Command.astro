@@ -1,21 +1,15 @@
 ---
-// The command, the page's one call to action: install, then start, as the README gives them (facts.ts), and one
-// copy button for both lines, its icon alone, the check in its place once copied.
+// The install command alone; the setup section explains the first start.
 import { COMMANDS } from "../../landing/facts.ts";
+
+const install = COMMANDS[0];
 ---
 
 <div class="cmd">
   <span class="lines">
-    {
-      COMMANDS.map((command) => (
-        <span class="line">
-          <span class="dollar" aria-hidden="true">$</span>
-          {command}
-        </span>
-      ))
-    }
+    <span class="line"><span class="dollar" aria-hidden="true">$</span>{install}</span>
   </span>
-  <button type="button" class="copy" data-copy={COMMANDS.join("\n")} aria-label="Copy" title="Copy">
+  <button type="button" class="copy" data-copy={install} aria-label="Copy install command" title="Copy install command">
     <svg class="ready" viewBox="0 0 16 16" aria-hidden="true">
       <rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect>
       <path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"></path>

@@ -87,11 +87,16 @@ describe("npmInstallArgs", () => {
 });
 
 describe("registryUrls", () => {
-  test("lookover's version, then each platform package's, the scope's slash escaped", () => {
+  test("lookover's version, then each platform package's, the scope's slash escaped, then each one's tarball", () => {
+    // The tarballs too: 0.1.0's and 0.2.0's win32-x64 had its version answering while its tarball still said 404, so
+    // npm skipped the optional package and the launcher found no executable.
     expect(registryUrls("0.1.0", ["win32-x64", "linux-arm64"])).toEqual([
       "https://registry.npmjs.org/lookover/0.1.0",
       "https://registry.npmjs.org/@lookover%2fwin32-x64/0.1.0",
       "https://registry.npmjs.org/@lookover%2flinux-arm64/0.1.0",
+      "https://registry.npmjs.org/lookover/-/lookover-0.1.0.tgz",
+      "https://registry.npmjs.org/@lookover/win32-x64/-/win32-x64-0.1.0.tgz",
+      "https://registry.npmjs.org/@lookover/linux-arm64/-/linux-arm64-0.1.0.tgz",
     ]);
   });
 });

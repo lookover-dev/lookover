@@ -159,61 +159,6 @@ section.lined {
   height: calc(var(--s-16) - var(--s-1));
   gap: var(--s-4);
 }
-.nav .brand {
-  display: flex;
-  align-items: center;
-  border-radius: var(--r-2);
-}
-.nav .brand .mark {
-  width: var(--h-sm);
-  height: var(--h-sm);
-  color: var(--ink);
-}
-.nav .links {
-  display: flex;
-  align-items: center;
-  gap: var(--s-1);
-}
-.nav .links a {
-  font: 500 var(--t-14) / 1 var(--body);
-  color: var(--ink-2);
-  text-decoration: none;
-  padding: var(--s-2) var(--s-3);
-  border-radius: var(--r-2);
-}
-.nav .links a:hover {
-  color: var(--ink);
-  background: var(--raised);
-}
-.nav .right {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-}
-@media (max-width: 760px) {
-  .nav .links {
-    display: none;
-  }
-}
-.gh-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(var(--s-8) + var(--s-1));
-  height: calc(var(--s-8) + var(--s-1));
-  border-radius: var(--r-2);
-  color: var(--ink-2);
-}
-.gh-icon:hover {
-  color: var(--ink);
-  background: var(--raised);
-}
-.gh-icon svg {
-  width: var(--s-5);
-  height: var(--s-5);
-  fill: currentColor;
-}
-
 /* the hero */
 .hero {
   padding: calc(var(--s-16) + var(--s-2)) 0 var(--s-12);
@@ -249,7 +194,7 @@ section.lined {
   margin-top: var(--s-1);
 }
 
-/* the command: the one call to action, install then start, one copy button for both */
+/* The install command, with one copy button. */
 .cmd {
   display: inline-flex;
   align-items: center;
@@ -321,6 +266,13 @@ section.lined {
 @media (min-width: 641px) {
   .cmd {
     font-size: var(--t-18);
+  }
+}
+@media (max-width: 374px) {
+  .cmd {
+    font-size: var(--t-14);
+    gap: var(--s-2);
+    padding-left: var(--s-3);
   }
 }
 
@@ -416,6 +368,10 @@ section.lined {
   min-width: 0;
 }
 .pr .cm-h {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-1);
   background: var(--gh-surface);
   border-bottom: var(--line-w) solid var(--gh-border);
   padding: var(--s-2) var(--s-3);
@@ -508,11 +464,10 @@ section.lined {
   align-items: center;
   gap: var(--s-3);
   padding: var(--s-3);
-  border: var(--line-w) solid var(--gh-border);
-  border-radius: var(--r-2);
+  border-top: var(--line-w) solid var(--gh-border);
   background: var(--gh-surface);
   font-size: var(--t-13);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .pr .check .dot {
   width: var(--s-3);
@@ -521,14 +476,21 @@ section.lined {
   background: var(--gh-green);
   flex: none;
 }
-.pr .check b {
-  font-weight: 600;
-}
-.pr .check .r {
-  margin-left: auto;
-  color: var(--gh-muted);
-  font-size: var(--t-12);
-  white-space: nowrap;
+@media (max-width: 639px) {
+  .pr .pr-body,
+  .pr .pr-head {
+    padding: var(--s-3);
+  }
+  .pr .cm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pr .av {
+    display: none;
+  }
+  .pr .pr-meta > span:last-child {
+    min-width: 0;
+    flex: 1;
+  }
 }
 
 /* the trust points */
@@ -971,12 +933,15 @@ section.lined {
 .ink-2 {
   color: var(--ink-2);
 }
+.faq a,
+.story a {
+  color: var(--acc-text);
+  text-decoration: none;
+}
 
 /* what moves, and only with no reduced-motion preference: the hovers' colours, the questions' chevron, "Play again"
    fading in when the story ends, the reveals (fade and 6 px, once); the chips stay still */
 @media (prefers-reduced-motion: no-preference) {
-  .nav .links a,
-  .gh-icon,
   .copy {
     transition:
       color var(--d-1) var(--e-out),

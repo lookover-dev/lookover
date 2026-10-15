@@ -1,0 +1,102 @@
+/* Shared by the landing page and docs. Small branding stays still; only the hero plays its intro. */
+.brand-link {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--ink);
+  border-radius: var(--r-1);
+}
+.brand-wordmark {
+  display: block;
+  width: calc(var(--s-16) + var(--s-12));
+}
+.brand-link svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  fill: currentColor;
+  overflow: visible;
+}
+.brand-mark {
+  display: none;
+  width: var(--h-sm);
+}
+.mark[data-state="idle"] .lid {
+  animation: none;
+}
+.header-links {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--s-2);
+}
+.header-links a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(var(--s-8) + var(--s-1));
+  color: var(--ink-2);
+  text-decoration: none;
+  border-radius: var(--r-2);
+}
+.header-links .docs-link {
+  padding-inline: var(--s-3);
+  font: 500 var(--t-14) / 1 var(--body);
+}
+.header-links .github-link {
+  width: calc(var(--s-8) + var(--s-1));
+}
+.github-link svg {
+  width: var(--s-5);
+  height: var(--s-5);
+  fill: currentColor;
+}
+.header-links a:hover {
+  color: var(--ink);
+  background: var(--raised);
+}
+:is(.brand-link, .header-links a):focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.docs-header {
+  display: flex;
+  align-items: center;
+  gap: var(--s-6);
+  height: 100%;
+}
+.docs-search {
+  margin-left: auto;
+  min-width: 0;
+}
+@media (min-width: 800px) {
+  .docs-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 22rem) minmax(0, 1fr);
+  }
+  .docs-search {
+    margin-left: 0;
+    width: 100%;
+  }
+  .docs-header > .header-links {
+    justify-self: end;
+  }
+}
+@media (max-width: 639px) {
+  .brand-wordmark {
+    display: none;
+  }
+  .brand-mark {
+    display: block;
+  }
+  .docs-header {
+    gap: var(--s-2);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .header-links a {
+    transition:
+      color var(--d-1) var(--e-out),
+      background var(--d-1) var(--e-out);
+  }
+}

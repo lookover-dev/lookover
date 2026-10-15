@@ -42,7 +42,7 @@ describe("the three-sided story", () => {
       "Looked over a1f9c2e. One thing to fix, rateLimit.ts line 42. The rest can go.",
       "Looked over b2c3d4e. Nothing new to fix. The rest can go.",
     ]);
-    expect(panel).toContain("<b>lookover-q7x2ka</b>");
+    expect(panel).toContain("<b>lookover</b>");
     // Lookover posts no reply on a fixed thread: `lookover wait` resolves it.
     expect(panel).toContain("<b>Resolved</b> · verified fixed in <code>b2c3d4e</code>");
     expect(panel).not.toContain("<b>lookover</b> ·");

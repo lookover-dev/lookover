@@ -11,7 +11,7 @@
 // `--from-registry <version>`: the same, on `lookover@<version>` installed from npm's public registry instead, with
 // no install script run and none of the user's npm settings read (the public release.yml's `verify` job, once the
 // packages are published). `--wait` first waits, up to ten minutes, until the registry answers for `lookover` and each
-// platform package at that version (a package just published may take a moment to show).
+// platform package at that version, and for each one's tarball (a package just published may take a moment to show).
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -157,11 +157,16 @@ export async function installGlobal(o: { prefix: string; scratch: string } & Sou
   if (code !== 0) throw new Error(`npm install exited ${code}:\n${said}${failed}`);
 }
 
-/** The registry's address of `lookover` at `version`, then each platform package's (the scope's slash escaped). */
+/**
+ * The registry's address of `lookover` at `version`, then each platform package's (the scope's slash escaped), then
+ * each one's tarball: a version can answer while its tarball still says 404, and npm then skips the optional package.
+ */
 export function registryUrls(version: string, platforms: string[]): string[] {
   return [
     `${REGISTRY}lookover/${version}`,
     ...platforms.map((platform) => `${REGISTRY}@lookover%2f${platform}/${version}`),
+    `${REGISTRY}lookover/-/lookover-${version}.tgz`,
+    ...platforms.map((platform) => `${REGISTRY}@lookover/${platform}/-/${platform}-${version}.tgz`),
   ];
 }
 
@@ -261,7 +266,8 @@ if (import.meta.main) {
       const urls = registryUrls(version, releasePlatforms());
       console.log(`Waiting for ${REGISTRY} to answer for lookover ${version} and its platform packages.`);
       const missing = await waitForRegistry(urls, {
-        status: async (url) => (await fetch(url, { method: "GET" })).status,
+        // HEAD: a tarball's answer without its download.
+        status: async (url) => (await fetch(url, { method: "HEAD" })).status,
         sleep: (ms) => Bun.sleep(ms),
         now: () => Date.now(),
         timeoutMs: 10 * 60_000,
