@@ -129,6 +129,9 @@ async function runningOrStarted(
   args: string[],
   deps: VerbDeps,
 ): Promise<{ serving: Serving; inTerminalJob: boolean } | null> {
+  // Read before the lock is probed: free then, what it says was left by a crash, and the service started below holds
+  // the lock a moment before it removes that file.
+  const left = servingOf(home);
   if (holds(home)) {
     const serving = await servingWhenSaid(home, deps, () => holds(home));
     if (!isServing(serving)) return failedStart(home, serving, deps, null);
@@ -147,7 +150,7 @@ async function runningOrStarted(
     return null;
   }
   // Another start may have won the folder meanwhile: then its service is the one waited for.
-  const serving = await servingWhenSaid(home, deps, () => started.running() || holds(home));
+  const serving = await servingWhenSaid(home, deps, () => started.running() || holds(home), left);
   if (!isServing(serving)) return failedStart(home, serving, deps, null);
   deps.print.out(`Lookover runs in the background.`);
   return { serving, inTerminalJob: started.inTerminalJob };
@@ -257,7 +260,7 @@ export async function stop(argv: string[], deps: VerbDeps): Promise<number> {
   }
   const deadline = time.now() + STOP_LIMIT_MS;
   // A service still starting is asked once it says where it serves.
-  const said = await servingWhenSaid(home, deps, () => holds(home), deadline);
+  const said = await servingWhenSaid(home, deps, () => holds(home), null, deadline);
   const asked = isServing(said) ? said : null;
   if (asked !== null) await post(home, asked, API.stop);
   if (await lockFreeBy(home, deadline, deps)) {
@@ -362,19 +365,23 @@ type NotServing = "stopped" | "late";
 const isServing = (found: Serving | NotServing): found is Serving => typeof found !== "string";
 
 /**
- * What `instance.json` says once the folder's service says where it serves; `stopped` once `alive` says false
- * (callers pass whether the lock is held, so a service that dies starting is seen at once), `late` at `deadline`.
+ * What `instance.json` says once the folder's service says where it serves, never `left` (the file a crash left);
+ * `stopped` once `alive` says false (callers pass whether the lock is held, so a service that dies starting is seen
+ * at once), `late` at `deadline`.
  */
 async function servingWhenSaid(
   home: string,
   deps: VerbDeps,
   alive: () => boolean,
+  left: Serving | null = null,
   deadline = deps.background.time.now() + START_LIMIT_MS,
 ): Promise<Serving | NotServing> {
   const { time } = deps.background;
+  const isLeft = (serving: Serving) =>
+    left !== null && serving.pid === left.pid && serving.since === left.since;
   for (;;) {
     const serving = holds(home) ? servingOf(home) : null;
-    if (serving !== null) return serving;
+    if (serving !== null && !isLeft(serving)) return serving;
     if (!alive()) return "stopped";
     if (time.now() >= deadline) return "late";
     await time.sleep(POLL_MS);

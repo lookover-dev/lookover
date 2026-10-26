@@ -590,6 +590,27 @@ test("a service that dies while it starts is noticed at once, not after 60 s", a
   expect(waits.count).toBe(1);
 });
 
+test("the instance.json a crash left is never taken for the service started, though it holds the lock before removing it", async () => {
+  const home = folder();
+  const crashed = { pid: 1, port: 1, address: "http://127.0.0.1:1", version: "0.1.0", since: 0 };
+  writeFileSync(join(home, "instance.json"), JSON.stringify(crashed));
+  let service: ReturnType<typeof booting> | undefined;
+  const { time } = countedTime(async (wait) => {
+    if (wait === 2) await service?.announce();
+  });
+  const c = command({
+    time,
+    startServe: async () => {
+      // The moment a start may poll in: the new service holds the lock, the crash's file is still there.
+      service = booting(home);
+      writeFileSync(join(home, "instance.json"), JSON.stringify(crashed));
+      return { started: true, pid: 4242, inTerminalJob: false, running: () => true };
+    },
+  });
+  expect(await c.run("start", `--home=${home}`, "--no-open")).toBe(0);
+  expect(c.out.join("\n")).toContain(LINK_GIVEN);
+});
+
 /** Runs in `folder` until the test ends, as a terminal opened there would. */
 function inFolder(folder: string): void {
   const was = process.cwd();
