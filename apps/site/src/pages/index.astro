@@ -1,13 +1,9 @@
 ---
 // lookover.dev's landing page, on the design system's tokens and the brand's own drawings. A page of its own, beside
 // the docs.
-// The styles are imported here, in the frontmatter, so knip sees the packages (it doesn't read CSS imports); Astro
-// bundles the fonts, so nothing is fetched from another host.
-import "@fontsource-variable/figtree";
-import "@fontsource-variable/hanken-grotesk";
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/500.css";
-import "@lookover/web/tokens.css";
+// The styles are imported here, in the frontmatter, so knip sees the packages (it doesn't read CSS imports); the
+// fonts and the tokens come with Fonts, first.
+import Fonts from "../components/Fonts.astro";
 import "@lookover/web/github-colours.css";
 import "../brand/eyes.generated.css";
 import "../styles/header.css";
@@ -38,6 +34,7 @@ const description =
     <meta name="description" content={description} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="canonical" href="https://lookover.dev/" />
+    <Fonts />
     <script is:inline define:vars={{ storageKey }}>
       // Before the first paint: the theme kept under Starlight's key, as the docs read it, else the system's, dark
       // when it says nothing. An inline script can't import, so this mirrors theme.ts's `readTheme` and `shownTheme`;

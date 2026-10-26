@@ -1,0 +1,23 @@
+---
+// The site's fonts, for the landing page's head and the docs' (Head.astro): the app's @fontsource faces, the tokens
+// that name them, the fallbacks that keep their place until they arrive (fonts.css), and a preload of the Latin file
+// of each face the first screen sets, so it is mostly there for the first paint. Imported in the frontmatter so knip
+// sees the packages (it doesn't read CSS imports); Astro bundles the files, so no page fetches a font from another
+// host (ADR 0064, 5). The preloads name the same files the faces do: Vite emits each file once.
+import "@fontsource-variable/figtree";
+import "@fontsource-variable/hanken-grotesk";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
+import "@fontsource/ibm-plex-mono/600.css";
+import "@lookover/web/tokens.css";
+import "../styles/fonts.css";
+import plexMono from "../../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2?url";
+import figtree from "../../node_modules/@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2?url";
+import hanken from "../../node_modules/@fontsource-variable/hanken-grotesk/files/hanken-grotesk-latin-wght-normal.woff2?url";
+---
+
+{
+  [figtree, hanken, plexMono].map((href) => (
+    <link rel="preload" href={href} as="font" type="font/woff2" crossorigin />
+  ))
+}

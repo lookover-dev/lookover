@@ -2,6 +2,12 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.2.2](https://github.com/lookover-dev/lookover/compare/v0.2.1...v0.2.2) (2026-10-26)
+
+### Bug Fixes
+
+- **site:** the landing page's headline no longer jumps on a first visit: its fonts load sooner, and the text holds its place until they arrive.
+
 ## [0.2.1](https://github.com/lookover-dev/lookover/compare/v0.2.0...v0.2.1) (2026-10-15)
 
 ### Bug Fixes

@@ -1,0 +1,60 @@
+/*
+ * Until a face arrives, its text is set in Arial (or Liberation Sans, cut to Arial's widths) scaled to that face's
+ * widths and lines (design-system.md, "The site"), so the swap moves nothing: the headline keeps its three lines.
+ * Each `size-adjust` is the face's width over Arial's, measured on the landing page's text at the weight the site
+ * sets; the overrides are the face's ascent and descent, divided by it. Figtree at 600, 700 and 800, the 800 tuned
+ * on the headline so it breaks into as many lines as in Figtree from 320 to 1440 px wide but at 327, 350-351 and
+ * 573-575; Hanken Grotesk at 400 and 500 on Arial, at 600 and over on Arial Bold. Imported after the tokens, which it
+ * extends.
+ */
+
+@font-face {
+  font-family: "Figtree fallback";
+  font-weight: 300 649;
+  src: local("Arial Bold"), local("Arial-BoldMT"), local("Liberation Sans Bold");
+  size-adjust: 95.05%;
+  ascent-override: 99.95%;
+  descent-override: 26.3%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Figtree fallback";
+  font-weight: 650 749;
+  src: local("Arial Bold"), local("Arial-BoldMT"), local("Liberation Sans Bold");
+  size-adjust: 96.12%;
+  ascent-override: 98.84%;
+  descent-override: 26.01%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Figtree fallback";
+  font-weight: 750 900;
+  src: local("Arial Bold"), local("Arial-BoldMT"), local("Liberation Sans Bold");
+  size-adjust: 96.7%;
+  ascent-override: 98.24%;
+  descent-override: 25.85%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Hanken Grotesk fallback";
+  font-weight: 100 549;
+  src: local("Arial"), local("ArialMT"), local("Liberation Sans");
+  size-adjust: 100.2%;
+  ascent-override: 99.8%;
+  descent-override: 29.94%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Hanken Grotesk fallback";
+  font-weight: 550 900;
+  src: local("Arial Bold"), local("Arial-BoldMT"), local("Liberation Sans Bold");
+  size-adjust: 94.42%;
+  ascent-override: 105.91%;
+  descent-override: 31.77%;
+  line-gap-override: 0%;
+}
+
+:root {
+  --display: "Figtree Variable", "Figtree", "Figtree fallback", sans-serif;
+  --body: "Hanken Grotesk Variable", "Hanken Grotesk", "Hanken Grotesk fallback", system-ui, sans-serif;
+}

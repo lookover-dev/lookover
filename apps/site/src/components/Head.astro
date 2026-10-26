@@ -1,14 +1,8 @@
 ---
-// Starlight's head, plus the site's styles: the app's fonts and tokens, then Starlight on them (site.css). Imported
-// here, in the frontmatter, rather than through Starlight's `customCss`, so knip sees the packages the site uses
-// (it doesn't read imports inside CSS). The fonts are self-hosted: Astro bundles their files into the build, so no
-// page fetches a font from another host (ADR 0064, 5).
-import "@fontsource-variable/figtree";
-import "@fontsource-variable/hanken-grotesk";
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/500.css";
-import "@fontsource/ibm-plex-mono/600.css";
-import "@lookover/web/tokens.css";
+// Starlight's head, plus the site's styles: the app's fonts and tokens (Fonts), then Starlight on them (site.css).
+// Imported here, in the frontmatter, rather than through Starlight's `customCss`, so knip sees the packages the site
+// uses (it doesn't read imports inside CSS).
+import Fonts from "./Fonts.astro";
 import "../brand/eyes.generated.css";
 import "../styles/header.css";
 import "../styles/site.css";
@@ -16,3 +10,4 @@ import Default from "@astrojs/starlight/components/Head.astro";
 ---
 
 <Default><slot /></Default>
+<Fonts />
