@@ -23,11 +23,11 @@ import {
 } from "./schemas.ts";
 
 /** A listing's pages, each read whole as the `Link` header gives the next: a discovery read is not cached. */
-async function everyPage<T>(
+export async function everyPage<T>(
   api: GitHubApi,
   first: string,
   bearer: string,
-  cause: CauseOf,
+  cause: CauseOf | undefined,
   read: (body: unknown, what: string) => T[],
 ): Promise<T[]> {
   const items: T[] = [];
@@ -40,7 +40,7 @@ async function everyPage<T>(
 }
 
 /** GitHub's account type as the contracts take it: anything but a person's account is an organisation's. */
-const accountOf = (account: { id: number; login: string; type: string }): HostAccount => ({
+export const accountOf = (account: { id: number; login: string; type: string }): HostAccount => ({
   id: account.id,
   login: account.login,
   type: account.type === "User" ? "User" : "Organization",

@@ -74,8 +74,8 @@ test("a version that failed shows it and holds the job with that reason; a tick 
   await time.advance(0);
   expect((await state()).engines.claude).toMatchObject({ state: "failed-self-test", version: "2.4.1" });
   expect(logged).toEqual([
-    "lookover-sandbox#1 opened by sasensi: Add unpaid filter and rewrite total",
-    "lookover-sandbox#2 opened as a draft by octocat: Bump the dev dependencies",
+    "sasensi/lookover-sandbox#1 opened by sasensi: Add unpaid filter and rewrite total",
+    "sasensi/lookover-sandbox#2 opened as a draft by octocat: Bump the dev dependencies",
     "self-test of claude 2.4.1: failed (wall), 0 ms",
     "Claude didn't pass Lookover's safety check",
   ]);

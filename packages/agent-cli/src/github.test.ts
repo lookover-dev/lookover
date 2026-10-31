@@ -77,6 +77,7 @@ const run = (id: number, slug: string, status = "queued", conclusion: string | n
   conclusion,
   output: { title: "Waiting for its turn", summary: "Queued.", text: null },
   app: { slug },
+  external_id: `job-${id}@1234567`,
 });
 
 describe("createAgentHost", () => {
@@ -91,6 +92,18 @@ describe("createAgentHost", () => {
       accept: "application/vnd.github+json",
       "x-github-api-version": "2022-11-28",
     });
+  });
+
+  test("the token's own account is GitHub's `GET /user`, its id and its login (ADR 0066)", async () => {
+    // GitHub's answer trimmed to what is read; spike 20 recorded the owner's: `sasensi`, 11247504.
+    const { asked, host } = github({
+      "GET https://api.github.com/user": () =>
+        json(200, { login: "sasensi", id: 11247504, type: "User", name: "Samuel" }),
+    });
+    expect(await host.account()).toEqual({ id: 11247504, login: "sasensi" });
+    expect(asked.map((a) => [a.method, a.url, a.headers.authorization])).toEqual([
+      ["GET", "https://api.github.com/user", "Bearer gho_agent"],
+    ]);
   });
 
   test("a pull request from a fork reads as one: its head in another repository, or in one deleted (ADR 0048)", async () => {
@@ -118,15 +131,15 @@ describe("createAgentHost", () => {
             run(10, "lookover-spike-sasensi", "completed", "cancelled"),
             run(20, "someone-elses-app", "completed", "success"),
             { ...run(25, "lookover-spike-sasensi", "completed", "skipped"), app: null },
-            run(15, "lookover-spike-sasensi", "completed", "skipped"),
+            { ...run(15, "lookover-spike-sasensi", "completed", "skipped"), external_id: null },
           ],
         }),
     });
     const checks = await host.checks(repo, sha, "lookover-spike-sasensi");
-    expect(checks.map((c) => [c.id, c.status, c.conclusion])).toEqual([
-      ["10", "completed", { other: "cancelled" }],
-      ["15", "completed", "skipped"],
-      ["30", "in_progress", null],
+    expect(checks.map((c) => [c.id, c.status, c.conclusion, c.externalId])).toEqual([
+      ["10", "completed", { other: "cancelled" }, "job-10@1234567"],
+      ["15", "completed", "skipped", ""],
+      ["30", "in_progress", null, "job-30@1234567"],
     ]);
     expect(checks[0]?.output).toEqual({ title: "Waiting for its turn", summary: "Queued.", text: "" });
   });
@@ -286,6 +299,34 @@ describe("createAgentHost", () => {
         replies: [],
       },
     ]);
+  });
+
+  test("given the person the App posts as, their roots holding a marker are Lookover's too; another's never (ADR 0066)", async () => {
+    const PERSON = { __typename: "User", login: "signed-in", databaseId: 11247504 };
+    const { host } = github({}, () =>
+      json(200, {
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  thread("PRRT_1", [note(101, PERSON, finding("F1")), note(102, OWNER, "Fixed.")]),
+                  thread("PRRT_2", [note(201, OWNER, finding("F9"))]),
+                  thread("PRRT_3", [note(301, APP_BOT, finding("F2"))]),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    );
+    const change = { repo, number: 7 };
+    const roots = async (person?: number) =>
+      (await host.threads(change, "lookover-spike-sasensi", person)).map((t) => t.commentId);
+    expect(await roots(11247504)).toEqual([101, 301]);
+    expect(await roots()).toEqual([301]);
+    expect(await roots(5550001)).toEqual([301]);
   });
 
   test("threads go on past 100, and so do a thread's comments", async () => {

@@ -27,6 +27,7 @@ import {
   type SettingValues,
   type Setup,
   SSE,
+  type State,
 } from "@lookover/contracts";
 import { createEngines, type SelfTestReport, type SelfTests } from "@lookover/engines";
 import { createProcessRunner } from "@lookover/process";
@@ -667,6 +668,7 @@ export function recordedStore(dir: string, past: number): { store: Store; calls:
       selfTests: recorded("selfTests", real.selfTests, calls),
       setup: recorded("setup", real.setup, calls),
       appFlows: recorded("appFlows", real.appFlows, calls),
+      installAsks: recorded("installAsks", real.installAsks, calls),
       close: () => real.close(),
     },
   };
@@ -767,6 +769,22 @@ export async function snapshot(service: RunningService, cookie: string) {
   return res.json();
 }
 
+/**
+ * The snapshot `read` gives, once `holds` holds of it, read every few milliseconds: what is kept on disk before it shows
+ * (a sign-in) is waited for, not raced.
+ */
+export async function eventually(
+  read: () => Promise<State>,
+  holds: (state: State) => boolean,
+): Promise<State> {
+  for (let i = 0; i < 300; i++) {
+    const state = await read();
+    if (holds(state)) return state;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("the snapshot never came to hold");
+}
+
 export function post(service: RunningService, cookie: string, body: unknown, origin = service.origin) {
   return fetch(api(service, "/commands"), {
     method: "POST",
@@ -847,7 +865,7 @@ export async function until(stream: AsyncGenerator<SseMessage>, type: Event["typ
 }
 
 export const expectedChange1: Change = {
-  id: changeId("lookover-sandbox#1"),
+  id: changeId("sasensi/lookover-sandbox#1"),
   repoId: repositoryId("sasensi/lookover-sandbox"),
   number: 1,
   title: "Add unpaid filter and rewrite total",
@@ -889,7 +907,7 @@ export function withRules(sandboxDir: string, changes: FakeChange[]): FakeChange
   return changes.map((c) => (c.number === 1 ? { ...c, head: { ...c.head, sha }, diff } : c));
 }
 
-export const PLANTED = changeId("lookover-sandbox#1");
+export const PLANTED = changeId("sasensi/lookover-sandbox#1");
 /** The fix commit `pushSandboxFix` pushes on pull request #1 (fixed dates: the same sha everywhere). */
 export const FIXED = commitSha("4700cffcc191fa0290cc7d91340f924a74c7f803");
 

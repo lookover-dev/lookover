@@ -67,6 +67,11 @@ const APP: ConnectionApp = {
   person: { id: 7, login: "sam" },
 };
 
+/** The own App's one account (ADR 0066): its installation `id`, on the App's account. */
+const installedOn = (app: ConnectionApp, id: number): Connection["accounts"] => [
+  { account: { ...app.account }, installationId: id, cause: null, owner: null },
+];
+
 function repo(name: string): Repository {
   return { id: repositoryId(`sam/${name}`), owner: "sam", name, enabled: true, settings: DEFAULTS };
 }
@@ -78,7 +83,11 @@ function connection(patch: Partial<Connection> = {}): Connection {
     cause: null,
     bot: null,
     app: null,
-    installationId: null,
+    accounts: [],
+    unreached: [],
+    way: null,
+    signIn: null,
+    person: null,
     web: GITHUB_WEB,
     since: NOW,
     limitUntil: null,
@@ -108,7 +117,7 @@ function onGitHub(
     connection: connection({
       ...(made ? { app: APP, bot: `${APP.slug}[bot]` } : {}),
       ...(github === "done" || github === "nothing-granted"
-        ? { installationId: 77, state: "connected" as const }
+        ? { accounts: installedOn(APP, 77), state: "connected" as const }
         : {}),
       ...patch.connection,
     }),
@@ -249,7 +258,7 @@ test("installed with nothing granted, the step says so and opens the installatio
     labels: ACCESS_LABELS,
   });
   // No installation known yet: the install page, where GitHub lists it.
-  const unknown = githubStep(onGitHub("nothing-granted", { connection: { installationId: null } }));
+  const unknown = githubStep(onGitHub("nothing-granted", { connection: { accounts: [] } }));
   expect(unknown.access.action?.href).toBe("https://github.com/apps/lookover-q7x2ka/installations/new");
 });
 
@@ -440,7 +449,7 @@ test("Settings names the App and whose it is, and how a new key is given", () =>
 // ---- links ----
 
 test("Add a repository opens the installation's settings, or the install page before there is one", () => {
-  expect(addRepositoryLink(connection({ app: APP, installationId: 77 }))).toBe(
+  expect(addRepositoryLink(connection({ app: APP, accounts: installedOn(APP, 77) }))).toBe(
     "https://github.com/settings/installations/77",
   );
   expect(addRepositoryLink(connection({ app: APP }))).toBe(
@@ -448,7 +457,7 @@ test("Add a repository opens the installation's settings, or the install page be
   );
   expect(addRepositoryLink(connection())).toBeNull();
   const acme = { ...APP, account: { id: 900, login: "acme", type: "Organization" as const } };
-  expect(addRepositoryLink(connection({ app: acme, installationId: 77 }))).toBe(
+  expect(addRepositoryLink(connection({ app: acme, accounts: installedOn(acme, 77) }))).toBe(
     "https://github.com/organizations/acme/settings/installations/77",
   );
 });
@@ -464,28 +473,71 @@ test("Repositories' foot names the bot and the account it is on (ADR 0059)", () 
   expect(repositoriesFoot(connection())).toBe("Connected to GitHub as nobody.");
 });
 
+test("Repositories' foot on the shared App names the person signed in and every account reached (ADR 0066)", () => {
+  const account = (id: number, login: string, type: "User" | "Organization") => ({
+    account: { id, login, type },
+    installationId: id,
+    cause: null,
+    owner: null,
+  });
+  const shared = (accounts: ReturnType<typeof account>[]) =>
+    connection({
+      state: "connected",
+      way: "shared",
+      bot: null,
+      app: null,
+      person: { id: 7, login: "sam" },
+      accounts,
+    });
+  expect(
+    repositoriesFoot(shared([account(7, "sam", "User"), account(338, "ledger-dev", "Organization")])),
+  ).toBe("Signed in to GitHub as sam, on sam and ledger-dev.");
+  expect(
+    repositoriesFoot(
+      shared([
+        account(7, "sam", "User"),
+        account(338, "ledger-dev", "Organization"),
+        account(9, "acme", "Organization"),
+      ]),
+    ),
+  ).toBe("Signed in to GitHub as sam, on sam, ledger-dev and acme.");
+  expect(repositoriesFoot(shared([]))).toBe("Signed in to GitHub as sam.");
+  // Signed in only while GitHub takes the sign-in: otherwise the foot says what the status menu says.
+  const out = { ...shared([account(7, "sam", "User")]), state: "disconnected" as const };
+  expect(repositoriesFoot({ ...out, cause: { kind: "signed-out" } })).toBe(
+    "Not connected to GitHub: signed out.",
+  );
+  expect(repositoriesFoot({ ...out, cause: { kind: "unreachable" } })).toBe(
+    "Not connected to GitHub: unreachable.",
+  );
+  expect(repositoriesFoot({ ...out, state: "not-connected" })).toBe("Not connected to GitHub.");
+});
+
 test("a departed repository is said in one sentence, labelled Left, and Add it back opens the installation's settings (ADR 0059)", () => {
   const text =
     "left the App's installation and is no longer reviewed: moved, deleted, or taken off its access.";
-  expect(departedNotice(connection({ app: APP, installationId: 77 }))).toEqual({
+  const repo = { owner: "sasensi" };
+  expect(departedNotice(connection({ app: APP, accounts: installedOn(APP, 77) }), repo)).toEqual({
     label: "Left",
     text,
     addBack: "https://github.com/settings/installations/77",
   });
   const acme = { ...APP, account: { id: 900, login: "acme", type: "Organization" as const } };
-  expect(departedNotice(connection({ app: acme, installationId: 78 }))).toEqual({
+  expect(departedNotice(connection({ app: acme, accounts: installedOn(acme, 78) }), repo)).toEqual({
     label: "Left",
     text,
     addBack: "https://github.com/organizations/acme/settings/installations/78",
   });
   // No App kept any more: nothing to add it back to.
-  expect(departedNotice(connection()).addBack).toBeNull();
+  expect(departedNotice(connection(), repo).addBack).toBeNull();
 });
 
 test("Open on GitHub opens the real pull request in live mode, and the simulated page in demo mode", () => {
   const change = { repoId: repositoryId("sam/site"), number: 12 };
   expect(pullRequestLink(connection(), change)).toEqual({ href: "https://github.com/sam/site/pull/12" });
-  expect(pullRequestLink(connection({ web: DEMO_API.github }), change)).toEqual({ path: "/github/site/12" });
+  expect(pullRequestLink(connection({ web: DEMO_API.github }), change)).toEqual({
+    path: "/github/sam/site/12",
+  });
 });
 
 test("the AI step waits for Continue (ADR 0058): both ready says so and offers Continue; one of two ready says which and offers it only; none, nothing", () => {

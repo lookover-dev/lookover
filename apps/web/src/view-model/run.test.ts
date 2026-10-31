@@ -34,7 +34,7 @@ function running(
   steps: RunStep[] = [],
 ): Review {
   return {
-    ...emptyReview(changeId("app#1"), NOW),
+    ...emptyReview(changeId("sam/app#1"), NOW),
     preview,
     run: {
       id: runId("run-1"),
@@ -73,7 +73,7 @@ function done(steps: RunStep[]): Review {
     steps: steps.map((s) => ({ step: s, ms: 1_000 })),
     sessions: [],
   };
-  return { ...emptyReview(changeId("app#1"), NOW), rounds: [round] };
+  return { ...emptyReview(changeId("sam/app#1"), NOW), rounds: [round] };
 }
 
 test("each step is said three ways: as it runs in a line, as it runs in the list, and once done", () => {

@@ -54,6 +54,10 @@ const command = z.discriminatedUnion("type", [
     appId: z.number().int().positive(),
     key: z.string().min(1),
   }),
+  z.object({ type: z.literal("connection.signIn") }),
+  z.object({ type: z.literal("connection.cancelSignIn") }),
+  // The account is taken only once it is one `Connection.unreached` names (ADR 0067): any login parses.
+  z.object({ type: z.literal("connection.askToInstall"), account: z.string().min(1) }),
   z.object({ type: z.literal("connection.reconnect") }),
   z.object({
     type: z.literal("setup.goto"),
@@ -105,6 +109,12 @@ const demoInject = z.object({
     "codex-failed-self-test",
     "codex-too-old",
     "engines-missing",
+    "sign-in-entered",
+    "sign-in-denied",
+    "github-signed-out",
+    "sso-asked",
+    "organisation-suspended",
+    "owner-installs",
     "connection-lost",
     "app-uninstalled",
     "app-suspended",

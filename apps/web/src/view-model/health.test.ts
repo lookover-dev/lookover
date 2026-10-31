@@ -62,6 +62,9 @@ test("GitHub and the service in a few words", () => {
   expect(line({ bot: "x[bot]", app: app({ id: 7, login: "sam", type: "User" }) })).toBe(
     "connected as x[bot], on your GitHub account",
   );
+  // Signed in to the shared App (ADR 0066), no bot: connected as the person, and never as nobody.
+  expect(line({ bot: null, person: { id: 7, login: "sam" } })).toBe("connected as sam");
+  expect(line({ bot: null })).toBe("connected");
   expect(serviceStatus({ startAtLogin: true, startsAtLogin: true, loginItem: "os" })).toEqual({
     ok: true,
     text: "running, starts at login",
@@ -85,6 +88,8 @@ test("GitHub disconnected says its cause in a few words (ADR 0053)", () => {
   expect(text({ kind: "key-refused", why: "revoked" })).toBe("key refused");
   expect(text({ kind: "key-lost" })).toBe("key lost");
   expect(text({ kind: "not-a-member", organisation: "acme" })).toBe("membership lost");
+  expect(text({ kind: "signed-out" })).toBe("signed out");
+  expect(text({ kind: "sso", organisation: "acme", url: null })).toBe("SSO needed");
 });
 
 test("the service's check says whether Lookover starts at login for real, warning when it isn't as chosen (ADR 0054)", () => {

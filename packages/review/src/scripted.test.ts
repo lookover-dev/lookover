@@ -23,9 +23,11 @@ const job: ReviewJob = {
 };
 
 const retrieval = new ScriptedRetrieval({ root: "worktrees" });
+/** The change the job reviews: #1 of the sandbox. */
+const PR1 = { repo: { owner: "sasensi", name: "lookover-sandbox" }, number: 1 };
 
 const prepared: Prepared = {
-  cwd: retrieval.worktreeOf(1, SHA),
+  cwd: retrieval.worktreeOf(PR1, SHA),
   diff: [
     "diff --git a/src/total.ts b/src/total.ts",
     "--- a/src/total.ts",
@@ -259,7 +261,7 @@ test("the confirm pass on those candidates reaches the confirm script of the sam
 
 test("a commit the script doesn't know fails the find pass with the fake's own words, never a default round", async () => {
   const engines = scripted();
-  const other = { ...prepared, cwd: retrieval.worktreeOf(1, commitSha("9f0e1d2")) };
+  const other = { ...prepared, cwd: retrieval.worktreeOf(PR1, commitSha("9f0e1d2")) };
   const result = await createReview({ engines }).run(
     { ...job, sha: commitSha("9f0e1d2") },
     other,

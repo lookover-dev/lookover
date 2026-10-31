@@ -1638,6 +1638,11 @@ dialog.dlg::backdrop {
   background: var(--code-bg);
   color: var(--ink);
 }
+/* inline code read as one where it is typed elsewhere (a device code, the App's slug), in the band, the status menu
+   and the setup's lines: never broken at its hyphen */
+.code-whole code {
+  white-space: nowrap;
+}
 .session code {
   font-size: 0.85em;
   font-weight: 500;
@@ -1736,6 +1741,21 @@ a.btn {
 .substep-below {
   grid-column: 2 / -1;
 }
+/* on a phone a sub-step's action goes under its title and detail, its place still kept: the text keeps the width;
+   what is below takes the whole width, from under the square */
+@media (max-width: 640px) {
+  .substep {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .substep-below {
+    grid-column: 1 / -1;
+  }
+  .substep > :nth-child(3):not(.substep-below) {
+    grid-column: 2;
+    justify-self: start;
+    max-width: 100%;
+  }
+}
 .app-place {
   display: grid;
   gap: var(--s-2);
@@ -1761,8 +1781,184 @@ a.btn {
   align-items: center;
   margin-top: var(--s-1);
 }
-.app-place-line code {
+/* Sign in with GitHub (design-system.md "Sign in with GitHub", ADR 0066): the code in the row's detail as inline
+   code, in the mono face at its line's size, a little apart and never broken (`.code-whole`), so it reads as typed;
+   the row's two actions side by side, their place as wide as both whether a code waits or not */
+.sign-in-detail code {
+  font-family: var(--mono);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.code-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+/* The accounts list (design-system.md "Accounts list", ADR 0067): one row per account, its login over its detail,
+   then its actions: the fix's place, as wide as every label it can show across the rows, and under it Ask again's on
+   the rows that can wait for an owner, so a row asked, reached or suspended moves nothing; a row's detail held at the
+   tallest it can show (`HeldDetail`) */
+.accounts-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--s-2);
+  row-gap: var(--s-3);
+  align-items: start;
+}
+.account-row {
+  display: contents;
+}
+.account-name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.account-name b {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.account-row[data-state="needs-you"] .account-name .t-small {
+  color: var(--acc-text);
+}
+.account-actions {
+  display: grid;
+  justify-items: end;
+  row-gap: var(--s-1);
+}
+/* an action's place: as wide as the hidden floor labels in the same cell and no wider, whatever the rows; the link
+   shown adds no width of its own (inline-size containment), so a label naming a long login is cut, never pushing */
+.account-action {
+  display: inline-grid;
+}
+.account-action > * {
+  grid-area: 1 / 1;
+  display: flex;
+  min-width: 0;
+}
+.account-action-floor {
+  visibility: hidden;
+}
+.account-action-link {
+  contain: inline-size;
+}
+.account-action > * > .btn {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+}
+.account-action-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* on a phone a row stacks: the login over its detail across the width, then its actions beneath, the fix's place on
+   the left, held on every row so nothing shifts, and Ask again's beside it on the rows that can wait for an owner; the
+   fix's place narrows to the width left when its widest floor would not fit, its label cut */
+@media (max-width: 640px) {
+  .accounts-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .account-row {
+    display: grid;
+    row-gap: var(--s-2);
+  }
+  .account-actions {
+    grid-template-columns: minmax(0, max-content) auto;
+    justify-content: start;
+    justify-items: stretch;
+    column-gap: var(--s-2);
+  }
+  .account-actions > .account-action {
+    min-width: 0;
+  }
+  .account-row .account-action-floor {
+    overflow: hidden;
+  }
+}
+/* Repositories' group heads (design-system.md, ADR 0067): the account in the table's header style, the group's header
+   cell and nothing else in it, then its cause's line held at every line a cause can say, then its fix's place, as wide
+   as every fix the account can have, so a cause coming or going moves nothing */
+.repos-group th {
+  padding-top: var(--s-5);
+  overflow-wrap: anywhere;
+}
+.tbl.repos .repos-group td {
+  height: auto;
+  padding-top: var(--s-5);
+}
+.tbl .repos-group:hover td {
+  background: none;
+}
+.repos-group-fix {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--s-3);
+  align-items: center;
+}
+.repos-group-fix[data-state="needs-you"] .repos-group-cause {
+  color: var(--acc-text);
+}
+.repos-group-narrow {
+  display: none;
+}
+/* on a phone the cause and the fix's place go in a row of their own under the account, the fix under the cause, kept
+   there whether a cause holds or not */
+@media (max-width: 640px) {
+  .repos-group-wide {
+    display: none;
+  }
+  .repos-group-narrow {
+    display: table-row;
+  }
+  .repos-group:has(+ .repos-group-narrow) th {
+    border-bottom: 0;
+  }
+  .tbl.repos .repos-group-narrow td {
+    padding-top: 0;
+  }
+  .repos-group-fix {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--s-2);
+  }
+  .repos-group-fix .account-action {
+    justify-self: start;
+  }
+}
+/* Settings › GitHub's sign-in row, a settings row's shape: who is signed in, or the code, held at the tallest it can
+   show; Sign in again on the right of the place the code's two actions keep */
+.signed-in-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--s-4);
+  align-items: center;
+  padding: 14px 0;
+}
+.signed-in-row b {
+  display: block;
+  font-weight: 600;
+}
+.signed-in-row .t-small {
+  max-width: 52ch;
+}
+.sign-in-acts .same-width-slot {
+  justify-content: flex-end;
+}
+.sign-in-acts .same-width-slot > .btn {
+  flex: none;
+}
+/* on a phone the actions' place goes under who is signed in, as the accounts list's rows do */
+@media (max-width: 640px) {
+  .signed-in-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-3);
+  }
+  .sign-in-acts .same-width-slot {
+    justify-content: flex-start;
+  }
+}
+.setcard-accounts {
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--line);
 }
 /* a value to copy: the value in code, then the copy icon button */
 .copyline {

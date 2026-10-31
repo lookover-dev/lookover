@@ -119,8 +119,16 @@ const NO_READ_ORG: Record<string, Answer> = {
     code: 1,
   },
 };
+/** Orbit behind SAML the token isn't authorised for: its membership refused, the list left without it, saying so. */
 const SSO: Record<string, Answer> = {
   ...SIGNED_IN,
+  [LIST]: {
+    out: http(
+      "200 OK",
+      { ...SCOPES, ...ACCEPTS, "X-Github-Sso": `partial-results; organizations=${orbit.id}` },
+      [membershipOf(harbor, "member"), membershipOf(lookoverDev, "admin")],
+    ),
+  },
   "user/memberships/orgs/orbit": {
     out: http(
       "403 Forbidden",
@@ -285,7 +293,7 @@ describe("the real adapter", () => {
         ),
       },
     };
-    expect(await ghOn(partial).adminOrganisations()).toMatchObject({ kind: "unanswered", why: "sso" });
+    expect(await ghOn(partial).memberships()).toMatchObject({ kind: "unanswered", why: "sso" });
   });
 
   test("a list longer than a page: every page read, by the Link GitHub gives", async () => {
@@ -301,9 +309,14 @@ describe("the real adapter", () => {
       },
       [`${LIST}&page=3`]: { out: http("200 OK", SCOPES, [membershipOf(orbit, "admin")]) },
     };
-    expect(await ghOn(paged).adminOrganisations()).toEqual({
+    expect(await ghOn(paged).memberships()).toEqual({
       kind: "listed",
-      organisations: [lookoverDev, orbit],
+      person: sam,
+      organisations: [
+        { organisation: lookoverDev, role: "owner" },
+        { organisation: harbor, role: "member" },
+        { organisation: orbit, role: "owner" },
+      ],
     });
   });
 
@@ -318,7 +331,7 @@ describe("the real adapter", () => {
         [membershipOf(lookoverDev, "admin")],
       ),
     });
-    expect(await ghOn(endless).adminOrganisations()).toMatchObject({ kind: "unanswered", why: "failed" });
+    expect(await ghOn(endless).memberships()).toMatchObject({ kind: "unanswered", why: "failed" });
   });
 
   test("an answer of another shape can't answer, and says so", async () => {

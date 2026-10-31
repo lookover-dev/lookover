@@ -50,7 +50,7 @@ async function loaded(scenario: string): Promise<State> {
 }
 
 const MIN = 60_000;
-const id = (n: number) => changeId(`lookover-sandbox#${n}`);
+const id = (n: number) => changeId(`sasensi/lookover-sandbox#${n}`);
 const SANDBOX = repositoryId("sasensi/lookover-sandbox");
 
 test("S8, pause and resume: two pull requests arrive while paused and wait; resumed, they run one after the other, each on both AIs; then all checks run", async () => {

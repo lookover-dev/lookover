@@ -2,16 +2,17 @@
 // load ends, Claude forty seconds into finding. Twenty seconds on, Claude's session signs out: the run answers
 // `auth_required` at its end and the job waits for Claude, the band and the pill saying so. "Sign in" opens the
 // login (scripted: signed in five seconds on), the watch sees Claude ready and the review starts again, this time
-// to its end: Claude finds one, Codex double-checks it, round 1 is posted. What Claude does as it reads (ADR 0055) is
+// to its end: Claude finds one, Codex double-checks it, round 1 is posted (#151 is also S16's on the owner's account,
+// so its data is exported). What Claude does as it reads (ADR 0055) is
 // written by hand: the files and searches of a small exporter's review.
 import { commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { CONFIRM_MS, FIND_MS, LEDGER_API, MIN, OWNER, unified } from "./ledger-api.ts";
 
 const ESCAPED = "  const cell = (value: string) => '\"' + value.replaceAll('\"', '\"\"') + '\"';";
 const PLAIN = "  const cell = (value: string) => value;";
 
-const CSV_EXPORT: ScenarioChange = {
+export const CSV_EXPORT: ScenarioChange = {
   number: 151,
   title: "Export invoices as CSV",
   branch: "invoices-csv",
@@ -84,6 +85,9 @@ const CSV_EXPORT: ScenarioChange = {
   ],
 };
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(LEDGER_API.repo);
+
 export const S3: Scenario = {
   id: "S3",
   title: "An AI signs out mid-run",
@@ -98,7 +102,7 @@ export const S3: Scenario = {
   world: LEDGER_API,
   changes: [CSV_EXPORT],
   script: [
-    { at: MIN, move: { kind: "open", change: 151 } },
+    { at: MIN, move: { kind: "open", change: pr(151) } },
     { at: 2 * MIN, move: { kind: "sign-out", engine: "claude" } },
   ],
   seed: MIN + 40_000,

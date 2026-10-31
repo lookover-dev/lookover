@@ -6,13 +6,13 @@
 // skipped as not the owner's, as any other author's is (ADR 0016). An App an admin made before, lookover-ledger-dev
 // (id 1, installed on both), is on GitHub's fake too, for "Use an existing App".
 import { commitSha } from "@lookover/contracts";
-import type { Account, Scenario, ScenarioChange } from "../scenario.ts";
-import { LEDGER_API, MIN, MIRA, unified } from "./ledger-api.ts";
+import { type Account, on, type Scenario, type ScenarioChange } from "../scenario.ts";
+import { LEDGER_API, LEDGER_DEV, MIN, MIRA, of, unified } from "./ledger-api.ts";
 import { RATE_LIMITING } from "./s2-happy-loop.ts";
 
-/** The organisation the App lives on: a team's, named as the owner's own is. */
-const LEDGER_DEV: Account = { id: 338, login: "ledger-dev" };
 const TOMAS: Account = { id: 9, login: "tomas" };
+/** The organisation's ledger-api, where every pull request of the story is: the App lives on ledger-dev. */
+const LEDGER_DEV_API_REPO = of(LEDGER_DEV, "ledger-api");
 
 const CURRENCY: ScenarioChange = {
   number: 151,
@@ -60,6 +60,9 @@ const TIMEOUTS: ScenarioChange = {
   ],
 };
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(LEDGER_DEV_API_REPO);
+
 export const S15: Scenario = {
   id: "S15",
   title: "An organisation's App",
@@ -73,7 +76,7 @@ export const S15: Scenario = {
   path: "/setup",
   world: {
     ...LEDGER_API,
-    repo: { owner: LEDGER_DEV.login, name: "ledger-api" },
+    repo: LEDGER_DEV_API_REPO,
     repositories: [{ owner: LEDGER_DEV.login, name: "ledger-web" }],
     bot: { id: 2, login: "lookover-ledger-dev[bot]" },
     organisation: { account: LEDGER_DEV, admin: true },
@@ -89,9 +92,9 @@ export const S15: Scenario = {
   },
   changes: [RATE_LIMITING, CURRENCY, TIMEOUTS],
   script: [
-    { at: MIN, move: { kind: "open", change: 148 } },
-    { at: 10 * MIN, move: { kind: "open", change: 151 } },
-    { at: 12 * MIN, move: { kind: "open", change: 153 } },
+    { at: MIN, move: { kind: "open", change: pr(148) } },
+    { at: 10 * MIN, move: { kind: "open", change: pr(151) } },
+    { at: 12 * MIN, move: { kind: "open", change: pr(153) } },
   ],
   seed: 2 * MIN,
 };

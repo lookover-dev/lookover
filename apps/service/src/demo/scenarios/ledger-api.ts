@@ -4,7 +4,7 @@
 // as git prints it; every diff of these scenarios is hand-written fixture data, nothing here is a recording. S8 to
 // S13 play on this world moved to another repository (`SANDBOX`, `sandbox.ts`); S8 to S14 share its people,
 // `MIN`, the runs' durations and the diff helpers.
-import { commitSha } from "@lookover/contracts";
+import { commitSha, type RepositoryRef } from "@lookover/contracts";
 import type { Account, World } from "../scenario.ts";
 
 export const MIN = 60_000;
@@ -18,6 +18,15 @@ export const SHORT_FIND_MS = 75_000;
 export const OWNER: Account = { id: 1, login: "sasensi" };
 export const DEPENDABOT: Account = { id: 49699333, login: "dependabot[bot]" };
 export const MIRA: Account = { id: 7, login: "mira" };
+/** The organisation the owner works in (S15, S16, S17). */
+export const LEDGER_DEV: Account = { id: 338, login: "ledger-dev" };
+/** The owner's organisation without the shared App: theirs to install on (ADR 0067). */
+export const LEDGER_LABS: Account = { id: 340, login: "ledger-labs" };
+/** An organisation without the shared App where the owner is a member: they ask, and an owner of it installs it. */
+export const LEDGER_HQ: Account = { id: 341, login: "ledger-hq" };
+
+/** `account`'s repository `name`. */
+export const of = (account: Account, name: string): RepositoryRef => ({ owner: account.login, name });
 
 export const LEDGER_API: World = {
   repo: { owner: "sasensi", name: "ledger-api" },

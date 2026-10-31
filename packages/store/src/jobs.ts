@@ -289,7 +289,7 @@ export interface Jobs {
   pending(changeId: ChangeId): boolean;
   /**
    * Whether a change whose id starts with `changes` has a job waiting or running (the service names a repository's
-   * changes `<name>#<n>`): the repository is asked, and polled at the hot cadence (ADR 0043).
+   * changes `<owner>/<name>#<n>`): the repository is asked, and polled at the hot cadence (ADR 0043).
    */
   pendingIn(changes: string): boolean;
   /** The job's check as kept: the one it has, and whether it is completed. */

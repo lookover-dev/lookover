@@ -17,7 +17,7 @@ import {
 } from "@lookover/contracts";
 import { cancelSentence, type DisplayStatus, displayStatus, failureSentence, failureText } from "./status.ts";
 
-const ID = changeId("app#1");
+const ID = changeId("sam/app#1");
 const SHA = commitSha("a1f9c2e");
 const ROUND = {
   n: 1,

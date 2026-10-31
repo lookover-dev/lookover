@@ -3,15 +3,17 @@
 // token GitHub no longer accepts (401: revoked, say, or its installation gone) is bought again once and the call made
 // again, so the purchase's refusal says why; a permission refusal (403) is `unauthorized` too, the installation's
 // (`uninstalled`, `suspended`), and drops the token as well, on purpose: the next call signs in again, which costs
-// two requests and nothing else. The bot's numeric user id is looked up
-// once, from the App's slug. An installation id whose token GitHub refuses as not found (the App uninstalled, then
-// perhaps installed again under a new id) is forgotten, so the next call looks it up again (ADR 0053).
+// two requests and nothing else. Who posts is the App's bot (the `Session` it is, `session.ts`), its numeric user
+// id looked up once, from the App's slug. An installation id whose token GitHub refuses as not found (the App
+// uninstalled, then perhaps installed again under a new id) is forgotten, so the next call looks it up again (ADR
+// 0053).
 import type { Clock, RepositoryRef } from "@lookover/contracts";
 import { HostError } from "@lookover/contracts";
 import { type GitHubApi, GitHubRefusal } from "./api.ts";
 import type { AppCredentials } from "./github.ts";
 import { appCause, appJwt, jwtCause, tokenCause } from "./jwt.ts";
 import { accessToken, app, botUser, installation, parse } from "./schemas.ts";
+import type { Poster, Session, TokenScope } from "./session.ts";
 
 /** A token is renewed this long before GitHub would expire it. */
 const RENEW_MARGIN_MS = 5 * 60_000;
@@ -20,9 +22,6 @@ interface Token {
   value: string;
   expiresAt: number;
 }
-
-/** What a token may do: the ports' own, or a fetch's (read the contents, nothing more). */
-export type TokenScope = "ports" | "fetch";
 
 const keyOf = (repo: RepositoryRef) => `${repo.owner}/${repo.name}`;
 const tokenKey = (repo: RepositoryRef, scope: TokenScope) => `${keyOf(repo)}:${scope}`;
@@ -45,7 +44,7 @@ const PERMISSIONS: Record<TokenScope, Record<string, string> | undefined> = {
   fetch: { contents: "read", metadata: "read" },
 };
 
-export class AppSession {
+export class AppSession implements Session {
   private readonly api: GitHubApi;
   private readonly app: AppCredentials;
   private readonly clock: Clock;
@@ -100,9 +99,9 @@ export class AppSession {
     return this.app.id;
   }
 
-  /** The bot's numeric user id: the identity of its posts (ADR 0006). */
-  async botId(repo: RepositoryRef): Promise<number> {
-    return (await this.botUser(repo)).id;
+  /** Who posts: the App's bot, told by its numeric user id (ADR 0006). */
+  async poster(repo: RepositoryRef): Promise<Poster> {
+    return { ...(await this.botUser(repo)), bot: true };
   }
 
   /** The bot user, looked up once from the App's slug: `<slug>[bot]`. */

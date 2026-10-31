@@ -16,6 +16,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { MORE_SETTINGS } from "../shell.tsx";
 import { useApp, useAppState, useSend, useTheme } from "../store.tsx";
 import {
+  Button,
   Card,
   Check,
   Code,
@@ -34,17 +35,17 @@ import {
   Switch,
 } from "../ui/basics.tsx";
 import { Select, Tip } from "../ui/layers.tsx";
+import { type RepositoryGroupHead, repositoryGroups } from "../view-model/accounts.ts";
 import { AGENT_INTRO } from "../view-model/coding-agent.ts";
 import { agoSentence, plural } from "../view-model/format.ts";
 import { followLogs, logLinesShown } from "../view-model/logs.ts";
 import {
   addRepositoryLink,
-  appText,
   departedNotice,
   NEW_KEY_TEXT,
   repositoriesFoot,
 } from "../view-model/onboarding.ts";
-import { differences, lastReviewAt, openChangeCount } from "../view-model/select.ts";
+import { differences, lastReviewAt, openChangeCount, repositoryLabel } from "../view-model/select.ts";
 import {
   pickOf,
   ruleSourceText,
@@ -55,10 +56,11 @@ import {
   settingValueText,
   WHEN_TEXT,
 } from "../view-model/settings.ts";
+import { GITHUB_SETTINGS_TEXT, type GitHubSettingsView, githubSettings } from "../view-model/sign-in.ts";
 import { startAtLoginHelp } from "../view-model/start-at-login.ts";
 import { AgentRows } from "./coding-agent.tsx";
-import { Page, Sentence, useSaving } from "./common.tsx";
-import { AgentAppLine, UseAppForm } from "./github-app.tsx";
+import { HeldDetail, Page, Sentence, useSaving } from "./common.tsx";
+import { AccountAction, AccountsList, AgentAppLine, CodeActions, UseAppForm } from "./github-app.tsx";
 
 /** The control for one setting, used for your defaults and for a repository's own value. */
 function SettingControl({
@@ -108,6 +110,7 @@ export function Settings() {
     if (change) save(change);
   };
   const row = (id: string) => ({ id, "data-target": hash === `#${id}` || undefined });
+  const github = githubSettings(state);
   return (
     <Page screen="settings">
       <Sentence
@@ -160,32 +163,38 @@ export function Settings() {
         </div>
       </Card>
       <Group title="GitHub">
-        <Card className="setcard">
-          <div {...row("github")}>
-            <SetRow
-              title="Your App"
-              help={appText(state.connection)}
-              extra={<AgentAppLine connection={state.connection} />}
-            >
-              {state.connection.app ? (
-                <LinkButton
-                  size="sm"
-                  href={githubLinks.app(
-                    state.connection.web,
-                    state.connection.app.account,
-                    state.connection.app.slug,
-                  )}
+        {github.way === "shared" ? (
+          <SharedGitHub view={github} anchor={row("github")} />
+        ) : (
+          <>
+            <Card className="setcard">
+              <div {...row("github")}>
+                <SetRow
+                  title="Your App"
+                  help={github.text}
+                  extra={<AgentAppLine connection={state.connection} />}
                 >
-                  Open on GitHub
-                </LinkButton>
-              ) : null}
-            </SetRow>
-          </div>
-        </Card>
-        <Disclosure summary="Use an existing App">
-          <p>{NEW_KEY_TEXT}</p>
-          <UseAppForm appId={state.connection.app?.id ?? null} />
-        </Disclosure>
+                  {state.connection.app ? (
+                    <LinkButton
+                      size="sm"
+                      href={githubLinks.app(
+                        state.connection.web,
+                        state.connection.app.account,
+                        state.connection.app.slug,
+                      )}
+                    >
+                      Open on GitHub
+                    </LinkButton>
+                  ) : null}
+                </SetRow>
+              </div>
+            </Card>
+            <Disclosure summary="Use an existing App">
+              <p>{NEW_KEY_TEXT}</p>
+              <UseAppForm appId={state.connection.app?.id ?? null} />
+            </Disclosure>
+          </>
+        )}
       </Group>
       <Group title="Your coding agent">
         <div {...row("agent")}>
@@ -208,6 +217,57 @@ export function Settings() {
         </div>
       </Group>
     </Page>
+  );
+}
+
+/**
+ * Settings › GitHub on the shared App (ADR 0067): who is signed in, with Sign in again, and the code it gives in place,
+ * also while connected (Cancel keeps the sign-in); the accounts list, setup's own; Use your own App, which replaces the
+ * sign-in. `anchor`, the row Settings' links point at.
+ */
+function SharedGitHub({
+  view,
+  anchor,
+}: {
+  view: Extract<GitHubSettingsView, { way: "shared" }>;
+  anchor: { id: string; "data-target": true | undefined };
+}) {
+  const send = useSend();
+  const T = GITHUB_SETTINGS_TEXT;
+  return (
+    <>
+      <Card className="setcard">
+        {/* Setup's sign-in row, not a SetRow: its detail and actions nest spans a SetRow would restyle. */}
+        <div {...anchor} className="signed-in-row">
+          <div>
+            <b>{T.title}</b>
+            <div className="t-small sign-in-detail code-whole">
+              <HeldDetail shown={view.signIn.text} details={view.signIn.held} />
+            </div>
+          </div>
+          <div className="sign-in-acts">
+            <CodeActions
+              code={view.signIn.code}
+              onCancel={() => send({ type: "connection.cancelSignIn" })}
+              idle={
+                <Button size="sm" onClick={() => send({ type: "connection.signIn" })}>
+                  {T.again}
+                </Button>
+              }
+            />
+          </div>
+        </div>
+        {view.list.rows.length > 0 ? (
+          <div className="setcard-accounts">
+            <AccountsList list={view.list} />
+          </div>
+        ) : null}
+      </Card>
+      <Disclosure summary={T.own}>
+        <p>{T.ownBody}</p>
+        <UseAppForm appId={null} />
+      </Disclosure>
+    </>
   );
 }
 
@@ -353,51 +413,94 @@ export function Repositories() {
           <thead>
             <tr>
               <th>Repository</th>
-              <th>Pull requests</th>
+              {/* On a phone the column keeps no width and its text isn't displayed (app.css). */}
+              <th className="repos-prs">
+                <span>Pull requests</span>
+              </th>
               <th>Reviewing</th>
             </tr>
           </thead>
-          <tbody>
-            {state.repos.map((r) => {
-              const n = openChangeCount(state, r.id);
-              const last = lastReviewAt(state, r.id);
-              const d = differences(r).length;
-              return (
-                <tr key={r.id} onClick={() => navigate(`/repositories/${r.name}`)} className="clickable">
-                  <td>
-                    <Link to={`/repositories/${r.name}`} onClick={(e) => e.stopPropagation()}>
-                      <b>{r.name}</b>
-                    </Link>
-                    {/* Quiet on purpose: differing from the defaults is the exception. */}
-                    {d > 0 ? <div className="t-small">{plural(d, "setting")} of its own</div> : null}
-                  </td>
-                  <td>
-                    {r.enabled ? (
-                      <>
-                        {n === 0 ? "none open" : `${n} open`}
-                        {last ? (
-                          <span className="t-small"> · last review {agoSentence(state.now, last)}</span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <span className="t-small">not reviewed</span>
-                    )}
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <Switch
-                      checked={r.enabled}
-                      label={`Review ${r.name}`}
-                      onChange={(enabled) => send({ type: "repo.setEnabled", repoId: r.id, enabled })}
-                    />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
+          {repositoryGroups(state).map((group) => (
+            <tbody key={group.key}>
+              {group.head === null ? null : <GroupHead head={group.head} />}
+              {group.repos.map((r) => {
+                const n = openChangeCount(state, r.id);
+                const last = lastReviewAt(state, r.id);
+                const d = differences(r).length;
+                return (
+                  <tr
+                    key={r.id}
+                    onClick={() => navigate(`/repositories/${r.owner}/${r.name}`)}
+                    className="clickable"
+                  >
+                    <td>
+                      <Link to={`/repositories/${r.owner}/${r.name}`} onClick={(e) => e.stopPropagation()}>
+                        <b>{repositoryLabel(r)}</b>
+                      </Link>
+                      {/* Quiet on purpose: differing from the defaults is the exception. */}
+                      {d > 0 ? <div className="t-small">{plural(d, "setting")} of its own</div> : null}
+                    </td>
+                    <td className="repos-prs">
+                      <span>
+                        {r.enabled ? (
+                          <>
+                            {n === 0 ? "none open" : `${n} open`}
+                            {last ? (
+                              <span className="t-small"> · last review {agoSentence(state.now, last)}</span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="t-small">not reviewed</span>
+                        )}
+                      </span>
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <Switch
+                        checked={r.enabled}
+                        label={`Review ${repositoryLabel(r)}`}
+                        onChange={(enabled) => send({ type: "repo.setEnabled", repoId: r.id, enabled })}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          ))}
         </table>
       </div>
       <div className="foot">{repositoriesFoot(state.connection)}</div>
     </Page>
+  );
+}
+
+/**
+ * A group of Repositories' head on the shared App (design-system.md "Repositories' group heads"): the account, in the
+ * table's header style and the only text of the group's header cell, then its cause's line held at every line a cause
+ * can say, and its one fix on the right, its place as wide as every fix the account can have, so a cause coming or
+ * going moves nothing. The cause and the fix are said twice, one shown: beside the account on a wide screen, in a row
+ * of their own under it on a phone, where the Pull requests column has no width.
+ */
+function GroupHead({ head }: { head: RepositoryGroupHead }) {
+  const fix = (
+    <span className="repos-group-fix" data-state={head.state}>
+      <span className="t-small repos-group-cause">
+        <HeldDetail shown={head.cause} details={head.held} />
+      </span>
+      <AccountAction link={head.fix} labels={head.labels} variant="secondary" />
+    </span>
+  );
+  return (
+    <>
+      <tr className="repos-group">
+        <th scope="rowgroup">{head.account}</th>
+        <td colSpan={2} className="repos-group-wide">
+          {fix}
+        </td>
+      </tr>
+      <tr className="repos-group repos-group-narrow">
+        <td colSpan={3}>{fix}</td>
+      </tr>
+    </>
   );
 }
 
@@ -411,7 +514,7 @@ function Departed({
   connection: Connection;
   dismiss: () => void;
 }) {
-  const { label, text, addBack } = departedNotice(connection);
+  const { label, text, addBack } = departedNotice(connection, repo);
   return (
     <Notice
       label={label}
@@ -427,7 +530,7 @@ function Departed({
         </span>
       }
     >
-      <b className="nowrap">{repo.name}</b> {text}
+      <b className="nowrap">{repositoryLabel(repo)}</b> {text}
     </Notice>
   );
 }
@@ -480,9 +583,9 @@ function RepoSetting({
 
 export function RepositoryPage() {
   const state = useAppState();
-  const { name } = useParams();
+  const { owner, name } = useParams();
   const { stamp, save } = useSaving();
-  const repo = state.repos.find((r) => r.name === name);
+  const repo = state.repos.find((r) => r.owner === owner && r.name === name);
   if (!repo) {
     return (
       <Page>
@@ -498,7 +601,7 @@ export function RepositoryPage() {
   return (
     <Page screen="repository">
       <div className="crumb">
-        <Link to="/repositories">Repositories</Link> / <b>{repo.name}</b>
+        <Link to="/repositories">Repositories</Link> / {repo.owner} / <b>{repo.name}</b>
       </div>
       <Sentence
         title={repo.id}

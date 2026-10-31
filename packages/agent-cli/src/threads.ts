@@ -10,6 +10,7 @@ import {
   type ReviewResult,
   readReplyMarker,
 } from "@lookover/contracts";
+import { isLookovers, type Poster } from "./whose.ts";
 import type { World } from "./world.ts";
 
 /**
@@ -22,14 +23,21 @@ export interface ReplyToAnswer {
   at: number;
 }
 
-/** The newest of the threads whose finding the round left unsettled, by a person (a bot's never asks); null when none. */
-export function newestReply(threads: AgentThread[], result: ReviewResult): ReplyToAnswer | null {
+/**
+ * The newest reply on the threads whose finding the round left unsettled, by a person and not Lookover's (a bot's
+ * never asks, nor Lookover's own as its person); null when none.
+ */
+export function newestReply(
+  threads: AgentThread[],
+  result: ReviewResult,
+  poster: Poster,
+): ReplyToAnswer | null {
   const unsettled = new Set(result.findings.filter(isUnsettled).map((f) => f.id));
   const replies = threads
     .filter((t) => unsettled.has(t.findingId))
     .flatMap((t) =>
       t.replies
-        .filter((r) => !r.author.bot)
+        .filter((r) => !r.author.bot && !isLookovers(r, poster))
         .map((r) => ({ commentId: r.commentId, findingId: t.findingId, at: Date.parse(r.at) })),
     )
     .filter((r) => !Number.isNaN(r.at))
@@ -37,9 +45,12 @@ export function newestReply(threads: AgentThread[], result: ReviewResult): Reply
   return replies.at(-1) ?? null;
 }
 
-/** Lookover's own last reply on the thread (a bot's, as `<app>[bot]`), its hidden marker left out. */
-export function lookoverReply(thread: AgentThread, app: string): { body: string; at: string } | null {
-  const last = thread.replies.findLast((r) => r.author.bot && r.author.login === `${app}[bot]`);
+/**
+ * Lookover's own last reply on the thread (its bot's, as `<app>[bot]`, or its person's with a reply marker), its
+ * hidden marker left out.
+ */
+export function lookoverReply(thread: AgentThread, poster: Poster): { body: string; at: string } | null {
+  const last = thread.replies.findLast((r) => isLookovers(r, poster));
   if (!last) return null;
   return { body: readReplyMarker(last.body)?.text ?? last.body.trim(), at: last.at };
 }
@@ -79,15 +90,15 @@ export async function resolveVerified(
     w.err(`Resolved the threads of ${listed(resolved)}: Lookover verified them fixed.`);
 }
 
-/** Lookover's threads on the change, or the host's refusal said on stderr and none. */
+/** Lookover's threads on the change, its bot's or its person's, or the host's refusal said on stderr and none. */
 export async function readThreads(
   host: AgentHost,
   w: Pick<World, "err">,
   change: ChangeRef,
-  app: string,
+  { app, person }: Poster,
 ): Promise<AgentThread[] | null> {
   try {
-    return await host.threads(change, app);
+    return await host.threads(change, app, person ?? undefined);
   } catch (error) {
     if (!(error instanceof HostError)) throw error;
     w.err(`Couldn't read Lookover's threads: ${sentence(error.message)}`);

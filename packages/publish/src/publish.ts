@@ -7,6 +7,8 @@ import {
   CHECK_OUTPUT_MAX_BYTES,
   type ChangeRef,
   type CheckOutput,
+  changeName,
+  checkExternalId,
   type FindingId,
   HostError,
   type HostFailure,
@@ -69,11 +71,12 @@ async function follow(
   job: JobCheck,
   created: Created,
   offset: (at: number) => number,
+  person: () => number,
 ): Promise<string> {
   const { repo } = job.change;
   const { standing } = job;
   const create = async (status: OpenCheckStatus, output: CheckOutput): Promise<string> => {
-    const id = await writer.createCheck(repo, job.sha, status, output, job.job.id);
+    const id = await writer.createCheck(repo, job.sha, status, output, checkExternalId(job.job.id, person()));
     created(id);
     return id;
   };
@@ -203,8 +206,6 @@ async function unless(
   }
 }
 
-const nameOf = (change: ChangeRef) => `${change.repo.owner}/${change.repo.name}#${change.number}`;
-
 /**
  * The posts a dismissal owes, in the order they are sent (ADR 0052): the reply on the finding's thread, the summary,
  * the round's check when it is rewritten (`checkId`), then the thread's root minimized. What the caller saves as owed
@@ -294,6 +295,8 @@ export function createPublisher({
   time,
   log = () => {},
   offset = machineOffset,
+  person,
+  lookovers,
   secretsRemoved,
 }: PublisherOptions): Publisher {
   /**
@@ -310,14 +313,14 @@ export function createPublisher({
     return { round: filteredRound(given, text, finding), placing };
   };
   /**
-   * A reply of this round already on the host, found by its marker among the bot's replies in the threads: its id,
-   * or null when none holds it (or there is no reader to look with).
+   * A reply of this round already on the host, found by its marker among Lookover's replies in the threads (ADR 0066:
+   * a teammate's copy of it is never Lookover's): its id, or null when none holds it (or there is no reader to look
+   * with).
    */
   const sentReply = async (change: ChangeRef, marker: string): Promise<string | null> => {
-    if (!threads) return null;
-    const found = (await threads(change))
-      .flatMap((t) => t.replies)
-      .find((r) => r.author.bot && r.body.includes(marker));
+    if (!threads || !lookovers) return null;
+    const [read, isLookovers] = await Promise.all([threads(change), lookovers(change)]);
+    const found = read.flatMap((t) => t.replies).find((r) => isLookovers(r) && r.body.includes(marker));
     return found === undefined ? null : String(found.commentId);
   };
   /**
@@ -370,7 +373,8 @@ export function createPublisher({
         }
       };
       // The job's check, in progress since the run started, is the round's: created only when it has none, and
-      // looked for by the job's id first when a create began whose answer was lost.
+      // looked for by its external id (the job's and the person's) first when a create began whose answer was lost.
+      const externalId = checkExternalId(round.run.job, person());
       const checkId = await send(
         "check",
         async () => {
@@ -380,10 +384,10 @@ export function createPublisher({
             round.sha,
             "in_progress",
             checkInProgress(round),
-            round.run.job,
+            externalId,
           );
         },
-        () => writer.findCheck(change.repo, round.sha, round.run.job),
+        () => writer.findCheck(change.repo, round.sha, externalId),
       );
       /** The round's findings the review holds a comment on, as it was sent. */
       const commented = () => commentedIn(round, placed);
@@ -406,7 +410,7 @@ export function createPublisher({
           (failure) => STANDING_REPLY_REFUSALS.has(failure),
           (error) =>
             log(
-              `${nameOf(change)}: no reply on ${reply.findingId}'s thread: ${error.failure}: ${error.message}`,
+              `${changeName(change)}: no reply on ${reply.findingId}'s thread: ${error.failure}: ${error.message}`,
             ),
         );
       }
@@ -429,7 +433,8 @@ export function createPublisher({
         await unless(
           () => send(`minimize:${nodeId}`, () => minimized(change, nodeId)),
           () => true,
-          (error) => log(`${nameOf(change)}: ${nodeId} not minimized: ${error.failure}: ${error.message}`),
+          (error) =>
+            log(`${changeName(change)}: ${nodeId} not minimized: ${error.failure}: ${error.message}`),
         );
       }
       return { checkId, reviewId, summaryId, result };
@@ -444,7 +449,7 @@ export function createPublisher({
       const root = newestThread(read ?? [], dismissal.findingId);
       const marker = dismissalMarker(dismissal.id, dismissal.findingId);
       const said = (what: string) => (error: HostError) =>
-        log(`${nameOf(change)}: ${what} on ${dismissal.findingId}: ${error.failure}: ${error.message}`);
+        log(`${changeName(change)}: ${what} on ${dismissal.findingId}: ${error.failure}: ${error.message}`);
       if (root)
         await unless(
           () =>
@@ -483,6 +488,6 @@ export function createPublisher({
       const reviewId = await writer.findReview(round.change, reviewMarker(round));
       return reviewId === null ? null : { reviewId, commented: commentedIn(round, placing(degraded)) };
     },
-    check: (job, created = () => {}) => follow(writer, job, created, offset),
+    check: (job, created = () => {}) => follow(writer, job, created, offset, person),
   };
 }

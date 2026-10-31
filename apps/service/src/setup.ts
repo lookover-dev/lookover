@@ -26,7 +26,7 @@ import type {
 import { furthestReached } from "@lookover/contracts";
 import type { Store } from "@lookover/store";
 import type { Installation } from "./installation.ts";
-import { appInstalled, appMade, connectionIdOf, repoIdOf } from "./snapshot.ts";
+import { appInstalled, appMade, repoIdOf } from "./snapshot.ts";
 
 export interface SetupDeps {
   store: Pick<Store, "setup" | "repos">;
@@ -34,8 +34,8 @@ export interface SetupDeps {
   emit(body: EventBody): void;
   /** The repositories the service watches now. */
   repos(): readonly RepositoryRef[];
-  /** The bot and the installation as the service holds them, and the install's wait. */
-  github: Pick<Installation, "bot" | "installationId" | "waitForInstall">;
+  /** The connection's id and the installation as the service holds them, and the install's wait. */
+  github: Pick<Installation, "connectionId" | "accounts" | "waitForInstall">;
   /** The queue's first review of the change: a request, a preview when said. */
   review(changeId: ChangeId, preview: boolean): Promise<"ok" | "no_such_change">;
 }
@@ -57,8 +57,9 @@ export interface SetupFlow {
   /** The manifest flow stopped short: why, shown on the GitHub step until the owner tries again. */
   flowRefused(why: SetupGitHubRefusal): void;
   /**
-   * An App created or given (ADR 0053), kept by the service, the connection showing it and its bot already (the
-   * installation's `adopt` sent them): unless it is installed already, the install is waited for.
+   * An App created or given (ADR 0053), or a sign-in to the shared App made (ADR 0066), kept by the service, the
+   * connection showing its way already (the installation's `adopt` or `signedIn` sent it): unless it is installed
+   * already, the install is waited for.
    */
   appGiven(): void;
   /**
@@ -115,15 +116,16 @@ export function createSetup(d: SetupDeps): SetupFlow {
       if (kept.github === github) return;
       const at = now();
       if (!appInstalled(kept)) {
-        const bot = d.github.bot();
+        // The bot's on `own`, the person's on `shared` (ADR 0066).
+        const id = d.github.connectionId();
         d.emit({
           type: "connection.changed",
           at,
           patch: {
-            ...(bot === null ? {} : { id: connectionIdOf(bot) }),
+            ...(id === null ? {} : { id }),
             state: "connected",
             since: at,
-            installationId: d.github.installationId(),
+            accounts: d.github.accounts(),
           },
         });
       }

@@ -7,6 +7,7 @@ import {
   type AgentRefusal,
   APP_PERMISSIONS,
   type AppPermission,
+  type AskToInstallRefusal,
   type Command,
   type CreateAppRefusal,
   createAppRefusalText,
@@ -15,6 +16,7 @@ import {
   type SettingsFileError,
   type SettingsRefusal,
   type SettingsWriteFailure,
+  type SignInStartRefusal,
   type UseAppRefusal,
 } from "@lookover/contracts";
 import { Refused } from "../api/http.ts";
@@ -22,6 +24,7 @@ import type { WebMode } from "../dev/mode.ts";
 import type { WithCommand } from "./format.ts";
 import { isSettingsFileProblem, settingsFileProblemText } from "./health.ts";
 import { useAppRefusalText } from "./onboarding.ts";
+import { type SignInNotStarted, signInRefusalText } from "./sign-in.ts";
 import { devCommand } from "./start-at-login.ts";
 
 /**
@@ -41,6 +44,10 @@ export interface Refusal {
   useApp?: UseAppRefusal;
   createApp?: CreateAppRefusal;
   agent?: AgentRefusal;
+  /** Why "Sign in with GitHub" didn't start (ADR 0066): the service's `signIn`, or GitHub giving no code (502). */
+  signIn?: SignInNotStarted;
+  /** Why "Ask to install on <org>" wasn't kept (ADR 0067): the service's `askToInstall`. */
+  askToInstall?: AskToInstallRefusal;
   command?: Command;
 }
 
@@ -166,6 +173,33 @@ function useAppOf(answer: unknown): UseAppRefusal | null {
   }
 }
 
+/** Every reason the service gives for not starting a sign-in (409's `signIn`): a value the UI doesn't know is not taken. */
+const SIGN_IN: Record<SignInStartRefusal, true> = {
+  pending: true,
+  "own-app": true,
+  unavailable: true,
+};
+const isSignInRefusal = (value: unknown): value is SignInStartRefusal =>
+  typeof value === "string" && Object.hasOwn(SIGN_IN, value);
+
+/**
+ * Why "Sign in with GitHub" didn't start (ADR 0066): the answer's `signIn`, or `github` for the sign-in's own 502
+ * (GitHub gave no code); null for anything else.
+ */
+function signInOf(answer: unknown, status: number, command: Command | undefined): SignInNotStarted | null {
+  if (isRecord(answer) && isSignInRefusal(answer.signIn)) return answer.signIn;
+  return status === 502 && command?.type === "connection.signIn" ? "github" : null;
+}
+
+/** Why "Ask to install on <org>" wasn't kept (ADR 0067), by the service's `askToInstall`. */
+const ASK_TO_INSTALL: Record<AskToInstallRefusal, string> = {
+  "not-shared": "Lookover isn't signed in to GitHub here.",
+  "not-named": "That account isn't waiting to be installed any more.",
+  owner: "You own that account: install it there yourself.",
+};
+const isAskToInstallRefusal = (value: unknown): value is AskToInstallRefusal =>
+  typeof value === "string" && Object.hasOwn(ASK_TO_INSTALL, value);
+
 /** The answer's `createApp`, when it is why "Create it on GitHub" was refused (ADR 0053, ADR 0059). */
 function createAppOf(answer: unknown): CreateAppRefusal | null {
   if (!isRecord(answer) || !isRecord(answer.createApp)) return null;
@@ -196,20 +230,38 @@ export function refusalOf(error: unknown, command?: Command): Refusal {
   const invalid = invalidOf(answer);
   const unwritten = unwrittenOf(answer);
   const refused = isRecord(answer) && isRefused(answer.refused) ? answer.refused : null;
-  // The App's refusals, as the service sends them beside `error` (#197, #198): `answer.useApp` (UseAppRefusal) and
-  // `answer.createApp` (CreateAppRefusal). Exactly these names: anything else is only the toast's generic line.
-  const useApp = useAppOf(answer);
-  const createApp = createAppOf(answer);
   return {
     status: error.status,
     error: error.reason,
     ...(invalid === null ? {} : { invalid }),
     ...(unwritten === null ? {} : { unwritten }),
     ...(refused === null ? {} : { refused }),
+    ...(agent === null ? {} : { agent }),
+    ...connectionRefusalOf(answer, error.status, command),
+    ...sent,
+  };
+}
+
+/**
+ * The App's and the sign-in's refusals, as the service sends them beside `error` (#197, #198, ADR 0066, ADR 0067):
+ * `answer.useApp` (UseAppRefusal), `answer.createApp` (CreateAppRefusal), `answer.signIn` and `answer.askToInstall`.
+ * Exactly these names: anything else is only the toast's generic line.
+ */
+function connectionRefusalOf(
+  answer: unknown,
+  status: number,
+  command: Command | undefined,
+): Pick<Refusal, "useApp" | "createApp" | "signIn" | "askToInstall"> {
+  const useApp = useAppOf(answer);
+  const createApp = createAppOf(answer);
+  const signIn = signInOf(answer, status, command);
+  const askToInstall =
+    isRecord(answer) && isAskToInstallRefusal(answer.askToInstall) ? answer.askToInstall : null;
+  return {
     ...(useApp === null ? {} : { useApp }),
     ...(createApp === null ? {} : { createApp }),
-    ...(agent === null ? {} : { agent }),
-    ...sent,
+    ...(signIn === null ? {} : { signIn }),
+    ...(askToInstall === null ? {} : { askToInstall }),
   };
 }
 
@@ -221,8 +273,13 @@ export function refusalText(refusal: Refusal): { title: string; detail: string }
   };
 }
 
-/** An App refused (ADR 0053): "Use an existing App", or "Create it on GitHub". */
-function appReason({ useApp, createApp }: Refusal): string | null {
+/**
+ * An App refused (ADR 0053, ADR 0066, ADR 0067): "Use an existing App", "Create it on GitHub", "Sign in with GitHub",
+ * or "Ask to install on <org>".
+ */
+function appReason({ useApp, createApp, signIn, askToInstall }: Refusal): string | null {
+  if (signIn !== undefined) return signInRefusalText(signIn);
+  if (askToInstall !== undefined) return ASK_TO_INSTALL[askToInstall];
   if (useApp !== undefined) return useAppRefusalText(useApp);
   return createApp === undefined ? null : createAppRefusalText(createApp);
 }
@@ -289,13 +346,18 @@ export function refusalLine(refusal: Refusal): string {
 
 /**
  * The toast's line, or null when the refusal is said in place: an App refused (ADR 0053), under "Use an existing
- * App"'s key or on the setup's GitHub step; Your coding agent's writes (ADR 0058), on their row. One problem, said
- * once.
+ * App"'s key or on the setup's GitHub step; a sign-in refused while the setup shows (`setup`), on its GitHub step,
+ * though Sign in again from the alert band has only the toast (ADR 0066); Your coding agent's writes (ADR 0058), on
+ * their row. One problem, said once.
  */
-export function refusalToast(refusal: Refusal): string | null {
+export function refusalToast(refusal: Refusal, where: { setup: boolean } = { setup: false }): string | null {
   const type = refusal.command?.type;
   if (type === "agent.path" || type === "agent.skill") return null;
-  return refusal.useApp !== undefined || refusal.createApp !== undefined ? null : refusalLine(refusal);
+  const inPlace =
+    refusal.useApp !== undefined ||
+    refusal.createApp !== undefined ||
+    (refusal.signIn !== undefined && where.setup);
+  return inPlace ? null : refusalLine(refusal);
 }
 
 const NOT_SIGNED_IN = "This tab isn't signed in.";

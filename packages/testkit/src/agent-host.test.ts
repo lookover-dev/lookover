@@ -26,6 +26,8 @@ const change: FakeChange = {
 };
 
 const host = () => new FakeGitHost({ repo, bot, changes: [change] });
+/** The person signed in to the App, on the fake's person mode (ADR 0066): someone other than the agent's account. */
+const person = { id: 11247504, login: "signed-in" };
 
 let pushes = 0;
 /** A commit no other push of this file made. */
@@ -50,9 +52,10 @@ async function postFinding(fake: FakeGitHost, id: string): Promise<number> {
   return Number(root);
 }
 
-const fixture = async (): Promise<AgentHostFixture> => {
-  const fake = host();
+const fixture = (signedIn?: typeof person) => async (): Promise<AgentHostFixture> => {
+  const fake = new FakeGitHost({ repo, bot, changes: [change], ...(signedIn ? { person: signedIn } : {}) });
   return {
+    ...(signedIn ? { person: signedIn } : {}),
     host: fake.asAgent(owner),
     change: ref,
     branch: "feature/unpaid",
@@ -60,7 +63,7 @@ const fixture = async (): Promise<AgentHostFixture> => {
     app: "lookover-spike-sasensi",
     botId: bot.id,
     account: owner,
-    check: (sha, status, output) => fake.createCheck(repo, sha, status, output, "job-1"),
+    check: (sha, status, output, externalId) => fake.createCheck(repo, sha, status, output, externalId),
     complete: (id, conclusion, output) => fake.completeCheck(repo, id, conclusion, output),
     react: (id, reaction) => fake.react(repo, id, reaction),
     push: () => {
@@ -89,14 +92,18 @@ const refusing = (failure: HostRefusal) => () => {
   return Promise.resolve({ host: fake.asAgent(owner), change: ref, branch: "feature/unpaid", head });
 };
 
-describeAgentHost("FakeGitHost", {
-  open: fixture,
-  refusing: {
-    unauthorized: refusing("unauthorized"),
-    rate_limited: refusing("rate_limited"),
-    unavailable: refusing("unavailable"),
-  },
-});
+for (const [name, signedIn] of [
+  ["FakeGitHost", undefined],
+  ["FakeGitHost posting as a person", person],
+] as const)
+  describeAgentHost(name, {
+    open: fixture(signedIn),
+    refusing: {
+      unauthorized: refusing("unauthorized"),
+      rate_limited: refusing("rate_limited"),
+      unavailable: refusing("unavailable"),
+    },
+  });
 
 describe("FakeGitHost's agent side on its own", () => {
   test("the agent's comment is seen by the App's side, written by the agent's account", async () => {

@@ -16,6 +16,9 @@ const fetch: FetchSpec = {
   credentials: () => Promise.resolve({ username: "x-access-token", password: "ghs_fake" }),
 };
 const request = (job: string, head = PLANTED) => ({ repo, job: jobId(job), head, base: BASE, fetch });
+/** Pull request #1 of the sandbox, and #1 of the organisation's sandbox of the same name. */
+const pr1 = { repo, number: 1 };
+const orgPr1 = { repo: { owner: "lookover-dev", name: "lookover-sandbox" }, number: 1 };
 
 const PLANTED_DIFF = "diff --git a/src/total.ts b/src/total.ts\n--- a/src/total.ts\n+++ b/src/total.ts\n";
 const FIXED_DIFF = "diff --git a/src/total.ts b/src/total.ts\n+ fixed\n";
@@ -27,8 +30,8 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 describe("ScriptedRetrieval", () => {
   test("gives each scripted commit of a change its own worktree path under the root, with the diff scripted for it, and writes nothing there", async () => {
     const retrieval = new ScriptedRetrieval({ root });
-    retrieval.script(1, PLANTED, PLANTED_DIFF);
-    retrieval.script(1, FIXED, FIXED_DIFF);
+    retrieval.script(pr1, PLANTED, PLANTED_DIFF);
+    retrieval.script(pr1, FIXED, FIXED_DIFF);
 
     const round1 = await retrieval.prepare(request("id-1"));
     const again = await retrieval.prepare(request("id-2"));
@@ -36,30 +39,54 @@ describe("ScriptedRetrieval", () => {
     await round1.dispose();
 
     expect(round1).toMatchObject({
-      cwd: join(root, "1", PLANTED),
+      cwd: join(root, "sasensi", "lookover-sandbox", "1", PLANTED),
       diff: PLANTED_DIFF,
       mergeBase: BASE,
       diffFile: ".lookover-change.diff",
     });
     expect(again.cwd).toBe(round1.cwd);
-    expect(round2).toMatchObject({ cwd: join(root, "1", FIXED), diff: FIXED_DIFF });
-    expect(retrieval.worktreeOf(1, FIXED)).toBe(round2.cwd);
+    expect(round2).toMatchObject({
+      cwd: join(root, "sasensi", "lookover-sandbox", "1", FIXED),
+      diff: FIXED_DIFF,
+    });
+    expect(retrieval.worktreeOf(pr1, FIXED)).toBe(round2.cwd);
     expect(readdirSync(root)).toEqual([]);
     expect(retrieval.prepared).toEqual([jobId("id-1"), jobId("id-2"), jobId("id-3")]);
     expect(retrieval.disposed).toEqual([jobId("id-1")]);
   });
 
-  test("a commit is one change's: scripted under another, it is refused; under the same, its diff is replaced", async () => {
+  test("a commit is one change's: scripted under another, even one of its number in a same-named repository, it is refused; under the same, its diff is replaced", async () => {
     const retrieval = new ScriptedRetrieval({ root: "demo/worktrees" });
-    retrieval.script(1, PLANTED, PLANTED_DIFF);
+    retrieval.script(pr1, PLANTED, PLANTED_DIFF);
 
-    expect(() => retrieval.script(2, PLANTED, FIXED_DIFF)).toThrow("scripted under change 1 already, not 2");
-    retrieval.script(1, PLANTED, FIXED_DIFF);
+    expect(() => retrieval.script({ repo, number: 2 }, PLANTED, FIXED_DIFF)).toThrow(
+      "scripted under sasensi/lookover-sandbox#1 already, not sasensi/lookover-sandbox#2",
+    );
+    expect(() => retrieval.script(orgPr1, PLANTED, FIXED_DIFF)).toThrow(
+      "scripted under sasensi/lookover-sandbox#1 already, not lookover-dev/lookover-sandbox#1",
+    );
+    retrieval.script(pr1, PLANTED, FIXED_DIFF);
 
     expect(await retrieval.prepare(request("id-1"))).toMatchObject({
-      cwd: join("demo/worktrees", "1", PLANTED),
+      cwd: join("demo/worktrees", "sasensi", "lookover-sandbox", "1", PLANTED),
       diff: FIXED_DIFF,
     });
+  });
+
+  test("one number in two same-named repositories of two accounts gives two worktrees", async () => {
+    const retrieval = new ScriptedRetrieval({ root: "demo/worktrees" });
+    retrieval.script(pr1, PLANTED, PLANTED_DIFF);
+    retrieval.script(orgPr1, FIXED, FIXED_DIFF);
+
+    const org = await retrieval.prepare({ ...request("id-1", FIXED), repo: orgPr1.repo });
+    expect(org).toMatchObject({
+      cwd: join("demo/worktrees", "lookover-dev", "lookover-sandbox", "1", FIXED),
+      diff: FIXED_DIFF,
+    });
+    expect(retrieval.worktreeOf(orgPr1, FIXED)).toBe(org.cwd);
+    expect(retrieval.worktreeOf(pr1, PLANTED)).toBe(
+      join("demo/worktrees", "sasensi", "lookover-sandbox", "1", PLANTED),
+    );
   });
 
   test("a commit nothing is scripted for gets the default diff (none) at a path of its job's", async () => {

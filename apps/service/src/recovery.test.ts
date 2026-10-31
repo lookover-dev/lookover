@@ -100,8 +100,8 @@ const ONE_FINDING = [
   "```",
 ].join("\n");
 
-const OTHER = changeId("lookover-sandbox#9");
-const TENTH = changeId("lookover-sandbox#10");
+const OTHER = changeId("sasensi/lookover-sandbox#9");
+const TENTH = changeId("sasensi/lookover-sandbox#10");
 /** Another pull request of the owner's, on the same commits as the first. */
 const numbered = (number: number): FakeChange => ({
   ...pr1,
@@ -176,7 +176,7 @@ test("a restart starts again the job it interrupted before publishing, then the 
   const second = await heldService(dir, { first, ids: 100 }, (line) => logged.push(line));
   // The log says what the restart did with the job it found running (ADR 0055).
   expect(logged.slice(0, 1)).toEqual([
-    "lookover-sandbox#1 review runs again: the service stopped while it ran",
+    "sasensi/lookover-sandbox#1 review runs again: the service stopped while it ran",
   ]);
   const again = await openApp(second.service);
   const events = await sinceStart(second.service, again, last);
@@ -249,7 +249,7 @@ test("a job interrupted a second time fails, the service stopped, and the jobs q
   const logged: string[] = [];
   const third = await heldService(dir, { first, ids: 200 }, (line) => logged.push(line));
   expect(logged.slice(0, 1)).toEqual([
-    "lookover-sandbox#1 review failed: the service stopped before the review finished",
+    "sasensi/lookover-sandbox#1 review failed: the service stopped before the review finished",
   ]);
   const thrice = await openApp(third.service);
   const events = await sinceStart(third.service, thrice, last);
@@ -282,7 +282,9 @@ test("a restart that finds a follow-up behind the interrupted job runs the follo
   const last = lastEvent(dir);
   const logged: string[] = [];
   const second = await heldService(dir, { first, ids: 100 }, (line) => logged.push(line));
-  expect(logged.slice(0, 1)).toEqual(["lookover-sandbox#1 review cancelled: a newer review took its place"]);
+  expect(logged.slice(0, 1)).toEqual([
+    "sasensi/lookover-sandbox#1 review cancelled: a newer review took its place",
+  ]);
   const again = await openApp(second.service);
   const events = await sinceStart(second.service, again, last);
   second.held.release();
@@ -330,11 +332,11 @@ test("a restart during publishing resumes the round's posts: nothing is found ag
   const log = (line: string) => logged.push(line);
   const second = await start({ home: dir, host, engines, time: first.time, idsFrom: 100, log });
   expect(logged).toEqual([
-    "lookover-sandbox#1 review resumes its posts: the service stopped while it posted",
+    "sasensi/lookover-sandbox#1 review resumes its posts: the service stopped while it posted",
   ]);
   const again = await openApp(second.service);
   const seen = await until(await sinceStart(second.service, again, last), "round.finished");
-  expect(logged.at(-1)).toBe("lookover-sandbox#1 round 1 posted: no open findings");
+  expect(logged.at(-1)).toBe("sasensi/lookover-sandbox#1 round 1 posted: no open findings");
   // No job is asked again, and the engine never runs again: the round's posts resume.
   // Its outbox shown as kept (the check sent before the stop), then each post sent.
   expect(seen.map(named)).toEqual([
@@ -406,7 +408,9 @@ test("a review GitHub kept as the service stopped is found by its marker after t
     idsFrom: 100,
     log: (line) => logged.push(line),
   });
-  expect(logged[0]).toBe("lookover-sandbox#1 review resumes its posts: the service stopped while it posted");
+  expect(logged[0]).toBe(
+    "sasensi/lookover-sandbox#1 review resumes its posts: the service stopped while it posted",
+  );
   const seen = await until(
     await sinceStart(second.service, await openApp(second.service), last),
     "round.finished",

@@ -5,7 +5,7 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { apply, changeId, FAULTS } from "@lookover/contracts";
 import { SCENARIOS, type Scenario, scenarioOf } from "../index.ts";
-import { TEST_LIMIT_MS } from "../service.test-support.ts";
+import { SANDBOX, TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
   advance,
   inject,
@@ -23,7 +23,7 @@ setDefaultTimeout(TEST_LIMIT_MS);
 afterEach(stopAll);
 
 const MIN = 60_000;
-const id = (n: number) => changeId(`lookover-sandbox#${n}`);
+const id = (n: number) => changeId(`sasensi/lookover-sandbox#${n}`);
 /**
  * S10's seed: sixty-eight events (the start, the repository, six pull requests and their reviews, their outboxes as
  * they posted, main's rules read and counted three times).
@@ -80,9 +80,9 @@ test("the moves after the seed are armed on the clock: a pause the owner sets, t
     ...quiet,
     id: "T-later",
     script: [
-      { at: 1 * MIN, move: { kind: "open", change: 141 } },
+      { at: 1 * MIN, move: { kind: "open", change: { repo: SANDBOX, number: 141 } } },
       { at: 6 * MIN, move: { kind: "command", command: { type: "service.pause", for: "hour" } } },
-      { at: 7 * MIN, move: { kind: "open", change: 146 } },
+      { at: 7 * MIN, move: { kind: "open", change: { repo: SANDBOX, number: 146 } } },
     ],
     seed: 5 * MIN,
   };
@@ -126,7 +126,7 @@ test("the listing: every scenario as the drawer shows it, the one loaded, the cl
         "Inject “Codex fails its self-test” from the drawer.",
       ],
       later: "",
-      path: "/reviews/lookover-sandbox/1",
+      path: "/reviews/sasensi/lookover-sandbox/1",
     },
   ]);
   expect(body.current).toBe("S10");

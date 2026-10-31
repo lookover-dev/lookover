@@ -1,7 +1,7 @@
 // `AgentHost` over GitHub's REST API, with the agent's own token (ADR 0021): plain HTTPS, one request at a time,
 // every answer parsed where it enters, GitHub's refusals turned into `HostError`s as the `github` package does
 // for the App (this package never imports it: it would bring the App's key within reach). Listings follow the
-// `Link` header past 100 items. The token is sent as given and never written down.
+// `Link` header past 100 items. The token is sent as given and never written down. Whose it is, is `GET /user`'s.
 // The threads are GraphQL's (ADR 0052): only it knows a thread's id, which resolving takes, whether a person
 // resolved it, and whether it is outdated as soon as a push makes it so (REST's `line` lags minutes, #174). GraphQL
 // names an App's bot without `[bot]`: the App is told by its type and its slug, and its replies are named
@@ -15,6 +15,7 @@ import {
   type CheckConclusion,
   COMMENT_MAX_BYTES,
   type CommitSha,
+  changeName,
   commitSha,
   findingOfMarker,
   type HostCheck,
@@ -40,6 +41,8 @@ export interface AgentHostOptions {
 
 const BASE = "https://api.github.com";
 
+/** The token's account, as `GET /user` gives it. */
+const account = z.object({ id: z.int(), login: z.string() });
 /** A repository by its id, which a rename keeps: what tells a fork's pull request from one of the base's own. */
 const repoId = z.object({ id: z.int() });
 const pull = z.object({
@@ -62,6 +65,8 @@ const checkRuns = z.object({
         text: z.string().nullable(),
       }),
       app: z.object({ slug: z.string() }).nullable(),
+      // Whose check it is (ADR 0066): `<job>@<person's id>`; null on a check made without one.
+      external_id: z.string().nullish(),
     }),
   ),
 });
@@ -172,14 +177,18 @@ function repliesOf(comments: ThreadComment[]): HostThreadReply[] {
 }
 
 /**
- * The thread as Lookover's, with the replies of its first page; null when its root comment is not the App `app`'s
- * (a bot of that login: GraphQL's has no `[bot]`) or holds no finding marker.
+ * The thread as Lookover's, with the replies of its first page; null when its root comment is neither the App
+ * `app`'s (a bot of that login: GraphQL's has no `[bot]`) nor, given `person`, that person's (a user of that id, whom
+ * the App posts as, ADR 0066), or holds no finding marker.
  */
-function lookoverThread(node: ReviewThread, app: string): AgentThread | null {
+function lookoverThread(node: ReviewThread, app: string, person: number | undefined): AgentThread | null {
   const [root, ...replies] = node.comments.nodes;
   if (!root || root.databaseId === null) return null;
   const finding = findingOfMarker(root.body);
-  const ours = root.author?.__typename === "Bot" && root.author.login === app;
+  const author = root.author;
+  const ours =
+    (author?.__typename === "Bot" && author.login === app) ||
+    (person !== undefined && author?.__typename === "User" && author.databaseId === person);
   if (!ours || finding === null) return null;
   return {
     commentId: root.databaseId,
@@ -351,16 +360,20 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   /** Lookover's threads among the change's review threads from the cursor `after`, and the next page's cursor. */
-  async function threadsPage(change: ChangeRef, app: string, after: string | null): Promise<ThreadsPage> {
+  async function threadsPage(
+    change: ChangeRef,
+    app: string,
+    person: number | undefined,
+    after: string | null,
+  ): Promise<ThreadsPage> {
     const { repo, number } = change;
-    const to = `read the threads of ${repo.owner}/${repo.name}#${number}`;
+    const to = `read the threads of ${changeName({ repo, number })}`;
     const variables = { owner: repo.owner, name: repo.name, number, after };
     const pull = (await graphql(to, THREADS, variables, threadsAnswer)).repository?.pullRequest;
-    if (!pull)
-      throw new HostError("not_found", `GitHub has no pull request ${repo.owner}/${repo.name}#${number}`);
+    if (!pull) throw new HostError("not_found", `GitHub has no pull request ${changeName({ repo, number })}`);
     const threads: AgentThread[] = [];
     for (const node of pull.reviewThreads.nodes) {
-      const thread = lookoverThread(node, app);
+      const thread = lookoverThread(node, app, person);
       if (thread === null) continue;
       thread.replies.push(...repliesOf(await restOf(node)));
       threads.push(thread);
@@ -378,6 +391,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   };
 
   return {
+    async account() {
+      const me = account.parse((await request("/user")).body);
+      return { id: me.id, login: me.login };
+    },
+
     async changeOf(repo, branch) {
       const head = encodeURIComponent(`${repo.owner}:${branch}`);
       const open = await all(`${repoPath(repo)}/pulls?state=open&head=${head}&per_page=100`, (body) =>
@@ -414,6 +432,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
             summary: run.output.summary ?? "",
             text: run.output.text ?? "",
           },
+          externalId: run.external_id ?? "",
         }));
     },
 
@@ -448,11 +467,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       return String(created.parse(answer.body).id);
     },
 
-    async threads(change, app) {
+    async threads(change, app, person) {
       const threads: AgentThread[] = [];
       let after: string | null = null;
       do {
-        const page: ThreadsPage = await threadsPage(change, app, after);
+        const page: ThreadsPage = await threadsPage(change, app, person, after);
         threads.push(...page.threads);
         after = page.next;
       } while (after !== null);

@@ -108,20 +108,17 @@ function repository(value: unknown): RepositoryRef | undefined {
 }
 
 /**
- * Refuses two of `repositories` sharing a name (GitHub's names ignore case), saying which `line` lists them: a change
- * is known by its repository's name (`<name>#<n>`, ADR 0053), so two of one name given one service would share their
- * changes.
+ * Refuses one repository listed twice in `repositories` (GitHub's names ignore case), saying which `line` lists it.
+ * Two of one name on two accounts are two (a change is known by its owner and name, ADR 0066).
  */
-function noTwins(repositories: RepositoryRef[], line: string, wrong: (what: string) => Error): void {
-  const seen = new Map<string, RepositoryRef>();
-  for (const repo of repositories) {
-    const first = seen.get(repo.name.toLowerCase());
+function noRepeats(repositories: RepositoryRef[], line: string, wrong: (what: string) => Error): void {
+  repositories.forEach((repo, i) => {
+    const first = repositories.slice(0, i).find((r) => sameRepository(r, repo));
     if (first)
       throw wrong(
-        `"${line}" lists two repositories named ${first.name.toLowerCase()}, ${repositoryName(first)} and ${repositoryName(repo)}: a change is known by its repository's name, so keep one of them`,
+        `"${line}" lists ${repositoryName(first)} twice, the second time as ${repositoryName(repo)}: keep one of them`,
       );
-    seen.set(repo.name.toLowerCase(), repo);
-  }
+  });
 }
 
 /** The `fork` line as a repository, `undefined` when absent; refused when not one, or when `repositories` lists it. */
@@ -210,7 +207,7 @@ function organisationRepositoriesIn(
       );
   }
   // The list the organisation's App is given: its sandbox, then these.
-  noTwins([sandbox, ...theirs], "organisation.repositories", wrong);
+  noRepeats([sandbox, ...theirs], "organisation.repositories", wrong);
   return theirs;
 }
 
@@ -268,7 +265,7 @@ export function readLiveConfig(path: string): LiveConfig {
   const repositories = listed.filter((r) => r !== undefined);
   if (repositories.length === 0 || repositories.length !== listed.length)
     throw wrong(`"repositories" must list the repositories live mode may use, each "owner/name"`);
-  noTwins(repositories, "repositories", wrong);
+  noRepeats(repositories, "repositories", wrong);
   const fork = forkIn(parsed.fork, repositories, wrong);
   const app = appIn(parsed.app, wrong);
   const organisation = organisationIn(parsed.organisation, repositories, app, wrong);

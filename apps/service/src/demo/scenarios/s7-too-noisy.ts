@@ -4,7 +4,7 @@
 // on the fake GitHub, its thread answered, the summary and the check rewritten), turn the rule off, or post only
 // blocking findings in ledger-api, each of the last two with what it would have removed from the repository's last
 // reviews (this one round), written to ledger-api's settings file in the room's folder, as in live mode.
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { LEDGER_API, MIN } from "./ledger-api.ts";
 import { RATE_LIMITING } from "./s2-happy-loop.ts";
 
@@ -37,6 +37,9 @@ const CITING: ScenarioChange = {
   ],
 };
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(LEDGER_API.repo);
+
 export const S7: Scenario = {
   id: "S7",
   title: "Too noisy?",
@@ -48,9 +51,9 @@ export const S7: Scenario = {
     "Or turn off the rule, or post only blocking findings in ledger-api: either is saved in its settings.",
   ],
   later: "",
-  path: "/reviews/ledger-api/148",
+  path: "/reviews/sasensi/ledger-api/148",
   world: { ...LEDGER_API, rules: [{ path: "REVIEW.md", text: REVIEW_MD }] },
   changes: [CITING],
-  script: [{ at: MIN, move: { kind: "open", change: 148 } }],
+  script: [{ at: MIN, move: { kind: "open", change: pr(148) } }],
   seed: 6 * MIN,
 };

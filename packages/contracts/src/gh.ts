@@ -1,6 +1,6 @@
-// The person's own `gh` (ADR 0059): the port that says who the GitHub CLI is signed in as, the organisations where
-// that account is an active admin, and that account's membership of one organisation; and what the setup's GitHub
-// step shows of it (`GhChoices`). Before an App exists the service has no GitHub credential of its own, and an App's
+// The person's own `gh` (ADR 0059): the port that says who the GitHub CLI is signed in as, that account's active
+// organisation memberships with its role in each (ADR 0067), and its membership of one organisation; and what the
+// setup's GitHub step shows of it (`GhChoices`). Before an App exists the service has no GitHub credential of its own, and an App's
 // credentials can't say which person runs Lookover: the person's `gh` login can, since GitHub vouches for it. The
 // service runs the real one (`apps/service/src/gh.ts`), testkit keeps the fake (`memoryGh`) and the suite
 // (`describeGh`) that holds both to these shapes.
@@ -28,8 +28,30 @@ export type GhUnanswered =
 /** Who `gh` is signed in as. */
 export type GhPerson = { kind: "signed-in"; account: HostLogin } | GhUnanswered;
 
-/** The organisations where the signed-in account is an active admin. */
+/**
+ * The organisations where the signed-in account is an active admin: its memberships (`GhMemberships`) whose role is
+ * `owner`, the places "Create your App" offers beside your own account.
+ */
 export type GhAdminOrganisations = { kind: "listed"; organisations: HostLogin[] } | GhUnanswered;
+
+/** The account's role in an organisation, in GitHub's people page's words: an owner (the API's `admin`) or a member. */
+export type GhRole = "owner" | "member";
+
+/** One organisation the signed-in account is an active member of, with its role there. */
+export interface GhOrganisation {
+  organisation: HostLogin;
+  role: GhRole;
+}
+
+/**
+ * Every organisation the signed-in account is an active member of, in `gh`'s order, each with its role, and who that
+ * account is (`person`, its id and login: the shared App's person is compared by id, ADR 0067). Pending invitations
+ * are left out. No answer is unknown, never an empty list: `gh` missing, signed out, or unable to answer (offline, a
+ * token without `read:org`, an organisation's SSO hiding it from the list, anything else).
+ */
+export type GhMemberships =
+  | { kind: "listed"; person: HostLogin; organisations: GhOrganisation[] }
+  | GhUnanswered;
 
 /**
  * The signed-in account's membership of one organisation: active or pending (invited, not yet accepted), as whom and
@@ -46,7 +68,8 @@ export type GhMembership =
  */
 export interface Gh {
   person(): Promise<GhPerson>;
-  adminOrganisations(): Promise<GhAdminOrganisations>;
+  /** One read of every active membership (ADR 0067): what `shared` names, and what "Create your App" offers. */
+  memberships(): Promise<GhMemberships>;
   /** `organisation` is a login, matched without case as GitHub does; one no organisation can have is `absent`. */
   membership(organisation: string): Promise<GhMembership>;
 }

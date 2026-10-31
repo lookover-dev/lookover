@@ -10,21 +10,25 @@ import {
   type Connection,
   type CreateAppRefusal,
   createAppRefusalText,
+  type DepartedRepository,
   type Engine,
   type GhWhy,
   GITHUB_WEB,
   ghFixText,
   githubLinks,
+  ownInstallation,
   type Repository,
   type RepositoryId,
+  repositoryRefOf,
   type SetupGitHubRefusal,
   type State,
   USE_EXISTING_APP,
   type UseAppRefusal,
   upperFirst,
 } from "@lookover/contracts";
+import { sharedRepositoriesLink, signedInToShared } from "./accounts.ts";
 import { itOrThem, plural, type WithCommand } from "./format.ts";
-import { accountText, engineStateText } from "./health.ts";
+import { accountText, connectionText, engineStateText } from "./health.ts";
 
 /**
  * An AI's line in the setup's first step: ready with its plan and version, signing in, signed out, or not found; one
@@ -128,12 +132,17 @@ const AGAIN = "Open GitHub again";
 
 /**
  * Where the App's repositories are chosen ("Add a repository", the setup's "Open GitHub again"): its installation's
- * settings once there is one, else its install page; null before there is an App.
+ * settings once there is one, else its install page; null before there is an App. On the shared App (ADR 0067),
+ * `sharedRepositoriesLink`'s; null while nobody is signed in to it.
  */
 export function addRepositoryLink(connection: Connection): string | null {
-  const { app, installationId, web } = connection;
+  const { app, accounts, web } = connection;
+  if (connection.way === "shared")
+    return signedInToShared(connection) ? sharedRepositoriesLink(connection) : null;
   if (app === null) return null;
-  if (installationId !== null) return githubLinks.installation(web, app.account, installationId);
+  const installation = ownInstallation(accounts);
+  if (installation !== undefined)
+    return githubLinks.installation(web, app.account, installation.installationId);
   return githubLinks.install(web, app.slug);
 }
 
@@ -232,6 +241,9 @@ function accessView(state: State): SubStepView {
  */
 export function githubStep(state: State, createApp: CreateAppRefusal | null = null): GitHubStepView {
   const { github, githubRefused } = state.setup;
+  // Shown on the shared App, its sign-in lost before the setup was done: no App of its own yet, at its start.
+  if (state.connection.way === "shared" && github !== "waiting-for-app" && github !== "start")
+    return githubStep({ ...state, setup: { ...state.setup, github: "start" } }, createApp);
   const refused =
     githubRefused !== null
       ? REFUSED[githubRefused]
@@ -378,18 +390,36 @@ export function appText(connection: Connection): string {
   return `${app.slug}, on ${accountText(app)}. Pull requests opened by ${you} or your agents are reviewed.`;
 }
 
-/** Repositories' foot: the bot Lookover acts as, and the account the App is on (ADR 0059). */
+/**
+ * Repositories' foot: the bot Lookover acts as, and the account the App is on (ADR 0059); signed in to the shared App
+ * (ADR 0066), the person who posts and every account reached, in GitHub's order, while GitHub takes the sign-in;
+ * else what the status menu says of it.
+ */
 export function repositoriesFoot(connection: Connection): string {
-  const { app, bot } = connection;
+  const { app, bot, person, accounts } = connection;
+  if (bot === null && person !== null) {
+    if (connection.state === "not-connected") return "Not connected to GitHub.";
+    if (connection.state !== "connected") return `Not connected to GitHub: ${connectionText(connection)}.`;
+    const logins = accounts.map((a) => a.account.login);
+    const last = logins.pop();
+    const on =
+      last === undefined ? "" : `, on ${logins.length > 0 ? `${logins.join(", ")} and ${last}` : last}`;
+    return `Signed in to GitHub as ${person.login}${on}.`;
+  }
   return `Connected to GitHub as ${bot ?? "nobody"}${app ? `, on ${accountText(app)}` : ""}.`;
 }
 
 /**
  * A repository the installation stopped listing (ADR 0059), as Repositories says it until it is back or dismissed:
  * labelled "Left" (nothing waits on the person: the status says all good), after its name, that it is no longer
- * reviewed and where it may have gone; and "Add it back", the installation's settings (null with no App kept).
+ * reviewed and where it may have gone; and "Add it back", the installation's settings (null with no App kept). On the
+ * shared App (ADR 0067), its account's installation settings when the person owns it and it is installed, else
+ * GitHub's install page.
  */
-export function departedNotice(connection: Connection): {
+export function departedNotice(
+  connection: Connection,
+  repo: Pick<DepartedRepository, "owner">,
+): {
   label: string;
   text: string;
   addBack: string | null;
@@ -397,7 +427,10 @@ export function departedNotice(connection: Connection): {
   return {
     label: "Left",
     text: "left the App's installation and is no longer reviewed: moved, deleted, or taken off its access.",
-    addBack: addRepositoryLink(connection),
+    addBack:
+      connection.way === "shared"
+        ? sharedRepositoriesLink(connection, repo.owner)
+        : addRepositoryLink(connection),
   };
 }
 
@@ -413,8 +446,8 @@ export function pullRequestLink(
   connection: Connection,
   change: Pick<Change, "repoId" | "number">,
 ): { href: string } | { path: string } {
-  const [owner = "", name = ""] = change.repoId.split("/");
+  const repo = repositoryRefOf(change.repoId) ?? { owner: "", name: "" };
   if (connection.web === GITHUB_WEB)
-    return { href: githubLinks.pullRequest(GITHUB_WEB, { owner, name }, change.number) };
-  return { path: `/github/${name}/${change.number}` };
+    return { href: githubLinks.pullRequest(GITHUB_WEB, repo, change.number) };
+  return { path: `/github/${repo.owner}/${repo.name}/${change.number}` };
 }

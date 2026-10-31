@@ -9,6 +9,7 @@ import {
   isCounted,
   isUnsettled,
   keptText,
+  LOOKOVERS_OPENING,
   type Review,
   type Round,
   shortSha,
@@ -97,7 +98,8 @@ export function summaryComment(it: ChangeReview): string {
   const { review } = it;
   const last = review.rounds.at(-1);
   if (!last) return "";
-  const lead = `Looked over ${shortSha(last.sha)}. ${foundAndChecked(last)}`;
+  // Opened as publish opens it (ADR 0066): signed in as a person, it is what says the words are Lookover's.
+  const lead = `${LOOKOVERS_OPENING}Looked over ${shortSha(last.sha)}. ${foundAndChecked(last)}`;
   const open = openOnGitHub(review);
   const where = (f: Finding) => `${f.file.split("/").at(-1)} ${placeText(f)}`;
   const escalated = open.filter((f) => f.status === "escalated");
@@ -116,6 +118,9 @@ export function summaryComment(it: ChangeReview): string {
   const count = open.length === 1 ? "One thing to fix" : `${open.length} things to fix`;
   return `${lead} ${count}, starting with ${where(first)}. ${rest}`;
 }
+
+/** What each inline comment opens with, as publish opens it on GitHub (ADR 0066). */
+export const INLINE_OPENING = LOOKOVERS_OPENING;
 
 export interface Thread {
   /** Folded away, the way GitHub shows a resolved thread. */

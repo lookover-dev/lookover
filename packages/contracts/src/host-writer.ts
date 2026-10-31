@@ -1,11 +1,13 @@
 // Port: writing to the Git host (ADR 0006, ADR 0023, ADR 0033, ADR 0039, ADR 0043). The `github` package posts
-// as the App's bot; `testkit`'s `FakeGitHost` records. Shaped by the check following a review job and by what one
-// round posts. The check is created when the job is recorded (`queued`, or `in_progress`), updated as the job
-// changes (its status and text), and completed: by the round, after one review holding every inline comment and
-// the summary comment (created once, then edited); or without a round. The bot's own comments are told by its
-// numeric user id, never by its login. Apart from a round, it reacts to a review request (ADR 0043): 👀 when the
-// request is recorded, 🚀 when its round is posted. Each post can be sent again safely (ADR 0044): the check
-// carries its job's id (found with `findCheck` before a re-send), the review its round's `REVIEW_MARKER` (found
+// as who posts (ADR 0066): the App's bot, or the person signed in to the shared App, the check always under the
+// App; `testkit`'s `FakeGitHost` records. "The bot" below is who posts. Shaped by the check following a review job
+// and by what one round posts. The check is created when the job is recorded (`queued`, or `in_progress`), updated
+// as the job changes (its status and text), and completed: by the round, after one review holding every inline
+// comment and the summary comment (created once, then edited); or without a round. The bot's own comments are told
+// by its numeric user id, never by its login; a person's summary also by the App that posted it. Apart from a
+// round, it reacts to a review request (ADR 0043): 👀 when the request is recorded, 🚀 when its round is posted.
+// Each post can be sent again safely (ADR 0044): the check carries its external id (`checkExternalId`: the job's
+// id and the person's, found with `findCheck` before a re-send), the review its round's `REVIEW_MARKER` (found
 // with `findReview` before a re-send), and
 // the summary its `SUMMARY_MARKER`. On its threads (ADR 0052) it replies, one reply per conversation, and it
 // minimizes the comments a round settled, since it can't resolve a thread. Every body is budgeted in bytes: the
@@ -66,9 +68,9 @@ export interface ReviewPost {
 
 export interface HostWriter {
   /**
-   * Creates the `Lookover` check on the commit, `queued` or `in_progress`, with its output, and `externalId`, the
-   * review job's id, which the host keeps with it (GitHub's `external_id`). Returns the host's id for it, to
-   * update and complete it with. Throws `HostError("too_large")` as `completeCheck` does.
+   * Creates the `Lookover` check on the commit, `queued` or `in_progress`, with its output, and `externalId` (the
+   * job's and the person's ids, `checkExternalId`), which the host keeps with it (GitHub's `external_id`). Returns
+   * the host's id for it, to update and complete it with. Throws `HostError("too_large")` as `completeCheck` does.
    */
   createCheck(
     repo: RepositoryRef,
@@ -78,7 +80,7 @@ export interface HostWriter {
     externalId: string,
   ): Promise<string>;
   /**
-   * The host's id for the bot's `Lookover` check on the commit created with `externalId` (the job's id), the newest
+   * The host's id for the App's `Lookover` check on the commit created with `externalId`, the newest
    * when there are several; null when there is none. How a check created on an answer that was lost is found
    * before it is created again (ADR 0044).
    */

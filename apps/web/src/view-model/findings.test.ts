@@ -60,7 +60,7 @@ function finding(id: string, status: FindingStatus, extra: Partial<Finding> = {}
 }
 
 function review(findings: Finding[]): Review {
-  return { ...emptyReview(changeId("app#1"), 0), findings };
+  return { ...emptyReview(changeId("sam/app#1"), 0), findings };
 }
 
 const ids = (list: Finding[]) => list.map((f) => String(f.id));
@@ -210,7 +210,7 @@ test('"Too noisy?" offers turning off the rule a finding cites and posting only 
   };
   const cites = finding("F1", "open", { rule: cited });
   const on = {
-    changeId: changeId("app#1"),
+    changeId: changeId("sam/app#1"),
     repo: "my-app",
     strictness: "recommended" as const,
     noise: { reviews: 12, postedBelowBlocking: 7, raisedByRule: { [cited.id]: 3 } },
@@ -224,13 +224,13 @@ test('"Too noisy?" offers turning off the rule a finding cites and posting only 
       "Turn off the rule",
       undefined,
       "3 fewer findings in your last 12 reviews",
-      { kind: "rule-off", changeId: changeId("app#1"), findingId: findingId("F1") },
+      { kind: "rule-off", changeId: changeId("sam/app#1"), findingId: findingId("F1") },
     ],
     [
       "Only post blocking findings in my-app",
       "my-app",
       "7 fewer findings posted in your last 12 reviews",
-      { kind: "blocking-only", changeId: changeId("app#1") },
+      { kind: "blocking-only", changeId: changeId("sam/app#1") },
     ],
   ]);
   expect(choices.map((c) => [c.effect, c.saved])).toEqual([
@@ -290,7 +290,7 @@ test('"Too noisy?" offers turning off the rule a finding cites and posting only 
 
 test('"This finding is wrong" is offered on any posted finding still unsettled, blocking ones too, first (ADR 0052)', () => {
   const on = {
-    changeId: changeId("app#1"),
+    changeId: changeId("sam/app#1"),
     repo: "my-app",
     strictness: "blocking" as const,
     rules: [],
@@ -302,7 +302,7 @@ test('"This finding is wrong" is offered on any posted finding still unsettled, 
   expect(wrong).toEqual({
     label: "This finding is wrong",
     hint: "keep it out of future rounds",
-    choice: { kind: "wrong", changeId: changeId("app#1"), findingId: findingId("F1") },
+    choice: { kind: "wrong", changeId: changeId("sam/app#1"), findingId: findingId("F1") },
     effect:
       "The finding is dismissed here and on GitHub: Lookover says so on its thread, hides its comment, and updates the summary and the check. It won't be raised again on this pull request.",
     saved: "Marked as wrong. The finding is dismissed.",

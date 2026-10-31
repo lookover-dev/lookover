@@ -60,7 +60,7 @@ reply     Answers a finding on its thread: claim fixed, wont-fix, disputed, defe
           lookover wait to have it answered.
 
   --pr N                the pull request; the current branch's by default
-  --app SLUG            the Lookover App's slug; LOOKOVER_APP, else the data folder's App
+  --app SLUG            the Lookover App's slug; LOOKOVER_APP, else the data folder's App, else the shared App
   --timeout 30m         how long wait waits for the result
   --appear-timeout 3m   how long wait waits for Lookover to pick the request up
   --json                one JSON document on stdout

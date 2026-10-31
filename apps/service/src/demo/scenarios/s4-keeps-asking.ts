@@ -5,7 +5,7 @@
 // Round 2 finds F1 still there and keeps it, with Lookover's reply on the thread; round 3 keeps it against its
 // author a second time and escalates it: only the owner settles it now (ADR 0052, "Needs you").
 import { commitSha, findingId } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import {
   added,
   BY_CLAUDE,
@@ -128,6 +128,9 @@ const PAYMENTS: ScenarioChange = {
   ],
 };
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(LEDGER_API.repo);
+
 export const S4: Scenario = {
   id: "S4",
   title: "The agent keeps asking",
@@ -142,19 +145,19 @@ export const S4: Scenario = {
   world: LEDGER_API,
   changes: [PAYMENTS],
   script: [
-    { at: MIN + 20_000, move: { kind: "open", change: 149 } },
+    { at: MIN + 20_000, move: { kind: "open", change: pr(149) } },
     {
       at: 6 * MIN - 10_000,
-      move: { kind: "reply", change: 149, finding: F1, by: OWNER, text: FIRST_ANSWER },
+      move: { kind: "reply", change: pr(149), finding: F1, by: OWNER, text: FIRST_ANSWER },
     },
-    { at: 6 * MIN, move: { kind: "push", change: 149 } },
-    { at: 6 * MIN + 10_000, move: { kind: "ask", change: 149 } },
+    { at: 6 * MIN, move: { kind: "push", change: pr(149) } },
+    { at: 6 * MIN + 10_000, move: { kind: "ask", change: pr(149) } },
     {
       at: 10 * MIN - 10_000,
-      move: { kind: "reply", change: 149, finding: F1, by: OWNER, text: SECOND_ANSWER },
+      move: { kind: "reply", change: pr(149), finding: F1, by: OWNER, text: SECOND_ANSWER },
     },
-    { at: 10 * MIN, move: { kind: "push", change: 149 } },
-    { at: 10 * MIN + 10_000, move: { kind: "ask", change: 149 } },
+    { at: 10 * MIN, move: { kind: "push", change: pr(149) } },
+    { at: 10 * MIN + 10_000, move: { kind: "ask", change: pr(149) } },
   ],
   seed: MIN,
 };

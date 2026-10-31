@@ -55,9 +55,9 @@ test("a post GitHub asks to wait shows the round's outbox: sent of owed, until w
   ]);
   expect(seen.at(-1)).toMatchObject({ type: "round.finished", job: { state: "done" } });
   expect(logged).toContain(
-    `lookover-sandbox#1 round 1 posts wait: GitHub asked to wait, trying again at ${local(until1)} (2 of 4 sent)`,
+    `sasensi/lookover-sandbox#1 round 1 posts wait: GitHub asked to wait, trying again at ${local(until1)} (2 of 4 sent)`,
   );
-  expect(logged.at(-1)).toBe("lookover-sandbox#1 round 1 posted: no open findings");
+  expect(logged.at(-1)).toBe("sasensi/lookover-sandbox#1 round 1 posted: no open findings");
 });
 
 test("a post GitHub refuses for good is given up at once: no wait shown, and the log says the round's posts were given up", async () => {
@@ -76,7 +76,7 @@ test("a post GitHub refuses for good is given up at once: no wait shown, and the
   expect(seen.at(-1)).toMatchObject({ job: { state: "failed", failure: { kind: "publish_failed" } } });
   expect(logged.filter((line) => line.includes("posts wait"))).toEqual([]);
   expect(logged.at(-1)).toMatch(
-    /^lookover-sandbox#1 round 1 kept, its posts given up: GitHub refused the review/,
+    /^sasensi\/lookover-sandbox#1 round 1 kept, its posts given up: GitHub refused the review/,
   );
 });
 
@@ -101,13 +101,13 @@ test("an hour of GitHub not answering says each wait in the log, then the round 
     wait: { until: refusedAt + 5_000, refusal: "unavailable" },
   });
   const waits = logged.filter((line) =>
-    line.startsWith("lookover-sandbox#1 round 1 posts wait: GitHub did not answer"),
+    line.startsWith("sasensi/lookover-sandbox#1 round 1 posts wait: GitHub did not answer"),
   );
   expect(waits.length).toBeGreaterThan(5);
   expect(waits[0]).toBe(
-    `lookover-sandbox#1 round 1 posts wait: GitHub did not answer, trying again at ${local(refusedAt + 5_000)} (1 of 4 sent)`,
+    `sasensi/lookover-sandbox#1 round 1 posts wait: GitHub did not answer, trying again at ${local(refusedAt + 5_000)} (1 of 4 sent)`,
   );
   expect(logged).toContainEqual(
-    expect.stringMatching(/^lookover-sandbox#1 round 1 kept, its posts given up: /),
+    expect.stringMatching(/^sasensi\/lookover-sandbox#1 round 1 kept, its posts given up: /),
   );
 });

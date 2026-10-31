@@ -32,7 +32,7 @@ import {
 setDefaultTimeout(TEST_LIMIT_MS);
 afterEach(stopAll);
 
-const ONE = changeId("lookover-sandbox#1");
+const ONE = changeId("sasensi/lookover-sandbox#1");
 const ref = { repo: SANDBOX, number: 1 };
 const REPO = repositoryId(`${SANDBOX.owner}/${SANDBOX.name}`);
 
@@ -317,7 +317,7 @@ test("a first review of a pull request the service doesn't know is refused, and 
   const cookie = await openApp(service);
   const asked = await post(service, cookie, {
     type: "setup.firstReview",
-    changeId: changeId("lookover-sandbox#9"),
+    changeId: changeId("sasensi/lookover-sandbox#9"),
     preview: true,
   });
   expect(asked.status).toBe(404);

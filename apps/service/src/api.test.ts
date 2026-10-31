@@ -75,10 +75,10 @@ test("the one-time token becomes a cookie, and the snapshot lists the sandbox's 
     },
   ]);
   expect(state.changes).toEqual({
-    "lookover-sandbox#1": expectedChange1,
-    "lookover-sandbox#2": {
+    "sasensi/lookover-sandbox#1": expectedChange1,
+    "sasensi/lookover-sandbox#2": {
       ...expectedChange1,
-      id: "lookover-sandbox#2",
+      id: "sasensi/lookover-sandbox#2",
       number: 2,
       title: "Bump the dev dependencies",
       openedBy: "octocat",
@@ -87,7 +87,7 @@ test("the one-time token becomes a cookie, and the snapshot lists the sandbox's 
       draft: true,
     },
   });
-  expect(state.reviews["lookover-sandbox#1"]).toEqual(expectedReview1);
+  expect(state.reviews["sasensi/lookover-sandbox#1"]).toEqual(expectedReview1);
   expect(state.setup.done).toBe(true);
   expect(state.connection).toEqual({
     id: "github:lookover-spike-sasensi[bot]",
@@ -96,7 +96,21 @@ test("the one-time token becomes a cookie, and the snapshot lists the sandbox's 
     bot: BOT.login,
     // The fake's App (its first id) and its first installation, on the owner's account (ADR 0053).
     app: personalApp(1, "lookover-spike-sasensi"),
-    installationId: 60_000_001,
+    accounts: [
+      {
+        account: { id: 1, login: "sasensi", type: "User" },
+        installationId: 60_000_001,
+        cause: null,
+        // On the own App, whether the person owns its account is nobody's to say (ADR 0067).
+        owner: null,
+      },
+    ],
+    // The accounts the shared App doesn't reach: none on the own App.
+    unreached: [],
+    way: "own",
+    signIn: null,
+    // Nobody signed in to the shared App: the own App's person is its.
+    person: null,
     web: "https://github.com",
     since: T0,
     limitUntil: null,

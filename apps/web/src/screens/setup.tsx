@@ -4,6 +4,7 @@
 // click moves it. Going back never loses the way forward: finished steps stay reachable from the top bar.
 import {
   type ChangeId,
+  type DeviceCode,
   type Engine,
   isCounted,
   type RepositoryId,
@@ -50,10 +51,18 @@ import {
   problems,
 } from "../view-model/select.ts";
 import { SETUP_REVIEWERS_TEXT } from "../view-model/settings.ts";
+import {
+  bothWays,
+  SIGN_IN_TEXT,
+  signedInNow,
+  signInEnd,
+  signInStep,
+  wayShown,
+} from "../view-model/sign-in.ts";
 import { BACKGROUND_TEXT, backgroundLine } from "../view-model/start-at-login.ts";
 import { AgentRows } from "./coding-agent.tsx";
 import { HeldDetail, roundDuration, Sentence, StateSquare, StepList, SubStep } from "./common.tsx";
-import { FixButton, GitHubButton, UseAppForm } from "./github-app.tsx";
+import { AccountsList, CodeActions, FixButton, GitHubButton, UseAppForm } from "./github-app.tsx";
 
 const STEPS: { id: SetupStep; label: string }[] = [
   { id: "ai", label: "Your AI" },
@@ -268,7 +277,7 @@ function AppPlace({ place, pick }: { place: AppPlaceView; pick: (organisation: s
           </div>
         );
       })}
-      <div className="app-place-line">
+      <div className="app-place-line code-whole">
         <span className="t-small">
           <HeldDetail shown={place.line} details={place.held} />
         </span>
@@ -287,7 +296,125 @@ function AppPlace({ place, pick }: { place: AppPlaceView; pick: (organisation: s
   );
 }
 
+/**
+ * The GitHub step (ADR 0066): Sign in with GitHub first, Use your own App beside it, today's flow. The way shown
+ * follows the connection's; before either, what was chosen here.
+ */
 function StepGitHub() {
+  const state = useAppState();
+  const [chosen, setChosen] = useState<"own" | null>(null);
+  if (wayShown(state, chosen) === "shared") return <StepSignIn useOwnApp={() => setChosen("own")} />;
+  // Back to the two ways while nothing was asked of GitHub on this one; else to the AI step, as before.
+  return <StepOwnApp back={bothWays(state) ? () => setChosen(null) : null} />;
+}
+
+/**
+ * Sign in with GitHub (ADR 0066): the code, copied and GitHub's page opened by one button, the wait, Cancel; then who
+ * you are and the accounts reached. The step's one primary starts it, then is its Continue. How a code went without
+ * a sign-in is remembered here: the connection only says one waits.
+ */
+function StepSignIn({ useOwnApp }: { useOwnApp: () => void }) {
+  const state = useAppState();
+  const send = useSend();
+  const { store } = useApp();
+  const { refusal } = useStoreStatus(store);
+  const { connection } = state;
+  const [last, setLast] = useState<DeviceCode | null>(connection.signIn);
+  const [cancelled, setCancelled] = useState(false);
+  useEffect(() => {
+    if (connection.signIn === null) return;
+    setLast(connection.signIn);
+    setCancelled(false);
+  }, [connection.signIn]);
+  // The code that signed the person in ended nothing: signed out later, the step says that, not how it went.
+  const inNow = signedInNow(connection);
+  useEffect(() => {
+    if (inNow) setLast(null);
+  }, [inNow]);
+  const startRefused = refusal?.command?.type === "connection.signIn" ? (refusal.signIn ?? null) : null;
+  const step = signInStep(state, {
+    end: signInEnd(last, connection, state.now, cancelled),
+    refusal: startRefused,
+  });
+  const cancel = () => {
+    setCancelled(true);
+    send({ type: "connection.cancelSignIn" });
+  };
+  const T = SIGN_IN_TEXT;
+  return (
+    <>
+      <Sentence title={T.title} small={T.lead} />
+      <SubStep
+        state={step.signIn.state}
+        title={T.signIn}
+        action={<CodeActions code={step.signIn.code} onCancel={cancel} />}
+      >
+        <span className="sign-in-detail code-whole">
+          <HeldDetail shown={step.signIn.text} details={step.signIn.held} />
+        </span>
+      </SubStep>
+      <SubStep
+        state={step.accounts.state}
+        title={T.accounts}
+        below={step.accounts.list.rows.length > 0 ? <AccountsList list={step.accounts.list} /> : null}
+      >
+        <HeldDetail shown={step.accounts.text} details={step.accounts.held} />
+      </SubStep>
+      {/* Always there, empty until a refusal: nothing under it moves when one is said or cleared. */}
+      <p className="refused-line" role="status">
+        {step.refused}
+      </p>
+      <div className="setup-acts">
+        <span className="t-small">{step.done ? T.done : ""}</span>
+        <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "ai" })}>
+          Back
+        </Button>
+        {/* Its place kept once signed in: nothing beside it moves. Taken while a code waits, it gives that up. */}
+        <Button
+          variant="ghost"
+          className={step.ownApp ? "" : "hidden"}
+          aria-hidden={!step.ownApp}
+          tabIndex={step.ownApp ? 0 : -1}
+          onClick={() => {
+            if (connection.signIn !== null) cancel();
+            useOwnApp();
+          }}
+        >
+          {T.own}
+        </Button>
+        {/* One primary, as wide as both its labels: Sign in with GitHub starts it, then it is the step's Continue. */}
+        <SameWidth
+          shown={step.primary.label}
+          labels={{
+            [T.signIn]: (
+              <Button
+                variant="primary"
+                size="lg"
+                disabled={!step.primary.enabled}
+                onClick={() => send({ type: "connection.signIn" })}
+              >
+                {T.signIn}
+              </Button>
+            ),
+            [T.continue]: (
+              <Button
+                variant="primary"
+                size="lg"
+                disabled={!step.primary.enabled}
+                onClick={() => send({ type: "setup.goto", step: "repos" })}
+              >
+                {T.continue}
+              </Button>
+            ),
+          }}
+        />
+      </div>
+    </>
+  );
+}
+
+/** Use your own App (ADR 0053, ADR 0059): today's flow, make the App and install it, or use one made before. */
+function StepOwnApp({ back }: { back: (() => void) | null }) {
   const state = useAppState();
   const send = useSend();
   const { store } = useApp();
@@ -337,7 +464,7 @@ function StepGitHub() {
       </div>
       <div className="setup-acts">
         <span className="t-small">{step.done ? T.done : ""}</span>
-        <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "ai" })}>
+        <Button variant="ghost" onClick={() => (back ? back() : send({ type: "setup.goto", step: "ai" }))}>
           Back
         </Button>
         {/* Always there, enabled once the step is done: setup waits for it (ADR 0058), and nothing beside it moves. */}
@@ -417,7 +544,7 @@ function FirstReviewProblem({ review }: { review: Review }) {
   if (!problem) return null;
   return (
     <Notice busy={problem.busy} action={<FixButton problem={problem} busyLabel="Waiting for the sign-in…" />}>
-      <b>{problem.title}.</b> {problem.detail}
+      <b>{problem.title}.</b> <Said words={problem.detail} />
     </Notice>
   );
 }

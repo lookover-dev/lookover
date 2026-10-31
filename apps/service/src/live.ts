@@ -5,7 +5,9 @@
 // 0044), and `retrieval` fetching from GitHub with the App's short-lived token. The App is `live.json`'s when it names
 // one: its key's text read here from the path it gives, passed to the adapters and never logged, never stored, and
 // the data folder set up at once. Without one, the data folder's (its App store, its key in the OS keychain), and a
-// fresh data folder starts at the setup's first step. The owner and the bot are the App's, asked of GitHub when the
+// fresh data folder starts at the setup's first step. The shared App is offered beside it (ADR 0066): its device flow,
+// and the sign-in kept sealed in the data folder (or the folder `signIns` names) on the same keychain, used only when
+// no App is: `live.json`'s or the data folder's own wins. The owner and the bot are the App's, asked of GitHub when the
 // room opens; `live.json`'s App owned by an organisation works for the person their own `gh` names (ADR 0059). No scripted push: a live push is the owner's, or `bun run live`'s through `gh`. The machine-wide lock
 // is the program's to take (`acquireLiveLock`), since `bun run live` holds it around more than the service.
 import { readFileSync } from "node:fs";
@@ -13,16 +15,22 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Gh, HostLogin } from "@lookover/contracts";
 import { createEngines, type SignIn } from "@lookover/engines";
-import { createGitHub, createHostInstallations } from "@lookover/github";
+import {
+  createGitHub,
+  createHostAccounts,
+  createHostInstallations,
+  createHostSignIn,
+} from "@lookover/github";
 import { createProcessRunner } from "@lookover/process";
 import { openTerminal } from "@lookover/process/terminal";
 import { createRetrieval } from "@lookover/retrieval";
 import { appStore } from "./app-store.ts";
 import type { GitHubSide } from "./installation.ts";
-import { osKeychain } from "./keychain.ts";
+import { type Keychain, osKeychain } from "./keychain.ts";
 import type { LiveConfig } from "./live-config.ts";
 import type { ServiceOptions } from "./service.ts";
 import type { SignInOpener } from "./sign-in.ts";
+import { signInStore } from "./sign-in-store.ts";
 import { NEW_OWNER, SET_UP } from "./snapshot.ts";
 import { REAL_TIMERS } from "./timers.ts";
 
@@ -45,6 +53,11 @@ export interface LiveOptions {
   config: LiveConfig | undefined;
   /** Given every secret GitHub's adapter comes to hold (its key, JWTs, tokens), for the log to remove (ADR 0054). */
   secret?(value: string): void;
+  /**
+   * The folder whose sign-in to the shared App the service reads and renews (ADR 0066): `home` unless given. `bun run
+   * live` gives the live data folder, so every run's fresh folder shares the one sign-in, never a copy of it.
+   */
+  signIns?: string;
   /**
    * The person's own `gh` (ADR 0059): who `live.json`'s App works for when an organisation owns it, asked at start.
    * Absent: such an App is refused at start.
@@ -107,21 +120,24 @@ export function guarded(side: GitHubSide, config: LiveConfig | undefined): GitHu
 }
 
 /**
- * GitHub for a real run (ADR 0053): the App level and the repository ports, each built with the live config's
+ * GitHub for a real run (ADR 0053, ADR 0066): the App level and the repository ports, each built with the live config's
  * allow-list when there is one, and guarded by it, each given `secret` for the log; the App the live config names,
- * else the data folder's App store over the OS keychain.
+ * else the data folder's App store over the OS keychain; and the shared App, its sign-in kept in `signIns`'s sign-in
+ * store on the same keychain (the App, when there is one, wins over it).
  */
 function liveGitHub(
   home: string,
   config: LiveConfig | undefined,
   secret: ((value: string) => void) | undefined,
   gh: Gh | undefined,
+  signIns: string,
 ): GitHubSide {
   const repositories = config?.repositories;
   const told = {
     ...(repositories === undefined ? {} : { repositories }),
     ...(secret === undefined ? {} : { secret }),
   };
+  const keychain: Keychain = osKeychain(REAL_TIMERS);
   // Guarded here for `bun run live`, which starts on these adapters alone; the program's wiring guards them again.
   const side: GitHubSide = guarded(
     {
@@ -130,11 +146,20 @@ function liveGitHub(
         const github = createGitHub({ app: { id, privateKey: key }, ...told });
         return { intake: github.intake, writer: github.writer };
       },
+      shared: {
+        signIn: createHostSignIn(told),
+        signIns: signInStore({ home: signIns, keychain }),
+        accounts: (keeper) => createHostAccounts({ keeper, ...told }),
+        connect: (keeper) => {
+          const github = createGitHub({ keeper, ...told });
+          return { intake: github.intake, writer: github.writer };
+        },
+      },
     },
     config,
   );
   const app = config?.app;
-  if (app === undefined) return { ...side, apps: appStore({ home, keychain: osKeychain(REAL_TIMERS) }) };
+  if (app === undefined) return { ...side, apps: appStore({ home, keychain }) };
   const person = gh === undefined ? {} : { person: ghPerson(gh) };
   return { ...side, given: { id: app.id, key: readFileSync(app.keyPath, "utf8") }, ...person };
 }
@@ -147,6 +172,7 @@ export async function liveAdapters({
   config,
   secret,
   gh,
+  signIns,
 }: LiveOptions): Promise<LiveAdapters> {
   const runner = createProcessRunner({ registryFile: processes });
   await runner.sweepOrphans();
@@ -154,7 +180,7 @@ export async function liveAdapters({
   // With `live.json`'s App, set up at once; without, the setup's first step on a fresh data folder (ADR 0053).
   const given = config?.app !== undefined;
   return {
-    github: liveGitHub(home, config, secret, gh),
+    github: liveGitHub(home, config, secret, gh, signIns ?? home),
     engines,
     // The confirm pass at its own effort (ADR 0044): Codex at medium.
     confirmEngines: createEngines({ runner, env, codexEffort: "medium" }),

@@ -25,12 +25,12 @@ export interface Rounds {
   of(changeId: ChangeId): Pick<Round, "n" | "sha">[];
   /**
    * When the last round of a change whose id starts with `changes` was posted (the service names a repository's
-   * changes `<name>#<n>`): one repository's hot window (ADR 0043); null before its first.
+   * changes `<owner>/<name>#<n>`): one repository's hot window (ADR 0043); null before its first.
    */
   lastPostedAt(changes: string): number | null;
   /**
    * "Too noisy?"'s counts (ADR 0049) over the 30 most recently reviewed changes whose ids start with `changes` (the
-   * service names a repository's changes `<name>#<n>`), each by its last round: the findings below blocking posted,
+   * service names a repository's changes `<owner>/<name>#<n>`), each by its last round: the findings below blocking posted,
    * and the findings citing each rule or any of `repoId`'s rules nested in it.
    */
   noise(repoId: RepositoryId, changes: string): NoiseCounts;

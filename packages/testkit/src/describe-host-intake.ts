@@ -12,7 +12,8 @@
 // since GitHub lets no account fork its own repository, so it runs against the fake only.
 // The host keeps comments' times to the second, so a case that needs one comment edited after a point lets a
 // second pass first, and no case expects two comments written in the same second in a given order.
-// Lookover's threads (ADR 0052): the fixture posts a finding as the bot, replies and comments inline as the owner,
+// Lookover's threads (ADR 0052): the fixture posts a finding as who posts (the bot, or a signed-in person, ADR
+// 0066), replies and comments inline as the owner,
 // and pushes a commit that replaces the finding's line.
 // Nothing in the suite is GitHub's: the clone URL is checked as any host's.
 import { describe, expect, test } from "bun:test";
@@ -60,14 +61,21 @@ export interface HostIntakeFixture {
   markReady(number: number): Promise<void>;
   /** Closes `open`. Returns once the host shows it. */
   close(): Promise<void>;
-  /** The reviewer bot as the host knows it: the author of Lookover's threads. */
-  bot: { id: number; login: string };
   /**
-   * Posts, as the bot, a review of `open` with one inline comment ending in the finding marker of `finding`, on a
+   * Who posts, as the host knows them: the author of Lookover's threads. The App's bot, or the person signed in to the
+   * App (ADR 0066); `owner` is then someone else, whose copied marker names no thread.
+   */
+  poster: { id: number; login: string };
+  /**
+   * Posts, as the poster, a review of `open` with one inline comment ending in the finding marker of `finding`, on a
    * line `outdate` replaces. Returns the comment's id: the thread's root.
    */
   postFinding(finding: FindingId): Promise<number>;
-  /** Writes an inline comment on `open` as `owner`, on a line of its diff. Returns its id. */
+  /**
+   * Writes an inline comment on `open` as someone other than the poster, on a line of its diff: `owner`, or, where
+   * `owner` is the poster (live on the shared App: a live run has one person, ADR 0066), another account, such as an
+   * App's bot. Returns its id.
+   */
   commentInline(body: string): Promise<number>;
   /** Replies as `owner` in the thread whose root comment is `commentId`. Returns the reply's id. */
   reply(commentId: number, body: string): Promise<number>;
@@ -350,6 +358,12 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       expect(username).not.toBe("");
       expect(password).not.toBe("");
       expect(spec.cloneUrl).not.toContain(password);
+    });
+
+    test("who posts is the fixture's poster, by numeric id; a repository that isn't one is not found", async () => {
+      const { intake, repo, poster } = await setup.open();
+      expect(await intake.poster(repo)).toEqual(poster);
+      await expect(intake.poster(noSuchRepository(repo))).rejects.toMatchObject({ failure: "not_found" });
     });
 
     test("a change nobody reviewed has no threads; a change that isn't one is not found", async () => {

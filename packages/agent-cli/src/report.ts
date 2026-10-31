@@ -10,6 +10,7 @@ import {
 } from "@lookover/contracts";
 import { lookoverReply } from "./threads.ts";
 import { EXIT, forTheAgent, type Outcome } from "./wait.ts";
+import type { Poster } from "./whose.ts";
 import type { World } from "./world.ts";
 
 /** Where a finding is: `path:12`, `path:12-14`, or the whole change. */
@@ -91,13 +92,13 @@ function conversation(
 export function reportFeedback(
   outcome: Outcome,
   threads: AgentThread[],
-  app: string,
+  poster: Poster,
   json: boolean,
   w: Pick<World, "out" | "err">,
 ): number {
   const joined = forTheAgent(outcome.result).map((f) => {
     const thread = newestThread(threads, f.id);
-    return { f, thread, last: thread ? lookoverReply(thread, app) : null };
+    return { f, thread, last: thread ? lookoverReply(thread, poster) : null };
   });
   w.err(outcome.message);
   if (json) {

@@ -23,7 +23,7 @@ import {
 setDefaultTimeout(TEST_LIMIT_MS);
 
 const MIN = 60_000;
-const id = (n: number) => changeId(`ledger-api#${n}`);
+const id = (n: number) => changeId(`ledger-dev/ledger-api#${n}`);
 const ORGANISATION = { id: 338, login: "ledger-dev" };
 const PERSON = { id: 1, login: "sasensi" };
 
@@ -170,10 +170,13 @@ test("the drawer's gh is uninstalled: the step's next read says gh is missing", 
 test("a test's own gh is emptied at each load: S1 after S15 lists no organisation once gh is signed in", async () => {
   const gh = memoryGh();
   const own = await startScenario(scenarioOf("S15"), { gh });
-  expect(await gh.adminOrganisations()).toEqual({ kind: "listed", organisations: [ORGANISATION] });
+  expect(await gh.memberships()).toMatchObject({
+    kind: "listed",
+    organisations: [{ organisation: ORGANISATION, role: "owner" }],
+  });
   expect((await load(own, "S1")).status).toBe(200);
   expect(await gh.person()).toEqual({ kind: "signed-out" });
   expect(await inject(own, "gh-signed-in")).toBe(200);
-  expect(await gh.adminOrganisations()).toEqual({ kind: "listed", organisations: [] });
+  expect(await gh.memberships()).toMatchObject({ kind: "listed", organisations: [] });
   expect(await gh.membership("ledger-dev")).toEqual({ kind: "absent" });
 });

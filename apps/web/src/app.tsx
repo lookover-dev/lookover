@@ -42,9 +42,9 @@ function Main() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/reviews" element={<AllReviews />} />
-          <Route path="/reviews/:repo/:number" element={<Review />} />
+          <Route path="/reviews/:owner/:name/:number" element={<Review />} />
           <Route path="/repositories" element={<Repositories />} />
-          <Route path="/repositories/:name" element={<RepositoryPage />} />
+          <Route path="/repositories/:owner/:name" element={<RepositoryPage />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/settings/:section" element={<SettingsSection />} />
           <Route path="/logs" element={<Logs />} />
@@ -58,12 +58,13 @@ function Main() {
 
 /**
  * The toast of a refused command: said once per refusal; the band keeps the line (design-system.md). None for an App
- * refused: the form or the GitHub step says it in place.
+ * refused, nor a sign-in refused while the setup shows (`setup`): the form or the GitHub step says it in place.
  */
-function RefusalToast({ refusal }: { refusal: Refusal | null }) {
+function RefusalToast({ refusal, setup }: { refusal: Refusal | null; setup: boolean }) {
   const toast = useToast();
+  // `setup` is read as the refusal comes, never watched: a refusal is said once, the setup finishing later says nothing.
   useEffect(() => {
-    const text = refusal ? refusalToast(refusal) : null;
+    const text = refusal ? refusalToast(refusal, { setup }) : null;
     if (text !== null) toast({ text, tone: "need" });
   }, [refusal, toast]);
   return null;
@@ -123,10 +124,10 @@ export function App({
     <AppContext.Provider value={app}>
       <StateProvider value={state}>
         <ToastProvider>
-          <RefusalToast refusal={refusal} />
+          <RefusalToast refusal={refusal} setup={!state.setup.done} />
           <TickingProvider state={state} pace={dev?.pace ?? REAL_PACE}>
             <Routes>
-              <Route path="/github/:repo/:number" element={<GitHubMock />} />
+              <Route path="/github/:owner/:name/:number" element={<GitHubMock />} />
               {dev?.routes}
               <Route path="*" element={state.setup.done ? <Main /> : <Setup />} />
             </Routes>

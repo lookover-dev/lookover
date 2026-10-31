@@ -5,7 +5,7 @@ description: Lookover is in 0.x. What it doesn't do, and where it has had little
 
 Lookover is in 0.x: it works, and it changes. This is what it doesn't do yet.
 
-- **GitHub only** (github.com), one App per Lookover. No GitLab, Bitbucket or GitHub Enterprise Server.
+- **GitHub only** (github.com). No GitLab, Bitbucket or GitHub Enterprise Server.
 - **Subscriptions only,** through the `claude` and `codex` CLIs. No API keys, no other AI.
 - **Your own pull requests.** Another author's pull request is reviewed when you ask, by Claude alone. A fork's is never reviewed by itself: ask with `/lookover review`, and Claude reviews it.
 - **On your computer only.** No server mode yet. A team doesn't share one Lookover: each colleague runs their own ([your plan's terms](/docs/terms/)).

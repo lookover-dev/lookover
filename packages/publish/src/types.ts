@@ -10,6 +10,7 @@ import type {
   FindingId,
   HostChange,
   HostIntake,
+  HostThreadReply,
   HostWriter,
   JobFailureKind,
   JobId,
@@ -292,10 +293,22 @@ export interface PostTime {
 export interface PublisherOptions {
   writer: HostWriter;
   /**
+   * The numeric id on the host of the person Lookover posts for (the App's person on the own App, the signed-in
+   * person on the shared one), read at each check created or looked for: their id is in its external id with the
+   * job's (`checkExternalId`, ADR 0066), so two people's checks on one commit never mix.
+   */
+  person: () => number;
+  /**
    * Reads the change's Lookover threads (ADR 0052), once, as a round's check is completed: the result names each
    * finding's thread. Without it, or when the host refuses the read, the result names none.
    */
   threads?: HostIntake["threads"];
+  /**
+   * What tells Lookover's replies on the change's threads from everyone else's, asked at each look (`core`'s
+   * `lookoversReply`, ADR 0066): a reply already sent is the one it names holding the reply's marker. Without it, or
+   * without `threads`, a reply begun is never looked for: it is sent again.
+   */
+  lookovers?: (change: ChangeRef) => Promise<(reply: HostThreadReply) => boolean>;
   /** What a refused post waits on before it is tried again; without it, every refusal propagates at once. */
   time?: PostTime;
   /** Where a refusal that never fails the round is said (a comment GitHub wouldn't minimize); without it, nowhere. */

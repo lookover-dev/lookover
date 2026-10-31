@@ -39,16 +39,16 @@
 // comment's id and URL, and whether it was resolved when the read can tell), null for a finding with none. A
 // transient refusal of that read is tried again like a post; one that stands leaves `thread` out, and the check
 // still completes.
-// Replies and minimizing (ADR 0052): each of `core`'s replies (`reconciled.replies`) on a finding whose thread the
-// run read (`roots`, kept with the round so a resume reads nothing new) is one post, sent after the review and
-// before the summary, under the thread's root, ending with a hidden reply marker (contracts' `replyMarker`: the
-// run, the finding and the claim it answers, so a claim written while the round ran is read next) within
-// `COMMENT_MAX_BYTES`: only its reason is cut, at a line, so its opening and its closing line ("If it is kept again, the owner decides.") are always said. A reply whose send began before is
-// looked for by its marker among the bot's replies in the threads (`threads`) before it is sent again, so it is
-// sent once. A reply on a finding with no thread read is not sent, nor an answer with no words. A reply refused
-// for good (`not_found`: its thread's root deleted; `invalid`) never fails the round: it goes to `log`, and the
-// rest go on. Once the check completed, the request comments the round answers (`requests`) and the root comment
-// of each finding it withdrew are minimized as `resolved`, one post each; a refusal that stands, after the
+// Replies and minimizing (ADR 0052): each of `core`'s replies (`reconciled.replies`) on a finding whose thread the run
+// read (`roots`, kept with the round so a resume reads nothing new) is one post, sent after the review and before the
+// summary, under the thread's root, ending with a hidden reply marker (contracts' `replyMarker`: the run, the finding
+// and the claim it answers, so a claim written while the round ran is read next) within `COMMENT_MAX_BYTES`: only its
+// reason is cut, at a line, so its opening and its closing line ("If it is kept again, the owner decides.") are always
+// said. A reply whose send began before is looked for by its marker among the bot's replies in the threads (`threads`)
+// before it is sent again, so it is sent once. A reply on a finding with no thread read is not sent, nor an answer with
+// no words. A reply refused for good (`not_found`: its thread's root deleted; `invalid`) never fails the round: it goes
+// to `log`, and the rest go on. Once the check completed, the request comments the round answers (`requests`) and the
+// root comment of each finding it withdrew are minimized as `resolved`, one post each; a refusal that stands, after the
 // transient ones were tried again, never fails the round either: it goes to `log`, and the rest go on.
 // The owner's dismissal (ADR 0052, "This finding is wrong") posts outside any round, through an outbox of its own
 // keyed by the dismissal (`dismissalPostsOf`): "Dismissed by the owner." on the finding's thread, ending with a
@@ -67,27 +67,29 @@
 // each `@`, between the `!` and the `[` of each `![`, after the `<` of each tag, after the `&` of each entity and
 // before each run of three backticks or tildes; fenced code is left as written but for those two, so a suggestion
 // still applies. Lookover's own words hold nothing the filter changes.
-// Interface: `createPublisher({ writer, threads, time, log, secretsRemoved })` takes the `HostWriter` port, the
-// threads' reader (optional), the time a refused post waits on, where a refusal that never fails a round is said,
-// and the secrets filter (the service's log sink's; none removed without it), and gives
-// `dismiss(dismissal, outbox, signal)` (above), and `publish(round, outbox, signal)`: a `RoundToPost` (contracts' `Reconciled` as `core.reconcile` answered it, with
-// the change and its host, the commit, the diff, the run and the job's check, if it has one) to the host's ids and
-// the result as posted; and `check(job)`: a `JobCheck` (the job, the commit its check is on, its check's id or none,
-// and where it stands: waiting, running or ended) to its check's id, created when it had none. The caller (the
+// Interface: `createPublisher({ writer, person, threads, lookovers, time, log, secretsRemoved })` takes the `HostWriter`
+// port, the numeric id of the person Lookover posts for (read at each check created; one that is no id throws), the
+// threads' reader and what tells Lookover's replies on them (`core.lookoversReply`, both optional: without them a reply begun
+// is sent again), the time a refused post waits on, where a refusal that never fails a round is said, and the
+// secrets filter (the service's log sink's; none removed without it), and gives `dismiss(dismissal, outbox, signal)`
+// (above), and `publish(round, outbox, signal)`: a `RoundToPost` (contracts' `Reconciled` as `core.reconcile` answered
+// it, with the change and its host, the commit, the diff, the run and the job's check, if it has one) to the host's ids
+// and the result as posted; and `check(job)`: a `JobCheck` (the job, the commit its check is on, its check's id or
+// none, and where it stands: waiting, running or ended) to its check's id, created when it had none. The caller (the
 // scheduler) never writes to the host's checks itself, and keeps the id: `check` gives a check it creates to the
-// caller's `created`, and `publish` marks the round's check sent in the outbox, at once, before anything else is
-// sent for it, so a refusal after the create never leaves a second check behind it. The result's line opens with
-// contracts' `RESULT_MARKER`, and contracts' `readResult` reads it back (the agents' helper imports only
-// `contracts`).
-// The outbox (ADR 0044): the caller saves the round and its posts as owed (`postsOf(round)`, in order) before the
-// first is sent, and hands them to `publish` as an `Outbox`, a structural port its store keeps: `publish` sends
-// only the owed ones and marks each sent with the host's id before the next is begun, so a restart resumes where
-// a stopped service left off, and nothing is sent twice. A post whose send began but was never marked sent may be
-// on the host already: the review is looked for by the hidden `REVIEW_MARKER` line its body ends with (the
-// round's run and number) through `findReview` before it is posted again; the summary is edited by its marker
-// either way; the check created on an answer that was lost is looked for by the job's id (its `external_id`)
-// through `findCheck`; the check completed is a write by id. `findReview(round)` answers whether the host holds a
-// round's review, for a caller that gave a round up with its review begun and never marked sent.
+// caller's `created`, and `publish` marks the round's check sent in the outbox, at once, before anything else is sent
+// for it, so a refusal after the create never leaves a second check behind it. The result's line opens with contracts'
+// `RESULT_MARKER`, and contracts' `readResult` reads it back (the agents' helper imports only `contracts`).
+// The outbox (ADR 0044): the caller saves the round and its posts as owed (`postsOf(round)`, in order) before the first
+// is sent, and hands them to `publish` as an `Outbox`, a structural port its store keeps: `publish` sends only the owed
+// ones and marks each sent with the host's id before the next is begun, so a restart resumes where a stopped service
+// left off, and nothing is sent twice. A post whose send began but was never marked sent may be on the host already:
+// the review is looked for by the hidden `REVIEW_MARKER` line its body ends with (the round's run and number) through
+// `findReview` before it is posted again; the summary is edited by its marker either way; the check created on an
+// answer that was lost is looked for by its external id (the job's id and the person's, `checkExternalId`, ADR 0066:
+// the `person` the options give) through `findCheck`; the check completed is a write by id. `findReview(round)` answers
+// whether the host holds a round's review, for a caller that gave a round up with its review begun and never marked
+// sent.
 // Refusals (ADR 0044): given the caller's `time`, a transient refusal (`unavailable`: a 5xx, GitHub's 422 "An internal
 // error occurred", a network failure; `rate_limited`, waiting at least a minute, else until the host's `retryAt`) is
 // tried again, backing off from 5 s to 5 min, while the refusals in a row last less than an hour (about 55 min of

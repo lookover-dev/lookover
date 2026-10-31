@@ -514,9 +514,9 @@ function ownersGh() {
       asked.push("person");
       return gh.person();
     },
-    adminOrganisations: () => {
-      asked.push("adminOrganisations");
-      return gh.adminOrganisations();
+    memberships: () => {
+      asked.push("memberships");
+      return gh.memberships();
     },
     membership: (organisation) => {
       asked.push(`membership ${organisation}`);
@@ -650,6 +650,24 @@ test("on your own account, nothing asks gh: not Create it on GitHub, the page, n
   ]);
 });
 
+test("on an organisation, gh is asked once for its memberships: the person comes with them", async () => {
+  const time = new DemoClock({ at: T0 });
+  const { counted, asked } = ownersGh();
+  const door = await newOwner({ time, host: acmeWithNoApp(time), gh: counted });
+
+  const chosen = await post(door.service, door.cookie, {
+    type: "connection.createApp",
+    organisation: "acme",
+  });
+  expect(chosen.status).toBe(200);
+  expect(asked).toEqual(["memberships"]);
+  expect((await snapshot(door.service, door.cookie)).connection.gh).toEqual({
+    person: { kind: "signed-in", account: OWNER },
+    organisations: { kind: "listed", organisations: [{ id: ACME.id, login: ACME.login }] },
+  });
+  await door.service.stop();
+});
+
 test("an organisation gh doesn't list as the person's to admin is refused, as is any when gh can't say", async () => {
   const time = new DemoClock({ at: T0 });
   const failing = (why: "offline" | "scope") => () => {
@@ -693,16 +711,16 @@ function slowGh() {
   });
   const slow: Gh = {
     person: () => gh.person(),
-    adminOrganisations: async () => {
-      asked.push("adminOrganisations");
+    memberships: async () => {
+      asked.push("memberships");
       await held;
-      return gh.adminOrganisations();
+      return gh.memberships();
     },
     membership: (organisation) => gh.membership(organisation),
   };
   /** Until gh is being asked for the organisations. */
   const asking = async () => {
-    while (!asked.includes("adminOrganisations")) await Bun.sleep(1);
+    while (!asked.includes("memberships")) await Bun.sleep(1);
   };
   return { slow, answer, asking };
 }

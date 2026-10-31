@@ -78,8 +78,24 @@ const DIFF = [{ path: "src/invoice.ts", side: "head" as const, from: 2, to: 21 }
 /** The line the suite's finding is on, which `outdate` replaces. */
 const FINDING_LINE = { path: "src/invoice.ts", side: "head" as const, line: 12, endLine: null };
 
-const host = (clock = heldClock()) =>
-  new FakeGitHost({ repo, bot, clock, defaultBranch: DEFAULT_BRANCH, changes: [{ ...change, diff: DIFF }] });
+/** The person signed in to the App, on the fake's person mode (ADR 0066): someone other than the owner. */
+const person = { id: 11247504, login: "signed-in" };
+
+const host = (clock = heldClock(), signedIn?: typeof person) =>
+  new FakeGitHost({
+    repo,
+    bot,
+    clock,
+    defaultBranch: DEFAULT_BRANCH,
+    changes: [{ ...change, diff: DIFF }],
+    ...(signedIn ? { person: signedIn } : {}),
+  });
+
+/** Who posts on each of the fake's modes: the App's bot, or the person signed in to it. */
+const MODES = [
+  { name: "FakeGitHost", person: undefined },
+  { name: "FakeGitHost posting as a person", person },
+] as const;
 
 /** Fresh commits, one per push. */
 let pushed = 0;
@@ -91,77 +107,80 @@ const refusing = (failure: HostRefusal) => () => {
   return Promise.resolve({ intake: fake, repo, open: change });
 };
 
-describeHostIntake("FakeGitHost", {
-  open: () => {
-    const clock = heldClock();
-    const fake = host(clock);
-    // A second passes between two moves of the world, as it would on GitHub between two calls.
-    const tick = <T>(value: T) => {
-      clock.advance(1_000);
-      return Promise.resolve(value);
-    };
-    return Promise.resolve({
-      intake: fake,
-      repo,
-      open: change,
-      defaultBranch: DEFAULT_BRANCH,
-      owner,
-      before: T0,
-      comment: (body) => tick(fake.seedComment(ref, { author: owner, body })),
-      edit: (id, body) => tick(fake.editComment(id, body)),
-      later: () => tick(undefined),
-      push: (commits, rewrite = false, messages) => {
-        const sha = nextSha();
-        fake.push(ref, sha, [], [], {
-          commits,
-          ...(messages ? { messages } : {}),
-          ...(rewrite ? { onto: change.base.sha } : {}),
-        });
-        return tick(sha);
-      },
-      openDraft: () => {
-        fake.open({ ...wip, diff: [] });
-        return tick(wip);
-      },
-      markReady: (number) => tick(fake.markReady({ repo, number })),
-      close: () => tick(fake.close(ref)),
-      bot,
-      postFinding: async (finding) => {
-        const { head } = await fake.getChange(repo, 1);
-        const body = `**Off by one** · Should fix\n\n${FINDING_MARKER}${JSON.stringify({ v: 1, id: finding })} -->`;
-        const reviewId = await fake.publishReview(ref, {
-          sha: head.sha,
-          body: "",
-          comments: [{ ...FINDING_LINE, body }],
-        });
-        const root = fake.view(ref).reviews.find((r) => r.id === reviewId)?.comments[0]?.id;
-        return tick(Number(root));
-      },
-      commentInline: (body) => tick(fake.seedInline(ref, owner, { ...FINDING_LINE, line: 14, body })),
-      reply: (commentId, body) => tick(fake.seedReply(ref, commentId, { author: owner, body })),
-      outdate: () =>
-        tick(fake.push(ref, nextSha(), DIFF, [{ path: FINDING_LINE.path, line: 12, removed: 1, added: 1 }])),
-    });
-  },
-  refusing: {
-    unauthorized: refusing("unauthorized"),
-    rate_limited: refusing("rate_limited"),
-    unavailable: refusing("unavailable"),
-  },
-  notInstalled: () =>
-    Promise.resolve({
-      intake: new FakeGitHost({ repo, bot, changes: [{ ...change, diff: [] }], installed: false }),
-      repo,
-      open: change,
-    }),
-  forks: () => {
-    const fake = host();
-    // To the fake a deleted fork is what GitHub makes of it: a change from a fork still.
-    fake.open({ ...fromFork, diff: [] });
-    fake.open({ ...fromDeletedFork, diff: [] });
-    return Promise.resolve({ intake: fake, repo, fork: fromFork, deletedFork: fromDeletedFork });
-  },
-});
+for (const mode of MODES)
+  describeHostIntake(mode.name, {
+    open: () => {
+      const clock = heldClock();
+      const fake = host(clock, mode.person);
+      // A second passes between two moves of the world, as it would on GitHub between two calls.
+      const tick = <T>(value: T) => {
+        clock.advance(1_000);
+        return Promise.resolve(value);
+      };
+      return Promise.resolve({
+        intake: fake,
+        repo,
+        open: change,
+        defaultBranch: DEFAULT_BRANCH,
+        owner,
+        before: T0,
+        comment: (body) => tick(fake.seedComment(ref, { author: owner, body })),
+        edit: (id, body) => tick(fake.editComment(id, body)),
+        later: () => tick(undefined),
+        push: (commits, rewrite = false, messages) => {
+          const sha = nextSha();
+          fake.push(ref, sha, [], [], {
+            commits,
+            ...(messages ? { messages } : {}),
+            ...(rewrite ? { onto: change.base.sha } : {}),
+          });
+          return tick(sha);
+        },
+        openDraft: () => {
+          fake.open({ ...wip, diff: [] });
+          return tick(wip);
+        },
+        markReady: (number) => tick(fake.markReady({ repo, number })),
+        close: () => tick(fake.close(ref)),
+        poster: mode.person ?? bot,
+        postFinding: async (finding) => {
+          const { head } = await fake.getChange(repo, 1);
+          const body = `**Off by one** · Should fix\n\n${FINDING_MARKER}${JSON.stringify({ v: 1, id: finding })} -->`;
+          const reviewId = await fake.publishReview(ref, {
+            sha: head.sha,
+            body: "",
+            comments: [{ ...FINDING_LINE, body }],
+          });
+          const root = fake.view(ref).reviews.find((r) => r.id === reviewId)?.comments[0]?.id;
+          return tick(Number(root));
+        },
+        commentInline: (body) => tick(fake.seedInline(ref, owner, { ...FINDING_LINE, line: 14, body })),
+        reply: (commentId, body) => tick(fake.seedReply(ref, commentId, { author: owner, body })),
+        outdate: () =>
+          tick(
+            fake.push(ref, nextSha(), DIFF, [{ path: FINDING_LINE.path, line: 12, removed: 1, added: 1 }]),
+          ),
+      });
+    },
+    refusing: {
+      unauthorized: refusing("unauthorized"),
+      rate_limited: refusing("rate_limited"),
+      unavailable: refusing("unavailable"),
+    },
+    notInstalled: () =>
+      Promise.resolve({
+        intake: new FakeGitHost({ repo, bot, changes: [{ ...change, diff: [] }], installed: false }),
+        repo,
+        open: change,
+      }),
+    forks: () => {
+      const fake = host();
+      // To the fake a deleted fork is what GitHub makes of it: a change from a fork still.
+      fake.open({ ...fromFork, diff: [] });
+      fake.open({ ...fromDeletedFork, diff: [] });
+      return Promise.resolve({ intake: fake, repo, fork: fromFork, deletedFork: fromDeletedFork });
+    },
+  });
 
 describe("FakeGitHost intake on its own", () => {
   test("a repository it does not hold is not found, as GitHub answers 404", async () => {

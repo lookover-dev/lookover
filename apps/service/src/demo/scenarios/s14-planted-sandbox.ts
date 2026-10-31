@@ -14,7 +14,7 @@
 // chosen, the streams carrying none. #2 and #3 are the sandbox's other branches;
 // #2's clean round is hand-written, there being no recording of it.
 import { changeId, commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange, World } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange, type World } from "../scenario.ts";
 import { MIN, OWNER, unified } from "./ledger-api.ts";
 
 const SEC = 1_000;
@@ -394,7 +394,10 @@ const CHANGES: ScenarioChange[] = [
 ];
 
 /** The pull request the story is about. */
-const PLANTED_ID = changeId("lookover-sandbox#1");
+const PLANTED_ID = changeId("sasensi/lookover-sandbox#1");
+
+/** A pull request of the world's repository, by its number. */
+const pr = on(WORLD.repo);
 
 export const S14: Scenario = {
   id: "S14",
@@ -408,19 +411,19 @@ export const S14: Scenario = {
     "Inject “Codex fails its self-test” from the drawer.",
   ],
   later: "",
-  path: "/reviews/lookover-sandbox/1",
+  path: "/reviews/sasensi/lookover-sandbox/1",
   world: WORLD,
   changes: CHANGES,
   script: [
-    { at: 1 * MIN, move: { kind: "open", change: 2 } },
-    { at: 2 * MIN, move: { kind: "open", change: 3 } },
-    { at: 3 * MIN, move: { kind: "open", change: 1 } },
-    { at: 5 * MIN + 30 * SEC, move: { kind: "push", change: 1 } },
+    { at: 1 * MIN, move: { kind: "open", change: pr(2) } },
+    { at: 2 * MIN, move: { kind: "open", change: pr(3) } },
+    { at: 3 * MIN, move: { kind: "open", change: pr(1) } },
+    { at: 5 * MIN + 30 * SEC, move: { kind: "push", change: pr(1) } },
     {
       at: 6 * MIN + 30 * SEC,
       move: { kind: "command", command: { type: "review.request", changeId: PLANTED_ID } },
     },
-    { at: 8 * MIN + 30 * SEC, move: { kind: "close", change: 2 } },
+    { at: 8 * MIN + 30 * SEC, move: { kind: "close", change: pr(2) } },
     { at: 9 * MIN + 30 * SEC, move: { kind: "command", command: { type: "service.pause", for: "hour" } } },
     {
       at: 9 * MIN + 40 * SEC,

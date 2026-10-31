@@ -34,6 +34,21 @@ export type Command =
    * is checked, kept and never echoed, logged or put in an event or a refusal (`UseAppRefusal`).
    */
   | { type: "connection.useApp"; appId: number; key: string }
+  /**
+   * "Sign in with GitHub", and Sign in again once signed out (ADR 0066): a device code asked of GitHub and shown on
+   * the connection (`signIn`) until the person enters it, it expires, or the sign-in is cancelled. Refused while one
+   * waits, and while Lookover runs as its own App.
+   */
+  | { type: "connection.signIn" }
+  /** The sign-in waiting for its code given up: the code no longer shown, nothing kept. Nothing when none waits. */
+  | { type: "connection.cancelSignIn" }
+  /**
+   * "Ask to install on <org>" (ADR 0067): the person, not an owner of `account` (an organisation's login, one of
+   * `Connection.unreached`), opened GitHub's install page to request the shared App there; Lookover keeps the time
+   * asked (`UnreachedAccount.askedAt`) until the account is reached. The link opens the page; this only records the
+   * ask. Refused as `AskToInstallRefusal` says.
+   */
+  | { type: "connection.askToInstall"; account: string }
   | { type: "connection.reconnect" }
   | { type: "setup.goto"; step: SetupStep }
   | { type: "setup.chooseRepos"; enabled: RepositoryId[] }

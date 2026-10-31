@@ -189,8 +189,14 @@ button {
     flex-direction: column;
     align-items: stretch;
   }
-  .tbl.repos th:nth-child(2),
-  .tbl.repos td:nth-child(2) {
+  /* kept, no wider than nothing, rather than removed: a group head's row spans the three columns (ADR 0067); what it
+     says is not displayed, so nothing reads it */
+  .tbl.repos thead th:nth-child(2),
+  .tbl.repos td.repos-prs {
+    width: 0;
+    padding-inline: 0;
+  }
+  .repos-prs > span {
     display: none;
   }
 }
@@ -327,6 +333,11 @@ button {
 }
 .st-note {
   padding: 2px 10px 8px;
+}
+/* a fix under its line and detail (an account's), in line with the text */
+.menu .st-fix {
+  display: flex;
+  padding: var(--s-1) 0 2px 15px;
 }
 .menu .st-link {
   all: unset;
@@ -1040,9 +1051,9 @@ dialog.cmdk {
 .alert.warn .alert-label {
   color: var(--warn-text);
 }
-/* The button keeps its width while it waits. */
+/* The button keeps its width while it waits, as wide as the widest fix: "Copy code and open GitHub" on one line. */
 .alert .btn {
-  width: 208px;
+  width: var(--w-fix);
   justify-content: center;
 }
 
@@ -1422,14 +1433,21 @@ dialog.cmdk {
 .tbl.repos {
   table-layout: fixed;
 }
-.tbl.repos th:nth-child(1) {
+.tbl.repos thead th:nth-child(1) {
   width: 36%;
 }
-.tbl.repos th:nth-child(3) {
+.tbl.repos thead th:nth-child(3) {
   width: 120px;
 }
 .tbl.repos td {
   height: 62px;
+}
+/* on a phone, Pull requests kept at no width (above): the repository's name takes what Reviewing leaves, not a third
+   of the screen, so "owner/name" stays on one line */
+@media (max-width: 640px) {
+  .tbl.repos thead th:nth-child(1) {
+    width: auto;
+  }
 }
 
 /* ---- saved, said quietly ---- */

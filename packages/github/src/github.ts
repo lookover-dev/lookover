@@ -1,20 +1,28 @@
-// The adapter's composition: one App session, one API client, the two ports over them.
-import type {
-  ChangeRef,
-  Clock,
-  CommitSha,
-  HostInstallations,
-  HostIntake,
-  HostView,
-  HostWriter,
-  RepositoryRef,
+// The adapter's composition: one session (the App's, the person's, or one given), one API client, the ports over them.
+import {
+  type ChangeRef,
+  type Clock,
+  type CommitSha,
+  GITHUB_WEB,
+  type HostAccounts,
+  type HostInstallations,
+  type HostIntake,
+  type HostSignIn,
+  type HostView,
+  type HostWriter,
+  type RepositoryRef,
+  type SignInKeeper,
 } from "@lookover/contracts";
+import { createAccounts } from "./accounts.ts";
 import { allowedOnly } from "./allowed.ts";
 import { type Fetch, GitHubApi, type RateLimit } from "./api.ts";
 import { AppSession } from "./auth.ts";
 import { createInstallations } from "./installations.ts";
 import { createIntake } from "./intake.ts";
 import { parse, repository } from "./schemas.ts";
+import type { Session } from "./session.ts";
+import { createSignIn } from "./sign-in.ts";
+import { UserSession } from "./user-session.ts";
 import { createView } from "./view.ts";
 import { createWriter } from "./writer.ts";
 
@@ -24,10 +32,13 @@ export interface Account {
   login: string;
 }
 
-/** Who the snapshot shows: the repository's owner (their changes are "you") and the App's bot (the reviewer). */
+/**
+ * Who the snapshot shows: the repository's owner (their changes are "you") and who posts, the session's poster: the
+ * App's bot, or the person signed in to the App (ADR 0066).
+ */
 export interface Identity {
   owner: Account;
-  bot: Account;
+  poster: Account;
 }
 
 /** The App as the live config gives it: its id and the PEM text of its private key. */
@@ -46,6 +57,8 @@ export interface HostOptions {
   repositories?: readonly RepositoryRef[];
   /** GitHub's API address, `https://api.github.com` when not given: a stub's in tests and demo mode. */
   api?: string;
+  /** GitHub's web address, where the sign-in's OAuth endpoints are: `GITHUB_WEB` when not given. */
+  web?: string;
   /** The time, for token renewal and for when GitHub said to retry. The real clock when not given. */
   clock?: Clock;
   /** The HTTP client, for tests. `globalThis.fetch` when not given. */
@@ -58,9 +71,13 @@ export interface HostOptions {
   secret?(value: string): void;
 }
 
-export interface GitHubOptions extends HostOptions {
-  app: AppCredentials;
-}
+/**
+ * How the adapter is signed in (ADR 0066): with the App's key (`app`: its session buys a token per repository and
+ * posts as its bot), as the person signed in to the shared App (`keeper`: where their sign-in is kept, read and
+ * renewed there; one token for every repository, posting as them), or on a session made elsewhere (`session`).
+ */
+export type GitHubOptions = HostOptions &
+  ({ app: AppCredentials } | { keeper: SignInKeeper } | { session: Session });
 
 export interface GitHub {
   intake: HostIntake;
@@ -72,7 +89,7 @@ export interface GitHub {
    * with their comments, the conversation.
    */
   view(change: ChangeRef, commit?: CommitSha): Promise<HostView>;
-  /** The repository's owner and the App's bot, as the live snapshot shows them. */
+  /** The repository's owner and who posts, as the live snapshot shows them. */
   identity(repo: RepositoryRef): Promise<Identity>;
 }
 
@@ -82,15 +99,48 @@ function apiOf(options: HostOptions): { api: GitHubApi; clock: Clock } {
   return { api, clock };
 }
 
+/** Signing a person in to the shared App (contracts' `HostSignIn`): the device flow and the refresh. */
+export function createHostSignIn(options: HostOptions): HostSignIn {
+  const { api, clock } = apiOf(options);
+  return signInOf(options, api, clock);
+}
+
+function signInOf(options: HostOptions, api: GitHubApi, clock: Clock): HostSignIn {
+  return createSignIn({
+    api,
+    fetch: options.fetch ?? ((input, init) => fetch(input, init)),
+    web: options.web ?? GITHUB_WEB,
+    clock,
+    secret: options.secret ?? (() => {}),
+  });
+}
+
 /** The App level of GitHub (contracts' `HostInstallations`): the credentials come with each call. */
 export function createHostInstallations(options: HostOptions): HostInstallations {
   const { api, clock } = apiOf(options);
   return createInstallations(api, clock, options.repositories, options.secret ?? (() => {}));
 }
 
+/**
+ * What the person whose sign-in `keeper` keeps reaches through the shared App (contracts' `HostAccounts`, ADR 0066):
+ * their sign-in read and renewed as the person's session does it.
+ */
+export function createHostAccounts(options: HostOptions & { keeper: SignInKeeper }): HostAccounts {
+  const { api, clock } = apiOf(options);
+  const secret = options.secret ?? (() => {});
+  const session = new UserSession(signInOf(options, api, clock), options.keeper, clock, secret);
+  return createAccounts(api, session, options.repositories);
+}
+
 export function createGitHub(options: GitHubOptions): GitHub {
   const { api, clock } = apiOf(options);
-  const session = new AppSession(api, options.app, clock, options.secret ?? (() => {}));
+  const secret = options.secret ?? (() => {});
+  const session =
+    "app" in options
+      ? new AppSession(api, options.app, clock, secret)
+      : "keeper" in options
+        ? new UserSession(signInOf(options, api, clock), options.keeper, clock, secret)
+        : options.session;
   const allowed = allowedOnly(options.repositories);
   return {
     intake: createIntake(api, session, allowed),
@@ -103,8 +153,8 @@ export function createGitHub(options: GitHubOptions): GitHub {
       const owner = await session.withToken(repo, async (token) =>
         parse(repository, (await api.request({ path, bearer: token })).body, `GET ${path}`),
       );
-      const bot = await session.botUser(repo);
-      return { owner: { id: owner.owner.id, login: owner.owner.login }, bot };
+      const { id, login } = await session.poster(repo);
+      return { owner: { id: owner.owner.id, login: owner.owner.login }, poster: { id, login } };
     },
   };
 }

@@ -1,9 +1,11 @@
 ---
-// S2's review loop condensed into one card for the site, in GitHub's colours. The caption makes clear that this
-// groups the separate GitHub posts. The App's display name is illustrative; installations have unique slugs.
+// S2's review loop condensed into one card for the site, in GitHub's colours, as the shared App posts it (ADR 0065):
+// the review and the summary by the person signed in, the badge on the summary alone, the check under Lookover. The
+// caption makes clear that this groups the separate GitHub posts. The person is an example.
 import { ICON } from "../../brand/eyes.generated.ts";
 
-const APP = "lookover";
+const PERSON = "mira";
+const INITIAL = PERSON.charAt(0).toUpperCase();
 ---
 
 <section class="demo">
@@ -19,14 +21,13 @@ const APP = "lookover";
       </div>
       <div class="pr-body">
         <div class="cm">
-          <span class="av"><Fragment set:html={ICON} /></span>
+          <span class="av" aria-hidden="true">{INITIAL}</span>
           <div class="cm-box">
-            <div class="cm-h"><b>{APP}</b> <span class="bot">bot</span> <span>reviewed <code>a1f9c2e</code> · round 1</span></div>
+            <div class="cm-h"><b>{PERSON}</b> <span>reviewed <code>a1f9c2e</code> · round 1</span></div>
             <div class="cm-b">
               <p>
-                <b>One thing to fix.</b> The rest can go.
+                Lookover · <b>One thing to fix.</b> The rest can go.
               </p>
-              <p class="found-by">Found by Codex, double-checked by Claude.</p>
             </div>
             <div class="diff">
               <div class="file">src/middleware/rateLimit.ts</div>
@@ -47,15 +48,28 @@ const APP = "lookover";
               <span><b>agent</b> · Fixed in <code>b2c3d4e</code>: logs the key id only.</span>
               <span><span class="ok">Resolved</span> · verified fixed in <code>b2c3d4e</code></span>
             </div>
-            <div class="check">
-              <span class="dot" aria-hidden="true"></span><span><b>Nothing to fix.</b> Checked <code>b2c3d4e</code> · round 2</span>
+          </div>
+        </div>
+        <div class="cm">
+          <span class="av" aria-hidden="true">{INITIAL}<span class="badge"><Fragment set:html={ICON} /></span></span>
+          <div class="cm-box">
+            <div class="cm-h"><b>{PERSON}</b> <span>commented</span></div>
+            <div class="cm-b">
+              <p><b>Lookover</b> · round 2 · looked over <code>b2c3d4e</code></p>
+              <p class="found-by">Found by Codex, double-checked by Claude.</p>
+              <p>Nothing to fix.</p>
             </div>
           </div>
+        </div>
+        <div class="check">
+          <span class="ico" aria-hidden="true"><Fragment set:html={ICON} /></span><b>Lookover</b><span
+            ><span class="ok">Nothing to fix</span> · <code>b2c3d4e</code></span
+          >
         </div>
       </div>
     </div>
     <p class="cap">
-      One pull request, two rounds. A condensed preview of the review, the fix and the passing check on GitHub.
+      One pull request, two rounds, condensed. The review and the summary post as you; the check shows under Lookover.
     </p>
   </div>
 </section>

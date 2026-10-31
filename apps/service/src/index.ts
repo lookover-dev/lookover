@@ -241,7 +241,7 @@
 // store throws reaches the request, which gets no answer; a command that doesn't parse answers 400; a command with no
 // row answers 501 (none today: in live mode only the demo verbs do, with nothing scripted to move). Live mode:
 // `readLiveConfig` throws a plain `Error` holding `LIVE_CONFIG_HELP` for a config that is missing or of another
-// shape (two repositories of one name, say), and takes a `watch` it no longer reads, naming it in `ignored` for the
+// shape (one repository listed twice, say), and takes a `watch` it no longer reads, naming it in `ignored` for the
 // start to print `WATCH_IGNORED` once (`runService`, `bun run live`), its value never read; `liveAdapters` rejects with
 // the file system's error when the key file or the process registry can't be read; `startService` never rejects for
 // GitHub (ADR 0053): the App not installed, a key it refuses, GitHub down or a key Lookover kept that no longer opens
@@ -267,6 +267,10 @@
 // when the keychain can't, which `read()` and `write()` report as the key's protection (`read()` naming that file
 // as `fallback`); each file user-only (on Windows its access list, `icacls`; tests inject `userOnly`); a key that no
 // longer opens reads as `lost`. One store per data folder, in one process: its reads and writes take turns.
+// `signInStore({ home, keychain })` keeps the sign-in to the shared App the same way, by the one sealing (ADR 0066):
+// its record `github/sign-in.json` names the person, the tokens sealed in `github/sign-in.<entry>.key`, or in
+// `github/sign-in.<id>.token` when the keychain can't; `keeper` is the adapter's `SignInKeeper` over it. Its folder is
+// the data folder unless the live options name another (`LiveOptions.signIns`).
 // It must never know: the words the screens say (its JSON errors are for the console), the rules of `core` (it
 // calls them), or which wiring a program chose (the service itself sees only ports).
 // Exports: what `scripts/` uses (the live suites, `eval`, `build`), and what this package's own tests drive, since
@@ -352,6 +356,7 @@ export {
   windowsLoginItem,
   xdgLoginItem,
 } from "./login-item.ts";
+export { realReg } from "./reg.ts";
 export { DAY_MS } from "./retention.ts";
 export { buildRoom, type Room, type RoomOptions } from "./room.ts";
 export {
@@ -368,6 +373,7 @@ export { settingsChanged } from "./settings-changed.ts";
 export { diskSettingsFiles, repositorySettingsFile, SettingsUnwritten } from "./settings-files.ts";
 export { skillCommandLine } from "./shell-line.ts";
 export type { SignInOpened, SignInOpener } from "./sign-in.ts";
+export { type SignInRead, type SignInStore, signInStore } from "./sign-in-store.ts";
 export { renderSkill, skillStampOf } from "./skill.ts";
 export {
   CODING_AGENTS,
@@ -379,6 +385,8 @@ export {
   type SkillFolders,
   userSkillFolders,
 } from "./skill-folders.ts";
+// A data folder set up: `bun run live`'s shared App path starts its run folder so, as live.json's App does (ADR 0066).
+export { SET_UP } from "./snapshot.ts";
 export { REAL_TIMERS, type Timers } from "./timers.ts";
 // A file made user-only (an ACL on Windows, 0600 elsewhere): the App store's own, for a key file a dev script writes.
 export { makeUserOnly } from "./user-only.ts";

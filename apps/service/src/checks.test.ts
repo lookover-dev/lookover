@@ -3,7 +3,14 @@
 // or completed without one, `skipped` or `neutral`, never `failure` (ADR 0006), with the result block. A check
 // write the host refuses never fails the job: the job's next change sends it again.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { changeId, commitSha, HostError, readResult } from "@lookover/contracts";
+import {
+  changeId,
+  checkExternalId,
+  commitSha,
+  HostError,
+  readCheckExternalId,
+  readResult,
+} from "@lookover/contracts";
 import { RetrievalError } from "@lookover/retrieval";
 import { DemoClock, FakeGitHost, type HostPost, ScriptedRetrieval } from "@lookover/testkit";
 import {
@@ -13,6 +20,7 @@ import {
   heldRuns,
   home,
   messages,
+  OWNER,
   openApp,
   PLANTED,
   post,
@@ -34,7 +42,7 @@ setDefaultTimeout(TEST_LIMIT_MS);
 afterEach(stopAll);
 
 const PR = { repo: SANDBOX, number: 1 };
-const SECOND = changeId("lookover-sandbox#2");
+const SECOND = changeId("sasensi/lookover-sandbox#2");
 const SIGNED_IN = { installed: true, version: "2.4.1", signedIn: true };
 
 /** Each check post as `<kind> <status or conclusion>: <title>`, in the order the host received them. */
@@ -117,6 +125,23 @@ test('"Review now" creates a queued check on the head commit before the run star
   const [check] = host.view(PR).checks;
   expect(check).toMatchObject({ sha: SHA1, status: "completed", conclusion: "success" });
   expect(readResult(check?.output.text ?? "")?.run).toMatchObject({ state: "done", trigger: "manual" });
+});
+
+test("the job's check is found again by its job and the owner's id, the external id the room writes (ADR 0066)", async () => {
+  const engines = fakeEngines({ reviews: 1 });
+  const { service, host, time } = await start({ engines });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+
+  expect((await review(service, cookie)).status).toBe(200);
+  const started = (await until(stream, "run.started")).at(-1);
+  if (started?.type !== "run.started") throw new Error("no run started");
+  await until(stream, "round.finished");
+  await time.advance(0);
+  const [check] = host.view(PR).checks;
+  const externalId = checkExternalId(started.job.id, OWNER.id);
+  expect(readCheckExternalId(externalId)).toEqual({ job: started.job.id, person: OWNER.id });
+  expect(await host.findCheck(SANDBOX, SHA1, externalId)).toBe(check?.id ?? "no check");
 });
 
 test("a review held on a Codex too old for its model says so on its check, and says what starts it", async () => {
@@ -366,12 +391,12 @@ test("an update of the check the host refuses is logged, and the job's next chan
   await time.advance(60_000);
   // Each change of the review is in the log too (ADR 0055); the refused update after the one that moved.
   expect(logged).toEqual([
-    "lookover-sandbox#1 opened by sasensi: Add unpaid filter and rewrite total",
-    "lookover-sandbox#2 opened as a draft by octocat: Bump the dev dependencies",
-    "lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
-    "lookover-sandbox#1 review waits: Claude is signed out",
+    "sasensi/lookover-sandbox#1 opened by sasensi: Add unpaid filter and rewrite total",
+    "sasensi/lookover-sandbox#2 opened as a draft by octocat: Bump the dev dependencies",
+    "sasensi/lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
+    "sasensi/lookover-sandbox#1 review waits: Claude is signed out",
     "Claude is not installed",
-    "lookover-sandbox#1 review waits: Claude is not installed",
+    "sasensi/lookover-sandbox#1 review waits: Claude is not installed",
     "the check of job id-1 was not sent: The host could not be reached",
   ]);
   expect(shown(host)).toEqual(["queued null: Waiting: Claude is signed out"]);
@@ -415,12 +440,12 @@ async function endRefused(options: { home?: string } = {}) {
   await time.advance(0);
   // Each change of the review is in the log too (ADR 0055); the refused end after the cancel.
   expect(logged).toEqual([
-    "lookover-sandbox#1 opened by sasensi: Add unpaid filter and rewrite total",
-    "lookover-sandbox#2 opened as a draft by octocat: Bump the dev dependencies",
-    "lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
-    "lookover-sandbox#1 review waits: Claude is signed out",
-    "lookover-sandbox#1 closed",
-    "lookover-sandbox#1 review cancelled: the pull request was closed",
+    "sasensi/lookover-sandbox#1 opened by sasensi: Add unpaid filter and rewrite total",
+    "sasensi/lookover-sandbox#2 opened as a draft by octocat: Bump the dev dependencies",
+    "sasensi/lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
+    "sasensi/lookover-sandbox#1 review waits: Claude is signed out",
+    "sasensi/lookover-sandbox#1 closed",
+    "sasensi/lookover-sandbox#1 review cancelled: the pull request was closed",
     "the check of job id-1 was not sent: The host could not be reached",
   ]);
   expect(shown(host)).toEqual(["queued null: Waiting: Claude is signed out"]);

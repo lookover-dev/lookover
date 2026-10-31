@@ -68,7 +68,7 @@ const fork: FakeChange = {
   fork: true,
 };
 const FORK = { repo: SANDBOX, number: 7 };
-const id = changeId("lookover-sandbox#7");
+const id = changeId("sasensi/lookover-sandbox#7");
 
 /** Claude and Codex both signed in and ready. */
 function bothEngines(...claude: ScriptedRun[]) {

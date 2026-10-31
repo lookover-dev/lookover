@@ -1,14 +1,26 @@
 // Retrieval without git (ADR 0046): `retrieval`'s `Retrieval` port, structurally (the request and what a
 // prepare gives have the shapes `packages/retrieval` declares; it is not imported: testkit may reach only
-// contracts). Each commit of each change scripted gets its own worktree path, `<root>/<change>/<sha>`, where
-// nothing is ever written, and the unified diff scripted for it: the scripted engines answer by that path, and a
+// contracts). Each commit of each change scripted, named by its repository and number (two repositories of one name on
+// two accounts each have their own #1, ADR 0066), gets its own worktree path, `<root>/<owner>/<name>/<number>/<sha>`,
+// where nothing is ever written, and the unified diff scripted for it: the scripted engines answer by that path, and a
 // review of the same commit asked twice reads the same code. A commit nothing is scripted for gets the default
 // diff (`diff`, none unless set) at `<root>/<job>`: what the service's tests run on. A repository's rules files
 // (`scriptRules`) come with each of its prepares, as the real one reads them from the default branch; none unless set.
 import { join } from "node:path";
-import type { CommitSha, FetchSpec, JobId, Prepared, RepositoryRef, RulesFile } from "@lookover/contracts";
+import {
+  type ChangeRef,
+  type CommitSha,
+  changeName,
+  type FetchSpec,
+  type JobId,
+  type Prepared,
+  type RepositoryRef,
+  type RulesFile,
+  repositoryName,
+} from "@lookover/contracts";
 
-const repoKey = (repo: RepositoryRef) => `${repo.owner}/${repo.name}`;
+const repoKey = (repo: RepositoryRef) => repositoryName(repo);
+/** A change as written: `<owner>/<name>#<number>`. */
 
 /** What the service asks a prepare for: `retrieval`'s `PrepareRequest`, by shape. */
 export interface ScriptedPrepareRequest {
@@ -36,7 +48,7 @@ export interface ScriptedRetrievalOptions {
 
 /** A commit's script: the change it belongs to and its diff from the merge base. */
 interface Scripted {
-  change: number;
+  change: ChangeRef;
   diff: string;
 }
 
@@ -63,14 +75,17 @@ export class ScriptedRetrieval {
 
   /**
    * From now on a prepare of `sha`, a commit of change `change`, gives `diff` at `worktreeOf(change, sha)`. A
-   * commit is one change's: a prepare names the commit alone, so a sha scripted under another change already is
-   * refused rather than moved (scripted again under the same change, its diff is replaced).
+   * commit is one change's: a prepare names the commit alone, so a sha scripted under another change already (one of
+   * another repository, even of the same name and number) is refused rather than moved (scripted again under the same
+   * change, its diff is replaced).
    */
-  script(change: number, sha: CommitSha, diff: string): void {
+  script(change: ChangeRef, sha: CommitSha, diff: string): void {
     const already = this.commits.get(sha);
-    if (already && already.change !== change)
-      throw new Error(`Commit ${sha} is scripted under change ${already.change} already, not ${change}`);
-    this.commits.set(sha, { change, diff });
+    if (already && changeName(already.change) !== changeName(change))
+      throw new Error(
+        `Commit ${sha} is scripted under ${changeName(already.change)} already, not ${changeName(change)}`,
+      );
+    this.commits.set(sha, { change: { repo: { ...change.repo }, number: change.number }, diff });
   }
 
   /**
@@ -81,9 +96,9 @@ export class ScriptedRetrieval {
     this.rules.set(repoKey(repo), files);
   }
 
-  /** The worktree path a prepare of this commit of this change gives: `<root>/<change>/<sha>`. */
-  worktreeOf(change: number, sha: CommitSha): string {
-    return join(this.root, String(change), sha);
+  /** The worktree path a prepare of this commit of this change gives: `<root>/<owner>/<name>/<number>/<sha>`. */
+  worktreeOf(change: ChangeRef, sha: CommitSha): string {
+    return join(this.root, change.repo.owner, change.repo.name, String(change.number), sha);
   }
 
   /** The next prepare throws `error` (the real one throws its `RetrievalError`), then the following answer again. */

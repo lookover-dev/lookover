@@ -1,22 +1,164 @@
 // Pieces of onboarding for real (ADR 0053) that several screens show: a problem's one fix (a command, or a page on
-// GitHub), "Open on GitHub", "Use an existing App" and the App's slug for the agents.
-import type { Change, Connection } from "@lookover/contracts";
+// GitHub), "Open on GitHub", "Use an existing App", the App's slug for the agents, and on the shared App (ADR 0067)
+// the code's actions and the accounts list, the same in setup and Settings › GitHub.
+import type { Change, Connection, DeviceCode } from "@lookover/contracts";
 import { type ReactNode, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp, useAppState, useSend, useStoreStatus } from "../store.tsx";
-import { Button, CopyLine, Field, Input, KeyFile, LinkButton, Said } from "../ui/basics.tsx";
+import { Button, CopyLine, Field, Input, KeyFile, LinkButton, Said, SameWidth } from "../ui/basics.tsx";
 import { useToast } from "../ui/layers.tsx";
+import {
+  ACCOUNT_FIX_LABELS,
+  type AccountLink,
+  type AccountRow,
+  type AccountsList as AccountsListView,
+  ASK_AGAIN,
+} from "../view-model/accounts.ts";
 import { agentApp, pullRequestLink, USE_APP_TEXT, useAppRefusalText } from "../view-model/onboarding.ts";
 import type { Problem } from "../view-model/select.ts";
+import { codeToast, SIGN_IN_TEXT } from "../view-model/sign-in.ts";
+import { HeldDetail } from "./common.tsx";
+
+/** A `SameWidth` place's key while it shows nothing. */
+const NONE = "";
+
+/**
+ * A sign-in row's actions while a code waits: the code copied and GitHub's page opened, or the sign-in given up. Their
+ * place is kept, empty, when no code waits; `idle`, what it shows then instead (Settings' Sign in again).
+ */
+export function CodeActions({
+  code,
+  onCancel,
+  idle = null,
+}: {
+  code: DeviceCode | null;
+  onCancel: () => void;
+  idle?: ReactNode;
+}) {
+  const copyCode = useCopyCode();
+  const T = SIGN_IN_TEXT;
+  const copy = () => {
+    if (code !== null) copyCode(code.userCode);
+  };
+  return (
+    <SameWidth
+      shown={code === null ? NONE : "code"}
+      labels={{
+        [NONE]: idle,
+        code: (
+          <span className="code-actions">
+            <LinkButton href={code?.verificationUri ?? "about:blank"} onClick={copy}>
+              {T.copy}
+            </LinkButton>
+            <Button size="sm" variant="ghost" onClick={onCancel}>
+              {T.cancel}
+            </Button>
+          </span>
+        ),
+      }}
+    />
+  );
+}
+
+/**
+ * One of an account row's action places, as wide as the widest of `labels` and no wider, whatever the rows: its link,
+ * when it has one, opened in a new tab, its command sent as it opens (Ask to install's, which keeps the ask); a label
+ * wider than the place is cut with an ellipsis, said whole on hover. Repositories' group heads hold their fix in one.
+ */
+export function AccountAction({
+  link,
+  labels,
+  variant,
+}: {
+  link: AccountLink | null;
+  labels: readonly string[];
+  variant: "secondary" | "ghost";
+}) {
+  const send = useSend();
+  const command = link?.command;
+  return (
+    <span className="account-action">
+      {labels.map((label) => (
+        // Seen nowhere, never focused nor clicked: it only holds the place's width.
+        <span key={label} className="account-action-floor" aria-hidden>
+          <LinkButton size="sm" variant={variant} href="about:blank">
+            {label}
+          </LinkButton>
+        </span>
+      ))}
+      {link === null ? null : (
+        <span className="account-action-link" title={link.label}>
+          <LinkButton
+            size="sm"
+            variant={variant}
+            href={link.href}
+            {...(command === undefined ? {} : { onClick: () => send(command) })}
+          >
+            <span className="account-action-label">{link.label}</span>
+          </LinkButton>
+        </span>
+      )}
+    </span>
+  );
+}
+
+function AccountLine({ row }: { row: AccountRow }) {
+  return (
+    <div className="account-row" data-state={row.state}>
+      <span className="account-name">
+        <b>{row.name}</b>
+        <span className="t-small">
+          <HeldDetail shown={row.detail} details={row.details} />
+        </span>
+      </span>
+      <span className="account-actions">
+        <AccountAction link={row.fix} labels={ACCOUNT_FIX_LABELS} variant="secondary" />
+        {row.asks ? <AccountAction link={row.again} labels={[ASK_AGAIN]} variant="ghost" /> : null}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The accounts list (design-system.md "Accounts list", ADR 0067): one row per account, its login, its detail held at
+ * the tallest it can show, its one fix's place, as wide as every label it can show, and under it Ask again's on the
+ * rows that can wait for an owner, so a row changing state moves nothing and a row appended moves only what is under
+ * it. Nothing before a sign-in.
+ */
+export function AccountsList({ list }: { list: AccountsListView }) {
+  if (list.rows.length === 0) return null;
+  return (
+    <div className="accounts-list">
+      {list.rows.map((row) => (
+        <AccountLine key={row.key} row={row} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Copies a code to type on GitHub as its page opens (a sign-in's): said once the clipboard has it; without one, the
+ * code is to be typed. GitHub's page opens either way, by the link clicked.
+ */
+function useCopyCode(): (code: string) => void {
+  const toast = useToast();
+  return (code) => {
+    const said = (copied: boolean) => () => toast({ text: codeToast(code, copied) });
+    const written = navigator.clipboard?.writeText(code);
+    if (written === undefined) said(false)();
+    else written.then(said(true), said(false));
+  };
+}
 
 /**
  * A problem's one fix, at the size the band and the status menu give it: a command sent to the service, a page
- * opened on GitHub in a new tab, or a place in the app. `busyLabel`: what a command fix says while the problem waits
- * (a sign-in).
+ * opened on GitHub in a new tab (its code copied as it opens, when it asks for one), or a place in the app.
+ * `busyLabel`: what a command fix says while the problem waits (a sign-in).
  */
 export function FixButton({ problem, busyLabel }: { problem: Problem; busyLabel: string }) {
   const send = useSend();
   const navigate = useNavigate();
+  const copyCode = useCopyCode();
   const { fix, busy } = problem;
   if (!fix) return null;
   if ("path" in fix) {
@@ -28,8 +170,10 @@ export function FixButton({ problem, busyLabel }: { problem: Problem; busyLabel:
     );
   }
   if ("href" in fix) {
+    const { copy } = fix;
+    const click = copy === undefined ? {} : { onClick: () => copyCode(copy) };
     return (
-      <LinkButton size="sm" href={fix.href}>
+      <LinkButton size="sm" href={fix.href} {...click}>
         {fix.label}
       </LinkButton>
     );

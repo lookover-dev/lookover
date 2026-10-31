@@ -5,6 +5,7 @@
 // the findings it verified fixed are resolved.
 import {
   type AgentChange,
+  type AgentCheck,
   type AgentHost,
   type AgentThread,
   type ChangeRef,
@@ -21,6 +22,7 @@ import {
 import type { WaitArgs } from "./args.ts";
 import { branchChange } from "./change.ts";
 import { newestReply, type ReplyToAnswer, readThreads, resolveVerified } from "./threads.ts";
+import { ours, posterOf } from "./whose.ts";
 import type { World } from "./world.ts";
 
 /** What the exit says, each with its code (exploration 05 §11.3, ADR 0043). `8` stays unused: `gh`'s "pending". */
@@ -104,7 +106,9 @@ export async function wait(args: WaitArgs, app: string, w: World): Promise<Outco
       ),
       skip: "fork",
     });
-    return await follow(host, w, { args, app, change, commit, end, unasked: pushed.fork ? unasked : null });
+    const { id: me } = await host.account();
+    const unasking = pushed.fork ? unasked : null;
+    return await follow(host, w, { args, app, me, change, commit, end, unasked: unasking });
   } catch (error) {
     // A host's refusal (`HostError`, its message saying what GitHub answered), git, or no token.
     return end("error", error instanceof Error ? error.message : String(error));
@@ -132,6 +136,8 @@ async function shown(
 interface Following {
   args: WaitArgs;
   app: string;
+  /** The agent's own account's id: its person's checks are the ones read (`ours`). */
+  me: number;
   change: ChangeRef;
   commit: CommitSha;
   end: (meaning: Meaning, message: string, result?: ReviewResult | null) => Outcome;
@@ -143,13 +149,16 @@ interface Following {
   unasked: (() => Outcome) | null;
 }
 
-/** The requests naming the commit, from anyone. */
-const requestsFor = (comments: HostComment[], commit: CommitSha) =>
-  comments.filter((c) => requestedCommit(c.body) === commit);
+/**
+ * The agent's own requests naming the commit: its account's only. A colleague's asks their Lookover, never the
+ * agent's (a service follows its owner's requests alone), so neither it nor its reactions answer for the agent.
+ */
+const requestsFor = (comments: HostComment[], commit: CommitSha, me: number) =>
+  comments.filter((c) => c.author.id === me && requestedCommit(c.body) === commit);
 
-/** What one read showed: the App's checks of the commit, oldest first, and the requests naming it. */
+/** What one read showed: the agent's person's checks of the commit (`ours`), oldest first, and its requests naming it. */
 interface Read {
-  checks: HostCheck[];
+  checks: AgentCheck[];
   requests: HostComment[];
 }
 
@@ -178,18 +187,18 @@ export function nobodyAsked(check: HostCheck, requested: boolean): boolean {
 }
 
 /**
- * The checks and requests now, less the checks nobody asked for; the requests read again only while no check
- * showed, or no newer one since a reply was asked about (for the 👀).
+ * The agent's person's checks and the requests now, less the checks nobody asked for; the requests read again only
+ * while no check showed, or no newer one since a reply was asked about (for the 👀).
  */
 async function read(
   host: AgentHost,
-  { app, change, commit }: Following,
+  { app, me, change, commit }: Following,
   before?: Read,
   answering: Answering | null = null,
 ): Promise<Read> {
-  const all = await host.checks(change.repo, commit, app);
-  const shown = before !== undefined && before.checks.length > (answering?.checks ?? 0);
-  const requests = shown ? before.requests : requestsFor(await host.comments(change), commit);
+  const all = ours(await host.checks(change.repo, commit, app), me);
+  const shown = before !== undefined && appeared(before, answering);
+  const requests = shown ? before.requests : requestsFor(await host.comments(change), commit, me);
   return { checks: all.filter((c) => !nobodyAsked(c, requests.length > 0)), requests };
 }
 
@@ -199,10 +208,18 @@ async function read(
  */
 interface Answering {
   reply: ReplyToAnswer;
-  /** How many checks the commit had when it asked: one more is a sign Lookover has the request. */
-  checks: number;
+  /**
+   * The ids of the agent's person's checks of the commit when it asked: one not among them is a sign Lookover has
+   * the request. Ids, not a count: the first check naming the agent replaces those naming nobody (`ours`).
+   */
+  checks: Set<string>;
   /** When it asked, by the clock: the appear timeout runs from then. */
   askedAt: number;
+}
+
+/** Whether a check of the agent's person appeared since the reply was asked about (any check, when none was). */
+function appeared(now: Read, answering: Answering | null): boolean {
+  return answering === null ? now.checks.length > 0 : now.checks.some((c) => !answering.checks.has(c.id));
 }
 
 /** When the check's round started (else ended), in ms, as its result says; null when it says neither. */
@@ -229,7 +246,7 @@ function readIt(check: HostCheck, reply: ReplyToAnswer, appearedSinceAsked: bool
 
 /** Whether the newest check, completed, answers what was asked: any does, but a reply's only a round that read it. */
 function answers(now: Read, check: HostCheck, answering: Answering | null): boolean {
-  return answering === null || readIt(check, answering.reply, now.checks.length > answering.checks);
+  return answering === null || readIt(check, answering.reply, appeared(now, answering));
 }
 
 /**
@@ -292,7 +309,7 @@ async function askAgain(
   const yours = `your reply on ${again.findingId} (${shortSha(f.commit)}, pull request #${f.change.number})`;
   if (!asked) await host.comment(f.change, reviewRequest(f.commit, { reply: again.commentId }));
   w.err(asked ? `Waiting for Lookover to answer ${yours}.` : `Asked Lookover to answer ${yours}.`);
-  return { reply: again, checks: now.checks.length, askedAt: w.clock.now() };
+  return { reply: again, checks: new Set(now.checks.map((c) => c.id)), askedAt: w.clock.now() };
 }
 
 /** What the heartbeat says of the newest check: its title, unless it answers nothing asked. */
@@ -318,7 +335,7 @@ async function judge(host: AgentHost, w: World, now: Read, since: Since, f: Foll
   if (newest?.status === "completed" && answers(now, newest, answering)) {
     const ended = ending(newest, f);
     // The round answered the reply asked about when it appeared since: that reply asks nothing more.
-    const answered = answering !== null && now.checks.length > answering.checks ? answering.reply : null;
+    const answered = answering !== null && appeared(now, answering) ? answering.reply : null;
     if (ended !== null) return await roundEnd(host, w, f, ended, newest, answered);
   }
   const { head } = await host.getChange(change);
@@ -332,12 +349,13 @@ async function judge(host: AgentHost, w: World, now: Read, since: Since, f: Foll
     };
   const waited = w.clock.now() - since.start;
   const appearing = w.clock.now() - (answering?.askedAt ?? since.start);
-  const seen = answering
-    ? now.checks.length > answering.checks ||
-      now.requests.some(
-        (r) => r.reactions.eyes > 0 && readRequest(r.body)?.reply === answering.reply.commentId,
-      )
-    : now.checks.length > 0 || now.requests.some((r) => r.reactions.eyes > 0);
+  const seen =
+    appeared(now, answering) ||
+    now.requests.some(
+      (r) =>
+        r.reactions.eyes > 0 &&
+        (answering === null || readRequest(r.body)?.reply === answering.reply.commentId),
+    );
   if (!seen && appearing >= args.appearMs)
     return {
       end: end(
@@ -368,20 +386,21 @@ async function roundEnd(
   w: World,
   f: Following,
   ended: Outcome,
-  check: HostCheck,
+  check: AgentCheck,
   answered: ReplyToAnswer | null,
 ): Promise<Step> {
   const { result } = ended;
   if (result === null || result.run.state !== "done") return { end: ended, threads: null };
-  const threads = await readThreads(host, w, f.change, f.app);
+  // Lookover's threads are its bot's, or on the shared App the check's person's: whom its Lookover posts as (ADR 0066).
+  const poster = posterOf(f.app, check);
+  const threads = await readThreads(host, w, f.change, poster);
   if (threads === null) return { end: ended, threads: null };
-  const reply = f.unasked ? null : newestReply(threads, result);
+  const reply = f.unasked ? null : newestReply(threads, result, poster);
   if (reply === null || readIt(check, reply, reply.commentId === answered?.commentId))
     return { end: ended, threads };
-  const requests = (await host.comments(f.change)).filter((c) => {
-    const request = readRequest(c.body);
-    return request?.commit === f.commit && request.reply === reply.commentId;
-  });
+  const requests = requestsFor(await host.comments(f.change), f.commit, f.me).filter(
+    (c) => readRequest(c.body)?.reply === reply.commentId,
+  );
   if (requests.some(handled) || (requests.length > 0 && startedSince(check, reply)))
     return { end: ended, threads };
   return { again: reply, asked: requests.length > 0 };

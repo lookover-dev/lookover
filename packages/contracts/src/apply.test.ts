@@ -7,6 +7,7 @@ import {
   type Connection,
   changeId,
   commitSha,
+  connectionId,
   emptyReview,
   type Finding,
   findingId,
@@ -26,7 +27,7 @@ import {
 } from "./index.ts";
 
 const NOW = Date.UTC(2026, 9, 6, 10, 0, 0);
-const ID = changeId("app#1");
+const ID = changeId("sam/app#1");
 const SHA = commitSha("a1f9c2e");
 
 /** Every key at Lookover's default. */
@@ -56,12 +57,34 @@ const CONNECTED: Connection = {
     account: { id: 7, login: "sam", type: "User" },
     person: { id: 7, login: "sam" },
   },
-  installationId: 77,
+  accounts: [
+    { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
+  ],
+  unreached: [],
+  way: "own",
+  signIn: null,
+  person: null,
   web: GITHUB_WEB,
   since: NOW,
   limitUntil: null,
   gh: null,
 };
+
+/** The own App's one account, sam's, as `CONNECTED` holds it. */
+const SAM = {
+  account: { id: 7, login: "sam", type: "User" },
+  installationId: 77,
+  cause: null,
+  owner: null,
+} as const;
+/** The shared App on sam's account and on the organisation acme's. */
+const ON_SAM = { ...SAM, installationId: 91 };
+const ON_ACME = {
+  account: { id: 80, login: "acme", type: "Organization" },
+  installationId: 92,
+  cause: null,
+  owner: null,
+} as const;
 
 function snapshot(review: Partial<Review> = {}, change: Partial<Change> = {}): State {
   return {
@@ -397,7 +420,12 @@ test("a posting run shows its outbox as the last event says; with no run going i
 });
 
 test("a queued job's turn travels with it (ADR 0055)", () => {
-  const turn: Turn = { behind: "engines", engines: ["claude"], changes: [changeId("app#2")], testing: false };
+  const turn: Turn = {
+    behind: "engines",
+    engines: ["claude"],
+    changes: [changeId("sam/app#2")],
+    testing: false,
+  };
   const queued = job("queued", { turn });
   let after = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: queued });
   expect(reviewOf(after).job?.turn).toEqual(turn);
@@ -586,7 +614,7 @@ test("a settings change records what now applies, for the owner and for each rep
 });
 
 test("an opened change and the commits pushed to it are kept in its timeline, with who did it", () => {
-  const other = changeId("app#2");
+  const other = changeId("sam/app#2");
   const base = snapshot().changes[ID];
   if (!base) throw new Error("No change");
   const pushed = commitSha("b2c3d4e");
@@ -644,7 +672,7 @@ const ROUND_1: Round = {
 };
 
 test("a closed change leaves the list; its review is kept, and the round its run posts after the close is recorded", () => {
-  const other = changeId("app#2");
+  const other = changeId("sam/app#2");
   const base = snapshot().changes[ID];
   if (!base) throw new Error("No change");
   let after = apply(snapshot({ job: job("running"), run: RUN }), {
@@ -779,7 +807,7 @@ test("a repository whose rules files are gone has no rules left", () => {
 // ---- onboarding (ADR 0053) ----
 
 test("a repository gone from the installation leaves the copy with its changes and its rules; their reviews are kept", () => {
-  const other = changeId("other#2");
+  const other = changeId("sam/other#2");
   const before = snapshot();
   const withOther: State = {
     ...before,
@@ -803,7 +831,7 @@ test("a repository gone from the installation leaves the copy with its changes a
 });
 
 test("a repository removed takes the setup's first review with it when that change was its own, and only then", () => {
-  const other = changeId("other#2");
+  const other = changeId("sam/other#2");
   const before = snapshot();
   const withOther: State = {
     ...before,
@@ -924,9 +952,112 @@ test("a connection lost records its cause and keeps the App it knows; connected 
     type: "connection.changed",
     at: NOW + 3_000,
     seq: 3,
-    patch: { state: "connected", cause: null, installationId: 78, since: NOW + 3_000 },
+    patch: {
+      state: "connected",
+      cause: null,
+      accounts: [{ ...SAM, installationId: 78 }],
+      since: NOW + 3_000,
+    },
   });
-  expect(back.connection).toEqual({ ...CONNECTED, installationId: 78, since: NOW + 3_000 });
+  expect(back.connection).toEqual({
+    ...CONNECTED,
+    accounts: [{ ...SAM, installationId: 78 }],
+    since: NOW + 3_000,
+  });
+});
+
+test("a sign-in to the shared App shows its code until it ends, then the connection is the person's, with no bot (ADR 0066)", () => {
+  const none = apply(snapshot(), {
+    type: "connection.changed",
+    at: NOW,
+    seq: 1,
+    patch: { id: null, state: "not-connected", way: null, bot: null, app: null, accounts: [] },
+  });
+  const code = {
+    userCode: "WDJB-MJHT",
+    verificationUri: "https://github.com/login/device",
+    expiresAt: NOW + 900_000,
+  };
+  const waiting = apply(none, {
+    type: "connection.changed",
+    at: NOW + 1_000,
+    seq: 2,
+    patch: { signIn: code },
+  });
+  expect(waiting.connection.signIn).toEqual(code);
+  expect(waiting.connection.way).toBeNull();
+  const signedIn = apply(waiting, {
+    type: "connection.changed",
+    at: NOW + 6_000,
+    seq: 3,
+    patch: { signIn: null, way: "shared" },
+  });
+  const installed = apply(signedIn, {
+    type: "connection.changed",
+    at: NOW + 7_000,
+    seq: 4,
+    patch: {
+      id: connectionId("github:sam"),
+      state: "connected",
+      accounts: [ON_SAM, ON_ACME],
+      since: NOW + 7_000,
+    },
+  });
+  expect(installed.connection).toEqual({
+    ...CONNECTED,
+    id: connectionId("github:sam"),
+    way: "shared",
+    signIn: null,
+    bot: null,
+    app: null,
+    accounts: [ON_SAM, ON_ACME],
+    since: NOW + 7_000,
+  });
+  // One account's cause is that account's: the connection stays connected, its other account used.
+  const sso = { kind: "sso", organisation: "acme", url: null } as const;
+  const refused = apply(installed, {
+    type: "connection.changed",
+    at: NOW + 8_000,
+    seq: 5,
+    patch: { accounts: [ON_SAM, { ...ON_ACME, cause: sso }] },
+  });
+  expect(refused.connection.state).toBe("connected");
+  expect(refused.connection.cause).toBeNull();
+  expect(refused.connection.accounts).toEqual([ON_SAM, { ...ON_ACME, cause: sso }]);
+});
+
+test("the accounts the shared App doesn't reach follow the service: named, asked, then reached and gone from the list", () => {
+  const ledger = { id: 338, login: "ledger-dev" };
+  const shared = { ...snapshot(), connection: { ...CONNECTED, way: "shared" as const, accounts: [ON_SAM] } };
+  const named = apply(shared, {
+    type: "connection.changed",
+    at: NOW,
+    seq: 1,
+    patch: { unreached: [{ account: ledger, kind: "organisation", owner: false, askedAt: null }] },
+  });
+  expect(named.connection.unreached).toEqual([
+    { account: ledger, kind: "organisation", owner: false, askedAt: null },
+  ]);
+  const asked = apply(named, {
+    type: "connection.changed",
+    at: NOW + 1_000,
+    seq: 2,
+    patch: { unreached: [{ account: ledger, kind: "organisation", owner: false, askedAt: NOW + 1_000 }] },
+  });
+  expect(asked.connection.unreached[0]?.askedAt).toBe(NOW + 1_000);
+  const ledgerAccount = {
+    account: { ...ledger, type: "Organization" as const },
+    installationId: 93,
+    cause: null,
+  };
+  const reached = apply(asked, {
+    type: "connection.changed",
+    at: NOW + 2_000,
+    seq: 3,
+    patch: { accounts: [ON_SAM, { ...ledgerAccount, owner: false }], unreached: [] },
+  });
+  expect(reached.connection.accounts).toEqual([ON_SAM, { ...ledgerAccount, owner: false }]);
+  expect(reached.connection.unreached).toEqual([]);
 });
 
 test("your coding agent follows the service: the PATH reached and Lookover's command with it, then a skill installed", () => {

@@ -29,6 +29,9 @@ const OPTIONS: FakeGitHostOptions = {
 };
 
 const host = () => new FakeGitHost(OPTIONS);
+/** The person Lookover posts for: their id is in each check's external id (ADR 0066). */
+const PERSON = 1;
+const person = () => PERSON;
 
 /** The job asked by "Review now" on the head commit, waiting its turn, with no check yet. */
 const waiting: JobCheck = {
@@ -59,9 +62,22 @@ class RefusedCompletion extends FakeGitHost {
   }
 }
 
+test("a job's check carries the job's id and the person's, read at each post (ADR 0066)", async () => {
+  const github = host();
+  let who = PERSON;
+  const id = await createPublisher({ writer: github, person: () => who }).check(waiting);
+  expect(await github.findCheck(repo, HEAD, `job-1@${PERSON}`)).toBe(id);
+  who = 7;
+  const next = await createPublisher({ writer: github, person: () => who }).check({
+    ...waiting,
+    job: { id: jobId("job-2"), trigger: "manual" },
+  });
+  expect(await github.findCheck(repo, HEAD, "job-2@7")).toBe(next);
+});
+
 test("a job recorded creates its check queued on its commit, saying it waits for its turn", async () => {
   const github = host();
-  const id = await createPublisher({ writer: github }).check(waiting);
+  const id = await createPublisher({ writer: github, person }).check(waiting);
   expect(github.view(change).checks).toEqual([
     {
       id,
@@ -80,7 +96,7 @@ test("a job recorded creates its check queued on its commit, saying it waits for
 
 test("a deferred job's check says why it waits, and changes when the reason changes", async () => {
   const github = host();
-  const publisher = createPublisher({ writer: github });
+  const publisher = createPublisher({ writer: github, person });
   const id = await publisher.check(waiting);
   const signedOut = { reason: "engine-signed-out", engine: "claude" } as const;
   expect(
@@ -115,7 +131,7 @@ test("a deferred job's check says why it waits, and changes when the reason chan
 test("a job waiting on an engine that failed its self-test says so on its check (ADR 0044)", async () => {
   const github = host();
   const failed = { reason: "engine-failed-self-test", engine: "codex" } as const;
-  await createPublisher({ writer: github }).check({
+  await createPublisher({ writer: github, person }).check({
     ...waiting,
     standing: { kind: "waiting", deferral: failed, until: null },
   });
@@ -143,7 +159,7 @@ test("a job waiting on an engine found but not usable says why on its check, and
   for (const [unusable, why, when] of cases) {
     const github = host();
     const held = { reason: "engine-missing", engine: "codex", unusable } as const;
-    await createPublisher({ writer: github }).check({
+    await createPublisher({ writer: github, person }).check({
       ...waiting,
       standing: { kind: "waiting", deferral: held, until: null },
     });
@@ -157,7 +173,7 @@ test("a job waiting on an engine found but not usable says why on its check, and
 test("a job waiting on an engine's limit gives the reset on its check, with its offset (ADR 0055)", async () => {
   const github = host();
   const limit = { reason: "engine-limit", engine: "codex" } as const;
-  const publisher = createPublisher({ writer: github });
+  const publisher = createPublisher({ writer: github, person });
   const id = await publisher.check({
     ...waiting,
     standing: { kind: "waiting", deferral: limit, until: Date.parse("2026-10-14T10:11:00Z") },
@@ -186,7 +202,7 @@ test("the reset is the service's wall-clock time and its offset from UTC, read e
   /** The check's summary for a reset at `at`, written by a service `minutes` east of UTC. */
   const summary = async (minutes: number, at: string) => {
     const github = host();
-    await createPublisher({ writer: github, offset: () => minutes }).check({
+    await createPublisher({ writer: github, person, offset: () => minutes }).check({
       ...waiting,
       standing: { kind: "waiting", deferral: limit, until: Date.parse(at) },
     });
@@ -207,7 +223,7 @@ test("the reset is the service's wall-clock time and its offset from UTC, read e
 
 test("the run's start moves the check in progress", async () => {
   const github = host();
-  const publisher = createPublisher({ writer: github });
+  const publisher = createPublisher({ writer: github, person });
   const id = await publisher.check(waiting);
   await publisher.check({
     ...waiting,
@@ -225,7 +241,7 @@ test("the run's start moves the check in progress", async () => {
 
 test("a job moved to a newer commit completes its old check skipped, with the result block and no findings", async () => {
   const github = host();
-  const publisher = createPublisher({ writer: github });
+  const publisher = createPublisher({ writer: github, person });
   const id = await publisher.check(waiting);
   await publisher.check({
     ...waiting,
@@ -280,7 +296,7 @@ test("a job moved to a newer commit completes its old check skipped, with the re
 
 test("a closed pull request's or another author's job is skipped with its reason", async () => {
   const github = host();
-  const publisher = createPublisher({ writer: github });
+  const publisher = createPublisher({ writer: github, person });
   const closed = await publisher.check({
     ...waiting,
     standing: { kind: "ended", ended: { kind: "skipped", why: "closed" } },
@@ -318,7 +334,7 @@ test("a closed pull request's or another author's job is skipped with its reason
 
 test("another author's job skipped because only Codex may review says why, and stops the agent (ADR 0044)", async () => {
   const github = host();
-  const id = await createPublisher({ writer: github }).check({
+  const id = await createPublisher({ writer: github, person }).check({
     ...waiting,
     standing: { kind: "ended", ended: { kind: "skipped", why: "codex-not-yours" } },
   });
@@ -338,7 +354,7 @@ test("another author's job skipped because only Codex may review says why, and s
 
 test("a fork's job skipped says why and how the owner asks, and stops the agent (ADR 0048)", async () => {
   const github = host();
-  const id = await createPublisher({ writer: github }).check({
+  const id = await createPublisher({ writer: github, person }).check({
     ...waiting,
     standing: { kind: "ended", ended: { kind: "skipped", why: "fork" } },
   });
@@ -358,7 +374,7 @@ test("a fork's job skipped says why and how the owner asks, and stops the agent 
 
 test("a fork's job skipped where only Codex may review points to Settings, not to a request (ADR 0048)", async () => {
   const github = host();
-  const id = await createPublisher({ writer: github }).check({
+  const id = await createPublisher({ writer: github, person }).check({
     ...waiting,
     onlyCodex: true,
     standing: { kind: "ended", ended: { kind: "skipped", why: "fork" } },
@@ -372,7 +388,7 @@ test("a fork's job skipped where only Codex may review points to Settings, not t
 
 test("a fork's request ended by a push says a newer commit came after it, and to ask again (ADR 0048)", async () => {
   const github = host();
-  const id = await createPublisher({ writer: github }).check({
+  const id = await createPublisher({ writer: github, person }).check({
     ...waiting,
     job: { id: jobId("job-1"), trigger: "comment" },
     standing: { kind: "ended", ended: { kind: "skipped", why: "pushed" } },
@@ -393,7 +409,7 @@ test("a fork's request ended by a push says a newer commit came after it, and to
 
 test("an ended job's check never created is created, and its id given before it is completed: a refused completion completes that one next time", async () => {
   const github = new RefusedCompletion();
-  const publisher = createPublisher({ writer: github });
+  const publisher = createPublisher({ writer: github, person });
   const ended: JobCheck = {
     ...waiting,
     standing: { kind: "ended", ended: { kind: "skipped", why: "closed" } },
@@ -414,7 +430,7 @@ test("an ended job's check never created is created, and its id given before it 
 
 test("a review the engine gave none of names the engine; a draft says when it is reviewed", async () => {
   const github = host();
-  const publisher = createPublisher({ writer: github });
+  const publisher = createPublisher({ writer: github, person });
   const failed = await publisher.check({
     ...waiting,
     run: RUN,
@@ -432,7 +448,7 @@ test("a review the engine gave none of names the engine; a draft says when it is
 
 test("a failed review completes its check neutral with the failure, never failure", async () => {
   const github = host();
-  const publisher = createPublisher({ writer: github });
+  const publisher = createPublisher({ writer: github, person });
   const id = await publisher.check({ ...waiting, run: RUN, standing: { kind: "running", round: 1 } });
   await publisher.check({
     ...waiting,

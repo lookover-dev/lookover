@@ -17,7 +17,6 @@ import type {
 import { commitSha, findingOfMarker, HostError } from "@lookover/contracts";
 import type { Allowed } from "./allowed.ts";
 import type { GitHubApi } from "./api.ts";
-import type { AppSession } from "./auth.ts";
 import { graphql } from "./graphql.ts";
 import {
   comparison,
@@ -29,6 +28,7 @@ import {
   repositoryComments,
   threadComments,
 } from "./schemas.ts";
+import type { Session } from "./session.ts";
 
 type Pull = ReturnType<typeof pull.parse>;
 type Comment = ReturnType<typeof repositoryComments.parse>[number];
@@ -42,16 +42,16 @@ const OUTDATED = `query($ids: [ID!]!) {
 }`;
 
 /**
- * Lookover's threads among a pull request's inline comments (ADR 0052): each root comment the bot wrote holding a
- * finding marker, with the replies to it, oldest first, those of a deleted account left out; `outdated` names the
- * root comments GitHub shows outdated.
+ * Lookover's threads among a pull request's inline comments (ADR 0052, ADR 0066): each root comment written by who
+ * posts (`poster`, the bot or the signed-in person, by numeric id) holding a finding marker, with the replies to it,
+ * oldest first, those of a deleted account left out; `outdated` names the root comments GitHub shows outdated.
  */
-function threadsOf(comments: ThreadComment[], bot: number, outdated: Set<string>): HostThread[] {
+function threadsOf(comments: ThreadComment[], poster: number, outdated: Set<string>): HostThread[] {
   const byId = [...comments].sort((a, b) => a.id - b.id);
   const threads: HostThread[] = [];
   for (const root of byId) {
     const finding = findingOfMarker(root.body);
-    if (root.in_reply_to_id !== undefined || root.user?.id !== bot || finding === null) continue;
+    if (root.in_reply_to_id !== undefined || root.user?.id !== poster || finding === null) continue;
     const replies = byId.flatMap((c) =>
       c.in_reply_to_id === root.id && c.user !== null
         ? [
@@ -104,7 +104,7 @@ const written = (c: Comment): HostConversationComment | null =>
         updatedAt: Date.parse(c.updated_at),
       };
 
-export function createIntake(api: GitHubApi, session: AppSession, allowed: Allowed): HostIntake {
+export function createIntake(api: GitHubApi, session: Session, allowed: Allowed): HostIntake {
   const repoPath = (repo: RepositoryRef) => `/repos/${repo.owner}/${repo.name}`;
 
   /**
@@ -202,12 +202,23 @@ export function createIntake(api: GitHubApi, session: AppSession, allowed: Allow
     },
     async threads(change) {
       allowed(change.repo);
-      const bot = await session.botId(change.repo);
+      const { id: poster } = await session.poster(change.repo);
       return session.withToken(change.repo, async (token) => {
         const comments = await inlineComments(change, token);
         // Lookover's roots, asked whether outdated: GraphQL showed it seconds after a push, REST's `line` minutes.
-        const roots = threadsOf(comments, bot, new Set()).map((t) => t.nodeId);
-        return threadsOf(comments, bot, await outdatedOf(roots, token));
+        const roots = threadsOf(comments, poster, new Set()).map((t) => t.nodeId);
+        return threadsOf(comments, poster, await outdatedOf(roots, token));
+      });
+    },
+    async poster(repo) {
+      allowed(repo);
+      // Through a token for the repository: the session keeps who posts. The App's token is bought for the repository,
+      // so one it isn't installed on is refused there; the person's is the same for every repository, so the
+      // repository is read with it, and one it can't see is not_found.
+      return session.withToken(repo, async (token) => {
+        const { id, login, bot } = await session.poster(repo);
+        if (!bot) await api.request({ path: repoPath(repo), bearer: token });
+        return { id, login };
       });
     },
     async countCommits(repo, from, to): Promise<CommitCount> {

@@ -1,16 +1,17 @@
-// The `HostWriter` port suite: run against `FakeGitHost` in `bun run check` and against `github` on throwaway
-// sandbox pull requests in `bun run live` (ADR 0039, ADR 0041); the check's whole lifecycle too (ADR 0043:
-// `queued`, its reason changed, `in_progress`, back to `queued`, completed `success`, `neutral` or `skipped`).
-// `setup.open` is called once per case and gives a change nobody has posted on yet, so no case depends on another's posts: the adapter, the change, one line a
-// comment can go on and one it can't, the bot as the host knows it, a way to comment as someone else, and
-// `observe`, which reads back what the host shows now as contracts' `HostView` for the change's head commit (the
-// fake's `view`; GitHub's API for the real adapter). `setup.refusing` gives, for each way a host can refuse every
-// call, a fresh adapter in that state, `observe` still reading what the host shows; one the host can't be
-// brought to on demand is left out, and its case is skipped (the real GitHub can't be made to rate-limit).
-// Its threads (ADR 0052): a reply read back through the App's own intake (`intake`), comments minimized by the
-// node ids the intake gives, and a completed check completed again.
-// Every output posted here has a title, a summary and a text: GitHub requires the summary and reads an empty
-// text back as null, so empty strings would fail the live run for reasons that are not the port's.
+// The `HostWriter` port suite: run against `FakeGitHost` in `bun run check` and against `github` on throwaway sandbox
+// pull requests in `bun run live` (ADR 0039, ADR 0041); the check's whole lifecycle too (ADR 0043: `queued`, its reason
+// changed, `in_progress`, back to `queued`, completed `success`, `neutral` or `skipped`). `setup.open` is called once
+// per case and gives a change nobody has posted on yet, so no case depends on another's posts: the adapter, the change,
+// one line a comment can go on and one it can't, who posts as the host knows them (the App's bot, or a signed-in
+// person, ADR 0066), a way to comment as someone else (and, for a person, as them by hand: `setup.byHand`, its case
+// skipped without it), and `observe`, which reads back what the host shows now as contracts' `HostView` for the
+// change's head commit (the fake's `view`; GitHub's API for the real adapter). `setup.refusing` gives, for each way a
+// host can refuse every call, a fresh adapter in that state, `observe` still reading what the host shows; one the host
+// can't be brought to on demand is left out, and its case is skipped (the real GitHub can't be made to rate-limit). Its
+// threads (ADR 0052): a reply read back through the App's own intake (`intake`), comments minimized by the node ids the
+// intake gives, and a completed check completed again. Every output posted here has a title, a summary and a text:
+// GitHub requires the summary and reads an empty text back as null, so empty strings would fail the live run for
+// reasons that are not the port's.
 import { describe, expect, test } from "bun:test";
 import type {
   ChangeRef,
@@ -47,10 +48,18 @@ export interface HostWriterFixture {
   removed: DiffLocation;
   /** A range of head lines inside one hunk: `line` to `endLine`. */
   range: DiffLocation & { endLine: number };
-  /** The reviewer bot as the host knows it: every post of the writer is its. */
-  bot: { id: number; login: string };
-  /** Writes a comment on the change's conversation as someone other than the bot. Returns its id. */
+  /**
+   * Who posts, as the host knows them: every post of the writer is theirs. The App's bot (`bot: true`), or the person
+   * signed in to the App (ADR 0066), whose posts are their own.
+   */
+  poster: { id: number; login: string; bot: boolean };
+  /** Writes a comment on the change's conversation as someone other than the poster. Returns its id. */
   comment(body: string): Promise<string>;
+  /**
+   * Writes a comment on the change's conversation as the poster, by hand, not through the App: only a person can,
+   * so it is given where the poster is one (the setup's `byHand`).
+   */
+  commentByHand?: (body: string) => Promise<string>;
   observe(): Promise<HostView>;
   /** The host read by an intake of the same App: how a reply or a node id is read back. */
   intake: HostIntake;
@@ -60,6 +69,8 @@ export interface HostWriterSetup {
   open(): Promise<HostWriterFixture>;
   /** An adapter whose every call the host refuses for that reason, on a change nobody has posted on. */
   refusing: Partial<Record<HostRefusal, () => Promise<HostWriterFixture>>>;
+  /** Every fixture gives `commentByHand` (the poster is a person); without it, the case that needs it is skipped. */
+  byHand?: boolean;
 }
 
 const REFUSALS = {
@@ -86,10 +97,15 @@ const PAGE = 100;
 const SLOW_MS = 600_000;
 /** A comment nobody reacted to. */
 const NONE = { eyes: 0, rocket: 0 };
+/** An account as a conversation comment names its author. */
+const accountOf = ({ id, login }: { id: number; login: string }) => ({ id, login });
 /** A finding's inline comment as `publish` ends it: with the marker naming the finding. */
 const FINDING_F1 = `**Off by one** · Should fix\n\n${FINDING_MARKER}{"v":1,"id":"F1"} -->`;
 
-export function describeHostWriter(name: string, { open: setup, refusing }: HostWriterSetup): void {
+export function describeHostWriter(
+  name: string,
+  { open: setup, refusing, byHand = false }: HostWriterSetup,
+): void {
   describe(`HostWriter port: ${name}`, () => {
     test("a check created in progress is completed with its conclusion and output", async () => {
       const f = await setup();
@@ -311,7 +327,7 @@ export function describeHostWriter(name: string, { open: setup, refusing }: Host
       expect(await f.writer.upsertSummary(f.change, second)).toBe(id);
       expect(await f.writer.upsertSummary(f.change, second)).toBe(id);
       expect((await f.observe()).comments).toEqual([
-        { id, body: second, author: f.bot, reactions: NONE, minimized: null },
+        { id, body: second, author: accountOf(f.poster), reactions: NONE, minimized: null },
       ]);
     });
 
@@ -327,7 +343,7 @@ export function describeHostWriter(name: string, { open: setup, refusing }: Host
         const comments = (await f.observe()).comments;
         expect(comments).toHaveLength(PAGE + 2);
         expect(comments.filter((c) => c.body.includes(SUMMARY_MARKER))).toEqual([
-          { id, body: second, author: f.bot, reactions: NONE, minimized: null },
+          { id, body: second, author: accountOf(f.poster), reactions: NONE, minimized: null },
         ]);
       },
       // A hundred comments written one by one, on GitHub at about a second each.
@@ -342,9 +358,34 @@ export function describeHostWriter(name: string, { open: setup, refusing }: Host
       const id = await f.writer.upsertSummary(f.change, ours);
       const comments = (await f.observe()).comments;
       expect(comments.map((c) => c.body)).toEqual([theirs, ours]);
-      expect(comments[1]).toEqual({ id, body: ours, author: f.bot, reactions: NONE, minimized: null });
-      expect(comments[0]?.author.id).not.toBe(f.bot.id);
+      expect(comments[1]).toEqual({
+        id,
+        body: ours,
+        author: accountOf(f.poster),
+        reactions: NONE,
+        minimized: null,
+      });
+      expect(comments[0]?.author.id).not.toBe(f.poster.id);
     });
+
+    test.skipIf(!byHand)(
+      "a comment holding the marker that the person wrote by hand is not the summary: only one the App posted is (ADR 0066)",
+      async () => {
+        const f = await setup();
+        if (!f.commentByHand) throw new Error("The setup says byHand, and its fixture can't comment by hand");
+        const quoted = `${SUMMARY_MARKER}\nQuoted by hand.`;
+        const theirs = await f.commentByHand(quoted);
+        const ours = `${SUMMARY_MARKER}\nRound 1: 1 open.`;
+        const id = await f.writer.upsertSummary(f.change, ours);
+        expect(id).not.toBe(theirs);
+        expect(await f.writer.upsertSummary(f.change, `${ours}\nEdited.`)).toBe(id);
+        const comments = (await f.observe()).comments;
+        expect(comments.map((c) => [c.id, c.author, c.body])).toEqual([
+          [theirs, accountOf(f.poster), quoted],
+          [id, accountOf(f.poster), `${ours}\nEdited.`],
+        ]);
+      },
+    );
 
     test("a summary without the marker is refused, and nothing is posted", async () => {
       const f = await setup();
@@ -375,7 +416,7 @@ export function describeHostWriter(name: string, { open: setup, refusing }: Host
       ]);
       expect(shown.reviews).toMatchObject([{ id: reviewId, ...review }]);
       expect(shown.comments).toEqual([
-        { id: summaryId, body: summary, author: f.bot, reactions: NONE, minimized: null },
+        { id: summaryId, body: summary, author: accountOf(f.poster), reactions: NONE, minimized: null },
       ]);
     });
 
@@ -430,7 +471,7 @@ export function describeHostWriter(name: string, { open: setup, refusing }: Host
         {
           commentId: Number(replyId),
           nodeId: expect.any(String),
-          author: { ...f.bot, bot: true },
+          author: f.poster,
           body,
           at: expect.any(String),
         },

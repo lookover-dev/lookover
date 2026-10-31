@@ -77,7 +77,7 @@ function finding(id: string, status: FindingStatus, extra: Partial<Finding> = {}
 
 /** A change after one finished, posted round on `ROUND_SHA`, with `findings` and the loop they give. */
 function item(findings: Finding[], change: Partial<Change> = {}, review: Partial<Review> = {}): ChangeReview {
-  const id = changeId("app#7");
+  const id = changeId("sam/app#7");
   const loop = findings.some((f) => f.status === "escalated")
     ? "needs_owner"
     : findings.some((f) => f.status === "open")
@@ -203,7 +203,7 @@ test("before its run starts, the agent reads the round it waits on, with no gap 
 
 test("the summary comment points at the first thing to fix", () => {
   expect(summaryComment(item([finding("key-in-log", "open")]))).toBe(
-    "Looked over a1f9c2e. Found by Codex, double-checked by Claude. One thing to fix, starting with rateLimit.ts line 42. The rest can go.",
+    "Lookover · Looked over a1f9c2e. Found by Codex, double-checked by Claude. One thing to fix, starting with rateLimit.ts line 42. The rest can go.",
   );
 });
 
@@ -230,18 +230,18 @@ test("a review with no round has no summary comment yet: nothing to say", () => 
 test("the summary comment names an old line or a range as the pull request does", () => {
   const old = finding("removed-guard", "open", { side: "base", line: 12, endLine: 13 });
   expect(summaryComment(item([old]))).toBe(
-    "Looked over a1f9c2e. Found by Codex, double-checked by Claude. One thing to fix, starting with rateLimit.ts old lines 12 to 13. The rest can go.",
+    "Lookover · Looked over a1f9c2e. Found by Codex, double-checked by Claude. One thing to fix, starting with rateLimit.ts old lines 12 to 13. The rest can go.",
   );
 });
 
 test("the summary comment says how many findings stay in the app, and then never that the rest can go (ADR 0042)", () => {
   const kept = finding("page-size", "open", { severity: "consider", posted: false, raisedIn: 2 });
   expect(summaryComment(item([finding("key-in-log", "open"), kept]))).toBe(
-    "Looked over a1f9c2e. Found by Codex, double-checked by Claude. One thing to fix, starting with rateLimit.ts line 42. One finding stays in Lookover, not on the pull request.",
+    "Lookover · Looked over a1f9c2e. Found by Codex, double-checked by Claude. One thing to fix, starting with rateLimit.ts line 42. One finding stays in Lookover, not on the pull request.",
   );
   const two = [kept, { ...kept, id: findingId("names"), fingerprints: { location: "x", meaning: "names" } }];
   expect(summaryComment(item([finding("key-in-log", "verified_fixed"), ...two]))).toBe(
-    "Looked over a1f9c2e. Found by Codex, double-checked by Claude. Nothing to fix. 2 findings stay in Lookover, not on the pull request.",
+    "Lookover · Looked over a1f9c2e. Found by Codex, double-checked by Claude. Nothing to fix. 2 findings stay in Lookover, not on the pull request.",
   );
 });
 
@@ -262,13 +262,13 @@ test("with nothing to fix and a finding kept in the app, the check passes and sa
 test("a dispute in the summary comment still says how many findings stay in the app", () => {
   const kept = finding("page-size", "open", { severity: "consider", posted: false, raisedIn: 2 });
   expect(summaryComment(item([finding("key-in-log", "escalated"), kept]))).toBe(
-    "Looked over a1f9c2e. Found by Codex, double-checked by Claude. The author and the reviewer disagree on rateLimit.ts line 42: only the owner can settle it. One finding stays in Lookover, not on the pull request.",
+    "Lookover · Looked over a1f9c2e. Found by Codex, double-checked by Claude. The author and the reviewer disagree on rateLimit.ts line 42: only the owner can settle it. One finding stays in Lookover, not on the pull request.",
   );
 });
 
 test("a finding only the owner can settle is not one more thing to fix in the summary comment", () => {
   expect(summaryComment(item([finding("key-in-log", "escalated")]))).toBe(
-    "Looked over a1f9c2e. Found by Codex, double-checked by Claude. The author and the reviewer disagree on rateLimit.ts line 42: only the owner can settle it.",
+    "Lookover · Looked over a1f9c2e. Found by Codex, double-checked by Claude. The author and the reviewer disagree on rateLimit.ts line 42: only the owner can settle it.",
   );
 });
 
@@ -281,13 +281,13 @@ test("the summary comment names who found the last round and who double-checked 
     return summaryComment({ ...it, review: { ...it.review, rounds: [{ ...first, ...round }] } });
   };
   expect(said({ secondFind: { engine: "codex", failure: null }, confirmer: "codex" })).toBe(
-    "Looked over a1f9c2e. Found by Codex in two sessions, double-checked by Codex in a new session. One thing to fix, starting with rateLimit.ts line 42. The rest can go.",
+    "Lookover · Looked over a1f9c2e. Found by Codex in two sessions, double-checked by Codex in a new session. One thing to fix, starting with rateLimit.ts line 42. The rest can go.",
   );
   expect(said({ confirmer: null })).toBe(
-    "Looked over a1f9c2e. Found by Codex, not double-checked. One thing to fix, starting with rateLimit.ts line 42. The rest can go.",
+    "Lookover · Looked over a1f9c2e. Found by Codex, not double-checked. One thing to fix, starting with rateLimit.ts line 42. The rest can go.",
   );
   expect(said({ confirmer: null, raised: 0 }, [])).toBe(
-    "Looked over a1f9c2e. Found by Codex, nothing new to double-check. Nothing to fix. The rest can go.",
+    "Lookover · Looked over a1f9c2e. Found by Codex, nothing new to double-check. Nothing to fix. The rest can go.",
   );
 });
 

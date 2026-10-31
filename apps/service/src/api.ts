@@ -16,6 +16,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   type AgentRefusal,
   API,
+  type AskToInstallRefusal,
   type CreateAppRefusal,
   createAppRefusalText,
   DEMO_API,
@@ -26,6 +27,7 @@ import {
   type SettingsFileError,
   type SettingsRefusal,
   type SettingsWriteFailure,
+  type SignInStartRefusal,
   SSE,
   type UseAppRefusal,
 } from "@lookover/contracts";
@@ -37,6 +39,7 @@ import { appFlowPages, OPEN_PAGES } from "./app-flow-pages.ts";
 import type { AgentOutcome } from "./coding-agent.ts";
 import { request } from "./commands.ts";
 import type { DemoRoom, InjectRefusal } from "./demo/driver.ts";
+
 import type { LogReader } from "./log-sink.ts";
 import type { Room, SettingsAnswer } from "./room.ts";
 import type { Timers } from "./timers.ts";
@@ -151,6 +154,10 @@ const NOTHING_TO_INJECT = {
   nothing_to_remove: "no repository left on the App's installation",
   nothing_departed: "no repository left the App's installation",
   no_organisation: "the App lives on no organisation in this scenario",
+  no_sign_in: "no sign-in waits for its code",
+  not_signed_in: "nobody is signed in to the shared App",
+  no_organisation_reached: "no organisation is reached through the shared App",
+  nothing_asked: "no organisation waits for an owner",
 } as const satisfies Record<InjectRefusal, string>;
 
 /** What the commands endpoint parses: the app's commands and the developer drawer's verbs. */
@@ -244,6 +251,20 @@ function settingsAnswer(answer: SettingsAnswer | "no_such_repository"): Answer {
   }
 }
 
+/** Why "Sign in with GitHub" didn't start (ADR 0066), for the console; `signIn` names it for the app. */
+const SIGN_IN_REFUSED = {
+  unavailable: "no shared App is offered here",
+  "own-app": "Lookover runs as your own App here",
+  pending: "a sign-in already waits for its code",
+} as const satisfies Record<SignInStartRefusal, string>;
+
+/** Why "Ask to install on <org>" wasn't kept (ADR 0067), for the console; `askToInstall` names it for the app. */
+const ASK_REFUSED = {
+  "not-shared": "Lookover isn't signed in to the shared App here",
+  "not-named": "that account isn't one Lookover names as not reached",
+  owner: "you own that account: install it there",
+} as const satisfies Record<AskToInstallRefusal, string>;
+
 /** The demo clock's verbs in live mode: the room has no demo clock, nothing to move. */
 const NO_CLOCK: Answer = [{ error: "no demo clock in live mode" }, 501];
 
@@ -264,7 +285,12 @@ const NO_CLOCK: Answer = [{ error: "no demo clock in live mode" }, 501];
  * refused (409, why in `createApp`) once an App is kept or under `live.json` (ADR 0053), or for an organisation the
  * person's `gh` doesn't list as theirs to admin, or can't answer for (ADR 0059); `gh.check` reads that `gh` again.
  * "Use an existing App" (`connection.useApp`, ADR 0053) answers why it refused as `useApp` (409, 502 when GitHub
- * couldn't be reached; `live-config` when `live.json` names the App); its key is in no answer.
+ * couldn't be reached; `live-config` when `live.json` names the App); its key is in no answer. "Sign in with GitHub"
+ * (`connection.signIn`, ADR 0066) asks GitHub for a device code and shows it on the connection, refused (409, why in
+ * `signIn`) while one waits, while Lookover runs as its own App, or with no shared App here; GitHub refusing the code
+ * is 502 through `onError`. `connection.cancelSignIn` gives the waiting one up. "Ask to install on <org>"
+ * (`connection.askToInstall`, ADR 0067) keeps the ask, refused (409, why in `askToInstall`) off `shared`, for an
+ * account Lookover doesn't name as not reached, or for one the person owns.
  * The developer drawer's fault (ADR 0046) happens on the demo driver: 501 in live mode, where nothing scripted
  * touches a real repository, 409 when the story has nothing left for it. A load is the room swap: 404 for an id the
  * catalogue hasn't, 500 with the fixture's error when the seed fails (the old room still answers).
@@ -312,6 +338,20 @@ const COMMANDS: { [K in Parsed["type"]]?: Row<K> } = {
   "connection.reconnect": async ({ room }) => {
     await room.reconnect();
     return OK;
+  },
+  "connection.signIn": async ({ room }) => {
+    const answer = await room.github.signIn();
+    if (answer === "ok") return OK;
+    return [{ error: SIGN_IN_REFUSED[answer.refused], signIn: answer.refused }, 409];
+  },
+  "connection.cancelSignIn": async ({ room }) => {
+    room.github.cancelSignIn();
+    return OK;
+  },
+  "connection.askToInstall": async ({ room }, { account }) => {
+    const answer = await room.github.askToInstall(account);
+    if (answer === "ok") return OK;
+    return [{ error: ASK_REFUSED[answer.refused], askToInstall: answer.refused }, 409];
   },
   "service.runChecks": async ({ room }) =>
     (await room.runChecks()) === "running" ? [{ error: "the checks are already running" }, 409] : OK,

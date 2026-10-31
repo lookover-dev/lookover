@@ -53,14 +53,14 @@ export interface Shot {
 export const ROUTES: [RegExp, string][] = [
   [/^\/$/, '[data-screen="home"]'],
   [/^\/reviews$/, '[data-screen="reviews"]'],
-  [/^\/reviews\/[^/]+\/\d+$/, '[data-screen="review"]'],
+  [/^\/reviews\/[^/]+\/[^/]+\/\d+$/, '[data-screen="review"]'],
   [/^\/repositories$/, '[data-screen="repositories"]'],
-  [/^\/repositories\/[^/]+$/, '[data-screen="repository"]'],
+  [/^\/repositories\/[^/]+\/[^/]+$/, '[data-screen="repository"]'],
   [/^\/settings$/, '[data-screen="settings"]'],
   [/^\/settings\/[^/]+$/, '[data-screen="settings-section"]'],
   [/^\/logs$/, '[data-screen="logs"]'],
   // Only a pull request GitHub holds has the page, not the strip shown for a number it doesn't know.
-  [/^\/github\/[^/]+\/\d+$/, ".gh .gh-page"],
+  [/^\/github\/[^/]+\/[^/]+\/\d+$/, ".gh .gh-page"],
 ];
 
 /** The screen a shot must land on: the one it names, the session screen, or the one its path routes to. */
@@ -81,6 +81,41 @@ const openLog = (page: Page) => page.getByRole("button", { name: /^Log/ }).first
 /** A link that opens a page in a new tab: "Create it on GitHub" (ADR 0053). */
 const link = (page: Page, name: string) => page.getByRole("link", { name }).first();
 
+/** Sign in again from the band, signed out of the shared App (ADR 0066): its code shows there once GitHub gave one. */
+async function signInAgain(page: Page) {
+  await button(page, "Sign in again").click();
+  await link(page, "Copy code and open GitHub").waitFor();
+}
+
+/**
+ * "Ask to install on ledger-hq" in the accounts list (ADR 0067): GitHub's fake install page opens on its picker,
+ * ledger-hq's Request there, the ask is kept beside it, and the row waits for an owner of ledger-hq. The tab is closed:
+ * a Request records nothing.
+ */
+async function askToInstallOnLedgerHq(page: Page) {
+  const [tab] = await Promise.all([
+    page.waitForEvent("popup"),
+    link(page, "Ask to install on ledger-hq").click(),
+  ]);
+  await tab.getByRole("link", { name: "Request" }).waitFor();
+  await tab.close();
+  await page.getByText("Waiting for an owner of ledger-hq", { exact: false }).waitFor();
+}
+
+/**
+ * Settings › GitHub on the shared App in view, its group's title clear of the top bar: who is signed in, the list,
+ * once it names ledger-hq (`gh` is read right after the start).
+ */
+const toSharedGitHub = async (page: Page) => {
+  await page.locator(".accounts-list").getByText("ledger-hq", { exact: true }).waitFor();
+  // At once: a smooth scroll would still be under way when the page is shot.
+  await page
+    .locator(".signed-in-row")
+    .evaluate((el) =>
+      window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 120, behavior: "instant" }),
+    );
+};
+
 /** "Too noisy?" on the finding card whose title holds `title`. */
 const tooNoisy = (page: Page, title: string) =>
   page.locator(".card.finding", { hasText: title }).getByRole("button", { name: "Too noisy?" });
@@ -97,11 +132,30 @@ async function setupUntilBothReady(page: Page, demo: Demo) {
     throw new Error("The AI step moved on by itself: setup waits for Continue (ADR 0058).");
 }
 
-/** S1 on to the GitHub step: both AIs ready, then Continue. */
-async function setupUntilGitHub(page: Page, demo: Demo) {
+/** S1 on to the GitHub step: both AIs ready, then Continue; the step opens on Sign in with GitHub (ADR 0066). */
+async function setupUntilWays(page: Page, demo: Demo) {
   await setupUntilBothReady(page, demo);
   await button(page, "Continue").click();
+  await button(page, "Use your own App").waitFor();
+}
+
+/** The GitHub step's second way, Use your own App: today's flow, "Create it on GitHub" first. */
+async function useOwnApp(page: Page) {
+  await button(page, "Use your own App").click();
   await link(page, "Create it on GitHub").waitFor();
+}
+
+/** S1 on to the GitHub step's own App: both AIs ready, Continue, then Use your own App. */
+async function setupUntilGitHub(page: Page, demo: Demo) {
+  await setupUntilWays(page, demo);
+  await useOwnApp(page);
+}
+
+/** S1's Sign in with GitHub asked: the code GitHub's fake gave, with Copy code and open GitHub. */
+async function setupUntilCode(page: Page, demo: Demo) {
+  await setupUntilWays(page, demo);
+  await button(page, "Sign in with GitHub").click();
+  await link(page, "Copy code and open GitHub").waitFor();
 }
 
 /**
@@ -124,6 +178,7 @@ async function createApp(page: Page): Promise<Page> {
  * there.
  */
 async function createOnOrganisation(page: Page): Promise<Page> {
+  await useOwnApp(page);
   await page.getByLabel("ledger-dev").check();
   return createApp(page);
 }
@@ -278,6 +333,13 @@ const CAUSES = {
       scenario: "S15",
       setUp: onLedgerDev("app-suspended"),
     },
+    // An owner of ledger-dev suspends the shared App there (ADR 0067): the pill names the account, the connection up.
+    {
+      name: "organisation-suspended",
+      pill: "App suspended on ledger-dev",
+      scenario: "S16",
+      inject: ["organisation-suspended"],
+    },
   ],
   "key-refused": [
     { name: "key-refused", pill: "GitHub key refused", scenario: "S10", inject: ["key-refused"] },
@@ -298,6 +360,12 @@ const CAUSES = {
       setUp: onLedgerDev("not-a-member"),
     },
   ],
+  // Signed out of the shared App (ADR 0066): S16 signed in on two accounts, GitHub no longer renewing the sign-in.
+  "signed-out": [
+    { name: "signed-out", pill: "GitHub signed out", scenario: "S16", inject: ["github-signed-out"] },
+  ],
+  // ledger-dev asking for SSO (ADR 0066): its account's cause on the shared App, the connection still up.
+  sso: [{ name: "sso", pill: "ledger-dev needs SSO", scenario: "S16", inject: ["sso-asked"] }],
 } satisfies Record<ConnectionCause["kind"], CauseShot[]>;
 
 /**
@@ -314,8 +382,8 @@ const CODEX_AT_LIMIT = {
 // round 2; #2 closed; reviews paused with #1 asked again; a newer Codex failing its self-test. Its stages, from
 // the load: round 1 under way (0), round 1 posted (2 min), the fix pushed (3), round 2 posted (5), #2 closed (6),
 // paused (8).
-const PLANTED = "/reviews/lookover-sandbox/1";
-const PLANTED_GITHUB = "/github/lookover-sandbox/1";
+const PLANTED = "/reviews/sasensi/lookover-sandbox/1";
+const PLANTED_GITHUB = "/github/sasensi/lookover-sandbox/1";
 const ROUND_1 = 2 * MIN;
 const PUSHED = 3 * MIN;
 const ROUND_2 = 5 * MIN;
@@ -412,11 +480,57 @@ export const SHOTS: Shot[] = [
     },
   },
   { name: "shortcuts", scenario: "S12", act: (p) => p.keyboard.press("?") },
+  // Signed in to the shared App on two accounts (ADR 0066): a #151 on each account's ledger-api, both reviewed.
+  { name: "home-two-accounts", scenario: "S16" },
+  { name: "review-other-account", scenario: "S16", path: "/reviews/ledger-dev/ledger-api/151" },
+  { name: "repositories-two-accounts", scenario: "S16", path: "/repositories" },
+  // An owner of ledger-dev suspends the App there (ADR 0067): its group's head says who, with its fix, on a phone too.
+  {
+    name: "repositories-organisation-suspended",
+    scenario: "S16",
+    path: "/repositories",
+    inject: ["organisation-suspended"],
+  },
+  {
+    name: "repositories-organisation-suspended-phone",
+    scenario: "S16",
+    path: "/repositories",
+    inject: ["organisation-suspended"],
+    phone: true,
+  },
+  // A repository of the second account: its crumb names the account.
+  { name: "repository-other-account", scenario: "S16", path: "/repositories/ledger-dev/ledger-api" },
+  // Several problems at once: the App suspended on ledger-dev and Codex signed out, each its own line in the menu.
+  {
+    name: "status-pill-several",
+    scenario: "S16",
+    inject: ["organisation-suspended", "codex-signed-out"],
+    act: (p) => button(p, "2 things need attention").click(),
+  },
+  // Signed out, then Sign in again from the band: its code in the band, and in the status menu's GitHub line. Each
+  // alone: the sign-in it asks for stays on the service, and a second one would be refused.
+  {
+    name: "home-signed-out-code",
+    scenario: "S16",
+    inject: ["github-signed-out"],
+    alone: true,
+    act: signInAgain,
+  },
+  {
+    name: "status-pill-signed-out-code",
+    scenario: "S16",
+    inject: ["github-signed-out"],
+    alone: true,
+    act: async (p) => {
+      await signInAgain(p);
+      await button(p, "GitHub signed out").click();
+    },
+  },
   // A review
   {
     name: "review-to-fix",
     scenario: "S4",
-    path: "/reviews/ledger-api/149",
+    path: "/reviews/sasensi/ledger-api/149",
     advance: 4 * MIN,
     fullPage: true,
   },
@@ -424,7 +538,7 @@ export const SHOTS: Shot[] = [
   {
     name: "review-kept",
     scenario: "S4",
-    path: "/reviews/ledger-api/149",
+    path: "/reviews/sasensi/ledger-api/149",
     advance: 8 * MIN,
     fullPage: true,
   },
@@ -432,7 +546,7 @@ export const SHOTS: Shot[] = [
   {
     name: "review-escalated",
     scenario: "S4",
-    path: "/reviews/ledger-api/149",
+    path: "/reviews/sasensi/ledger-api/149",
     advance: 11 * MIN,
     fullPage: true,
   },
@@ -440,13 +554,13 @@ export const SHOTS: Shot[] = [
   {
     name: "review-too-noisy",
     scenario: "S7",
-    path: "/reviews/ledger-api/148",
+    path: "/reviews/sasensi/ledger-api/148",
     act: (p) => tooNoisy(p, "The page size is not capped").click(),
   },
   {
     name: "review-too-noisy-wrong",
     scenario: "S7",
-    path: "/reviews/ledger-api/148",
+    path: "/reviews/sasensi/ledger-api/148",
     act: async (p) => {
       await tooNoisy(p, "The page size is not capped").click();
       await p.getByRole("button", { name: /This finding is wrong/ }).click();
@@ -455,7 +569,7 @@ export const SHOTS: Shot[] = [
   {
     name: "review-done-tab",
     scenario: "S2",
-    path: "/reviews/ledger-api/148",
+    path: "/reviews/sasensi/ledger-api/148",
     advance: 7 * MIN,
     act: (p) => p.getByRole("tab", { name: /Done/ }).click(),
   },
@@ -464,7 +578,7 @@ export const SHOTS: Shot[] = [
   {
     name: "review-posting-wait",
     scenario: "S2",
-    path: "/reviews/ledger-api/148",
+    path: "/reviews/sasensi/ledger-api/148",
     advance: MIN,
     inject: ["github-limit"],
     act: (_p, demo) => demo.advance(3 * MIN),
@@ -474,17 +588,17 @@ export const SHOTS: Shot[] = [
     name: "phone-review-posting-wait",
     scenario: "S2",
     phone: true,
-    path: "/reviews/ledger-api/148",
+    path: "/reviews/sasensi/ledger-api/148",
     advance: MIN,
     inject: ["github-limit"],
     act: (_p, demo) => demo.advance(3 * MIN),
   },
-  { name: "review-running", scenario: "S3", path: "/reviews/ledger-api/151" },
+  { name: "review-running", scenario: "S3", path: "/reviews/sasensi/ledger-api/151" },
   // Details › Log open while Claude reads (ADR 0055): the live log under the review's history, newest last.
   {
     name: "review-running-log",
     scenario: "S3",
-    path: "/reviews/ledger-api/151",
+    path: "/reviews/sasensi/ledger-api/151",
     fullPage: true,
     act: openLog,
   },
@@ -492,7 +606,7 @@ export const SHOTS: Shot[] = [
     name: "phone-review-running-log",
     scenario: "S3",
     phone: true,
-    path: "/reviews/ledger-api/151",
+    path: "/reviews/sasensi/ledger-api/151",
     // Scrolled to the live log: a phone's full page would draw the tab bar over the middle of it.
     act: async (p) => {
       await openLog(p);
@@ -502,7 +616,7 @@ export const SHOTS: Shot[] = [
   {
     name: "review-details-open",
     scenario: "S4",
-    path: "/reviews/ledger-api/149",
+    path: "/reviews/sasensi/ledger-api/149",
     advance: 11 * MIN,
     fullPage: true,
     act: async (p) => {
@@ -510,14 +624,19 @@ export const SHOTS: Shot[] = [
       await button(p, "How this review ran").click();
     },
   },
-  { name: "review-waiting-limit", path: "/reviews/ledger-api/148", ...CODEX_AT_LIMIT },
-  { name: "review-waiting-engine", scenario: "S3", path: "/reviews/ledger-api/151", advance: 2 * MIN },
-  { name: "review-paused-review-again", scenario: "S8", path: "/reviews/lookover-sandbox/160" },
+  { name: "review-waiting-limit", path: "/reviews/sasensi/ledger-api/148", ...CODEX_AT_LIMIT },
+  {
+    name: "review-waiting-engine",
+    scenario: "S3",
+    path: "/reviews/sasensi/ledger-api/151",
+    advance: 2 * MIN,
+  },
+  { name: "review-paused-review-again", scenario: "S8", path: "/reviews/sasensi/lookover-sandbox/160" },
   // Resumed, #162 waits its turn and says behind what: both AIs on #161 (ADR 0055).
   {
     name: "review-waiting-turn",
     scenario: "S8",
-    path: "/reviews/lookover-sandbox/162",
+    path: "/reviews/sasensi/lookover-sandbox/162",
     advance: 3 * MIN,
     alone: true,
     act: async (p) => {
@@ -538,23 +657,23 @@ export const SHOTS: Shot[] = [
       await p.waitForTimeout(700);
     },
   },
-  { name: "phone-review-paused", scenario: "S8", phone: true, path: "/reviews/lookover-sandbox/160" },
-  { name: "review-settled", scenario: "S10", path: "/reviews/lookover-sandbox/146", fullPage: true },
-  { name: "review-clean", scenario: "S10", path: "/reviews/lookover-sandbox/135" },
+  { name: "phone-review-paused", scenario: "S8", phone: true, path: "/reviews/sasensi/lookover-sandbox/160" },
+  { name: "review-settled", scenario: "S10", path: "/reviews/sasensi/lookover-sandbox/146", fullPage: true },
+  { name: "review-clean", scenario: "S10", path: "/reviews/sasensi/lookover-sandbox/135" },
   // A finding that follows main's REVIEW.md (ADR 0048): "Why it was raised" names the rule and where it is.
-  { name: "review-rule", scenario: "S10", path: "/reviews/lookover-sandbox/139" },
-  { name: "review-new-commits", scenario: "S6", path: "/reviews/ledger-api/153", advance: MIN },
+  { name: "review-rule", scenario: "S10", path: "/reviews/sasensi/lookover-sandbox/139" },
+  { name: "review-new-commits", scenario: "S6", path: "/reviews/sasensi/ledger-api/153", advance: MIN },
   {
     name: "review-skipped",
     scenario: "S10",
-    path: "/reviews/lookover-sandbox/137",
+    path: "/reviews/sasensi/lookover-sandbox/137",
     act: (p) => p.getByText("Why wasn't it reviewed?").click(),
   },
   // A colleague's pull request from her fork (ADR 0048): never reviewed by itself; Claude only, when asked.
   {
     name: "review-skipped-fork",
     scenario: "S5",
-    path: "/reviews/ledger-api/152",
+    path: "/reviews/sasensi/ledger-api/152",
     advance: 2 * MIN,
     act: (p) => p.getByText("Why wasn't it reviewed?").click(),
   },
@@ -564,34 +683,34 @@ export const SHOTS: Shot[] = [
   {
     name: "github-escalated",
     scenario: "S4",
-    path: "/github/ledger-api/149",
+    path: "/github/sasensi/ledger-api/149",
     advance: 11 * MIN,
     fullPage: true,
   },
-  { name: "github-in-progress", scenario: "S2", path: "/github/ledger-api/148", advance: MIN },
+  { name: "github-in-progress", scenario: "S2", path: "/github/sasensi/ledger-api/148", advance: MIN },
   // From round 2 a new Consider is not posted (ADR 0042): round 2's stays in the app.
-  { name: "review-not-posted", scenario: "S2", path: "/reviews/ledger-api/148", advance: 7 * MIN },
+  { name: "review-not-posted", scenario: "S2", path: "/reviews/sasensi/ledger-api/148", advance: 7 * MIN },
   {
     name: "github-not-posted",
     scenario: "S2",
-    path: "/github/ledger-api/148",
+    path: "/github/sasensi/ledger-api/148",
     advance: 7 * MIN,
     fullPage: true,
   },
   {
     name: "github-settled",
     scenario: "S2",
-    path: "/github/ledger-api/148",
+    path: "/github/sasensi/ledger-api/148",
     advance: 11 * MIN,
     fullPage: true,
   },
   // Settled with round 2's Consider still in the app: the verdict says so, and not that the rest can go.
-  { name: "review-settled-kept", scenario: "S2", path: "/reviews/ledger-api/148", advance: 11 * MIN },
+  { name: "review-settled-kept", scenario: "S2", path: "/reviews/sasensi/ledger-api/148", advance: 11 * MIN },
   // New commits after the last round have no check until a review is asked for.
   {
     name: "github-new-commits",
     scenario: "S6",
-    path: "/github/ledger-api/153",
+    path: "/github/sasensi/ledger-api/153",
     advance: MIN,
     fullPage: true,
   },
@@ -625,7 +744,7 @@ export const SHOTS: Shot[] = [
     inject: ["repository-removed", "repository-removed"],
     phone: true,
   },
-  { name: "repository", scenario: "S9", path: "/repositories/lookover-sandbox", fullPage: true },
+  { name: "repository", scenario: "S9", path: "/repositories/sasensi/lookover-sandbox", fullPage: true },
   {
     name: "repositories-one-off",
     scenario: "S9",
@@ -684,6 +803,61 @@ export const SHOTS: Shot[] = [
       await p.getByLabel("App id").scrollIntoViewIfNeeded();
     },
   },
+  // Settings › GitHub on the shared App (ADR 0067): signed in, the accounts list setup shows, Use your own App.
+  { name: "settings-github-shared", scenario: "S16", path: "/settings", act: toSharedGitHub },
+  // On a phone each row stacks: the account over its detail, its fix and Ask again's place beneath.
+  {
+    name: "settings-github-shared-phone",
+    scenario: "S16",
+    path: "/settings",
+    phone: true,
+    act: toSharedGitHub,
+  },
+  // Sign in again while connected: the code in place of the button, Cancel beside it; nothing else moves.
+  {
+    name: "settings-github-shared-code",
+    scenario: "S16",
+    path: "/settings",
+    alone: true,
+    act: async (p) => {
+      await toSharedGitHub(p);
+      await button(p, "Sign in again").click();
+      await link(p, "Copy code and open GitHub").waitFor();
+    },
+  },
+  // An owner of ledger-dev suspended the App there: its row says who, and asks an owner of it.
+  {
+    name: "settings-github-shared-suspended",
+    scenario: "S16",
+    path: "/settings",
+    inject: ["organisation-suspended"],
+    act: async (p) => {
+      await p.getByText("Suspended by mira.", { exact: false }).first().waitFor();
+      await toSharedGitHub(p);
+    },
+  },
+  // Asked an owner of ledger-hq to install it: the row waits for them, with Ask again.
+  {
+    name: "settings-github-shared-waiting",
+    scenario: "S16",
+    path: "/settings",
+    alone: true,
+    act: async (p) => {
+      await toSharedGitHub(p);
+      await askToInstallOnLedgerHq(p);
+    },
+  },
+  {
+    name: "settings-github-shared-waiting-phone",
+    scenario: "S16",
+    path: "/settings",
+    alone: true,
+    phone: true,
+    act: async (p) => {
+      await toSharedGitHub(p);
+      await askToInstallOnLedgerHq(p);
+    },
+  },
   // Start at login chosen, not registered (ADR 0054): its help says so, and how to try again.
   {
     name: "settings-login-refused",
@@ -724,6 +898,158 @@ export const SHOTS: Shot[] = [
       await p.locator(".substep.done").first().waitFor();
     },
   },
+  // Sign in with GitHub (ADR 0066): the step's start, both ways; the code GitHub gave, with Copy code and open GitHub
+  // and Cancel; a code that ran out; one GitHub didn't sign in (cancelled on its page); then who you are and the
+  // accounts reached. GitHub's fake device page, where the code is entered.
+  { name: "setup-github-ways", scenario: "S1", screen: ".setup", alone: true, act: setupUntilWays },
+  { name: "setup-github-sign-in-code", scenario: "S1", screen: ".setup", alone: true, act: setupUntilCode },
+  {
+    name: "setup-github-sign-in-expired",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilCode(p, demo);
+      await demo.advance(15 * MIN);
+      await p.getByText("The code ran out before it was entered.").waitFor();
+    },
+  },
+  {
+    name: "setup-github-sign-in-denied",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilCode(p, demo);
+      await demo.inject("sign-in-denied");
+      await demo.advance(5 * SEC);
+      await p.getByText("GitHub didn't sign you in.").waitFor();
+    },
+  },
+  {
+    name: "setup-github-signed-in",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilCode(p, demo);
+      await demo.inject("sign-in-entered");
+      await demo.advance(5 * SEC);
+      // Kept on disk, then the install's next check (4 s) finds the accounts.
+      await p.locator(".substep.done").first().waitFor();
+      await demo.advance(4 * SEC);
+      await p.getByText("GitHub is connected.").waitFor();
+    },
+  },
+  // Signed in, the shared App installed on none of your accounts: the accounts row looks, the list offers the installs.
+  {
+    name: "setup-github-signed-in-looking",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilCode(p, demo);
+      await demo.inject("app-uninstalled");
+      await demo.inject("sign-in-entered");
+      await demo.advance(5 * SEC);
+      await p.locator(".substep.done").first().waitFor();
+      await demo.advance(4 * SEC);
+      await p.getByText("Looking for your accounts", { exact: false }).waitFor();
+      // Install on another account's link is the fake's install page for the shared App, not a 404.
+      const [tab] = await Promise.all([
+        p.waitForEvent("popup"),
+        p.getByRole("link", { name: "Install on another account" }).click(),
+      ]);
+      await tab.getByRole("button", { name: "Install" }).waitFor();
+      await tab.close();
+    },
+  },
+  // Signed in before the install, then signed out on GitHub (the same as a sign-in lost with the keychain): both ways
+  // again, and why.
+  {
+    name: "setup-github-signed-out",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilCode(p, demo);
+      await demo.inject("app-uninstalled");
+      await demo.inject("sign-in-entered");
+      await demo.advance(5 * SEC);
+      await p.locator(".substep.done").first().waitFor();
+      await demo.inject("github-signed-out");
+      await demo.advance(4 * SEC);
+      await p.getByText("You're signed out of GitHub.", { exact: false }).waitFor();
+    },
+  },
+  // Signed in, the shared App installed on no repository: GitHub's page again, to pick some.
+  {
+    name: "setup-github-signed-in-nothing-granted",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilCode(p, demo);
+      await demo.inject("nothing-granted");
+      await demo.inject("sign-in-entered");
+      await demo.advance(5 * SEC);
+      await p.locator(".substep.done").first().waitFor();
+      await demo.advance(4 * SEC);
+      await p.getByText("Installed, with no repository.", { exact: false }).waitFor();
+    },
+  },
+  // S17 (ADR 0067): every account state at setup: ledger-dev reached, ledger-ops asking for SSO, sasensi and
+  // ledger-labs to install on, ledger-hq to ask an owner of (listed once `gh` is read, right after the start).
+  {
+    name: "setup-github-every-account",
+    scenario: "S17",
+    screen: ".setup",
+    fullPage: true,
+    act: (p) => link(p, "Ask to install on ledger-hq").waitFor(),
+  },
+  // On a phone each row stacks: the account over its detail, its fix and Ask again's place beneath.
+  {
+    name: "setup-github-every-account-phone",
+    scenario: "S17",
+    screen: ".setup",
+    fullPage: true,
+    phone: true,
+    act: (p) => link(p, "Ask to install on ledger-hq").waitFor(),
+  },
+  // Asked: ledger-hq's row waits for an owner, with Ask again; then an owner installs it, and it is reached.
+  {
+    name: "setup-github-waiting",
+    scenario: "S17",
+    screen: ".setup",
+    fullPage: true,
+    alone: true,
+    act: askToInstallOnLedgerHq,
+  },
+  {
+    name: "setup-github-waiting-phone",
+    scenario: "S17",
+    screen: ".setup",
+    fullPage: true,
+    alone: true,
+    phone: true,
+    act: askToInstallOnLedgerHq,
+  },
+  {
+    name: "setup-github-owner-installed",
+    scenario: "S17",
+    screen: ".setup",
+    fullPage: true,
+    alone: true,
+    act: async (p, demo) => {
+      await askToInstallOnLedgerHq(p);
+      await demo.inject("owner-installs");
+      // Reached: ledger-hq moves to the list's reached part, and Ask again detaching is the sign it did.
+      await link(p, "Ask again").waitFor({ state: "detached" });
+      // The pointer off the row, so no button shows its hover.
+      await p.mouse.move(0, 0);
+    },
+  },
+  { name: "github-device", scenario: "S1", path: `${DEMO_API.github}/login/device`, screen: "main" },
   // Where the App lives (ADR 0059): S1's gh signed out, so its line says `gh auth login` beside Check again, your own
   // account the one choice; S15's lists ledger-dev, picked, under it how a member who isn't an admin gets an App.
   {
@@ -754,6 +1080,7 @@ export const SHOTS: Shot[] = [
     screen: ".setup",
     alone: true,
     act: async (p) => {
+      await useOwnApp(p);
       await p.getByLabel("ledger-dev").check();
       await p.getByText("Not an admin of your organisation?").waitFor();
     },
@@ -783,6 +1110,7 @@ export const SHOTS: Shot[] = [
     fullPage: true,
     alone: true,
     act: async (p, demo) => {
+      await useOwnApp(p);
       await useExistingApp(p, "lookover-ledger-dev.private-key.pem", MADE_APP.key, MADE_APP.id);
       await button(p, "Use this App").click();
       await demo.advance(4 * SEC);
@@ -1014,13 +1342,13 @@ export const SHOTS: Shot[] = [
   },
   // On a phone, reaching the service from another device: looking is free, a change asks to unlock.
   { name: "phone-home", scenario: "S11", phone: true },
-  { name: "phone-review", scenario: "S11", phone: true, path: "/reviews/lookover-sandbox/180" },
+  { name: "phone-review", scenario: "S11", phone: true, path: "/reviews/sasensi/lookover-sandbox/180" },
   // Its details open: the Rounds table, who found and checked each round and its tokens, scrolls sideways (ADR 0055).
   {
     name: "phone-review-details-open",
     scenario: "S11",
     phone: true,
-    path: "/reviews/lookover-sandbox/180",
+    path: "/reviews/sasensi/lookover-sandbox/180",
     // Scrolled to the table, which is scrolled to its end: a phone's full page would draw the tab bar over it, and
     // its last columns are the new ones.
     act: async (p) => {
@@ -1036,7 +1364,7 @@ export const SHOTS: Shot[] = [
     name: "phone-unlock",
     scenario: "S11",
     phone: true,
-    path: "/reviews/lookover-sandbox/180",
+    path: "/reviews/sasensi/lookover-sandbox/180",
     act: async (p) => {
       await button(p, "Review again").click();
       await p.getByText("Unlock to make changes?").waitFor();

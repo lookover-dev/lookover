@@ -5,15 +5,18 @@
 // token without `read:org`, an organisation behind SAML single sign-on. A state the real `gh` can't be brought to on
 // demand is left out of its setup, and that case is skipped. Every read answers: none rejects.
 import { describe, expect, test } from "bun:test";
-import type { Gh, GhAdminOrganisations, GhMembership, GhPerson, HostLogin } from "@lookover/contracts";
+import type { Gh, GhMembership, GhMemberships, GhPerson, HostLogin } from "@lookover/contracts";
 
 export interface GhFixture {
   gh: Gh;
   /** The account `gh` is signed in as, its id and login exactly. */
   person: HostLogin;
-  /** Organisations where the person is an active admin: each must be listed (live, `gh` may list more). */
+  /**
+   * Organisations where the person is an active owner (GitHub's API: admin): each must be listed as an owner (live,
+   * `gh` may list more).
+   */
   admin: HostLogin[];
-  /** Organisations where the person is an active member, not an admin: none is listed as the person's to admin. */
+  /** Organisations where the person is an active member, not an owner: each must be listed as a member. */
   member?: HostLogin[];
   /** An organisation the person was invited to and hasn't joined: pending. None: not checked. */
   pending?: HostLogin;
@@ -35,7 +38,7 @@ export interface GhSetup {
   sso?: () => Promise<{ gh: Gh; organisation: string }>;
 }
 
-type Answer = GhPerson | GhAdminOrganisations | GhMembership;
+type Answer = GhPerson | GhMemberships | GhMembership;
 
 /** An answer's kind, and why for one that can't answer, with whether it gave `gh`'s words. */
 const kindOf = (answer: Answer): string =>
@@ -45,7 +48,14 @@ const kindOf = (answer: Answer): string =>
 
 /** Every read of `gh`, an organisation's with `organisation`, by kind. */
 const everyRead = async (gh: Gh, organisation: string): Promise<string[]> =>
-  (await Promise.all([gh.person(), gh.adminOrganisations(), gh.membership(organisation)])).map(kindOf);
+  (await Promise.all([gh.person(), gh.memberships(), gh.membership(organisation)])).map(kindOf);
+
+/** The memberships `gh` lists, or the case fails saying why it listed none. */
+async function listed(gh: Gh): Promise<Extract<GhMemberships, { kind: "listed" }>> {
+  const answer = await gh.memberships();
+  if (answer.kind !== "listed") throw new Error(`gh listed nothing: ${kindOf(answer)}`);
+  return answer;
+}
 
 /** A case for a state the setup may not bring the port to: skipped when it can't. */
 function when<T>(
@@ -65,26 +75,38 @@ export function describeGh(name: string, setup: GhSetup): void {
       expect(await gh.person()).toEqual({ kind: "signed-in", account: person });
     });
 
-    test("the organisations where the person is an active admin: each listed once, by id and login", async () => {
-      const { gh, admin, member } = await setup.signedIn();
-      const answer = await gh.adminOrganisations();
-      if (answer.kind !== "listed") throw new Error(`gh listed nothing: ${kindOf(answer)}`);
-      for (const organisation of admin) expect(answer.organisations).toContainEqual(organisation);
-      const ids = answer.organisations.map((o) => o.id);
-      expect(new Set(ids).size).toBe(ids.length);
-      for (const organisation of answer.organisations) {
-        expect(Number.isInteger(organisation.id)).toBe(true);
-        expect(organisation.login).toMatch(/^[A-Za-z0-9-]+$/);
-      }
-      for (const organisation of member ?? []) expect(ids).not.toContain(organisation.id);
+    test("memberships: who gh is, each owner's organisation as an owner and each member's as a member", async () => {
+      const { gh, person, admin, member } = await setup.signedIn();
+      const answer = await listed(gh);
+      expect(answer.person).toEqual(person);
+      for (const organisation of admin)
+        expect(answer.organisations).toContainEqual({ organisation, role: "owner" });
+      for (const organisation of member ?? [])
+        expect(answer.organisations).toContainEqual({ organisation, role: "member" });
     });
 
-    test("membership: each listed admin organisation reads active, as an admin, as the person", async () => {
+    test("memberships: each active organisation once, by id and login, never one only invited to", async () => {
+      const { gh, pending } = await setup.signedIn();
+      const { organisations } = await listed(gh);
+      const ids = organisations.map((o) => o.organisation.id);
+      expect(new Set(ids).size).toBe(ids.length);
+      for (const { organisation, role } of organisations) {
+        expect(Number.isInteger(organisation.id)).toBe(true);
+        expect(organisation.login).toMatch(/^[A-Za-z0-9-]+$/);
+        expect(["owner", "member"]).toContain(role);
+      }
+      if (pending !== undefined) expect(ids).not.toContain(pending.id);
+    });
+
+    test("membership: each organisation memberships lists, read alone, says the same role, as the person", async () => {
       const { gh, person } = await setup.signedIn();
-      const answer = await gh.adminOrganisations();
-      if (answer.kind !== "listed") throw new Error(`gh listed nothing: ${kindOf(answer)}`);
-      for (const organisation of answer.organisations)
-        expect(await gh.membership(organisation.login)).toEqual({ kind: "active", person, admin: true });
+      const answer = await listed(gh);
+      for (const { organisation, role } of answer.organisations)
+        expect(await gh.membership(organisation.login)).toEqual({
+          kind: "active",
+          person,
+          admin: role === "owner",
+        });
     });
 
     test("membership: an organisation's login matched without case, as GitHub does", async () => {
@@ -144,9 +166,10 @@ export function describeGh(name: string, setup: GhSetup): void {
 
     when(
       setup.sso,
-      "an organisation behind SAML single sign-on: its membership can't answer, for SSO",
+      "an organisation behind SAML single sign-on: its membership and the list of memberships can't answer, for SSO",
       async ({ gh, organisation }) => {
         expect(kindOf(await gh.membership(organisation))).toBe("unanswered: sso");
+        expect(kindOf(await gh.memberships())).toBe("unanswered: sso");
         expect((await gh.person()).kind).toBe("signed-in");
       },
     );

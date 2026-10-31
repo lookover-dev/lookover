@@ -2,6 +2,7 @@
 // says of the App and of where it is installed, the port the service reads them through, the refusals the setup
 // shows, and the addresses of GitHub's pages the app links to. Never a key in anything the service sends: the key
 // goes in once (`ManifestConversion`, `AppCredentials`, `connection.useApp`) and stays in the service.
+import type { ConnectionCause } from "./connection.ts";
 import type { GhRefusal } from "./gh.ts";
 import type { RepositoryRef } from "./host.ts";
 
@@ -88,6 +89,40 @@ export interface HostInstallations {
 }
 
 /**
+ * Why one account the person reaches can't be used while the connection can (ADR 0066): its installation suspended
+ * (`uninstalled`, `suspended` true), or its organisation asking for SAML SSO the sign-in hasn't (`sso`). The same
+ * rule by kind holds for a `HostError`'s `connectionCause` on an act on one repository: `uninstalled` and `sso` are
+ * the repository's account's, every other kind the connection's.
+ */
+export type AccountCause = Extract<ConnectionCause, { kind: "uninstalled" | "sso" }>;
+
+/** An account the person's sign-in reaches through the shared App (ADR 0066): its installation and what it grants. */
+export interface ReachedAccount {
+  installation: HostInstallation;
+  /**
+   * The repositories the installation grants the person, archived ones and any off the list left out, as GitHub
+   * names them (owner and name its own, never typed ones); none while `cause` holds.
+   */
+  repositories: RepositoryRef[];
+  /** Why the account's repositories can't be used now; null when they can. */
+  cause: AccountCause | null;
+}
+
+/**
+ * The shared App's level as the person signed in to it reaches it (ADR 0066), beside `HostInstallations`, the own
+ * App's: the person's token comes from their sign-in, never with a call. Each call refuses with a `HostError` whose
+ * `connectionCause` is the connection's (`signed-out`, `unreachable`): what is one account's (`uninstalled`, `sso`)
+ * is in its `cause`, never thrown.
+ * - `person`: who is signed in (`GET /user`).
+ * - `accounts`: every installation of the shared App the person reaches, on every account, each with the repositories
+ *   it grants them, in GitHub's order.
+ */
+export interface HostAccounts {
+  person(): Promise<HostLogin>;
+  accounts(): Promise<ReachedAccount[]>;
+}
+
+/**
  * Why the manifest flow stopped short, as the setup's GitHub step shows it until the owner tries again (ADR 0053).
  * `unreachable`: back from GitHub, its conversion could not reach GitHub; the flow stays open within the hour, so it
  * can be tried again. `expired`: GitHub's code or the flow ran out, or was used: start again from Lookover.
@@ -164,7 +199,11 @@ const PERSONAL = { login: "", type: "User" } as const;
  * installation's settings are on the App's account: the organisation's pages when it is one (ADR 0059).
  */
 export const githubLinks = {
-  /** Where the App is installed, or its repositories chosen: "Install it on GitHub", "Open GitHub again". */
+  /**
+   * Where the App is installed, or its repositories chosen: "Install it on GitHub", "Open GitHub again", and on
+   * `shared` "Install on <account>", "Ask to install on <org>" and "Install on another account" (ADR 0067): GitHub's
+   * documented page, where the person picks the account, never the undocumented `target_id` deep link.
+   */
   install: (web: string, slug: string) => `${web}/apps/${slug}/installations/new`,
   /** The installation's settings: "Add a repository", a suspended installation's fix. */
   installation: (web: string, account: Pick<HostAccount, "login" | "type">, installationId: number) =>
@@ -178,6 +217,13 @@ export const githubLinks = {
    */
   newApp: (web: string, organisation: string | null, state: string) =>
     `${settingsOf(web, organisation === null ? PERSONAL : { login: organisation, type: "Organization" })}/apps/new?state=${encodeURIComponent(state)}`,
+  /** An organisation's single sign-on page (ADR 0066): "Sign in with SSO" when GitHub gave no page of its own. */
+  sso: (web: string, organisation: string) => `${web}/orgs/${organisation}/sso`,
+  /**
+   * An organisation's people, filtered to its owners (ADR 0067): who to ask while an install waits for an owner, or
+   * to lift a suspension the person can't.
+   */
+  owners: (web: string, organisation: string) => `${web}/orgs/${organisation}/people?query=role%3Aowner`,
   /** A pull request: "Open on GitHub". */
   pullRequest: (web: string, repo: RepositoryRef, number: number) =>
     `${web}/${repo.owner}/${repo.name}/pull/${number}`,

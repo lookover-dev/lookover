@@ -54,6 +54,7 @@ const installationOf = async (fake: FakeGitHost): Promise<HostInstallation> => {
 };
 
 describeHostInstallation("FakeGitHost", {
+  way: "own",
   installed: () => {
     const fake = host();
     // Ledger's archived and notes left out of the installation: neither is listed.
@@ -126,6 +127,7 @@ const orgHost = (installed = true) =>
   });
 
 describeHostInstallation("FakeGitHost, an organisation's App", {
+  way: "own",
   installed: () => {
     const fake = orgHost();
     fake.removeRepository(orgLookover);
@@ -155,6 +157,195 @@ describeHostInstallation("FakeGitHost, an organisation's App", {
       app: { id: APP_ID + 1, slug: "lookover-k3x9qa", owner: organisation, permissions: APP_PERMISSIONS },
     });
   },
+});
+
+/**
+ * The person signed in to the shared App (ADR 0066), reaching three accounts: their own, where the App's installation
+ * is, `lookover-dev` and `acme`.
+ */
+const person = { id: owner.id, login: owner.login };
+const acme = { id: 5100, login: "acme", type: "Organization" as const };
+const acmeApi: RepositoryRef = { owner: "acme", name: "api" };
+const signedInHost = () =>
+  new FakeGitHost({
+    repo: sandbox,
+    bot,
+    person,
+    changes: [],
+    app: { id: APP_ID, owner },
+    reaches: [
+      { account: organisation, repositories: [orgSandbox, orgLookover] },
+      { account: acme, repositories: [acmeApi] },
+    ],
+  });
+
+describeHostInstallation("FakeGitHost, the person signed in on three accounts", {
+  way: "shared",
+  signedIn: () => {
+    const fake = signedInHost();
+    fake.archive(orgLookover);
+    return Promise.resolve({
+      accounts: fake,
+      person,
+      reached: [
+        { account: owner, granted: [sandbox] },
+        { account: organisation, granted: [orgSandbox], left: [orgLookover] },
+        { account: acme, granted: [acmeApi] },
+      ],
+    });
+  },
+  suspended: () => {
+    const fake = signedInHost();
+    fake.suspend("acme", "rhea-k");
+    return Promise.resolve({ accounts: fake, account: acme, by: "rhea-k" });
+  },
+  sso: () => {
+    const fake = signedInHost();
+    fake.askSso("acme");
+    return Promise.resolve({ accounts: fake, organisation: acme, others: [owner, organisation] });
+  },
+  unreachable: () => {
+    const fake = signedInHost();
+    fake.refuse("unavailable");
+    return Promise.resolve({ accounts: fake });
+  },
+});
+
+describe("FakeGitHost's other accounts, as the person signed in reaches them", () => {
+  const change = (repo: RepositoryRef) => ({
+    repo,
+    number: 1,
+    title: "One",
+    url: `https://github.com/${repo.owner}/${repo.name}/pull/1`,
+    author: { login: "sasensi", id: owner.id },
+    draft: false,
+    head: { ref: "one", sha: commitSha("1".repeat(40)) },
+    base: { ref: "main", sha: commitSha("0".repeat(40)) },
+    diff: [],
+  });
+  const why = async (call: Promise<unknown>) => {
+    const error = await call.catch((e: unknown) => e);
+    if (!(error instanceof HostError)) throw new Error("not refused");
+    return [error.failure, connectionCauseOf(error)];
+  };
+
+  test("an organisation's repositories answer through its own installation, its pull requests theirs", async () => {
+    const fake = signedInHost();
+    fake.open(change(acmeApi));
+    expect((await fake.getChange(acmeApi, 1)).number).toBe(1);
+    expect((await fake.listOpenChanges(orgSandbox)).items).toEqual([]);
+  });
+
+  test("an organisation asking for SSO refuses its repositories with its sso; the others answer; signed in there, it answers", async () => {
+    const fake = signedInHost();
+    fake.open(change(acmeApi));
+    const url = "https://github.com/orgs/acme/sso?authorization_request=FAKE";
+    fake.askSso("acme", url);
+    expect(await why(fake.getChange(acmeApi, 1))).toEqual([
+      "unauthorized",
+      { kind: "sso", organisation: "acme", url },
+    ]);
+    expect((await fake.listOpenChanges(sandbox)).items).toEqual([]);
+    fake.signInSso("acme");
+    expect((await fake.getChange(acmeApi, 1)).number).toBe(1);
+  });
+
+  test("an organisation's installation suspended refuses only its repositories, causeless as to a person's token; lifted, they answer", async () => {
+    const fake = signedInHost();
+    fake.suspend("acme");
+    expect(await why(fake.listOpenChanges(acmeApi))).toEqual(["invalid", null]);
+    expect((await fake.listOpenChanges(orgSandbox)).items).toEqual([]);
+    fake.unsuspend("acme");
+    expect((await fake.listOpenChanges(acmeApi)).items).toEqual([]);
+  });
+
+  test("the person's own account, the App's made without an owner, is theirs by id as on GitHub", async () => {
+    const own = { id: 1234, login: sandbox.owner };
+    const fake = new FakeGitHost({ repo: sandbox, bot, person: own, changes: [] });
+    expect((await fake.accounts())[0]?.installation.account).toEqual({ ...own, type: "User" });
+  });
+
+  test("the App's own installation gone, the others are still reached", async () => {
+    const fake = signedInHost();
+    fake.uninstall();
+    expect((await fake.accounts()).map((a) => a.installation.account.login)).toEqual([
+      "lookover-dev",
+      "acme",
+    ]);
+  });
+
+  test("an organisation of the person's without the App isn't reached, its repositories refused; installed there, it is, after the others", async () => {
+    const ledgerDev = { id: 338, login: "ledger-dev", type: "Organization" as const };
+    const ledgerWeb: RepositoryRef = { owner: "ledger-dev", name: "ledger-web" };
+    const fake = new FakeGitHost({
+      repo: sandbox,
+      bot,
+      person,
+      changes: [],
+      app: { id: APP_ID, owner },
+      reaches: [{ account: acme, repositories: [acmeApi] }],
+      unreached: [{ account: ledgerDev, repositories: [ledgerWeb] }],
+    });
+    expect((await fake.accounts()).map((a) => a.installation.account.login)).toEqual(["sasensi", "acme"]);
+    expect((await why(fake.listOpenChanges(ledgerWeb)))[0]).toBe("not_found");
+
+    const id = fake.installOn("LEDGER-DEV");
+    const reached = await fake.accounts();
+    expect(reached.map((a) => a.installation.account.login)).toEqual(["sasensi", "acme", "ledger-dev"]);
+    expect(reached[2]).toEqual({
+      installation: { id, account: ledgerDev, suspended: false },
+      repositories: [ledgerWeb],
+      cause: null,
+    });
+    expect((await fake.listOpenChanges(ledgerWeb)).items).toEqual([]);
+    expect(() => fake.installOn("ledger-dev")).toThrow("ledger-dev");
+
+    // Uninstalled there, it is the person's again without the App, and can be installed again, with a new id.
+    fake.uninstall("ledger-dev");
+    expect((await fake.accounts()).length).toBe(2);
+    expect(fake.installOn("ledger-dev")).not.toBe(id);
+  });
+
+  test("another account's repositories are only that account's: one named for another is refused", () => {
+    const outside = () =>
+      new FakeGitHost({
+        repo: sandbox,
+        bot,
+        person,
+        changes: [],
+        reaches: [{ account: acme, repositories: [orgSandbox] }],
+      });
+    expect(outside).toThrow("lookover-dev/lookover-sandbox is not acme's");
+  });
+
+  test("signed out on GitHub, every repository and the accounts refuse as signed out, as the adapter does once its renewal is refused; a new sign-in answers again", async () => {
+    const fake = signedInHost();
+    fake.open(change(acmeApi));
+    fake.signOut();
+    const signedOut: [HostFailure, ConnectionCause] = ["unauthorized", { kind: "signed-out" }];
+    expect(await why(fake.getChange(acmeApi, 1))).toEqual(signedOut);
+    expect(await why(fake.listOpenChanges(sandbox))).toEqual(signedOut);
+    expect(await why(fake.accounts())).toEqual(signedOut);
+    // The refresh tokens given so far are refused too.
+    const grant = await fake.startSignIn();
+    fake.enterCode(grant.userCode);
+    // Entered, but not signed in until the code is polled.
+    expect(await why(fake.accounts())).toEqual(signedOut);
+    expect((await fake.pollSignIn(grant)).kind).toBe("issued");
+    expect((await fake.getChange(acmeApi, 1)).number).toBe(1);
+    expect((await fake.accounts()).length).toBe(3);
+  });
+
+  test("nobody signed in, the person is signed out, as the adapter says it", async () => {
+    const fake = new FakeGitHost({ repo: sandbox, bot, changes: [] });
+    expect(await why(fake.person())).toEqual(["unauthorized", { kind: "signed-out" }]);
+  });
+
+  test("other accounts need a person signed in", () => {
+    const nobody = () =>
+      new FakeGitHost({ repo: sandbox, bot, changes: [], reaches: [{ account: acme, repositories: [] }] });
+    expect(nobody).toThrow("person");
+  });
 });
 
 describe("FakeGitHost's App and installation on their own", () => {

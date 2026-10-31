@@ -180,10 +180,11 @@ export interface QueueDeps {
    */
   engineStates(): Record<EngineId, Pick<Engine, "state" | "version" | "detail" | "limitUntil" | "unusable">>;
   /**
-   * The host's connection as the UI shows it now (the poller's report, ADR 0047): the service's in-memory copy.
-   * A job waits on it while it isn't connected; the poller takes again once it is.
+   * The host's connection as the UI shows it now (the poller's report, ADR 0047), for the repository's account
+   * (ADR 0066: disconnected while that account has a cause of its own), the connection's for none: the service's
+   * in-memory copy. A job waits on it while it isn't connected; the poller takes again once it is.
    */
-  connection(): Pick<Connection, "state">;
+  connection(repoId: RepositoryId | null): Pick<Connection, "state">;
   /** The open changes, by id, as the inbox keeps them: read from the store at each call. */
   openChanges(): ReadonlyMap<ChangeId, ChangeFacts>;
   /** The settings that hold for a repository. */
@@ -626,7 +627,6 @@ export function createQueue(d: QueueDeps): Queue {
     const engines = statesNow();
     const shown = d.engineStates();
     const unusable = { claude: shown.claude.unusable, codex: shown.codex.unusable };
-    const connection = d.connection().state;
     /** Engines whose broken health check already failed a job in this take. */
     const failedOn = new Set<EngineId>();
     // An engine busy with its self-test counts as reviewing: the jobs it would take wait their turn.
@@ -657,7 +657,7 @@ export function createQueue(d: QueueDeps): Queue {
         unusable,
         busy: busy(reviewing),
         changeBusy,
-        connection,
+        connection: d.connection(change?.repoId ?? null).state,
         finder: stored.reroute,
       });
       const engine = engineNamed(decision);

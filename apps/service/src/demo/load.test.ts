@@ -4,7 +4,7 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { changeId, jobId, SSE } from "@lookover/contracts";
 import { buildDemoRoom, type DemoRoom, type Room, type Scenario, scenarioOf } from "../index.ts";
-import { api, next, TEST_LIMIT_MS } from "../service.test-support.ts";
+import { api, next, SANDBOX, TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
   advance,
   BRIEF_SEEDED,
@@ -26,7 +26,7 @@ setDefaultTimeout(TEST_LIMIT_MS);
 afterEach(stopAll);
 
 const MIN = 60_000;
-const id = (n: number) => changeId(`lookover-sandbox#${n}`);
+const id = (n: number) => changeId(`sasensi/lookover-sandbox#${n}`);
 /**
  * S10's seed: sixty-eight events (the start, the repository, six pull requests and their reviews, their outboxes as
  * they posted, main's rules read and counted three times).
@@ -119,7 +119,7 @@ function broken(): Scenario {
       const { sha, message, diff } = c.commits[0];
       return { ...c, commits: [{ sha, message, diff }] };
     }),
-    script: [{ at: 1 * MIN, move: { kind: "open", change: 141 } }],
+    script: [{ at: 1 * MIN, move: { kind: "open", change: { repo: SANDBOX, number: 141 } } }],
     seed: 5 * MIN,
   };
 }
@@ -329,11 +329,11 @@ test("a seed that throws midway stops its own room: the load fails and leaves no
   const lost: Scenario = {
     ...brief(),
     id: "T-lost",
-    script: [{ at: 1 * MIN, move: { kind: "open", change: 999 } }],
+    script: [{ at: 1 * MIN, move: { kind: "open", change: { repo: SANDBOX, number: 999 } } }],
   };
   const door = await startBrief({ scenarios: [brief(), lost] });
   const { status, body } = await load(door, "T-lost");
   expect(status).toBe(500);
-  expect(body).toEqual({ error: "T-lost has no pull request #999" });
+  expect(body).toEqual({ error: "T-lost has no pull request sasensi/lookover-sandbox#999" });
   expect(logOf(door).at(-1)?.seq).toBe(BRIEF_SEEDED);
 });

@@ -5,7 +5,7 @@
 // default), so the review stays done and the change shows two new commits; "Review again" asks for round 2, which
 // finds both fixed and settles.
 import { commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { added, CONFIRM_MS, FIND_MS, LEDGER_API, MIN, OWNER, SHORT_FIND_MS, unified } from "./ledger-api.ts";
 
 const OFF_BY_ONE = "  due.setDate(due.getDate() + terms.days - 1);";
@@ -123,6 +123,9 @@ const DUE_DATE: ScenarioChange = {
   ],
 };
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(LEDGER_API.repo);
+
 export const S6: Scenario = {
   id: "S6",
   title: "New commits after a review",
@@ -137,8 +140,8 @@ export const S6: Scenario = {
   world: LEDGER_API,
   changes: [DUE_DATE],
   script: [
-    { at: MIN, move: { kind: "open", change: 153 } },
-    { at: 6 * MIN + 30_000, move: { kind: "push", change: 153 } },
+    { at: MIN, move: { kind: "open", change: pr(153) } },
+    { at: 6 * MIN + 30_000, move: { kind: "push", change: pr(153) } },
   ],
   seed: 6 * MIN,
 };

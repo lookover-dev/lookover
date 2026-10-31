@@ -3,6 +3,7 @@
 // Snapshots are built by hand: the view model reads state only.
 import { expect, test } from "bun:test";
 import {
+  type ConnectionAccount,
   type ConnectionCause,
   changeId,
   commitSha,
@@ -30,11 +31,14 @@ import {
 import {
   type ChangeReview,
   canReviewAgain,
+  changeLabel,
+  changeReviewAt,
   changeReviews,
   chip,
   differences,
   firstReviewCandidates,
   fixOn,
+  githubStatus,
   homeGroups,
   lookedOver,
   nextStep,
@@ -42,6 +46,7 @@ import {
   pill,
   problems,
   REVIEW_BUTTON,
+  repositoryLabel,
   reviewAgainNote,
   reviewButton,
   reviewLabel,
@@ -101,7 +106,11 @@ function calm(): State {
       cause: null,
       bot: "sam-reviewer[bot]",
       app: null,
-      installationId: null,
+      accounts: [],
+      unreached: [],
+      way: "own",
+      signIn: null,
+      person: null,
       web: GITHUB_WEB,
       since: NOW - 3 * HOUR,
       limitUntil: null,
@@ -223,7 +232,7 @@ function levels(status: Status, at: number): Partial<Review> {
   }
 }
 
-/** Adds the change `app#n` whose review stands at `status`, last updated `ago` ms before now. */
+/** Adds the change `sam/app#n` whose review stands at `status`, last updated `ago` ms before now. */
 function withChange(
   state: State,
   n: number,
@@ -231,7 +240,7 @@ function withChange(
   ago = 10 * MIN,
   extra: Partial<Review> = {},
 ): State {
-  const id = changeId(`app#${n}`);
+  const id = changeId(`sam/app#${n}`);
   const at = NOW - ago;
   const review: Review = { ...emptyReview(id, at), ...levels(status, at), ...extra };
   return {
@@ -264,6 +273,32 @@ const signedOut = (state: State, id: EngineId) => withEngine(state, id, { state:
 const paused = (state: State): State => ({
   ...state,
   service: { ...state.service, paused: { since: NOW - HOUR, until: null } },
+});
+
+// ---- a change's address and label ----
+
+test("two repositories of one name on two accounts: each change is found at its owner's address and labelled with its owner (ADR 0066)", () => {
+  const ours = withChange(calm(), 1, "to-fix");
+  const mine = ours.changes[changeId("sam/app#1")];
+  const review = ours.reviews[changeId("sam/app#1")];
+  if (!mine || !review) throw new Error("No change");
+  const theirs = { ...mine, id: changeId("acme/app#1"), repoId: repositoryId("acme/app") };
+  const st: State = {
+    ...ours,
+    repos: [
+      ...ours.repos,
+      { id: repositoryId("acme/app"), owner: "acme", name: "app", enabled: true, settings: DEFAULTS },
+    ],
+    changes: { ...ours.changes, [theirs.id]: theirs },
+    reviews: { ...ours.reviews, [theirs.id]: { ...review, changeId: theirs.id } },
+  };
+  expect(changeReviewAt(st, "acme", "app", "1")?.change.id).toBe(theirs.id);
+  expect(changeReviewAt(st, "sam", "app", "1")?.change.id).toBe(mine.id);
+  expect(changeReviewAt(st, "nobody", "app", "1")).toBeNull();
+  expect(changeLabel(theirs)).toBe("acme/app #1");
+  expect(changeLabel(mine)).toBe("sam/app #1");
+  // Repositories lists each account's, owner and name (ADR 0066): two apps, never one twice.
+  expect(st.repos.map(repositoryLabel)).toEqual(["sam/app", "acme/app"]);
 });
 
 // ---- problems: what the alert band lists ----
@@ -309,7 +344,9 @@ function down(cause: ConnectionCause, web: string = GITHUB_WEB): State {
         account: { id: 7, login: "sam", type: "User" },
         person: { id: 7, login: "sam" },
       },
-      installationId: 77,
+      accounts: [
+        { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
+      ],
     },
   };
 }
@@ -489,9 +526,239 @@ test("an organisation's App: each cause names the organisation and its admins; n
   });
 });
 
+test("signed out of the shared App says only a new sign-in brings GitHub back (ADR 0066)", () => {
+  const [p, ...rest] = problems(down({ kind: "signed-out" }));
+  expect(rest).toEqual([]);
+  expect(p).toEqual({
+    id: "connection",
+    tone: "need",
+    busy: false,
+    short: "GitHub signed out",
+    title: "You're signed out of GitHub",
+    detail: "GitHub no longer takes your sign-in. Reviews cannot be read or posted until you sign in again.",
+    fix: { label: "Sign in again", command: { type: "connection.signIn" } },
+  });
+});
+
+test("signed out, once Sign in again gave a code, the problem says the code and its fix copies it and opens GitHub (ADR 0066)", () => {
+  const st = down({ kind: "signed-out" });
+  const signIn = {
+    userCode: "FAKE-0003",
+    verificationUri: "https://github.com/login/device",
+    expiresAt: NOW + 15 * MIN,
+  };
+  const [p, ...rest] = problems({ ...st, connection: { ...st.connection, signIn } });
+  expect(rest).toEqual([]);
+  expect(p).toEqual({
+    id: "connection",
+    tone: "need",
+    busy: false,
+    short: "GitHub signed out",
+    title: "You're signed out of GitHub",
+    detail: { before: "Enter", command: "FAKE-0003", after: "on GitHub. It works until 10:15." },
+    fix: {
+      label: "Copy code and open GitHub",
+      href: "https://github.com/login/device",
+      copy: "FAKE-0003",
+    },
+  });
+  // Past its expiry and still shown, the code was taken: the sign-in finishes, its button waiting.
+  const later = problems({ ...st, now: NOW + 16 * MIN, connection: { ...st.connection, signIn } })[0];
+  expect(later).toMatchObject({
+    detail: "Finishing the sign-in with GitHub…",
+    fix: { label: "Sign in again", command: { type: "connection.signIn" } },
+    busy: true,
+  });
+});
+
+test("an organisation asking for SSO says so, and opens the page GitHub gave for it (ADR 0066)", () => {
+  const url = "https://github.com/orgs/acme/sso?authorization_request=A1B2";
+  const [p, ...rest] = problems(down({ kind: "sso", organisation: "acme", url }));
+  expect(rest).toEqual([]);
+  expect(p).toEqual({
+    id: "connection",
+    tone: "need",
+    busy: false,
+    short: "GitHub SSO needed",
+    title: "acme asks you to sign in with SSO",
+    detail:
+      "acme protects its repositories with single sign-on. Its reviews cannot be read or posted until you sign in there.",
+    fix: { label: "Sign in with SSO", href: url },
+  });
+});
+
+/** Signed in to the shared App on the person's account and on ledger-dev, which holds `cause`; connected. */
+function onAccounts(cause: ConnectionAccount["cause"], owner: boolean | null = false): State {
+  const st = calm();
+  return {
+    ...st,
+    connection: {
+      ...st.connection,
+      way: "shared",
+      bot: null,
+      app: null,
+      person: { id: 7, login: "sam" },
+      accounts: [
+        { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
+        {
+          account: { id: 338, login: "ledger-dev", type: "Organization" },
+          installationId: 78,
+          cause,
+          owner,
+        },
+      ],
+    },
+  };
+}
+
+test("one account asking for SSO on the shared App is that account's problem, the connection still up (ADR 0066)", () => {
+  const [p, ...rest] = problems(onAccounts({ kind: "sso", organisation: "ledger-dev", url: null }));
+  expect(rest).toEqual([]);
+  expect(p).toEqual({
+    id: "account:ledger-dev",
+    account: "ledger-dev",
+    tone: "need",
+    busy: false,
+    short: "ledger-dev needs SSO",
+    title: "ledger-dev asks you to sign in with SSO",
+    detail:
+      "ledger-dev protects its repositories with single sign-on. Its reviews cannot be read or posted until you sign in there.",
+    fix: { label: "Sign in with SSO", href: "https://github.com/orgs/ledger-dev/sso" },
+  });
+  // The pill names the account with the only problem.
+  expect(pill(onAccounts({ kind: "sso", organisation: "ledger-dev", url: null }))).toEqual({
+    tone: "warn",
+    label: "ledger-dev needs SSO",
+  });
+  expect(problems(onAccounts(null))).toEqual([]);
+});
+
+test("the shared App installed on none of the person's accounts any more: installed again from its page, not Reconnect", () => {
+  const st = down({ kind: "uninstalled", suspended: false });
+  const [p, ...rest] = problems({
+    ...st,
+    connection: {
+      ...st.connection,
+      way: "shared",
+      bot: null,
+      app: null,
+      person: { id: 7, login: "sam" },
+      accounts: [],
+    },
+  });
+  expect(rest).toEqual([]);
+  expect(p).toMatchObject({
+    id: "connection",
+    short: "GitHub App uninstalled",
+    title: "Lookover's App is no longer installed",
+    detail:
+      "lookover-dev is installed on none of your GitHub accounts. Reviews cannot be read or posted until it is installed again.",
+    // The accounts list's words (ADR 0067): the person's own account is always listed, Install on it.
+    fix: { label: "Install on sam", href: "https://github.com/apps/lookover-dev/installations/new" },
+  });
+});
+
+test("one account's installation suspended on the shared App, the person a member there: ask an owner, naming who suspended it", () => {
+  const [p] = problems(onAccounts({ kind: "uninstalled", suspended: true, suspendedBy: "mira" }));
+  expect(p).toEqual({
+    id: "account:ledger-dev",
+    account: "ledger-dev",
+    tone: "need",
+    busy: false,
+    short: "App suspended on ledger-dev",
+    title: "Lookover's App is suspended on ledger-dev",
+    detail:
+      "Its repositories' reviews cannot be read or posted until an owner of ledger-dev unsuspends it on GitHub. mira suspended it.",
+    fix: {
+      label: "Ask an owner of ledger-dev",
+      href: "https://github.com/orgs/ledger-dev/people?query=role%3Aowner",
+    },
+  });
+  // Nobody said whether the person owns it, nor who suspended it: a member's fix, nobody named.
+  const [unknown] = problems(onAccounts({ kind: "uninstalled", suspended: true }, null));
+  expect(unknown).toMatchObject({
+    detail:
+      "Its repositories' reviews cannot be read or posted until an owner of ledger-dev unsuspends it on GitHub.",
+    fix: { label: "Ask an owner of ledger-dev" },
+  });
+});
+
+test("one account's installation suspended on an organisation the person owns: they unsuspend it, from that installation's page", () => {
+  const [p] = problems(onAccounts({ kind: "uninstalled", suspended: true, suspendedBy: "mira" }, true));
+  expect(p).toMatchObject({
+    short: "App suspended on ledger-dev",
+    detail:
+      "Its repositories' reviews cannot be read or posted until you unsuspend it on GitHub. mira suspended it.",
+    fix: {
+      label: "Unsuspend it on GitHub",
+      href: "https://github.com/organizations/ledger-dev/settings/installations/78",
+    },
+  });
+});
+
+test("one account's installation gone, still listed: installed there again by an owner, asked for by a member", () => {
+  const [member] = problems(onAccounts({ kind: "uninstalled", suspended: false }));
+  expect(member).toMatchObject({
+    id: "account:ledger-dev",
+    account: "ledger-dev",
+    short: "App uninstalled on ledger-dev",
+    title: "Lookover's App is no longer installed on ledger-dev",
+    detail:
+      "Its repositories' reviews cannot be read or posted until an owner of ledger-dev installs it there again.",
+    fix: {
+      label: "Ask an owner of ledger-dev",
+      href: "https://github.com/orgs/ledger-dev/people?query=role%3Aowner",
+    },
+  });
+  const [owner] = problems(onAccounts({ kind: "uninstalled", suspended: false }, true));
+  expect(owner).toMatchObject({
+    detail: "Its repositories' reviews cannot be read or posted until you install it there again.",
+    fix: { label: "Install on ledger-dev", href: "https://github.com/apps/lookover-dev/installations/new" },
+  });
+});
+
+test("two accounts with a problem: the pill counts them, the status menu lists both", () => {
+  const st = onAccounts({ kind: "sso", organisation: "ledger-dev", url: null });
+  const [sam, ...rest] = st.connection.accounts;
+  if (sam === undefined) throw new Error("sam is listed first");
+  const both: State = {
+    ...st,
+    connection: {
+      ...st.connection,
+      accounts: [{ ...sam, owner: true, cause: { kind: "uninstalled", suspended: true } }, ...rest],
+    },
+  };
+  expect(pill(both)).toEqual({ tone: "warn", label: "2 things need attention" });
+  const status = githubStatus(both);
+  expect(status.ok).toBe(false);
+  expect(status.text).toBe("connected as sam");
+  expect(status.problems.map((p) => [p.id, p.short, p.fix?.label])).toEqual([
+    ["account:sam", "App suspended on sam", "Unsuspend it on GitHub"],
+    ["account:ledger-dev", "ledger-dev needs SSO", "Sign in with SSO"],
+  ]);
+});
+
+test("the status menu's GitHub line: connected and nothing held, its dot on; a wait GitHub asked for listed, no fault; disconnected, its cause", () => {
+  expect(githubStatus(onAccounts(null))).toEqual({ ok: true, text: "connected as sam", problems: [] });
+  const limited = { ...calm(), connection: { ...calm().connection, limitUntil: NOW + 5 * MIN } };
+  expect(githubStatus(limited)).toMatchObject({ ok: true, problems: [{ id: "connection", tone: "warn" }] });
+  const st = down({ kind: "signed-out" });
+  const out = githubStatus({ ...st, connection: { ...st.connection, way: "shared", app: null, bot: null } });
+  expect(out.ok).toBe(false);
+  expect(out.text).toBe("signed out");
+  expect(out.problems.map((p) => p.fix?.label)).toEqual(["Sign in again"]);
+  // The AIs and the service are the menu's other lines.
+  expect(githubStatus(signedOut(onAccounts(null), "claude")).problems).toEqual([]);
+});
+
+test("an organisation asking for SSO with no page from GitHub opens the organisation's SSO page", () => {
+  const [p] = problems(down({ kind: "sso", organisation: "acme", url: null }));
+  expect(p?.fix).toEqual({ label: "Sign in with SSO", href: "https://github.com/orgs/acme/sso" });
+});
+
 test("a cause whose page isn't known yet (no App) falls back to Reconnect", () => {
   const st = down({ kind: "key-lost" });
-  const [p] = problems({ ...st, connection: { ...st.connection, app: null, installationId: null } });
+  const [p] = problems({ ...st, connection: { ...st.connection, app: null, accounts: [] } });
   expect(p?.fix).toEqual({ label: "Reconnect GitHub", command: { type: "connection.reconnect" } });
 });
 
@@ -756,7 +1023,7 @@ test("pull requests with an escalated finding need you, and are counted", () => 
 test("a review waiting for a signed-out AI is not one more thing: the AI is", () => {
   const st = withChange(signedOut(calm(), "claude"), 1, "deferred", 5 * MIN);
   expect(sentence(st).title).toBe("1 thing needs you.");
-  expect(homeGroups(st).waiting.map((i) => String(i.change.id))).toEqual(["app#1"]);
+  expect(homeGroups(st).waiting.map((i) => String(i.change.id))).toEqual(["sam/app#1"]);
 });
 
 test("problems count with pull requests", () => {
@@ -809,12 +1076,12 @@ test("Home groups reviews by what they need, today's finished ones last", () => 
   st = withChange(st, 10, "none");
   const g = homeGroups(st);
   const ids = (list: { change: { id: string } }[]) => list.map((i) => String(i.change.id));
-  expect(ids(g.needs)).toEqual(["app#2"]);
-  expect(ids(g.running)).toEqual(["app#3"]);
+  expect(ids(g.needs)).toEqual(["sam/app#2"]);
+  expect(ids(g.running)).toEqual(["sam/app#3"]);
   // A review that waits will run by itself: it never looks broken.
-  expect(ids(g.waiting)).toEqual(["app#1", "app#4"]);
+  expect(ids(g.waiting)).toEqual(["sam/app#1", "sam/app#4"]);
   // Most recent first; yesterday's review and the unreviewed draft are not on Home.
-  expect(ids(g.earlier)).toEqual(["app#6", "app#7", "app#5", "app#8"]);
+  expect(ids(g.earlier)).toEqual(["sam/app#6", "sam/app#7", "sam/app#5", "sam/app#8"]);
 });
 
 // ---- statusLine: the line under a row's title ----
@@ -921,7 +1188,7 @@ test("after findings to fix, the verdict says who acts next", () => {
     "The agent is working on it and will ask again.",
   );
   const byYou = withChange(calm(), 1, "to-fix", MIN, { findings: open });
-  const change = byYou.changes[changeId("app#1")];
+  const change = byYou.changes[changeId("sam/app#1")];
   if (!change) throw new Error("No change");
   const yours = {
     ...byYou,
@@ -972,10 +1239,10 @@ test("a waiting review says what it waits for, in plain words", () => {
 });
 
 test("a review waiting its turn says what it waits behind, on its row and its page (ADR 0055)", () => {
-  const APP2 = changeId("app#2");
-  const APP3 = changeId("app#3");
+  const APP2 = changeId("sam/app#2");
+  const APP3 = changeId("sam/app#3");
   const busy = withChange(withChange(calm(), 2, "running"), 3, "running");
-  /** Home's row line and the review page's notice for app#1, queued behind `turn`. */
+  /** Home's row line and the review page's notice for sam/app#1, queued behind `turn`. */
   const words = (turn: Turn | null, extra: Partial<Review> = {}, state = busy) => {
     const queued = withChange(state, 1, "queued", MIN, extra);
     const it = changeReviews(queued).find((c) => c.change.number === 1);
@@ -990,19 +1257,19 @@ test("a review waiting its turn says what it waits behind, on its row and its pa
     testing,
   });
   expect(words(engines(["claude"]))).toEqual([
-    "Claude is reviewing app #2",
-    "Claude is reviewing app #2. This one starts after it.",
+    "Claude is reviewing sam/app #2",
+    "Claude is reviewing sam/app #2. This one starts after it.",
   ]);
   expect(words(engines(["claude", "codex"]))).toEqual([
-    "Claude and Codex are reviewing app #2",
-    "Claude and Codex are reviewing app #2. This one starts after it.",
+    "Claude and Codex are reviewing sam/app #2",
+    "Claude and Codex are reviewing sam/app #2. This one starts after it.",
   ]);
   expect(words(engines(["claude", "codex"], [APP2, APP3]))).toEqual([
-    "Claude and Codex are reviewing app #2 and app #3",
-    "Claude and Codex are reviewing app #2 and app #3. This one starts after them.",
+    "Claude and Codex are reviewing sam/app #2 and sam/app #3",
+    "Claude and Codex are reviewing sam/app #2 and sam/app #3. This one starts after them.",
   ]);
   // A change gone from the list since is still another pull request.
-  expect(words(engines(["claude"], [changeId("app#9")]))).toEqual([
+  expect(words(engines(["claude"], [changeId("sam/app#9")]))).toEqual([
     "Claude is reviewing another pull request",
     "Claude is reviewing another pull request. This one starts after it.",
   ]);
@@ -1099,10 +1366,10 @@ test("the chip says where a review stands; round counts have no limit", () => {
   expect(chipOf("running", { rounds: sixRounds, loop: "open" })).toEqual({ tone: "run", label: "Round 7" });
 });
 
-/** The change `app#9`, opened by Mira, skipped for `reason`, as Home and the review page see it. */
+/** The change `sam/app#9`, opened by Mira, skipped for `reason`, as Home and the review page see it. */
 function skippedFor(reason: SkipReason): ChangeReview {
   const st = withChange(calm(), 9, "skipped");
-  const id = changeId("app#9");
+  const id = changeId("sam/app#9");
   const review = st.reviews[id];
   const change = st.changes[id];
   const [repo] = st.repos;
@@ -1132,7 +1399,7 @@ test("a fork skipped says so on Home, and the review page says why and how to ha
 
 test("the review button asks for a first review as Review now, and for any later one as Review again", () => {
   const st = withChange(calm(), 1, "settled");
-  const id = changeId("app#1");
+  const id = changeId("sam/app#1");
   const change = st.changes[id];
   const review = st.reviews[id];
   const [repo] = st.repos;
@@ -1145,7 +1412,7 @@ test("the review button asks for a first review as Review now, and for any later
 test("the review button says what it does in each state: asks now or again, or shows the review running or waiting", () => {
   const button = (status: Status, rounds?: []) => {
     const st = withChange(calm(), 1, status);
-    const id = changeId("app#1");
+    const id = changeId("sam/app#1");
     const change = st.changes[id];
     const review = st.reviews[id];
     const [repo] = st.repos;
@@ -1168,7 +1435,7 @@ test("the review button says what it does in each state: asks now or again, or s
 
 test("a change never asked for, opened with reviews on open off, says so, not that someone else opened it", () => {
   const st = withChange(calm(), 1, "none");
-  const id = changeId("app#1");
+  const id = changeId("sam/app#1");
   const change = st.changes[id];
   const review = st.reviews[id];
   const [repo] = st.repos;
@@ -1205,7 +1472,7 @@ test("where only Codex reviews, a fork or another author's change points to Sett
 test("setup's first review offers the owner's pull requests of the repositories on, never a fork's (ADR 0048)", () => {
   let st = withChange(withChange(withChange(calm(), 1, "none"), 2, "none"), 3, "none");
   const change = (n: number) => {
-    const c = st.changes[changeId(`app#${n}`)];
+    const c = st.changes[changeId(`sam/app#${n}`)];
     if (!c) throw new Error("No change");
     return c;
   };
@@ -1213,8 +1480,8 @@ test("setup's first review offers the owner's pull requests of the repositories 
     ...st,
     changes: {
       ...st.changes,
-      [changeId("app#2")]: { ...change(2), fork: true },
-      [changeId("app#3")]: { ...change(3), author: "other" },
+      [changeId("sam/app#2")]: { ...change(2), fork: true },
+      [changeId("sam/app#3")]: { ...change(3), author: "other" },
     },
   };
   expect(firstReviewCandidates(st).map((it) => it.change.number)).toEqual([1]);

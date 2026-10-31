@@ -52,8 +52,8 @@ afterEach(stopAll);
 const HEAD = SHA1;
 /** A second push after `SHA1_PUSHED`. */
 const NEWEST = commitSha("d4e5f60718293a4b5c6d7e8f9012345678a1b2c3");
-const OTHER = changeId("lookover-sandbox#9");
-const TENTH = changeId("lookover-sandbox#10");
+const OTHER = changeId("sasensi/lookover-sandbox#9");
+const TENTH = changeId("sasensi/lookover-sandbox#10");
 /** Another pull request of the owner's, on the same commits as the first. */
 const numbered = (number: number): FakeChange => ({
   ...pr1,
@@ -701,7 +701,7 @@ test("a job whose start rule can't be asked fails, and the queue goes on to the 
   expect((await snapshot(service, cookie)).reviews[PLANTED]).toMatchObject({ job: failed, run: null });
   // The log says it once, the cause in the failure's line (ADR 0055).
   expect(logged.filter((line) => line.includes("failed"))).toEqual([
-    "lookover-sandbox#1 review failed: the review could not run (Claude's health check threw: health check broke)",
+    "sasensi/lookover-sandbox#1 review failed: the review could not run (Claude's health check threw: health check broke)",
   ]);
 });
 

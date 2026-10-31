@@ -140,6 +140,48 @@ test("an existing App or a new one refused is said by the data the service sent,
     expect(refusalOf(new Refused(409, { error: "x", ...data }))).toEqual({ status: 409, error: "x" });
 });
 
+test("Sign in with GitHub refused (ADR 0066): why, from the service's `signIn` or GitHub giving no code; said in place, no toast", () => {
+  const signIn = { type: "connection.signIn" } as const;
+  const pending = refusalOf(new Refused(409, { error: "x", signIn: "pending" }), signIn);
+  expect(pending).toEqual({ status: 409, error: "x", signIn: "pending", command: signIn });
+  expect(refusalText(pending).detail).toBe("A sign-in already waits for its code.");
+  // Said in place by the setup's GitHub step; Sign in again anywhere else (the alert band) has only the toast.
+  expect(refusalToast(pending, { setup: true })).toBeNull();
+  expect(refusalToast(pending, { setup: false })).toBe(
+    "Lookover couldn't do that. A sign-in already waits for its code.",
+  );
+  const github = refusalOf(new Refused(502, { error: "unavailable" }), signIn);
+  expect(github).toMatchObject({ status: 502, signIn: "github" });
+  expect(refusalText(github).detail).toBe("GitHub didn't give a code. Try again.");
+  // Another command's 502 is not a sign-in's, and a kind the UI doesn't know is not taken.
+  expect(refusalOf(new Refused(502, { error: "unavailable" }), { type: "engine.check" })).not.toHaveProperty(
+    "signIn",
+  );
+  expect(refusalOf(new Refused(409, { error: "x", signIn: "weather" }))).toEqual({ status: 409, error: "x" });
+});
+
+test("Ask to install refused (ADR 0067): why, from the service's `askToInstall`, in the toast; a kind the UI doesn't know is not taken", () => {
+  const ask = { type: "connection.askToInstall", account: "ledger-co" } as const;
+  const said = (askToInstall: string) =>
+    refusalText(refusalOf(new Refused(409, { error: "x", askToInstall }), ask)).detail;
+  expect(refusalOf(new Refused(409, { error: "x", askToInstall: "owner" }), ask)).toEqual({
+    status: 409,
+    error: "x",
+    askToInstall: "owner",
+    command: ask,
+  });
+  expect(said("not-shared")).toBe("Lookover isn't signed in to GitHub here.");
+  expect(said("not-named")).toBe("That account isn't waiting to be installed any more.");
+  expect(said("owner")).toBe("You own that account: install it there yourself.");
+  expect(refusalToast(refusalOf(new Refused(409, { error: "x", askToInstall: "owner" }), ask))).toBe(
+    "Lookover couldn't do that. You own that account: install it there yourself.",
+  );
+  expect(refusalOf(new Refused(409, { error: "x", askToInstall: "weather" }))).toEqual({
+    status: 409,
+    error: "x",
+  });
+});
+
 test("an App refused is said once, in place by the GitHub step or the form: no toast; any other refusal has its toast", () => {
   const useApp = refusalOf(new Refused(409, { error: "x", useApp: { kind: "not-a-key" } }));
   expect(refusalToast(useApp)).toBeNull();

@@ -226,7 +226,7 @@ test("a sign-in pending when the service stops is over at the next start: the en
 test("in demo mode the scripted engine signs itself in: five seconds on, Claude is ready and the review that waited starts; a missing engine has no login to open", async () => {
   const door = await startScenario(scenarioOf("S10"));
   expect(await inject(door, "claude-signed-out")).toBe(200);
-  const change = changeId("lookover-sandbox#141");
+  const change = changeId("sasensi/lookover-sandbox#141");
   expect((await send(door, { type: "review.request", changeId: change })).status).toBe(200);
   expect((await snapshotOf(door)).reviews[change]?.job).toMatchObject({
     state: "deferred",

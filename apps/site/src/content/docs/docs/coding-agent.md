@@ -25,7 +25,7 @@ lookover feedback   # the findings waiting on you, each with its thread
 lookover reply F3 wont-fix "The value is checked by the caller."
 ```
 
-`wait`, `feedback` and `reply` run from the checkout of the repository the agent works on, and take the pull request from the current branch (`--pr N` names another). They read the App's name from Lookover's data folder. On another computer, Settings › GitHub gives the line to put in the agent's environment, `LOOKOVER_APP=<slug>`, or pass `--app <slug>`.
+`wait`, `feedback` and `reply` run from the checkout of the repository the agent works on, and take the pull request from the current branch (`--pr N` names another). They read the App's name from Lookover's data folder, else take the shared App, Lookover's own. On another computer with your own App, Settings › GitHub gives the line to put in the agent's environment, `LOOKOVER_APP=<slug>`, or pass `--app <slug>`. Of that App's checks they read only your own account's, never a colleague's.
 
 ## Wait for the review
 

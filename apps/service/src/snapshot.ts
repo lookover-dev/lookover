@@ -9,16 +9,22 @@ import {
   type Change,
   type ChangeId,
   type CodingAgent,
+  type ConnectionAccount,
   type ConnectionApp,
-  changeId,
+  type ConnectionId,
+  type ConnectionWay,
+  changeIdOf,
+  changeNameParts,
   connectionId,
   type Engine,
   type EngineHealth,
   type EngineId,
   type EngineState,
   type Event,
+  type EventBody,
   engineHealthText,
   engineName,
+  type HostLogin,
   type LoginItemKind,
   type Repository,
   type RepositoryId,
@@ -27,6 +33,7 @@ import {
   type Rule,
   repositoryId,
   repositoryName,
+  repositoryRefOf,
   type SettingValues,
   type Setup,
   type State,
@@ -43,12 +50,18 @@ export interface Facts {
   command: string;
   /** Your coding agent (ADR 0058), as the machine said it at start. */
   agent: CodingAgent;
-  /** The App's bot, `<slug>[bot]`; null with no App (ADR 0053). */
+  /** The way Lookover is on GitHub (ADR 0066); null with neither an App nor a sign-in. */
+  way: ConnectionWay | null;
+  /** The connection's id once installed (`connectionIdOf` the bot, or the person on `shared`); null with neither. */
+  connectionId: ConnectionId | null;
+  /** The person signed in to the shared App (ADR 0066); null on `own` and with neither. */
+  person: HostLogin | null;
+  /** The App's bot, `<slug>[bot]`; null with no App (ADR 0053), and on `shared`. */
   bot: string | null;
   /** The owner's App, never its key; null with none. Shown once the setup says it is made. */
   app: ConnectionApp | null;
-  /** The App's installation on the owner's account, once listed; null before. */
-  installationId: number | null;
+  /** Each account reached, with its installation and its own cause (ADR 0066), once listed; none before. */
+  accounts: ConnectionAccount[];
   /** GitHub's web address the app's links are built on (ADR 0053): GitHub's own in live mode, its fake in demo mode. */
   web: string;
   /** Each engine's health at start, and the state it shows: its health's, once its self-test had its say. */
@@ -99,22 +112,20 @@ export const appInstalled = (setup: Setup): boolean =>
 export const appMade = (setup: Setup): boolean =>
   setup.github !== "start" && setup.github !== "waiting-for-app";
 
-/** The connection's id, once the bot is installed. */
-export const connectionIdOf = (bot: string) => connectionId(`github:${bot}`);
+/**
+ * The connection's id, once installed: of the bot on `own`, of the person's login on `shared` (ADR 0066), the bot's
+ * `[bot]` keeping the two apart.
+ */
+export const connectionIdOf = (poster: string) => connectionId(`github:${poster}`);
 
 /** The id the UI knows a repository by. */
 export const repoIdOf = (repo: RepositoryRef) => repositoryId(repositoryName(repo));
-export const changeIdOf = (repo: RepositoryRef, number: number): ChangeId =>
-  changeId(`${changePrefixOf(repo)}${number}`);
 
-/** What every id of the repository's changes starts with (`changeIdOf`). */
-export const changePrefixOf = (repo: RepositoryRef): string => `${repo.name}#`;
-
-/** The change's number on the host, which its id ends with (`changeIdOf`). */
+/** The change's number on the host, which its id ends with (contracts' `changeIdOf`). */
 export function numberOf(id: ChangeId): number {
-  const number = Number(id.slice(id.lastIndexOf("#") + 1));
-  if (!Number.isInteger(number) || number < 1) throw new Error(`${id} names no change number`);
-  return number;
+  const parts = changeNameParts(id);
+  if (parts === null) throw new Error(`${id} names no change number`);
+  return parts.number;
 }
 
 /**
@@ -183,6 +194,26 @@ export function changeFactsOf(open: OpenChange[], owner: { id: number }): Map<Ch
   );
 }
 
+/**
+ * The changes the UI shows whose author moved from "you" to "other" or back, as the store's facts say it now, sent
+ * again (`change.opened` on a change shown keeps what Lookover kept of it): another person signed in to the shared App,
+ * or an own App in place of it, works for someone else (ADR 0066), so "is it yours" is asked again, in the events a tab
+ * replays too. None when nobody's changed.
+ */
+export function ownershipMoved(
+  shown: State,
+  facts: ReadonlyMap<ChangeId, ChangeFacts>,
+  at: number,
+): EventBody[] {
+  const moved: EventBody[] = [];
+  for (const [id, { author }] of facts) {
+    const change = shown.changes[id];
+    if (change !== undefined && change.author !== author)
+      moved.push({ type: "change.opened", at, change: { ...change, author } });
+  }
+  return moved;
+}
+
 /** The settings in force for a repository (its files read over the defaults), and whether it is reviewed at all. */
 export interface SettingsInForce {
   enabled: boolean;
@@ -230,19 +261,23 @@ function engineOf(id: EngineId, { health, state }: Facts["engines"][EngineId], s
 }
 
 /**
- * The connection the setup leads to: the bot's once it is installed; until then none, with its name and its App once
- * created (ADR 0053).
+ * The connection the setup leads to: the bot's, or the person's on `shared`, once it is installed; until then none,
+ * with its way, and its name and its App once created (ADR 0053, ADR 0066). No sign-in waits at start.
  */
 function connectionOf(f: Facts): State["connection"] {
-  const installed = appInstalled(f.setup) && f.bot !== null;
+  const installed = appInstalled(f.setup) && f.connectionId !== null;
   const made = appMade(f.setup);
   return {
-    id: installed && f.bot !== null ? connectionIdOf(f.bot) : null,
+    id: installed ? f.connectionId : null,
     state: installed ? "connected" : "not-connected",
     cause: null,
+    way: f.way,
+    signIn: null,
+    person: f.person,
     bot: made ? f.bot : null,
     app: made ? f.app : null,
-    installationId: installed ? f.installationId : null,
+    accounts: installed ? f.accounts : [],
+    unreached: [],
     web: f.web,
     since: f.startedAt,
     limitUntil: null,
@@ -287,4 +322,65 @@ function base(f: Facts): State {
 /** The snapshot: the base with every event applied, current up to the last one. */
 export function snapshotOf(f: Facts, events: Event[]): State {
   return events.reduce(apply, base(f));
+}
+
+/** A change's id as named before ADR 0066, by its repository's name alone (`<name>#<n>`), read; null for another. */
+function oldName(id: ChangeId): { repository: string; number: number } | null {
+  const parts = changeNameParts(id);
+  return parts !== null && !parts.repository.includes("/") ? parts : null;
+}
+
+/** Each change id named before ADR 0066 the state holds, with its new one, as `ownerNamed` says. */
+function ownerNames(state: State): Map<ChangeId, ChangeId> {
+  const owners = new Map<string, string>();
+  for (const repo of state.repos) owners.set(repo.name, repo.owner);
+  const renamed = new Map<ChangeId, ChangeId>();
+  for (const change of Object.values(state.changes)) {
+    const repo = repositoryRefOf(change.repoId);
+    if (oldName(change.id) && repo !== null) renamed.set(change.id, changeIdOf(repo, change.number));
+  }
+  for (const { changeId: id } of Object.values(state.reviews)) {
+    const old = oldName(id);
+    const owner = old && owners.get(old.repository);
+    if (old && !renamed.has(id) && owner)
+      renamed.set(id, changeIdOf({ owner, name: old.repository }, old.number));
+  }
+  return renamed;
+}
+
+/**
+ * The UI's state with every change named `<owner>/<name>#<n>` (ADR 0066), as the store names it once migrated, when
+ * the events a data folder kept from before name some `<name>#<n>` (they are history, kept as written); null when
+ * none does. A change takes its repository's id; a review whose change is gone, the owner of the watched repository
+ * of that name (before ADR 0066 a name had one owner), else it stays as it was: a departed repository's included,
+ * as the migration, which names ids from the store's repositories and holds no row of a departed one, leaves it.
+ */
+function ownerNamed(state: State): State | null {
+  const renamed = ownerNames(state);
+  if (renamed.size === 0) return null;
+  const named = (id: ChangeId) => renamed.get(id) ?? id;
+  const changes: State["changes"] = {};
+  for (const change of Object.values(state.changes))
+    changes[named(change.id)] = { ...change, id: named(change.id) };
+  const reviews: State["reviews"] = {};
+  for (const review of Object.values(state.reviews)) {
+    const turn = review.job?.turn;
+    const job =
+      review.job === null || turn?.behind !== "engines"
+        ? review.job
+        : { ...review.job, turn: { ...turn, changes: turn.changes.map(named) } };
+    reviews[named(review.changeId)] = { ...review, changeId: named(review.changeId), job };
+  }
+  const first = state.setup.firstReviewChange;
+  const setup = first === null ? state.setup : { ...state.setup, firstReviewChange: named(first) };
+  return { ...state, changes, reviews, setup };
+}
+
+/**
+ * What a start sends when the events kept name changes as before ADR 0066 (`ownerNamed`): the UI's state in the
+ * store's ids, as `state.replaced`, so a UI follows it by `apply` like any event (AGENTS.md rule 3); else nothing.
+ */
+export function ownerNamedLeft(shown: State, at: number): EventBody[] {
+  const named = ownerNamed(shown);
+  return named === null ? [] : [{ type: "state.replaced", at, state: named }];
 }

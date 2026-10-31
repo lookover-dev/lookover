@@ -57,12 +57,7 @@ describe("lookover wait: exit codes", () => {
     expect(w.comments()).toEqual([]);
   });
 
-  test("2: no App named, an unknown option or a bad value", async () => {
-    const unnamed = world({ env: {} });
-    expect(await unnamed.lookover("wait")).toBe(2);
-    expect(unnamed.err[0]).toBe("Name Lookover's App: --app <slug>, or LOOKOVER_APP.");
-    expect(unnamed.comments()).toEqual([]);
-
+  test("2: an unknown option or a bad value", async () => {
     const w = world();
     expect(await w.lookover("wait", "--follow")).toBe(2);
     expect(await w.lookover("wait", "--timeout", "soon")).toBe(2);

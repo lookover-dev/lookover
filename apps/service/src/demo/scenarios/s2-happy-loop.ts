@@ -5,7 +5,7 @@
 // agent adds the missing test and asks again: round 3 settles the loop, the Consider still in the app. #148 is
 // also S1's first review and S7's finding, so its data is exported.
 import { commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import {
   added,
   BY_CLAUDE,
@@ -252,6 +252,9 @@ export const RATE_LIMITING: ScenarioChange = {
   ],
 };
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(LEDGER_API.repo);
+
 export const S2: Scenario = {
   id: "S2",
   title: "The happy loop",
@@ -267,11 +270,11 @@ export const S2: Scenario = {
   world: LEDGER_API,
   changes: [RATE_LIMITING],
   script: [
-    { at: MIN + 20_000, move: { kind: "open", change: 148 } },
-    { at: 6 * MIN, move: { kind: "push", change: 148 } },
-    { at: 6 * MIN + 10_000, move: { kind: "ask", change: 148 } },
-    { at: 10 * MIN, move: { kind: "push", change: 148 } },
-    { at: 10 * MIN + 10_000, move: { kind: "ask", change: 148 } },
+    { at: MIN + 20_000, move: { kind: "open", change: pr(148) } },
+    { at: 6 * MIN, move: { kind: "push", change: pr(148) } },
+    { at: 6 * MIN + 10_000, move: { kind: "ask", change: pr(148) } },
+    { at: 10 * MIN, move: { kind: "push", change: pr(148) } },
+    { at: 10 * MIN + 10_000, move: { kind: "ask", change: pr(148) } },
   ],
   seed: MIN,
 };

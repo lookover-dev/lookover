@@ -153,7 +153,7 @@ test("the day's prune keeps the folders of a running job, its interrupted run's 
   await time.advance(31 * DAY_MS);
   // 31 prunes have passed: the interrupted run ended 31 days ago, its job runs, and both its runs keep their folders.
   const shown = await snapshot(second.service, await openApp(second.service));
-  expect(shown.reviews["lookover-sandbox#1"].job.state).toBe("running");
+  expect(shown.reviews["sasensi/lookover-sandbox#1"].job.state).toBe("running");
   expect(existsSync(run)).toBe(true);
   expect(existsSync(rerun)).toBe(true);
 });

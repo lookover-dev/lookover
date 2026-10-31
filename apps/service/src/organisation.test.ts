@@ -70,7 +70,7 @@ const opened = (number: number, more: Partial<FakeChange> = {}): FakeChange => (
   ...more,
 });
 const ref = (number: number) => ({ repo: ACME_WEB, number });
-const idOf = (number: number) => changeId(`web#${number}`);
+const idOf = (number: number) => changeId(`acme/web#${number}`);
 
 /** Claude and Codex both signed in, each answering every run with no finding. */
 function bothEngines(): FakeEngines {
@@ -108,7 +108,7 @@ test("the installation on the organisation is found and its repositories discove
   expect(state.connection).toMatchObject({
     state: "connected",
     app: { account: ACME, person: OWNER },
-    installationId: 60_000_001,
+    accounts: [{ account: ACME, installationId: 60_000_001, cause: null }],
   });
   expect(state.repos.map((r: Repository) => r.id)).toEqual(["acme/web", "acme/api"]);
 });

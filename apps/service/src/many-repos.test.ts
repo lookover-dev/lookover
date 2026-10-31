@@ -109,12 +109,39 @@ test("a pull request opened in each of two repositories is reviewed, and both ar
   await until(stream, "round.finished");
   await until(stream, "round.finished");
   const state = await snapshot(service, cookie);
-  expect(state.reviews[changeId("lookover-sandbox#3")]?.rounds).toHaveLength(1);
-  expect(state.reviews[changeId("ledger-api#7")]?.rounds).toHaveLength(1);
-  expect(state.changes[changeId("ledger-api#7")]).toMatchObject({ repoId: LEDGER_ID, number: 7 });
+  expect(state.reviews[changeId("sasensi/lookover-sandbox#3")]?.rounds).toHaveLength(1);
+  expect(state.reviews[changeId("sasensi/ledger-api#7")]?.rounds).toHaveLength(1);
+  expect(state.changes[changeId("sasensi/ledger-api#7")]).toMatchObject({ repoId: LEDGER_ID, number: 7 });
   // Each review lands on its own repository's pull request, with its check.
   expect(host.view({ repo: LEDGER, number: 7 }).checks.map((c) => c.conclusion)).toEqual(["success"]);
   expect(host.view({ repo: SANDBOX, number: 3 }).checks.map((c) => c.conclusion)).toEqual(["success"]);
+});
+
+test("two repositories of one name on two accounts are watched together, and a change on each is reviewed under its owner", async () => {
+  const A: RepositoryRef = { owner: "a", name: "x" };
+  const B: RepositoryRef = { owner: "b", name: "x" };
+  const time = new DemoClock({ at: T0 });
+  const host = new FakeGitHost({ repo: A, repositories: [B], bot: BOT, changes: [], clock: time });
+  const { service } = await start({ repos: [A, B], host, time, engines: fakeEngines({ reviews: 2 }) });
+  const cookie = await openApp(service);
+  expect((await snapshot(service, cookie)).repos.map((r: Repository) => r.id)).toEqual([
+    repositoryId("a/x"),
+    repositoryId("b/x"),
+  ]);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+
+  host.open(opened(A, 1));
+  host.open(opened(B, 1));
+  await time.advance(MIN);
+  await until(stream, "round.finished");
+  await until(stream, "round.finished");
+  const state = await snapshot(service, cookie);
+  expect(state.changes[changeId("a/x#1")]).toMatchObject({ repoId: repositoryId("a/x"), number: 1 });
+  expect(state.changes[changeId("b/x#1")]).toMatchObject({ repoId: repositoryId("b/x"), number: 1 });
+  expect(state.reviews[changeId("a/x#1")]?.rounds).toHaveLength(1);
+  expect(state.reviews[changeId("b/x#1")]?.rounds).toHaveLength(1);
+  expect(host.view({ repo: A, number: 1 }).checks.map((c) => c.conclusion)).toEqual(["success"]);
+  expect(host.view({ repo: B, number: 1 }).checks.map((c) => c.conclusion)).toEqual(["success"]);
 });
 
 test("a repository switched off is still listed: its pull request is not reviewed, its /lookover review is recorded as a skip, and the other is reviewed", async () => {
@@ -138,7 +165,7 @@ test("a repository switched off is still listed: its pull request is not reviewe
   host.open(opened(SANDBOX, 3));
   await time.advance(MIN);
   await until(stream, "round.finished");
-  const ledgerSeven = changeId("ledger-api#7");
+  const ledgerSeven = changeId("sasensi/ledger-api#7");
   // Listed and shown, never reviewed: the switch decides only whether it is reviewed.
   expect((await snapshot(service, cookie)).changes[ledgerSeven]).toMatchObject({ repoId: LEDGER_ID });
   expect((await snapshot(service, cookie)).reviews[ledgerSeven]).toMatchObject({ job: null });
@@ -152,7 +179,7 @@ test("a repository switched off is still listed: its pull request is not reviewe
     skip: "repo-off",
   });
   expect(host.view({ repo: LEDGER, number: 7 }).checks.map((c) => c.conclusion)).toEqual(["skipped"]);
-  const sandboxThree = changeId("lookover-sandbox#3");
+  const sandboxThree = changeId("sasensi/lookover-sandbox#3");
   expect((await snapshot(service, cookie)).reviews[sandboxThree]?.rounds).toHaveLength(1);
 });
 
@@ -186,7 +213,7 @@ test("each repository is polled at its own cadence: the one with a review asked 
   const { service, time } = await start({ ...both, host, time: host.time, engines });
   const cookie = await openApp(service);
   // Claude is signed out: the review asked waits, and keeps the sandbox hot.
-  const review = { type: "review.request", changeId: changeId("lookover-sandbox#3") };
+  const review = { type: "review.request", changeId: changeId("sasensi/lookover-sandbox#3") };
   expect((await post(service, cookie, review)).status).toBe(200);
   await time.advance(MIN);
   const sandbox = host.listed(SANDBOX);
@@ -229,7 +256,7 @@ test("the setup's choice, the switch and the settings work for either repository
   expect(strictness).toEqual(["blocking", "blocking"]);
 
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
-  const ledgerSeven = changeId("ledger-api#7");
+  const ledgerSeven = changeId("sasensi/ledger-api#7");
   const first = { type: "setup.firstReview", changeId: ledgerSeven, preview: true };
   expect((await post(service, cookie, first)).status).toBe(200);
   await until(stream, "round.finished");
@@ -255,14 +282,14 @@ test("one repository's listing refused at every poll, GitHub down for it or not 
   await time.advance(MIN);
   await until(stream, "round.finished");
   expect(host.listed(LEDGER)).toBeGreaterThan(ledger);
-  expect((await snapshot(service, cookie)).reviews[changeId("ledger-api#7")]?.rounds).toHaveLength(1);
+  expect((await snapshot(service, cookie)).reviews[changeId("sasensi/ledger-api#7")]?.rounds).toHaveLength(1);
 
   // Not found, for it alone (the installation leaving it out): the other is still listed, and reviewed.
   host.refusing = { repo: SANDBOX, error: new HostError("not_found", "Not Found (404)") };
   host.open(opened(LEDGER, 8));
   await time.advance(MIN);
   await until(stream, "round.finished");
-  expect((await snapshot(service, cookie)).reviews[changeId("ledger-api#8")]?.rounds).toHaveLength(1);
+  expect((await snapshot(service, cookie)).reviews[changeId("sasensi/ledger-api#8")]?.rounds).toHaveLength(1);
   expect(logged).toContain("the pull requests could not be listed: Not Found (404)");
 });
 
@@ -284,7 +311,8 @@ test("a repository answering 502 at every poll, polled after one that answers, n
   expect([...ran, ...again].filter((e) => e.type === "connection.changed")).toEqual([]);
   const state = await snapshot(service, cookie);
   expect(state.connection).toMatchObject({ state: "connected", cause: null });
-  for (const n of [3, 4]) expect(state.reviews[changeId(`lookover-sandbox#${n}`)]?.rounds).toHaveLength(1);
+  for (const n of [3, 4])
+    expect(state.reviews[changeId(`sasensi/lookover-sandbox#${n}`)]?.rounds).toHaveLength(1);
 
   // Every repository refused: GitHub is unreachable. One answering again: back.
   host.refuse("unavailable");
@@ -305,9 +333,9 @@ test("the service starts when its first listings are refused, logging them: one 
   const log = (line: string) => logged.push(line);
   const { service } = await start({ ...both, host: notFound, time: notFound.time, log });
   const cookie = await openApp(service);
-  expect(Object.keys((await snapshot(service, cookie)).changes)).toEqual(["ledger-api#7"]);
+  expect(Object.keys((await snapshot(service, cookie)).changes)).toEqual(["sasensi/ledger-api#7"]);
   expect(logged).toEqual([
-    "ledger-api#7 opened by sasensi: Pull request 7 of ledger-api",
+    "sasensi/ledger-api#7 opened by sasensi: Pull request 7 of ledger-api",
     "the pull requests could not be listed: Not Found (404)",
   ]);
 
@@ -339,7 +367,7 @@ test("Review now lists only its change's repository", async () => {
   const { service } = await start({ ...both, host, time: host.time, engines });
   const cookie = await openApp(service);
   const [sandbox, ledger] = [host.listed(SANDBOX), host.listed(LEDGER)];
-  const now = { type: "review.request", changeId: changeId("ledger-api#7") };
+  const now = { type: "review.request", changeId: changeId("sasensi/ledger-api#7") };
   expect((await post(service, cookie, now)).status).toBe(200);
   expect([host.listed(SANDBOX), host.listed(LEDGER)]).toEqual([sandbox, ledger + 1]);
 });
@@ -370,7 +398,7 @@ test("a rule of the second repository switched off is written to its file alone;
   // Two changes of the sandbox reviewed, then one of ledger-api: each round counts its own repository's reviews.
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   const counted: unknown[] = [];
-  for (const id of ["lookover-sandbox#3", "lookover-sandbox#4", "ledger-api#7"]) {
+  for (const id of ["sasensi/lookover-sandbox#3", "sasensi/lookover-sandbox#4", "sasensi/ledger-api#7"]) {
     expect((await post(service, cookie, { type: "review.request", changeId: id })).status).toBe(200);
     const finished = (await until(stream, "round.finished")).at(-1);
     if (finished?.type !== "round.finished") throw new Error("no round finished");

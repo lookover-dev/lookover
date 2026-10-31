@@ -36,13 +36,20 @@ describe("the three-sided story", () => {
     }
   });
 
-  test("the review and the thread read as Lookover posts them, by the App, as itself", () => {
+  test("the review, the summary and the thread read as Lookover posts them, as the person signed in", () => {
     const panel = githubPanelHTML();
     expect(textsOf(panel, "ts-rvtext")).toEqual([
-      "Looked over a1f9c2e. One thing to fix, rateLimit.ts line 42. The rest can go.",
-      "Looked over b2c3d4e. Nothing new to fix. The rest can go.",
+      "Lookover · Looked over a1f9c2e. One thing to fix, rateLimit.ts line 42. The rest can go.",
+      "Lookover · Looked over b2c3d4e. Nothing new to fix. The rest can go.",
     ]);
-    expect(panel).toContain("<b>lookover</b>");
+    expect(textsOf(panel, "ts-sumtext")).toEqual([
+      "Lookover · round 1 · One thing to fix.",
+      "Lookover · round 2 · Nothing to fix.",
+    ]);
+    // The shared App posts as the person (ADR 0065): no bot, and Lookover's badge on the summary alone.
+    expect(panel).toContain('<b class="ts-who">mira</b>');
+    expect(panel).not.toContain("ts-bot");
+    expect(panel.match(/class="ts-badge"/g)).toHaveLength(1);
     // Lookover posts no reply on a fixed thread: `lookover wait` resolves it.
     expect(panel).toContain("<b>Resolved</b> · verified fixed in <code>b2c3d4e</code>");
     expect(panel).not.toContain("<b>lookover</b> ·");

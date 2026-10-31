@@ -55,5 +55,8 @@ test("the snapshot reads the event log once, at start, and follows each event af
   expect(calls.filter((call) => call.startsWith("events.all"))).toEqual(["events.all (10 rows)"]);
   // The snapshot holds what the events said: the last one's number, and the round it finished.
   expect(shown.seq).toBe(events.at(-1)?.seq);
-  expect(shown.reviews["lookover-sandbox#1"]).toMatchObject({ job: { state: "done" }, rounds: [{ n: 1 }] });
+  expect(shown.reviews["sasensi/lookover-sandbox#1"]).toMatchObject({
+    job: { state: "done" },
+    rounds: [{ n: 1 }],
+  });
 });

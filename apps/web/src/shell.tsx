@@ -4,10 +4,10 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FixButton } from "./screens/github-app.tsx";
 import { reviewPath, useApp, useAppState, useSend, useStoreStatus, useTheme } from "./store.tsx";
-import { Button, Chip, Eyes, Icon, IconButton, type IconName, Kbd, Mark } from "./ui/basics.tsx";
+import { Button, Chip, Eyes, Icon, IconButton, type IconName, Kbd, Mark, Said } from "./ui/basics.tsx";
 import { Dialog, Layer, MenuItem, useToast } from "./ui/layers.tsx";
 import { clock } from "./view-model/format.ts";
-import { checkLine, connectionText, engineStateText, serviceStatus } from "./view-model/health.ts";
+import { checkLine, engineStateText, serviceStatus } from "./view-model/health.ts";
 import { type Refusal, refusalText } from "./view-model/refusal.ts";
 import {
   authorLabel,
@@ -15,6 +15,7 @@ import {
   changeReviews,
   chip,
   fixOn,
+  githubStatus,
   pill,
   problems,
   REVIEW_KEY,
@@ -106,7 +107,11 @@ function EngineStatus({ engine }: { engine: Engine }) {
       >
         {engine.name}: {engineStateText(engine)}
       </StatusLine>
-      {problem ? <small>{problem.detail}</small> : null}
+      {problem ? (
+        <small className="code-whole">
+          <Said words={problem.detail} />
+        </small>
+      ) : null}
       {elsewhere ? (
         <button
           type="button"
@@ -123,9 +128,11 @@ function EngineStatus({ engine }: { engine: Engine }) {
 
 function HostAndServiceStatus() {
   const state = useAppState();
-  const { connection } = state;
-  // GitHub's problem, with its one fix: Reconnect, or the page on GitHub that fixes its cause (ADR 0053).
-  const problem = problems(state).find((x) => x.id === "connection");
+  // Every GitHub problem (ADR 0067): the connection's on GitHub's own line, with its one fix (Reconnect, or the page
+  // on GitHub that fixes its cause, ADR 0053); then each account's on the shared App, in GitHub's order, a line each.
+  const github = githubStatus(state);
+  const connectionProblem = github.problems.find((x) => x.account === undefined);
+  const accountProblems = github.problems.filter((x) => x.account !== undefined);
   // Whether it starts at login for real (ADR 0054), with the alert band's fix when the machine didn't do as chosen.
   const service = serviceStatus(state.service);
   const login = problems(state).find((x) => x.id === "login");
@@ -133,13 +140,30 @@ function HostAndServiceStatus() {
     <>
       <div className="st-block">
         <StatusLine
-          ok={connection.state === "connected"}
-          action={problem ? <FixButton problem={problem} busyLabel="Waiting…" /> : null}
+          ok={github.ok}
+          action={connectionProblem ? <FixButton problem={connectionProblem} busyLabel="Waiting…" /> : null}
         >
-          GitHub: {connectionText(connection)}
+          GitHub: {github.text}
         </StatusLine>
-        {problem ? <small>{problem.detail}</small> : null}
+        {connectionProblem ? (
+          <small className="code-whole">
+            <Said words={connectionProblem.detail} />
+          </small>
+        ) : null}
       </div>
+      {/* An account's line names it, and its fix may too ("Ask an owner of ledger-dev"): the fix goes under the
+          line and its detail, so the title isn't squeezed beside it. */}
+      {accountProblems.map((p) => (
+        <div key={p.id} className="st-block">
+          <StatusLine ok={false}>{p.title}</StatusLine>
+          <small className="code-whole">
+            <Said words={p.detail} />
+          </small>
+          <div className="st-fix">
+            <FixButton problem={p} busyLabel="Waiting…" />
+          </div>
+        </div>
+      ))}
       <div className="st-block">
         <StatusLine
           ok={service.ok}
@@ -147,7 +171,11 @@ function HostAndServiceStatus() {
         >
           Service: {service.text}
         </StatusLine>
-        {login ? <small>{login.detail}</small> : null}
+        {login ? (
+          <small className="code-whole">
+            <Said words={login.detail} />
+          </small>
+        ) : null}
       </div>
     </>
   );
@@ -319,8 +347,8 @@ export function Alerts() {
         {list.map((p) => (
           <div className={`alert ${p.tone}`} key={p.id}>
             <span className="alert-label">{p.tone === "need" ? "Needs you" : "Waiting"}</span>
-            <span className="alert-text">
-              <b>{p.title}.</b> {p.detail}
+            <span className="alert-text code-whole">
+              <b>{p.title}.</b> <Said words={p.detail} />
             </span>
             <FixButton problem={p} busyLabel="Waiting for the sign-in…" />
           </div>

@@ -5,7 +5,7 @@
 // reviewed by Codex right now. The App is on all seven of the owner's repositories, the other six quiet. Every diff is hand-written fixture data a review reads; nothing here is a real
 // recording.
 import { commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { BY_CLAUDE, CONFIRM_MS, FIND_MS, MIN, OWNER, SHORT_FIND_MS, unified } from "./ledger-api.ts";
 import { SANDBOX } from "./sandbox.ts";
 
@@ -163,6 +163,9 @@ const CHANGES: ScenarioChange[] = [
   },
 ];
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(SANDBOX.repo);
+
 export const S12: Scenario = {
   id: "S12",
   title: "Everything through the keyboard",
@@ -187,11 +190,11 @@ export const S12: Scenario = {
   },
   changes: CHANGES,
   script: [
-    { at: 1 * MIN, move: { kind: "open", change: 190 } },
-    { at: 10 * MIN, move: { kind: "push", change: 190 } },
+    { at: 1 * MIN, move: { kind: "open", change: pr(190) } },
+    { at: 10 * MIN, move: { kind: "push", change: pr(190) } },
     { at: 12 * MIN, move: { kind: "sign-out", engine: "claude" } },
-    { at: 20 * MIN, move: { kind: "open", change: 191 } },
-    { at: 29 * MIN + 30_000, move: { kind: "open", change: 192 } },
+    { at: 20 * MIN, move: { kind: "open", change: pr(191) } },
+    { at: 29 * MIN + 30_000, move: { kind: "open", change: pr(192) } },
   ],
   seed: 30 * MIN,
 };

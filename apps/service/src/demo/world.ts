@@ -6,13 +6,19 @@
 // the next round reads (ADR 0052). The lines the fake host accepts a comment
 // on are read from each commit's diff (`@lookover/diff`), never written twice. Who wrote a change is read as the
 // service reads it (`core.writerOf` over the commits' messages), so the drawer's "your agent opens a pull
-// request" and the round plan agree.
+// request" and the round plan agree. Signed in to the shared App (`World.shared`, ADR 0066), the host's App stands for
+// its installation on the owner's account, and each organisation the world reaches has its own, its repositories
+// beside the owner's: a change is named by its repository and number, so two repositories of one name each have theirs.
 import {
+  type ChangeRef,
   type CommitSha,
+  changeName,
+  DEMO_API,
   type DiffHunk,
   type EngineId,
   HostError,
   newestThread,
+  type RepositoryRef,
   reviewRequest,
 } from "@lookover/contracts";
 import { writerOf } from "@lookover/core";
@@ -28,7 +34,7 @@ import {
 } from "@lookover/testkit/demo";
 import type { Room } from "../room.ts";
 import { appInstalled, appMade } from "../snapshot.ts";
-import type { Move, Scenario, ScenarioChange } from "./scenario.ts";
+import type { Account, Move, Scenario, ScenarioChange, World } from "./scenario.ts";
 
 /** The removed lines of a hunk on `base`, as runs of consecutive lines of `path`. */
 function removedRuns(path: string, hunk: DiffHunk): CommentableRange[] {
@@ -89,12 +95,24 @@ export interface DemoWorld {
   /** Plays one move; the room is told what it would hear of from the host or the engines. */
   play(move: Move, room: Room): Promise<void>;
   /** The next change the script hasn't opened, written by the owner's agent or by someone else; null when none is left. */
-  unopened(by: "agent" | "other"): number | null;
+  unopened(by: "agent" | "other"): ChangeRef | null;
   /** The owner's open changes with a commit left to push, oldest opened first. */
-  pushable(): number[];
+  pushable(): ChangeRef[];
   /** The open changes, oldest opened first. */
-  open(): number[];
+  open(): ChangeRef[];
 }
+
+/** A change's repository: its own, or the world's first. */
+const repoOf = (scenario: Scenario, change: ScenarioChange): RepositoryRef =>
+  change.repo ?? scenario.world.repo;
+
+/** A change as a move names it: its repository and number. */
+const refOf = (scenario: Scenario, change: ScenarioChange): ChangeRef => ({
+  repo: repoOf(scenario, change),
+  number: change.number,
+});
+
+/** A change as written, `<owner>/<name>#<number>`: what the world keys and names it by. */
 
 /** Every move's row: what it does to the world, and what the room is told. */
 type Moves = { [K in Move["kind"]]: (move: Extract<Move, { kind: K }>, room: Room) => Promise<void> };
@@ -106,22 +124,46 @@ interface Held {
   closed: boolean;
 }
 
-export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: string): DemoWorld {
-  const { world } = scenario;
+/** An organisation of the shared App's, as the fake host keeps it: the account, and its repositories. */
+const reachOf = ({
+  organisation,
+  repositories,
+  owners = [],
+}: {
+  organisation: Account;
+  repositories: RepositoryRef[];
+  owners?: Account[];
+}) => ({
+  account: { ...organisation, type: "Organization" as const },
+  repositories,
+  owners: owners.map((o) => o.login),
+});
+
+/** GitHub as the world says it at the start: the App, its installations, the shared App's organisations. */
+function hostOf(world: World, clock: DemoClock): FakeGitHost {
   // The App is on GitHub (ADR 0047, ADR 0053), installed once the setup says so; one the setup says isn't made yet
   // was made on another computer, installed there on every repository (the driver keeps it only once the setup says
   // it was made). The fake's pages make a new one as GitHub's do (the manifest flow), which replaces it.
-  const installed = world.setup === undefined || !appMade(world.setup) || appInstalled(world.setup);
+  const installed =
+    world.shared?.ownAccountInstalled !== false &&
+    (world.setup === undefined || !appMade(world.setup) || appInstalled(world.setup));
   // The App is the owner's (ADR 0053), or the organisation's they work in (ADR 0059): the bot the snapshot shows is
   // its. Beside it, an App an organisation's admin made and handed over (ADR 0059), for "Use an existing App": its id
   // and key file are what the owner was given.
+  // The owner may sign in to the shared App instead (ADR 0066), on GitHub's fake device page: the App on GitHub
+  // stands for it, so its installation is what the sign-in reaches, with the shared App's on the organisations the
+  // world reaches, and the organisations it doesn't (ADR 0067). The bot posts until the service signs in.
   const host = new FakeGitHost({
     repo: world.repo,
     repositories: world.repositories ?? [],
     bot: world.bot,
+    person: world.owner,
+    devicePage: `${DEMO_API.github}/login/device`,
     changes: [],
     clock,
     installed,
+    reaches: (world.shared?.reaches ?? []).map(reachOf),
+    unreached: (world.shared?.unreached ?? []).map(reachOf),
     app: {
       owner:
         world.organisation === undefined
@@ -132,6 +174,15 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
     },
     handed: [HANDED_APP],
   });
+  host.postAs("bot");
+  for (const { organisation, sso } of world.shared?.reaches ?? [])
+    if (sso === true) host.askSso(organisation.login);
+  return host;
+}
+
+export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: string): DemoWorld {
+  const { world } = scenario;
+  const host = hostOf(world, clock);
   const engines = new ScriptedEngines({ timers: clock });
   const retrieval = new ScriptedRetrieval({ root: worktrees });
   for (const engine of ["claude", "codex"] as const) engines.setHealth(engine, world.engines[engine]);
@@ -140,29 +191,30 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
     (world.rules ?? []).map((file) => ({ ...file, commit: world.main.sha })),
   );
   for (const change of scenario.changes) {
+    const ref = refOf(scenario, change);
     for (const commit of change.commits) {
-      retrieval.script(change.number, commit.sha, commit.diff);
-      const worktree = retrieval.worktreeOf(change.number, commit.sha);
+      retrieval.script(ref, commit.sha, commit.diff);
+      const worktree = retrieval.worktreeOf(ref, commit.sha);
       if (commit.find) engines.scriptFind(worktree, commit.find);
       if (commit.confirm) engines.scriptConfirm(worktree, commit.confirm);
     }
   }
-  const opened = new Map<number, Held>();
-  const ref = (number: number) => ({ repo: world.repo, number });
-  const changeOf = (number: number): ScenarioChange => {
-    const change = scenario.changes.find((c) => c.number === number);
-    if (!change) throw new Error(`${scenario.id} has no pull request #${number}`);
+  /** The changes opened so far, by `changeName`. */
+  const opened = new Map<string, Held>();
+  const changeOf = (ref: ChangeRef): ScenarioChange => {
+    const change = scenario.changes.find((c) => changeName(refOf(scenario, c)) === changeName(ref));
+    if (!change) throw new Error(`${scenario.id} has no pull request ${changeName(ref)}`);
     return change;
   };
-  const heldOf = (number: number): Held => {
-    const held = opened.get(number);
-    if (!held) throw new Error(`#${number} is not open`);
+  const heldOf = (ref: ChangeRef): Held => {
+    const held = opened.get(changeName(ref));
+    if (!held) throw new Error(`${changeName(ref)} is not open`);
     return held;
   };
-  const headOf = (number: number): CommitSha => {
-    const held = heldOf(number);
+  const headOf = (ref: ChangeRef): CommitSha => {
+    const held = heldOf(ref);
     const head = held.change.commits[held.next - 1];
-    if (!head) throw new Error(`#${number} has no commit ${held.next}`);
+    if (!head) throw new Error(`${changeName(ref)} has no commit ${held.next}`);
     return head.sha;
   };
   /** A listing now; a host that refuses is the poller's to show, not the move's to fail on. */
@@ -177,11 +229,13 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
   const moves: Moves = {
     open: async (move, room) => {
       const change = changeOf(move.change);
+      const repo = repoOf(scenario, change);
       const [first] = change.commits;
       const shown: FakeChange = {
+        repo,
         number: change.number,
         title: change.title,
-        url: `https://github.com/${world.repo.owner}/${world.repo.name}/pull/${change.number}`,
+        url: `https://github.com/${repo.owner}/${repo.name}/pull/${change.number}`,
         author: change.author,
         draft: change.draft ?? false,
         fork: change.fork ?? false,
@@ -191,15 +245,15 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
         messages: [first.message],
       };
       host.open(shown);
-      opened.set(change.number, { change, next: 1, closed: false });
+      opened.set(changeName(move.change), { change, next: 1, closed: false });
       await listed(room);
     },
     push: async (move, room) => {
       const held = heldOf(move.change);
       const commit = held.change.commits[held.next];
-      if (!commit) throw new Error(`#${move.change} has no commit left to push`);
+      if (!commit) throw new Error(`${changeName(move.change)} has no commit left to push`);
       const messages = [...(commit.pushedWith ?? []), commit.message];
-      host.push(ref(move.change), commit.sha, commentableOf(commit.diff), [], {
+      host.push(move.change, commit.sha, commentableOf(commit.diff), [], {
         commits: messages.length,
         messages,
       });
@@ -207,19 +261,18 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
       await listed(room);
     },
     ask: async (move, room) => {
-      await host.asAgent(world.owner).comment(ref(move.change), reviewRequest(headOf(move.change)));
+      await host.asAgent(world.owner).comment(move.change, reviewRequest(headOf(move.change)));
       await listed(room);
     },
     reply: async (move) => {
-      const change = ref(move.change);
       // The newest thread on the finding: a later round's review may have commented on it again.
-      const thread = newestThread(await host.threads(change), move.finding);
-      if (!thread) throw new Error(`#${move.change} has no thread on ${move.finding}`);
-      host.seedReply(change, thread.commentId, { author: move.by, body: move.text });
+      const thread = newestThread(await host.threads(move.change), move.finding);
+      if (!thread) throw new Error(`${changeName(move.change)} has no thread on ${move.finding}`);
+      host.seedReply(move.change, thread.commentId, { author: move.by, body: move.text });
     },
     close: async (move, room) => {
       heldOf(move.change).closed = true;
-      host.close(ref(move.change));
+      host.close(move.change);
       await listed(room);
     },
     "sign-out": (move, room) => {
@@ -275,12 +328,13 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
         by === "other"
           ? change.author.id !== world.owner.id
           : change.author.id === world.owner.id && writtenBy(change) !== null;
-      return scenario.changes.find((c) => !opened.has(c.number) && wanted(c))?.number ?? null;
+      const next = scenario.changes.find((c) => !opened.has(changeName(refOf(scenario, c))) && wanted(c));
+      return next === undefined ? null : refOf(scenario, next);
     },
     pushable: () =>
       [...opened.values()]
         .filter((h) => !h.closed && h.change.author.id === world.owner.id && h.next < h.change.commits.length)
-        .map((h) => h.change.number),
-    open: () => [...opened.values()].filter((h) => !h.closed).map((h) => h.change.number),
+        .map((h) => refOf(scenario, h.change)),
+    open: () => [...opened.values()].filter((h) => !h.closed).map((h) => refOf(scenario, h.change)),
   };
 }

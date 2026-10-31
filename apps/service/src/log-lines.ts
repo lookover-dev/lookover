@@ -1,6 +1,6 @@
 // What the log file says of each event (ADR 0055, "The log file says what the service did"): one pure function words an
 // event, given the state before it, as one line or none. A line starts with what it is about: the change
-// (`ledger-api#151`), the engine (`Codex`) or the reviews (`reviews paused`). The events that change no review, and
+// (`sasensi/ledger-api#151`), the engine (`Codex`) or the reviews (`reviews paused`). The events that change no review, and
 // those that change nothing a reader of the file looks for (a step, a clock, a check), write none. The phrases the app
 // and GitHub say too come from `contracts`' copy; the file's own words are here. Times are the machine's local time,
 // as the file's stamps are: "11:00" on the event's own day, else with the date. The manifest flow's lines, which no
@@ -25,6 +25,7 @@ import {
   type Run,
   type RunPosting,
   type Service,
+  SHARED_APP,
   type State,
   sameDeferral,
   shortSha,
@@ -227,6 +228,27 @@ export const installationLines = {
   /** The App `slug` has no installation on its account, an organisation's or a person's. */
   notInstalled: (slug: string, account: HostAccount) =>
     `${slug} is not installed on ${account.type === "Organization" ? `the organisation ${account.login}` : `${account.login}'s account`}: install it on GitHub`,
+  /** The shared App reaches no account of `person`'s sign-in (ADR 0066). */
+  notReached: (person: string) =>
+    `${SHARED_APP.slug} is installed on none of the accounts ${person} reaches: install it on GitHub`,
+} as const;
+
+/** The sign-in to the shared App's lines (ADR 0066): how a device code ended; never the code or a token. */
+export const signInLines = {
+  /** The code was entered: `person` is signed in. */
+  signedIn: (person: string) => `signed in to GitHub as ${person}`,
+  /** The code ran out before it was entered. */
+  expired: "the GitHub sign-in code expired before it was entered",
+  /** The person refused on GitHub's page. */
+  denied: "the GitHub sign-in was refused on GitHub",
+  /** The sign-in was given up from the app. */
+  cancelled: "the GitHub sign-in was cancelled",
+  /** GitHub refused a poll for good, saying `why`. */
+  refused: (why: string) => `the GitHub sign-in stopped: ${why}`,
+  /** A poll GitHub couldn't answer for now, saying `why`: polled again. */
+  unanswered: (why: string) => `GitHub didn't answer the sign-in's poll, trying again: ${why}`,
+  /** The sign-in was made and not kept, saying `why`. */
+  notKept: (why: string) => `the GitHub sign-in was not kept: ${why}`,
 } as const;
 
 /**

@@ -8,15 +8,16 @@
 // Its only logic is `apply`, the snapshot reducer: what an event does to the snapshot is part of the wire
 // contract, shared by the UI and the service. Events carry the states they result in, so `apply` records
 // and decides nothing; the timeline it keeps is data, never sentences: the words belong to the UI. Besides it:
-// the ID constructors, which only check an ID where it enters; `isUnsettled`, the definition of an unsettled
-// finding, and `isCounted`, one that counts on the pull request (unsettled and posted, I-152); `bySeverity`, the
-// order findings are listed in, by publish and the app alike; `fingerprintWord`,
-// a category or a kind key as fingerprints compare it;
+// the ID constructors, which only check an ID where it enters, and a change's name (`<owner>/<name>#<n>`,
+// `changeName` and `changeIdOf`, read back by `changeNameParts`) and a repository's (`repositoryRefOf`) written once;
+// `isUnsettled`, the definition of an unsettled finding, and `isCounted`, one that counts on the pull request
+// (unsettled and posted, I-152); `bySeverity`, the order findings are listed in, by publish and the app alike;
+// `fingerprintWord`, a category or a kind key as fingerprints compare it;
 // `isWaiting`, a job not started yet (queued or deferred); `deferralEngine`, the engine a deferral waits for;
 // `engineDeferral`, what an engine's state makes a review wait for;
 // `sameDeferral`, when two deferrals are the same reason to wait; `sameTurn`, two turns the same thing to wait
-// behind; `stepsDone`, a run's steps with its current one closed; `repositoryName` and `sameRepository`, a repository as written and compared as GitHub does
-// (ignoring case); `reviewResultV1`, the Zod schema of
+// behind; `stepsDone`, a run's steps with its current one closed; `repositoryName` and `sameRepository`, a
+// repository as written and compared as GitHub does (ignoring case); `reviewResultV1`, the Zod schema of
 // `lookover.review-result/v1`, which parses a result where it enters, and `readResult`, which finds one in
 // a check's text (the agents' helper imports only this package); `enumOf`, a Zod enum tied to the type it
 // parses, so that every package's parser fails the typecheck when the type and the enum differ;
@@ -33,7 +34,8 @@
 // `CHECK_OUTPUT_MAX_BYTES` in `host.ts`, with `utf8Bytes`, a text measured as GitHub counts them.
 // The one exception to "never a sentence": `copy.ts`, the phrases the app, GitHub and the service's log file share
 // (`engineName`, `deferralText`, `failureText`, `cancelText` and `cancelPhrase`, `skipText`, `confirmFailureText`,
-// `findersText`, `foundAndCheckedText`, `keptText`, `ruleText`, `CODEX_REVIEWS`, `postWaitText`), the service's
+// `findersText`, `foundAndCheckedText`, `keptText`, `ruleText`, `CODEX_REVIEWS`, `postWaitText`, and
+// `LOOKOVERS_OPENING`, what Lookover's words open with on the pull request), the service's
 // sentences the web says too (`createAppRefusalText`), and the ways of writing they share (`asSentence`, `shortSha`,
 // `dayText`, `twoDigits`), written once here because the web may import only this package and `publish` words the
 // pull request: everything else either says stays in its own module.
@@ -42,6 +44,8 @@
 // `unchanged` when the host says so, with `HostError` as the one way a host refuses; `AgentHost`, the host as
 // the coding agent sees it with its own login, shaped by what `lookover wait` calls (ADR 0021, ADR 0043);
 // `HostView`, what a host shows of a change, the one shape the real adapter and the fake read back.
+// `HostIntake.poster` names who posts on a repository by numeric id, the App's bot or the person signed in on the
+// shared App (ADR 0066): what tells Lookover's replies on its threads, with the ids it kept.
 // A port changes here only, one change at a time. The frozen identifiers of ADR 0032 are in `frozen.ts`.
 // `API` and `SSE` name where `LookoverApi` is over HTTP and what its event stream sends (ADR 0038); beside it, the
 // `lookover` commands' two routes (`API.link`, answered as a `MintedLink`, and `API.stop`, ADR 0054). The log file's
@@ -75,6 +79,23 @@
 // organisations, a membership), what the setup's GitHub step shows of it (`Connection.gh`, read again by `gh.check`),
 // and where "Create it on GitHub" makes the App (`connection.createApp`'s `organisation`, refused with
 // `CreateAppRefusal`'s `gh-*` and `not-an-admin`).
+// The shared App (ADR 0065, ADR 0066): `SHARED_APP`, its id, slug, client ID and account, shipped, never configured;
+// a check's `external_id` as `checkExternalId` writes it (`<job>@<person's id>`) and `readCheckExternalId` reads it
+// back (null for an older check's job id alone); `AgentHost.account`, whose token the agent holds. Signing in to it
+// (`sign-in.ts`): the device flow and the refresh as a port (`HostSignIn`: a device code, `DeviceGrant`, polled to a
+// `DevicePoll`, the tokens issued, `SignInTokens`, then whose they are, `person`; a `SignIn` renewed, its refusal
+// the connection's cause `signed-out`), where the sign-in is kept (`SignInKeeper`), so the adapter never knows the
+// disk, and why the service didn't start one (`SignInStartRefusal`). What the person reaches through it
+// (`HostAccounts`: who they are, and every account's installation with its repositories, `ReachedAccount`, or the
+// account's own cause, `AccountCause`: suspended, or `sso`, an organisation asking for SAML single sign-on). The
+// connection keeps every account it reaches with its installation and its own cause (`Connection.accounts`,
+// `ConnectionAccount`; `accountOf` finds a repository owner's), one on an own App (`ownInstallation`). On `shared`
+// (ADR 0067) each reached account says whether the person owns it (`ConnectionAccount.owner`), the accounts the App
+// doesn't reach are named (`Connection.unreached`, `UnreachedAccount`: their own, and the organisations their `gh`
+// names, with when they asked an owner to install it), "Ask to install on <org>" records that ask
+// (`connection.askToInstall`, refused with `AskToInstallRefusal`), a suspension names who suspended it
+// (`suspendedBy`), and `githubLinks.owners` is an organisation's owners page. The person's `gh` reads every active
+// membership with its role at once (`Gh.memberships`, `GhMemberships`).
 // The types row 9 fills so the app shows what is happening now (ADR 0055, `activity.ts`): what an engine did
 // (`EngineActivity`: a file read, a search, a listing, a command), reported through `EngineRunSpec.onActivity` as
 // its output arrives and never after `run` resolves; a run's activities by engine and pass (`RunActivity`,
@@ -98,11 +119,12 @@
 // fails with Zod's own errors. A host port's refusal is a `HostError` and nothing else (its `failure` says
 // which); the engines and process ports never throw: their failures are outcomes.
 export type { EngineActivity, RunActivity } from "./activity.ts";
-export type { AgentChange, AgentHost, AgentThread } from "./agent-host.ts";
+export type { AgentChange, AgentCheck, AgentHost, AgentThread } from "./agent-host.ts";
 export type { LogMessage, LookoverApi, MintedLink, NoSession } from "./api.ts";
 export { API, APP_FLOW, SSE } from "./api.ts";
 export { apply, emptyReview } from "./apply.ts";
 export type { Change } from "./change.ts";
+export { checkExternalId, readCheckExternalId } from "./check-external-id.ts";
 export type { Claim, ClaimKind, FindingClaim } from "./claim.ts";
 export type { Clock } from "./clock.ts";
 export type {
@@ -117,7 +139,17 @@ export type {
 export type { Command, NoiseChoice } from "./command.ts";
 export type { Confirmation, ConfirmFailure, ConfirmFallback, ConfirmVerdict } from "./confirm.ts";
 export { NOT_CHECKED } from "./confirm.ts";
-export type { Connection, ConnectionApp, ConnectionCause, KeyRefusal } from "./connection.ts";
+export type {
+  AskToInstallRefusal,
+  Connection,
+  ConnectionAccount,
+  ConnectionApp,
+  ConnectionCause,
+  ConnectionWay,
+  KeyRefusal,
+  UnreachedAccount,
+} from "./connection.ts";
+export { accountOf, ownInstallation, sameLogin } from "./connection.ts";
 export {
   asSentence,
   CODEX_REVIEWS,
@@ -137,6 +169,7 @@ export {
   GH_SIGN_IN,
   ghFixText,
   keptText,
+  LOOKOVERS_OPENING,
   NOT_DOUBLE_CHECKED,
   NOT_RAISED_AGAIN,
   NOTHING_NEW_TO_CHECK,
@@ -201,18 +234,23 @@ export type {
   GhAdminOrganisations,
   GhChoices,
   GhMembership,
+  GhMemberships,
   GhNoAnswer,
+  GhOrganisation,
   GhPerson,
   GhRefusal,
+  GhRole,
   GhUnanswered,
   GhWhy,
 } from "./gh.ts";
 export { ghRefusalOf } from "./gh.ts";
 export type {
+  AccountCause,
   AppCredentials,
   AppPermission,
   CreateAppRefusal,
   HostAccount,
+  HostAccounts,
   HostApp,
   HostInstallation,
   HostInstallations,
@@ -221,6 +259,7 @@ export type {
   ManifestConversion,
   NoNewApp,
   PermissionLevel,
+  ReachedAccount,
   SetupGitHubRefusal,
   UseAppRefusal,
 } from "./github-app.ts";
@@ -271,11 +310,16 @@ export type { IdGen } from "./id-gen.ts";
 export type { ChangeId, CommitSha, ConnectionId, FindingId, JobId, RepositoryId, RunId } from "./ids.ts";
 export {
   changeId,
+  changeIdOf,
+  changeName,
+  changeNameParts,
+  changePrefixOf,
   commitSha,
   connectionId,
   findingId,
   jobId,
   repositoryId,
+  repositoryRefOf,
   runId,
 } from "./ids.ts";
 export type {
@@ -358,4 +402,16 @@ export type {
 export type { ResolveSettings, SettingsLayer } from "./settings-resolve.ts";
 export type { Setup, SetupGitHub, SetupStep } from "./setup.ts";
 export { furthestReached, SETUP_ORDER } from "./setup.ts";
+export type { SharedApp } from "./shared-app.ts";
+export { SHARED_APP } from "./shared-app.ts";
+export type {
+  DeviceCode,
+  DeviceGrant,
+  DevicePoll,
+  HostSignIn,
+  SignIn,
+  SignInKeeper,
+  SignInStartRefusal,
+  SignInTokens,
+} from "./sign-in.ts";
 export type { State } from "./state.ts";

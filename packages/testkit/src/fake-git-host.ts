@@ -1,37 +1,53 @@
-// An in-memory Git host: `HostIntake` and `HostWriter` for the owner's repositories (`repo`, then `repositories`;
-// a change, a comment, a listing's version are each a repository's), and `HostInstallations` for the owner's App,
-// a world a test moves. Changes open,
-// close, are marked ready and pushed after construction (a push with its commit count, or rewriting the head);
-// the owner and others write and edit comments, stamped by the injected clock; the bot reacts. It records every
-// post in order (a check created, updated and completed, ADR 0043) and knows GitHub's rules as spike 03 recorded
-// them (ADR 0022): one comment outside the diff fails
-// the whole review and posts nothing; a check output over the byte limit is refused; the bot's own comments are
-// told by its numeric user id; a repeated reaction stays one; a listing read again with nothing changed says
-// `unchanged` (GitHub's `304`), and a comment or a review changes the open changes' listing too, as it moves a
-// pull request's last update on GitHub. A test that passes here would pass on GitHub.
+// An in-memory Git host: `HostIntake` and `HostWriter` for the owner's repositories (`repo`, then `repositories`; a
+// change, a comment, a listing's version are each a repository's), and `HostInstallations` for the owner's App, a world
+// a test moves. Changes open, close, are marked ready and pushed after construction (a push with its commit count, or
+// rewriting the head); the owner and others write and edit comments, stamped by the injected clock; the bot reacts. It
+// records every post in order (a check created, updated and completed, ADR 0043) and knows GitHub's rules as spike 03
+// recorded them (ADR 0022): one comment outside the diff fails the whole review and posts nothing; a check output over
+// the byte limit is refused; the bot's own comments are told by its numeric user id; a repeated reaction stays one; a
+// listing read again with nothing changed says `unchanged` (GitHub's `304`), and a comment or a review changes the open
+// changes' listing too, as it moves a pull request's last update on GitHub. A test that passes here would pass on
+// GitHub.
 // It is brought to refuse as GitHub does on a bad day: every call (`refuse`), the check writes (`refuseChecks`), the
 // compare (`refuseCounts`), or the next post once (`refuseNext`), kept on the host or not: GitHub answered a review
 // it had saved "422 An internal error occurred".
-// The App and its installation (ADR 0053) move as the owner moves them on GitHub: made from a manifest
-// (`createApp`, which gives the code `convertManifest` converts once within the hour; the fake GitHub pages call
-// it), installed on every repository or some (`install`, a new installation id after `uninstall`), suspended
-// (`suspend`, `unsuspend`), a repository added to or removed from the installation (`addRepository`,
-// `removeRepository`), one archived (`archive`: left out of the installation's listing), its key revoked
-// (`revokeKey`) and a new one generated (`generateKey`) and used by the ports (`useKey`); `credentials` gives the
-// App's id and the key the ports sign with. Apps an organisation's admin made and handed over (`handed`, ADR 0059)
-// are described to the key handed with each and installed nowhere. The repository ports refuse as GitHub does: the
-// key refused, `unauthorized` (cause `key-refused`: `revoked` for a key the App doesn't take, `app-deleted` for an id it isn't, none
-// for a text that isn't a key, as `@lookover/github` reads GitHub's words); no installation, `not_found` (cause
-// `uninstalled`, ADR 0047's demo setup installs it on the fake); suspended, `unauthorized` (cause `uninstalled`,
-// suspended); a repository the installation leaves out, `not_found` with no cause. The agent's calls through
-// `asAgent` go on whatever the App's state, as the agent has a token of its own.
-// `asAgent` is the same host seen by a coding agent with its own token (`AgentHost`, ADR 0021): it reads the
-// checks of a commit from one App only (each check keeps the slug of the App that made it; the bot's App is
-// its login without `[bot]`), and writes comments as the agent's account; it reads Lookover's threads with their
-// thread ids (`PRRT_<root id>`) and whether they are resolved, replies in them as the agent and resolves them, as
-// GitHub's GraphQL lets a person do and the App can't. Made with `mayResolve: false`, the agent's token may not
-// resolve a thread, and `resolve` is refused as GitHub refuses it.
+// The App and its installation (ADR 0053) move as the owner moves them on GitHub: made from a manifest (`createApp`,
+// which gives the code `convertManifest` converts once within the hour; the fake GitHub pages call it), installed on
+// every repository or some (`install`, a new installation id after `uninstall`), suspended (`suspend`, `unsuspend`), a
+// repository added to or removed from the installation (`addRepository`, `removeRepository`), one archived (`archive`:
+// left out of the installation's listing), its key revoked (`revokeKey`) and a new one generated (`generateKey`) and
+// used by the ports (`useKey`); `credentials` gives the App's id and the key the ports sign with. Apps an
+// organisation's admin made and handed over (`handed`, ADR 0059) are described to the key handed with each and
+// installed nowhere. The repository ports refuse as GitHub does: the key refused, `unauthorized` (cause `key-refused`:
+// `revoked` for a key the App doesn't take, `app-deleted` for an id it isn't, none for a text that isn't a key, as
+// `@lookover/github` reads GitHub's words); no installation, `not_found` (cause `uninstalled`, ADR 0047's demo setup
+// installs it on the fake); suspended, `unauthorized` (cause `uninstalled`, suspended); a repository the installation
+// leaves out, `not_found` with no cause. The agent's calls through `asAgent` go on whatever the App's state, as the
+// agent has a token of its own.
+// Made with `person`, the repository ports post as that person signed in to the App (ADR 0066), as spike 20 saw
+// GitHub do it: the review, its line comments, the replies and the reactions are theirs, with no bot flag; the
+// summary, an issue comment, also names the App that posted it, so one they wrote by hand is never the summary; the
+// checks are still the App's. Lookover's threads are then the person's roots holding a finding marker. `postAs`
+// moves who posts between the person and the bot, as demo mode's service moves between its two ways.
+// That person signs in to the shared App by the device flow (`HostSignIn`, ADR 0066, `fake-sign-in.ts`): a code they
+// enter on GitHub's page (`enterCode`) or refuse (`denyCode`), a sign-in refreshed with its refresh token, spent
+// once used, and every refresh token refused once they take the App's authorisation back (`revokeSignIn`); signed out
+// (`signOut`), every repository and every account is refused as signed out until a new code is polled. What they
+// reach is `HostAccounts`: who they are (`person`) and every installation (`accounts`), the App's own on its account
+// and, given `reaches`, the shared App's on other accounts, each with its repositories, which the repository ports serve
+// through that installation. One suspended (`suspend(login, by)`, `by` named as who suspended it) or whose
+// organisation asks for SAML SSO (`askSso`, until `signInSso`) is that account's cause in `accounts`, and refuses its
+// own repositories alone, as GitHub's 403s do; one uninstalled (`uninstall(login)`) is no longer listed, its
+// repositories refused as not found. The person's organisations without the App (`unreached`, ADR 0067) are not
+// listed until an owner installs it there (`installOn(login)`), last.
+// `asAgent` is the same host seen by a coding agent with its own token (`AgentHost`, ADR 0021): it reads the checks of
+// a commit from one App only (each check keeps the slug of the App that made it; the bot's App is its login without
+// `[bot]`), answers the agent's own account, and writes comments as it; it reads Lookover's threads (the bot's roots,
+// or the person's when asked by their id) with their thread ids (`PRRT_<root id>`) and whether they are resolved,
+// replies in them as the agent and resolves them, as GitHub's GraphQL lets a person do and the App can't. Made with
+// `mayResolve: false`, the agent's token may not resolve a thread, and `resolve` is refused as GitHub refuses it.
 import type {
+  AgentCheck,
   AgentHost,
   AgentThread,
   AppCredentials,
@@ -41,10 +57,13 @@ import type {
   Clock,
   CommitCount,
   CommitSha,
+  DeviceGrant,
+  DevicePoll,
   DiffLocation,
   DiffSide,
   FetchSpec,
   HostAccount,
+  HostAccounts,
   HostApp,
   HostChange,
   HostCheck,
@@ -55,7 +74,9 @@ import type {
   HostInstallation,
   HostInstallations,
   HostIntake,
+  HostLogin,
   HostReview,
+  HostSignIn,
   HostThread,
   HostView,
   HostViewComment,
@@ -67,15 +88,18 @@ import type {
   Minimized,
   MinimizeReason,
   OpenCheckStatus,
+  ReachedAccount,
   Reaction,
   RepositoryRef,
   ReviewPost,
+  SignIn,
 } from "@lookover/contracts";
 import {
   APP_PERMISSIONS,
   CHECK_NAME,
   CHECK_OUTPUT_MAX_BYTES,
   COMMENT_MAX_BYTES,
+  changeName,
   findingOfMarker,
   HostError,
   PRIVATE_KEY_ARMOUR,
@@ -84,6 +108,7 @@ import {
   sameRepository,
   utf8Bytes,
 } from "@lookover/contracts";
+import { FakeSignIn } from "./fake-sign-in.ts";
 
 /** Lines a comment can go on: `from` to `to` inclusive, on one side of one file. */
 export interface CommentableRange {
@@ -118,6 +143,18 @@ export interface FakeGitHostOptions {
   repositories?: RepositoryRef[];
   /** The reviewer bot, as the host knows it: the numeric id is its identity (ADR 0006). */
   bot: { id: number; login: string };
+  /**
+   * The person signed in to the App, whom the repository ports post as (ADR 0066's `shared` way), as spike 20 saw
+   * GitHub do it: every review, line comment, reply and reaction is theirs, no bot's; the summary, an issue comment,
+   * also names the App that posted it (`performed_via_github_app`), so one they wrote by hand is not it; the checks
+   * are still the App's. The bot posts when not given.
+   */
+  person?: { id: number; login: string };
+  /**
+   * The page each device code names to be entered on (`DeviceCode.verificationUri`): GitHub's when not given; demo
+   * mode gives its fake's (`fakeGitHubPages`' `<web>/login/device`), so nothing it shows opens github.com.
+   */
+  devicePage?: string;
   /** The changes open at the start. */
   changes: FakeChange[];
   /** Where the fetch spec points: a local bare repository, so `retrieval` runs real git on it. GitHub's URL by default. */
@@ -140,6 +177,55 @@ export interface FakeGitHostOptions {
    * owner's App and its installation are unchanged.
    */
   handed?: FakeHandedApp[];
+  /**
+   * The shared App's other installations the person reaches (ADR 0066), each on its account with the repositories it
+   * grants them (all that account's), listed by `accounts` after the App's own in this order; needs `person`. Their
+   * repositories answer the repository ports through their own installation: suspended (`suspend(login)`) or asking
+   * for SAML SSO (`askSso`), only theirs are refused.
+   */
+  reaches?: FakeReach[];
+  /**
+   * The person's organisations where the shared App isn't installed (ADR 0067), each with its repositories: not in
+   * `accounts`, their repositories refused as not found, until `installOn` installs it there (an owner did, on
+   * GitHub's page); needs `person`.
+   */
+  unreached?: FakeReach[];
+}
+
+/**
+ * Another account the person reaches through the shared App: the account, and the repositories granted there.
+ * `owners`: the logins GitHub lists as the organisation's owners beside the person (its people page), none when not
+ * given.
+ */
+export interface FakeReach {
+  account: HostAccount;
+  repositories: RepositoryRef[];
+  owners?: string[];
+}
+
+/** Another account's installation as the fake keeps it: suspended, or its organisation asking for SAML SSO. */
+interface FakeOther {
+  id: number;
+  account: HostAccount;
+  repositories: RepositoryRef[];
+  owners?: string[];
+  suspended: boolean;
+  /** Who suspended it, as `accounts` names them; null when nobody is named. */
+  suspendedBy: string | null;
+  /** SAML SSO asked, with GitHub's page for it (null: none given); null while the person's sign-in has a session. */
+  sso: { url: string | null } | null;
+}
+
+/**
+ * Throws unless every repository is the account's: an installation on another account the person reaches grants only
+ * that account's repositories.
+ */
+function onlyItsOwn({ account, repositories }: FakeReach): void {
+  const outside = repositories.find((repo) => repo.owner.toLowerCase() !== account.login.toLowerCase());
+  if (outside)
+    throw new Error(
+      `${repositoryName(outside)} is not ${account.login}'s: an installation grants only its account's repositories`,
+    );
 }
 
 /**
@@ -188,6 +274,23 @@ export interface FakeGitHubView {
   app: HostApp | null;
   installation: { id: number; suspended: boolean; granted: RepositoryRef[] } | null;
   repositories: { repo: RepositoryRef; archived: boolean }[];
+  /**
+   * The other accounts the shared App is installed on (ADR 0066), in `accounts`' order: each installation, its
+   * repositories, whether it is suspended or its organisation asks for SAML SSO, and the owners GitHub lists.
+   */
+  reached: FakeGitHubReached[];
+  /** The person's organisations where the shared App isn't installed (ADR 0067), until `installOn`, with their owners. */
+  unreached: { account: HostAccount; owners: string[] }[];
+}
+
+/** Another account's installation of the shared App, as GitHub's pages show it. */
+export interface FakeGitHubReached {
+  id: number;
+  account: HostAccount;
+  repositories: RepositoryRef[];
+  suspended: boolean;
+  sso: boolean;
+  owners: string[];
 }
 
 /** One post, as the host received it. */
@@ -232,9 +335,16 @@ interface FakeApp extends HostApp {
   keys: string[];
 }
 
-/** The account the host's App is on, made or to be made: `app.owner`, else a person named after `repo`'s owner. */
-const accountOf = ({ app = {}, repo }: FakeGitHostOptions): HostAccount =>
-  app.owner ?? { id: 1, login: repo.owner, type: "User" };
+/**
+ * The account the host's App is on, made or to be made: `app.owner`, else a person named after `repo`'s owner, with
+ * `person`'s id when that is them (a user account's id is its person's, as on GitHub), else 1.
+ */
+const accountOf = ({ app = {}, repo, person }: FakeGitHostOptions): HostAccount =>
+  app.owner ?? {
+    id: person !== undefined && person.login.toLowerCase() === repo.owner.toLowerCase() ? person.id : 1,
+    login: repo.owner,
+    type: "User",
+  };
 
 /** The App the options make, its slug the bot's login without `[bot]`: null when they say none is made yet. */
 function appOf(options: FakeGitHostOptions): FakeApp | null {
@@ -266,6 +376,8 @@ function onlyTheOrganisations(owner: HostAccount, repositories: RepositoryRef[])
 interface FakeInstallation {
   id: number;
   suspended: boolean;
+  /** Who suspended it, as `accounts` names them; null when nobody is named. */
+  suspendedBy: string | null;
   all: boolean;
   selected: RepositoryRef[];
 }
@@ -308,11 +420,15 @@ interface Held extends Omit<FakeChange, "repo"> {
   closed: boolean;
 }
 
-/** A conversation comment as the fake keeps it: who put each reaction on it, by numeric id, and why it is hidden. */
+/**
+ * A conversation comment as the fake keeps it: who put each reaction on it, by numeric id, why it is hidden, and the
+ * slug of the App a person's token posted it through (GitHub's `performed_via_github_app`), null when written by hand.
+ */
 interface Kept extends HostConversationComment {
   repo: RepositoryRef;
   reactedBy: Record<Reaction, Set<number>>;
   minimized: Minimized;
+  via: string | null;
 }
 
 /** An account as a thread's reply names it: a bot or a person. */
@@ -370,7 +486,7 @@ type ListingName = "changes" | "comments";
 const keyOf = (repo: RepositoryRef) => repositoryName(repo).toLowerCase();
 
 /** A change's key: its repository's and its number. */
-const changeKey = (change: ChangeRef) => `${keyOf(change.repo)}#${change.number}`;
+const changeKey = (change: ChangeRef) => changeName(change).toLowerCase();
 
 /** Where a head line that no edit replaced is after the edits (all against the head before the push). */
 function shifted(line: number, edits: PushEdit[]): number {
@@ -409,7 +525,7 @@ const inDiff = (
 /** GitHub keeps a comment's times to the second. */
 const toSecond = (ms: number) => Math.floor(ms / 1000) * 1000;
 
-export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
+export class FakeGitHost implements HostIntake, HostWriter, HostInstallations, HostAccounts, HostSignIn {
   /** Every post, in the order it was asked. */
   readonly posts: HostPost[] = [];
   private readonly repo: RepositoryRef;
@@ -417,6 +533,12 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
   private readonly held: RepositoryRef[] = [];
   /** The App's bot: its login follows the App's slug, its id stays. */
   private bot: { id: number; login: string };
+  /** The person signed in to the App, whom the ports post as unless told the bot (`postAs`); null when none is. */
+  private readonly signedIn: { id: number; login: string } | null;
+  /** Who the ports post as: the person signed in (when there is one), or the bot. */
+  private postsAs: "bot" | "person";
+  /** Signed out on GitHub (`signOut`): every repository refused as signed out until a new sign-in is issued. */
+  private signedOut = false;
   private readonly changes: Held[] = [];
   private readonly cloneUrl: string | undefined;
   private readonly defaultBranch: string;
@@ -448,6 +570,10 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
   private readonly codes = new Map<string, { conversion: ManifestConversion; until: number }>();
   /** The Apps an organisation's admin handed over, by id. */
   private readonly handed = new Map<number, FakeApp>();
+  /** The shared App's installations on the other accounts the person reaches, in `accounts`' order. */
+  private readonly others: FakeOther[] = [];
+  /** The person's organisations where the shared App isn't installed, until `installOn`. */
+  private readonly unreached: FakeReach[] = [];
   private nextInstallation = FIRST_INSTALLATION;
   private nextKey = 1;
   private nextCode = 1;
@@ -455,15 +581,26 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
   private checkRefusal: HostRefusal | null = null;
   private countRefusal: HostRefusal | null = null;
   private nextRefusal: NextRefusal | null = null;
+  private readonly signIns: FakeSignIn;
 
   constructor(options: FakeGitHostOptions) {
     this.repo = options.repo;
     for (const repo of [options.repo, ...(options.repositories ?? [])])
       if (!this.held.some((r) => sameRepository(r, repo))) this.held.push(repo);
     this.bot = options.bot;
+    this.signedIn = options.person === undefined ? null : { ...options.person };
+    this.postsAs = "person";
     this.cloneUrl = options.cloneUrl;
     this.defaultBranch = options.defaultBranch ?? "main";
     this.clock = options.clock ?? { now: () => Date.now() };
+    this.signIns = new FakeSignIn(
+      this.clock,
+      () => {
+        if (this.signedIn === null) throw new Error("The fake has no person to sign in: give it `person`");
+        return this.signedIn;
+      },
+      options.devicePage,
+    );
     this.account = accountOf(options);
     onlyTheOrganisations(this.account, this.held);
     this.made = appOf(options);
@@ -477,6 +614,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
       });
     this.signing = this.made === null ? null : (this.made.keys[0] ?? this.generateKey());
     if (this.made !== null && (options.installed ?? true)) this.install();
+    this.reach(options.reaches, options.unreached);
     for (const change of options.changes) this.open(change);
   }
 
@@ -503,24 +641,88 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
     const grant = { all: repositories === undefined, selected: [...(repositories ?? [])] };
     this.current =
       this.current === null
-        ? { id: this.nextInstallation++, suspended: false, ...grant }
+        ? { id: this.nextInstallation++, suspended: false, suspendedBy: null, ...grant }
         : { ...this.current, ...grant };
     return this.current.id;
   }
 
-  /** The owner uninstalls the App: no installation, so the repository ports are refused as not found. */
-  uninstall(): void {
-    this.current = null;
+  /**
+   * The owner uninstalls the App: no installation, so the repository ports are refused as not found. Given another
+   * account's login, the shared App is uninstalled there (ADR 0066): `accounts` no longer lists it, and its
+   * repositories are refused as not found, no cause; the account is the person's without the App again, which
+   * `installOn` installs anew.
+   */
+  uninstall(login?: string): void {
+    if (login === undefined) {
+      this.current = null;
+      return;
+    }
+    const other = this.other(login);
+    this.others.splice(this.others.indexOf(other), 1);
+    this.unreached.push({
+      account: other.account,
+      repositories: other.repositories,
+      owners: [...(other.owners ?? [])],
+    });
   }
 
-  /** The owner suspends the installation: it stays, and everything through it is refused until `unsuspend`. */
-  suspend(): void {
-    this.installed().suspended = true;
+  /**
+   * The shared App installed on `login`, one of the person's organisations without it (`unreached`), as an owner does
+   * on GitHub's page (ADR 0067): `accounts` lists it last, with all its repositories, which answer from now on.
+   * Returns the new installation's id. Throws for an account that isn't the person's without the App.
+   */
+  installOn(login: string): number {
+    const at = this.unreached.findIndex((u) => u.account.login.toLowerCase() === login.toLowerCase());
+    const [found] = at === -1 ? [] : this.unreached.splice(at, 1);
+    if (found === undefined) throw new Error(`${login} is no account of the person's without the App`);
+    const id = this.nextInstallation++;
+    this.others.push({ id, ...found, suspended: false, suspendedBy: null, sso: null });
+    return id;
   }
 
-  /** The owner lifts the suspension. */
-  unsuspend(): void {
-    this.installed().suspended = false;
+  /**
+   * The organisation `login`, one the person reaches or one of theirs without the App, renamed `to` on GitHub: same id,
+   * its repositories under the new login. Throws for an account that is neither.
+   */
+  rename(login: string, to: string): void {
+    const found = [...this.others, ...this.unreached].find(
+      (a) => a.account.login.toLowerCase() === login.toLowerCase(),
+    );
+    if (found === undefined) throw new Error(`${login} is no organisation of the person's`);
+    found.account = { ...found.account, login: to };
+    found.repositories = found.repositories.map((r) => ({ ...r, owner: to }));
+  }
+
+  /**
+   * The owner suspends the installation, the App's own or, given its account's login, another the person reaches: it
+   * stays, and everything through it is refused until `unsuspend`. `by` is who suspended it, the login `accounts`
+   * names (GitHub's `suspended_by`); not given, `accounts` names nobody.
+   */
+  suspend(login?: string, by?: string): void {
+    const installation = this.installedOn(login);
+    installation.suspended = true;
+    installation.suspendedBy = by ?? null;
+  }
+
+  /** The owner lifts the suspension, of the App's own installation or, given its login, another account's. */
+  unsuspend(login?: string): void {
+    const installation = this.installedOn(login);
+    installation.suspended = false;
+    installation.suspendedBy = null;
+  }
+
+  /**
+   * The organisation `login` (one the person reaches) asks for SAML SSO the person's sign-in hasn't (ADR 0066): its
+   * repositories are refused as GitHub refuses them, `unauthorized` with the cause `sso` and GitHub's page (`url`,
+   * none when not given), and `accounts` says so on it, until `signInSso`.
+   */
+  askSso(login: string, url: string | null = null): void {
+    this.other(login).sso = { url };
+  }
+
+  /** The person starts an SSO session on the organisation `login`: its repositories answer again. */
+  signInSso(login: string): void {
+    this.other(login).sso = null;
   }
 
   /**
@@ -619,6 +821,15 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
         granted: this.held.filter((r) => this.grants(current, r)).map((r) => ({ ...r })),
       },
       repositories: this.held.map((r) => ({ repo: { ...r }, archived: this.archived.has(keyOf(r)) })),
+      reached: this.others.map((o) => ({
+        id: o.id,
+        account: { ...o.account },
+        repositories: o.repositories.map((r) => ({ ...r })),
+        suspended: o.suspended,
+        sso: o.sso !== null,
+        owners: [...(o.owners ?? [])],
+      })),
+      unreached: this.unreached.map((u) => ({ account: { ...u.account }, owners: [...(u.owners ?? [])] })),
     };
   }
 
@@ -664,6 +875,111 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
     });
   }
 
+  // HostAccounts: what the person signed in to the shared App reaches (ADR 0066).
+
+  /**
+   * Who is signed in (`HostAccounts`); given a token, whose that token is (`HostSignIn`: `GET /user`, refused once as
+   * `refuseSignInPerson` set).
+   */
+  person(token?: string): Promise<HostLogin> {
+    return this.answerAgent(() => {
+      if (token !== undefined) return this.signIns.personOf(token);
+      if (this.signedIn === null || this.signedOut)
+        throw new HostError("unauthorized", "Nobody is signed in to the shared App", {
+          connectionCause: { kind: "signed-out" },
+        });
+      return { ...this.signedIn };
+    });
+  }
+
+  /**
+   * The App's own installation, on its account, when there is one, then every other account's in `reaches`' order,
+   * each with what it grants (archived ones left out), or its cause: suspended, else SAML SSO asked.
+   */
+  accounts(): Promise<ReachedAccount[]> {
+    return this.answerAgent(() => {
+      this.stillSignedIn();
+      const reached: ReachedAccount[] = [];
+      const current = this.current;
+      if (current !== null && this.made !== null) {
+        const installation = { id: current.id, account: { ...this.account }, suspended: current.suspended };
+        const granted = this.held.filter((r) => this.grants(current, r));
+        reached.push(this.reachedOf(installation, current.suspendedBy, null, granted));
+      }
+      for (const other of this.others) {
+        const installation = { id: other.id, account: { ...other.account }, suspended: other.suspended };
+        reached.push(this.reachedOf(installation, other.suspendedBy, other.sso, other.repositories));
+      }
+      return reached;
+    });
+  }
+
+  // HostSignIn: the person signing in to the shared App (ADR 0066).
+
+  startSignIn(): Promise<DeviceGrant> {
+    return this.answerAgent(() => this.signIns.start());
+  }
+
+  pollSignIn(grant: DeviceGrant): Promise<DevicePoll> {
+    return this.answerAgent(() => {
+      const polled = this.signIns.poll(grant);
+      if (polled.kind === "issued") this.signedOut = false;
+      return polled;
+    });
+  }
+
+  refreshSignIn(signIn: SignIn): Promise<SignIn> {
+    return this.answerAgent(() => this.signIns.refresh(signIn));
+  }
+
+  /** The person enters the device code on GitHub's page and authorises the App: the next poll signs them in. */
+  enterCode(userCode: string): void {
+    this.signIns.enter(userCode);
+  }
+
+  /** The person refuses the device code on GitHub's page: the next poll is denied. */
+  denyCode(userCode: string): void {
+    this.signIns.deny(userCode);
+  }
+
+  /**
+   * Who the repository ports post as from now on: the person signed in (the shared App's way, the default when
+   * `person` is given), or the bot (an own App's, ADR 0066). Demo mode moves it as the service moves between the two.
+   */
+  postAs(who: "bot" | "person"): void {
+    this.postsAs = who;
+  }
+
+  /** The person takes the App's authorisation back on GitHub: no refresh token given so far renews. */
+  revokeSignIn(): void {
+    this.signIns.revoke();
+  }
+
+  /**
+   * The person is signed out on GitHub, as the adapter finds it once its renewal is refused (ADR 0066): the refresh
+   * tokens given so far are refused (`revokeSignIn`), and every repository, `accounts` and `person` refuse
+   * `unauthorized` with the cause `signed-out`, until a new code is polled to a sign-in.
+   */
+  signOut(): void {
+    this.signIns.revoke();
+    this.signedOut = true;
+  }
+
+  /** The next `GET /user` of a sign-in refused once as `failure`, the tokens already issued. */
+  refuseSignInPerson(failure: HostFailure): void {
+    this.signIns.refusePerson(failure);
+  }
+
+  /** GitHub asks to slow down at the device code's next poll. */
+  slowDownCode(userCode: string): void {
+    this.signIns.slowDown(userCode);
+  }
+
+  /** When the device code was polled, each time. */
+  codePolls(userCode: string): number[] {
+    return this.signIns.polls(userCode);
+  }
+
   // What a test does to the host, and reads from it.
 
   /** The host as it shows the change now: the checks of `commit`, or of the head commit when none is named. */
@@ -687,6 +1003,14 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
           }),
         ),
     };
+  }
+
+  /**
+   * Who filed each review of the change, by login, in order: the App's bot, or the person a sign-in posts as (ADR
+   * 0066). A change the host hasn't is refused (`not_found`).
+   */
+  reviewers(change: ChangeRef): string[] {
+    return this.reviewsOf(this.find(change)).map((r) => r.author.login);
   }
 
   /** A change opened on the host. Its head and base are commits the host knows from now on. */
@@ -916,6 +1240,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
   asAgent(account: { id: number; login: string }, options: { mayResolve?: boolean } = {}): AgentHost {
     const mayResolve = options.mayResolve ?? true;
     return {
+      account: () => this.answerAgent(() => ({ id: account.id, login: account.login })),
       changeOf: (repo, branch) =>
         this.answerAgent(() => {
           this.ownRepo(repo);
@@ -935,7 +1260,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
           if (!this.history.has(sha)) throw new HostError("not_found", `No commit ${sha}`);
           return this.checks
             .filter((c) => c.sha === sha && c.app === app && sameRepository(c.repo, repo))
-            .map(shownCheck);
+            .map((c): AgentCheck => ({ ...shownCheck(c), externalId: c.externalId }));
         }),
       comments: (change) =>
         this.answerAgent(() => this.view(change).comments.map(({ minimized: _, ...c }): HostComment => c)),
@@ -944,9 +1269,12 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
           this.find(change);
           return this.write(change, account, body).id;
         }),
-      threads: (change, app) =>
+      threads: (change, app, person) =>
         this.answerAgent(() =>
-          this.threadsOf(this.find(change), (a) => a.bot && a.login === `${app}[bot]`).map(
+          this.threadsOf(
+            this.find(change),
+            (a) => (a.bot && a.login === `${app}[bot]`) || (!a.bot && a.id === person),
+          ).map(
             (thread): AgentThread => ({
               ...thread,
               threadId: `PRRT_${thread.commentId}`,
@@ -1001,7 +1329,10 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
         .filter((c) => c.updatedAt >= since && sameRepository(c.repo, repo))
         // Newest edited first; of two edited in the same second, the one written later.
         .sort((a, b) => b.updatedAt - a.updatedAt || Number(b.id) - Number(a.id))
-        .map(({ reactedBy: _, minimized: __, repo: ___, ...c }) => ({ ...c, author: { ...c.author } }));
+        .map(({ reactedBy: _, minimized: __, repo: ___, via: ____, ...c }) => ({
+          ...c,
+          author: { ...c.author },
+        }));
       return this.listing(repo, "comments", items);
     });
   }
@@ -1011,7 +1342,17 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
   }
 
   threads(change: ChangeRef): Promise<HostThread[]> {
-    return this.answer(change.repo, () => this.threadsOf(this.find(change), (a) => a.id === this.bot.id));
+    return this.answer(change.repo, () =>
+      this.threadsOf(this.find(change), (a) => a.id === this.whoPosts().id),
+    );
+  }
+
+  poster(repo: RepositoryRef): Promise<{ id: number; login: string }> {
+    return this.answer(repo, () => {
+      this.ownRepo(repo);
+      const { id, login } = this.whoPosts();
+      return { id, login };
+    });
   }
 
   countCommits(repo: RepositoryRef, from: CommitSha, to: CommitSha): Promise<CommitCount> {
@@ -1134,12 +1475,12 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
           );
         }
         const at = toSecond(this.clock.now());
-        const author = { ...this.bot, bot: true };
+        const author = this.whoPosts();
         const posted: Filed = {
           id: this.id(),
           sha: review.sha,
           body: review.body,
-          author: { ...this.bot },
+          author: { id: author.id, login: author.login },
           comments: review.comments.map((c) => {
             const id = this.inlineId();
             return {
@@ -1179,8 +1520,8 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
   findReview(change: ChangeRef, marker: string): Promise<string | null> {
     return this.answer(change.repo, () => {
       const held = this.find(change);
-      // The bot's own: someone replying in a thread files a review too.
-      const own = this.reviewsOf(held).filter((r) => r.author.id === this.bot.id);
+      // The poster's own: someone replying in a thread files a review too.
+      const own = this.reviewsOf(held).filter((r) => r.author.id === this.whoPosts().id);
       return own.find((r) => r.body.includes(marker))?.id ?? null;
     });
   }
@@ -1201,7 +1542,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
           (c) =>
             c.change === change.number &&
             sameRepository(c.repo, change.repo) &&
-            c.author.id === this.bot.id &&
+            this.posted(c) &&
             c.body.includes(SUMMARY_MARKER),
         );
         if (own) {
@@ -1209,7 +1550,11 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
           this.posts.push({ kind: "summary.edited", number: change.number, commentId: own.id, body });
           return own.id;
         }
-        const created = this.write(change, this.bot, body);
+        // A person's token names the App on the issue comments it posts (spike 20); the bot's needs no naming.
+        const poster = this.whoPosts();
+        const via = poster.bot ? null : this.slug();
+        const by = { id: poster.id, login: poster.login };
+        const created = this.write(change, by, body, this.clock.now(), via);
         this.posts.push({ kind: "summary.created", number: change.number, commentId: created.id, body });
         return created.id;
       }),
@@ -1222,7 +1567,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
       this.posting("reaction", () => {
         this.ownRepo(repo);
         const kept = this.comment(commentId);
-        kept.reactedBy[reaction].add(this.bot.id);
+        kept.reactedBy[reaction].add(this.whoPosts().id);
         // GitHub lists each comment with its reactions' counts: a reaction changes the comments' listing.
         this.moved(kept.repo, "comments");
         this.posts.push({ kind: "reaction", commentId, reaction });
@@ -1237,7 +1582,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
         const held = this.find(change);
         this.fitsBody("reply", body);
         const root = this.root(held, commentId);
-        const reply = this.replyTo(held, root, { ...this.bot, bot: true }, body);
+        const reply = this.replyTo(held, root, this.whoPosts(), body);
         this.posts.push({ kind: "reply", number: held.number, commentId, replyId: reply.id, body });
         return reply.id;
       }),
@@ -1269,6 +1614,12 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
    */
   private answer<T>(repo: RepositoryRef, act: () => T): Promise<T> {
     return this.answerAgent(() => {
+      this.stillSignedIn();
+      const other = this.otherOf(repo);
+      if (other !== undefined) {
+        this.reachable(other);
+        return act();
+      }
       const app = this.made;
       this.opened(app === null || this.signing === null ? null : { id: app.id, key: this.signing });
       const current = this.current;
@@ -1284,6 +1635,14 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
     });
   }
 
+  /** Refused as signed out, as the adapter refuses every call once the person's renewal was refused (`signOut`). */
+  private stillSignedIn(): void {
+    if (this.signedOut)
+      throw new HostError("unauthorized", "GitHub refused to renew the sign-in: bad_refresh_token", {
+        connectionCause: { kind: "signed-out" },
+      });
+  }
+
   /** The App, or the `Error` of a test that moves an App the fake hasn't made. */
   private theApp(): FakeApp {
     if (this.made === null) throw new Error("The fake holds no App yet: make one with createApp");
@@ -1294,6 +1653,86 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
   private installed(): FakeInstallation {
     if (this.current === null) throw new Error("The fake's App is not installed");
     return this.current;
+  }
+
+  /**
+   * The other accounts' installations the person reaches, each with a new id, and the person's accounts without the
+   * App (`unreached`); none without a person.
+   */
+  private reach(reaches: FakeReach[] = [], unreached: FakeReach[] = []): void {
+    if (reaches.length + unreached.length > 0 && this.signedIn === null)
+      throw new Error("Other accounts are reached by a person signed in: give the fake `person`");
+    for (const other of unreached) {
+      onlyItsOwn(other);
+      this.unreached.push({
+        account: { ...other.account },
+        repositories: other.repositories.map((r) => ({ ...r })),
+        owners: [...(other.owners ?? [])],
+      });
+    }
+    for (const reach of reaches) {
+      onlyItsOwn(reach);
+      this.others.push({
+        id: this.nextInstallation++,
+        account: { ...reach.account },
+        repositories: reach.repositories.map((r) => ({ ...r })),
+        owners: [...(reach.owners ?? [])],
+        suspended: false,
+        suspendedBy: null,
+        sso: null,
+      });
+    }
+  }
+
+  /** The App's own installation (no login, or its account's), or another account's the person reaches. */
+  private installedOn(login?: string): { suspended: boolean; suspendedBy: string | null } {
+    if (login === undefined || login.toLowerCase() === this.account.login.toLowerCase())
+      return this.installed();
+    return this.other(login);
+  }
+
+  /** Another account's installation the person reaches, by its login, or the `Error` of a test naming none. */
+  private other(login: string): FakeOther {
+    const found = this.others.find((o) => o.account.login.toLowerCase() === login.toLowerCase());
+    if (found === undefined) throw new Error(`The person reaches no installation on ${login}`);
+    return found;
+  }
+
+  /** An installation as `accounts` gives it: suspended, or SAML SSO asked, its cause; else what it grants, unarchived. */
+  private reachedOf(
+    installation: HostInstallation,
+    suspendedBy: string | null,
+    sso: { url: string | null } | null,
+    granted: RepositoryRef[],
+  ): ReachedAccount {
+    if (installation.suspended) {
+      const by = suspendedBy === null ? {} : { suspendedBy };
+      return { installation, repositories: [], cause: { kind: "uninstalled", suspended: true, ...by } };
+    }
+    if (sso !== null) {
+      const cause = { kind: "sso", organisation: installation.account.login, url: sso.url } as const;
+      return { installation, repositories: [], cause };
+    }
+    const repositories = granted.filter((r) => !this.archived.has(keyOf(r))).map((r) => ({ ...r }));
+    return { installation, repositories, cause: null };
+  }
+
+  /** The other account's installation that grants `repo`, if any. */
+  private otherOf(repo: RepositoryRef): FakeOther | undefined {
+    return this.others.find((o) => o.repositories.some((r) => sameRepository(r, repo)));
+  }
+
+  /**
+   * Another account's installation refused as `@lookover/github`'s `UserSession` tells it: suspended, a 403 GitHub
+   * names no cause for, so the person's own refusal on that repository (`invalid`, no cause: `accounts` reads the
+   * suspension, from `suspended_at`); then SAML SSO asked (403), that account's `sso`.
+   */
+  private reachable(other: FakeOther): void {
+    if (other.suspended) throw new HostError("invalid", "Resource not accessible by integration (403)");
+    if (other.sso !== null)
+      throw new HostError("unauthorized", "Resource protected by organization SAML enforcement (403)", {
+        connectionCause: { kind: "sso", organisation: other.account.login, url: other.sso.url },
+      });
   }
 
   /** The App as GitHub describes it. */
@@ -1381,6 +1820,19 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
     return String(this.nextInlineId++);
   }
 
+  /** Who the repository ports post as: the person signed in to the App, else its bot (ADR 0066). */
+  private whoPosts(): Author {
+    return this.signedIn === null || this.postsAs === "bot"
+      ? { ...this.bot, bot: true }
+      : { ...this.signedIn, bot: false };
+  }
+
+  /** Whether a conversation comment is one the ports posted: theirs, and, for a person, through the App. */
+  private posted(c: Kept): boolean {
+    const poster = this.whoPosts();
+    return c.author.id === poster.id && (poster.bot || c.via === this.slug());
+  }
+
   /** The bot's App, by its slug: GitHub names an App's bot `<slug>[bot]`. */
   private slug(): string {
     return this.bot.login.replace(/\[bot\]$/, "");
@@ -1413,6 +1865,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
     author: { id: number; login: string },
     body: string,
     written = this.clock.now(),
+    via: string | null = null,
   ): Kept {
     const at = toSecond(written);
     const id = this.id();
@@ -1427,6 +1880,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
       updatedAt: at,
       reactedBy: { eyes: new Set(), rocket: new Set() },
       minimized: null,
+      via,
     };
     this.comments.push(kept);
     this.moved(change.repo, "comments");
@@ -1454,7 +1908,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations {
   }
 
   private ownRepo(repo: RepositoryRef): void {
-    if (!this.held.some((r) => sameRepository(r, repo)))
+    if (!this.held.some((r) => sameRepository(r, repo)) && this.otherOf(repo) === undefined)
       throw new HostError("not_found", `No repository ${repo.owner}/${repo.name}`);
   }
 

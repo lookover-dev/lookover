@@ -38,7 +38,7 @@ const MIN = 60_000;
 const LEDGER: RepositoryRef = { owner: SANDBOX.owner, name: "ledger-api" };
 const idOf = (repo: RepositoryRef) => repositoryId(`${repo.owner}/${repo.name}`);
 const APP = personalApp(1, "lookover-spike-sasensi");
-const PLANTED = changeId("lookover-sandbox#1");
+const PLANTED = changeId("sasensi/lookover-sandbox#1");
 
 /**
  * A fake GitHub that counts each repository's listings, and how often the installation is read; a repository named in
@@ -126,7 +126,7 @@ for (const fault of FAULTS)
     expect(room.snapshot().connection).toMatchObject({
       state: "connected",
       cause: null,
-      installationId: host.onGitHub().installation?.id,
+      accounts: [{ installationId: host.onGitHub().installation?.id }],
     });
   });
 
@@ -198,7 +198,7 @@ test("a reinstall heals without a restart: the loop's next listing shows the con
   expect(room.snapshot().connection).toMatchObject({
     state: "connected",
     cause: null,
-    installationId: installation,
+    accounts: [{ installationId: installation }],
   });
 });
 
@@ -213,7 +213,10 @@ test("uninstalled and installed again while the service was stopped: the restart
   const healed = host.install();
   await time.advance(MIN);
   await time.advance(0);
-  expect(first.room.snapshot().connection).toMatchObject({ state: "connected", installationId: healed });
+  expect(first.room.snapshot().connection).toMatchObject({
+    state: "connected",
+    accounts: [{ installationId: healed }],
+  });
   await first.room.stop();
 
   host.uninstall();
@@ -224,7 +227,7 @@ test("uninstalled and installed again while the service was stopped: the restart
     state: "connected",
     cause: null,
     app: APP,
-    installationId: fresh,
+    accounts: [{ installationId: fresh }],
   });
 });
 
@@ -287,7 +290,7 @@ test("started while GitHub is down: up and unreachable; once GitHub answers, the
     cause: null,
     bot: BOT.login,
     app: APP,
-    installationId: host.onGitHub().installation?.id,
+    accounts: [{ installationId: host.onGitHub().installation?.id }],
   });
   expect(room.snapshot().changes[PLANTED]).toMatchObject({ author: "you" });
 });
@@ -307,7 +310,7 @@ test("started with the App uninstalled: up and uninstalled; installed again, the
   expect(room.snapshot().connection).toMatchObject({
     state: "connected",
     cause: null,
-    installationId: installation,
+    accounts: [{ installationId: installation }],
   });
   expect(room.snapshot().changes[PLANTED]).toBeDefined();
 });

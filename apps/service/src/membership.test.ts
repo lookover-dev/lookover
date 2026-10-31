@@ -72,7 +72,7 @@ function counting(gh: Gh): Gh & { asked: string[] } {
   return {
     asked,
     person: () => gh.person(),
-    adminOrganisations: () => gh.adminOrganisations(),
+    memberships: () => gh.memberships(),
     membership: (organisation): Promise<GhMembership> => {
       asked.push(organisation);
       return gh.membership(organisation);

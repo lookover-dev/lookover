@@ -175,7 +175,8 @@ function nextPage(link: string | null): string | null {
   return null;
 }
 
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** What an error says, whatever was thrown. */
+export const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** GitHub's own words for a refusal: its `message`, and its `errors` when it lists them. */
 function said(body: unknown): string {
@@ -206,16 +207,70 @@ function retryAt(headers: Headers, now: number): number | undefined {
   return Number.isFinite(reset) ? reset * 1000 : undefined;
 }
 
+/**
+ * GitHub asking to wait, read in an answer's status, headers and words (`said`), as `rate_limited` until when it said
+ * it may be asked again; null when it asks no wait. The API's answers and the OAuth endpoints' read it alike.
+ */
+export function waitAsked(status: number, headers: Headers, words: string, now: number): HostError | null {
+  if ((status !== 403 && status !== 429) || !askedToWait(status, headers, words)) return null;
+  const detail = words === "" ? `${status}` : `${status}: ${words}`;
+  const at = retryAt(headers, now);
+  return new HostError(
+    "rate_limited",
+    `GitHub asked to wait (${detail})`,
+    at === undefined ? {} : { retryAt: at },
+  );
+}
+
+/** An organisation asking for SAML single sign-on, as GitHub refused: the page it gave to sign in there, if any. */
+export interface SsoAsked {
+  url: string | null;
+}
+
+/** GitHub's words for a resource an organisation protects with SAML SSO, in REST's message and in GraphQL's. */
+const SAML_WORDS = /SAML enforcement/i;
+
+/**
+ * A 403 asking for SAML SSO (GitHub's docs, "Authenticating to the REST API"): its `X-GitHub-SSO` header
+ * `required; url=<the page to sign in>`, or, without the header, GitHub's words for it. Null for any other answer.
+ */
+function ssoAskedIn(status: number, headers: Headers, words: string): SsoAsked | null {
+  if (status !== 403) return null;
+  const header = headers.get("x-github-sso") ?? "";
+  if (!/^required\b/i.test(header) && !SAML_WORDS.test(words)) return null;
+  const url = /\burl=(\S+)/.exec(header)?.[1];
+  return { url: url ?? null };
+}
+
+/**
+ * Whether a refusal asked for SAML SSO: a REST refusal as its answer said (`ssoAskedIn`), a GraphQL one (answered
+ * `200` with `FORBIDDEN`, no header) by GitHub's words in its message. Null for any other error.
+ */
+export function ssoAsked(error: unknown): SsoAsked | null {
+  if (error instanceof GitHubRefusal) return error.sso;
+  if (error instanceof HostError && error.failure === "unauthorized" && SAML_WORDS.test(error.message))
+    return { url: null };
+  return null;
+}
+
 /** A refusal GitHub answered, with its status: what tells a token it no longer takes (401) from an act refused. */
 export class GitHubRefusal extends HostError {
   readonly status: number;
+  /** The organisation's SAML SSO asked for, as the answer said; null when it asked none. */
+  readonly sso: SsoAsked | null;
 
-  constructor(error: HostError, status: number, connectionCause: ConnectionCause | undefined) {
+  constructor(
+    error: HostError,
+    status: number,
+    connectionCause: ConnectionCause | undefined,
+    sso: SsoAsked | null = null,
+  ) {
     super(error.failure, error.message, {
       ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
       ...(connectionCause === undefined ? {} : { connectionCause }),
     });
     this.status = status;
+    this.sso = sso;
   }
 }
 
@@ -238,7 +293,9 @@ function refusal(request: HostRequest, answer: Answer, now: number): GitHubRefus
   const error = new HostError(failure, redact(request, read.message), {
     ...(read.retryAt === undefined ? {} : { retryAt: read.retryAt }),
   });
-  return new GitHubRefusal(error, answer.status, cause);
+  const sso =
+    read.failure === "rate_limited" ? null : ssoAskedIn(answer.status, answer.headers, said(answer.body));
+  return new GitHubRefusal(error, answer.status, cause, sso);
 }
 
 function refusalOf(request: HostRequest, { status, body, headers }: Answer, now: number): HostError {
@@ -246,14 +303,8 @@ function refusalOf(request: HostRequest, { status, body, headers }: Answer, now:
   const where = `${request.method ?? "GET"} ${request.path}`;
   const detail = words === "" ? `${status}` : `${status}: ${words}`;
   if (status === 401) return new HostError("unauthorized", `GitHub refused the credentials (${detail})`);
-  if ((status === 403 || status === 429) && askedToWait(status, headers, words)) {
-    const at = retryAt(headers, now);
-    return new HostError(
-      "rate_limited",
-      `GitHub asked to wait (${detail})`,
-      at === undefined ? {} : { retryAt: at },
-    );
-  }
+  const wait = waitAsked(status, headers, words, now);
+  if (wait !== null) return wait;
   if (status === 403) return new HostError("unauthorized", `GitHub refused ${where} (${detail})`);
   if (status === 404) return new HostError("not_found", `GitHub has no ${where} (${detail})`);
   if (status === 422) return unprocessable(request, words, `${where} (${detail})`);

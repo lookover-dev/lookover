@@ -232,5 +232,5 @@ export function useTheme(): [Theme, (theme: Theme) => void] {
   ];
 }
 
-const repoName = (change: Change) => change.repoId.split("/")[1] ?? change.repoId;
-export const reviewPath = (change: Change) => `/reviews/${repoName(change)}/${change.number}`;
+/** The review page's address: the repository's owner and name (its id), then the number (ADR 0066). */
+export const reviewPath = (change: Change) => `/reviews/${change.repoId}/${change.number}`;

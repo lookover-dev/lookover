@@ -113,12 +113,15 @@ test("a restart keeps the pull requests and goes on numbering", async () => {
   const state = await snapshot(second.service, cookie2);
   // The second start (6); its own listing finds nothing new.
   expect(state.seq).toBe(6);
-  expect(state.changes["lookover-sandbox#1"]).toEqual({
+  expect(state.changes["sasensi/lookover-sandbox#1"]).toEqual({
     ...expectedChange1,
     headSha: SHA1_PUSHED,
     newCommits: 1,
   });
-  expect(Object.keys(state.changes).sort()).toEqual(["lookover-sandbox#1", "lookover-sandbox#2"]);
+  expect(Object.keys(state.changes).sort()).toEqual([
+    "sasensi/lookover-sandbox#1",
+    "sasensi/lookover-sandbox#2",
+  ]);
 
   // A tab from before the restart reloads, even one that saw every number: what the service fixes at
   // start (since when it runs, the engines' health) is in no event it could replay (ADR 0038).

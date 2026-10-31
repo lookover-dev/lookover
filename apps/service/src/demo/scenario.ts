@@ -1,18 +1,21 @@
 // A scenario (ADR 0046): data plus a script, played by the driver (`driver.ts`) against the real service on the
-// scripted fakes. The data: the world (the one repository, its bot and owner, each engine's health, the base
-// commit), the changes (number, title, branch, author, commits oldest first, each with the diff the review reads
+// scripted fakes. The data: the world (its repositories, its bot and owner, each engine's health, the base commit;
+// the shared App's accounts when signed in), the changes (repository, number, title, branch, author, commits oldest
+// first, each with the diff the review reads
 // at it and what the engines answer at each pass). Who wrote a change is in its commits' messages, as the host
 // shows it (`Co-authored-by`, ADR 0044), never a field of its own. The script: timed moves on the fake world and
 // commands sent as the owner would, `at` milliseconds from the room's start; the seed is the part at or before
 // `seed`, played at load with the clock advanced through it, the rest scheduled on the clock. A scenario carries
 // no sentence a screen shows but what the developer drawer lists (`DemoScenario`).
 import type {
+  ChangeRef,
   Command,
   CommitSha,
   DemoScenario,
   EngineHealth,
   EngineId,
   FindingId,
+  GhRole,
   HostFailure,
   RepositoryRef,
   RulesFile,
@@ -27,6 +30,11 @@ export interface Account {
   id: number;
   login: string;
 }
+
+/** A change of `repo` by its number, as a move names it: `on(repo)(148)`. */
+export const on =
+  (repo: RepositoryRef) =>
+  (number: number): ChangeRef => ({ repo, number });
 
 export interface World {
   repo: RepositoryRef;
@@ -43,8 +51,29 @@ export interface World {
    * active member of it, its admin when `admin`; absent, the App is on the owner's own account.
    */
   organisation?: { account: Account; admin: boolean };
+  /**
+   * Signed in to the shared App at the start (ADR 0066), Lookover posting as the owner: the App on GitHub stands for
+   * its installation on the owner's account, granting `repo` and `repositories`; each of `reaches` is its installation
+   * on an organisation the owner is in, granting the repositories given (that organisation's), in GitHub's order after
+   * the owner's. Absent, the owner's own App, or what the setup says. `ownAccountInstalled`: false, not installed on the
+   * owner's own account (absent, installed). `sso`: that organisation asks for SAML SSO the sign-in hasn't, from the start. `unreached`: the owner's
+   * organisations where it isn't installed (ADR 0067), each with its repositories, until an owner installs it there.
+   * `owners`: the organisation's owners beside the owner, as its people page on GitHub's fake lists them (absent, none;
+   * the owner is listed where `memberships` says they own it).
+   */
+  shared?: {
+    ownAccountInstalled?: boolean;
+    reaches: { organisation: Account; repositories: RepositoryRef[]; sso?: true; owners?: Account[] }[];
+    unreached?: { organisation: Account; repositories: RepositoryRef[]; owners?: Account[] }[];
+  };
   /** The owner's own `gh` (ADR 0059): signed in as the owner, signed out, or not installed. Absent, signed out. */
   gh?: "signed-in" | "signed-out" | "missing";
+  /**
+   * The organisations the owner's `gh` lists (ADR 0067), in its order, with the owner's role in each: what Lookover
+   * reads them as while `gh` is signed in, and what GitHub's fake install page offers each (Install, or Request).
+   * Absent, none but `organisation`.
+   */
+  memberships?: { organisation: Account; role: GhRole }[];
   /** Each engine's health at the start; the self-tests pass unless a move says otherwise. */
   engines: Record<EngineId, EngineHealth>;
   /** The repository's default branch and its commit: every change's base. */
@@ -100,6 +129,8 @@ interface ScenarioCommit {
 }
 
 export interface ScenarioChange {
+  /** The repository it is in: one the world holds (`World.repo` when not given). */
+  repo?: RepositoryRef;
   number: number;
   title: string;
   branch: string;
@@ -122,7 +153,8 @@ type OwnerCommand = Extract<Command, { type: "review.request" | "service.pause" 
 type Refusal = Extract<HostFailure, "unavailable" | "rate_limited">;
 
 /**
- * A move on the fake world. `open`: the host lists the change, at its first commit. `push`: its next commit
+ * A move on the fake world, naming its change by repository and number (two repositories of one name on two
+ * accounts each have their own #1, ADR 0066). `open`: the host lists the change, at its first commit. `push`: its next commit
  * lands. `ask`: a `/lookover review` comment by the owner's agent (as the owner, naming the head commit, as
  * `lookover wait` writes it). `refuse`: the host refuses every call for `forMs` on the clock (as rate limited, with
  * that time as GitHub's reset), then answers again. `update`: the engine is a newer version, whose self-test passes
@@ -134,11 +166,11 @@ type Refusal = Extract<HostFailure, "unavailable" | "rate_limited">;
  * author or anyone. Nothing is listed: a round reads the threads when it runs.
  */
 export type Move =
-  | { kind: "open"; change: number }
-  | { kind: "push"; change: number }
-  | { kind: "ask"; change: number }
-  | { kind: "reply"; change: number; finding: FindingId; by: Account; text: string }
-  | { kind: "close"; change: number }
+  | { kind: "open"; change: ChangeRef }
+  | { kind: "push"; change: ChangeRef }
+  | { kind: "ask"; change: ChangeRef }
+  | { kind: "reply"; change: ChangeRef; finding: FindingId; by: Account; text: string }
+  | { kind: "close"; change: ChangeRef }
   | { kind: "sign-out"; engine: EngineId }
   | { kind: "missing"; engine: EngineId }
   | { kind: "installed"; engine: EngineId; version: string }

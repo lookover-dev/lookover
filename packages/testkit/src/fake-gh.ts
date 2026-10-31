@@ -1,5 +1,5 @@
-// The person's own `gh` (ADR 0059), in memory: who it is signed in as, the organisations where that account is an active
-// admin, and that account's membership of one organisation. The port and its shapes are contracts' (`Gh`); the real
+// The person's own `gh` (ADR 0059), in memory: who it is signed in as, that account's active memberships with its role
+// in each (ADR 0067), and its membership of one organisation. The port and its shapes are contracts' (`Gh`); the real
 // one is the service's (`ghCli`), and `describeGh` holds both to one contract.
 import type { Gh, GhUnanswered, GhWhy, HostLogin } from "@lookover/contracts";
 
@@ -14,7 +14,7 @@ export interface GhMember {
  * kept per account, so another sign-in reads another person's memberships; each account answered with its id and login
  * only, as `gh` answers, whatever else it was given. `fail(why)` makes every read "can't answer"
  * with `why` until `null` (`scope` spares `person`, which needs none); `fail(why, organisation)` that organisation's
- * membership alone (an SSO organisation).
+ * membership alone, and the list of memberships too when `why` is `sso` (GitHub's `partial-results`).
  */
 export interface MemoryGh extends Gh {
   signIn(as: HostLogin | null | "missing"): void;
@@ -59,16 +59,17 @@ export function memoryGh(o: { as?: HostLogin | null | "missing" } = {}): MemoryG
       const who = signedIn(false);
       return isAccount(who) ? { kind: "signed-in", account: { ...who } } : who;
     },
-    adminOrganisations: async () => {
+    memberships: async () => {
       const who = signedIn(true);
       if (!isAccount(who)) return who;
-      const listed = [...organisations.entries()]
-        .filter(([login]) => {
-          const member = members.get(login)?.get(who.id);
-          return member?.state === "active" && member.admin;
-        })
-        .map(([, organisation]) => ({ ...organisation }));
-      return { kind: "listed", organisations: listed };
+      // GitHub leaves an SSO organisation out of the list and says so (`partial-results`): the list can't answer.
+      if ([...failingOrganisation.values()].includes("sso")) return unanswered("sso");
+      const listed = [...organisations.entries()].flatMap(([login, organisation]) => {
+        const member = members.get(login)?.get(who.id);
+        if (member?.state !== "active") return [];
+        return [{ organisation: { ...organisation }, role: member.admin ? "owner" : "member" } as const];
+      });
+      return { kind: "listed", person: { ...who }, organisations: listed };
     },
     membership: async (organisation) => {
       const who = signedIn(true);

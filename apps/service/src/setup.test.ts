@@ -41,7 +41,7 @@ afterEach(async () => {
 const MIN = 60_000;
 const OWNER = { id: 1, login: "sasensi" };
 const REPO = repositoryId("sasensi/lookover-sandbox");
-const MINE = changeId("lookover-sandbox#1");
+const MINE = changeId("sasensi/lookover-sandbox#1");
 
 /** The owner on the GitHub step: their AI is ready, no bot exists yet. */
 const ON_GITHUB: Setup = {
@@ -63,7 +63,7 @@ function newOwner(setup: Setup): Scenario {
     later: "",
     path: "/setup",
     world: {
-      repo: { owner: "sasensi", name: "lookover-sandbox" },
+      repo: SANDBOX,
       bot: { id: 2, login: "lookover-spike-sasensi[bot]" },
       owner: OWNER,
       engines: {
@@ -97,7 +97,7 @@ function newOwner(setup: Setup): Scenario {
         ],
       },
     ],
-    script: [{ at: 1 * MIN, move: { kind: "open", change: 1 } }],
+    script: [{ at: 1 * MIN, move: { kind: "open", change: { repo: SANDBOX, number: 1 } } }],
     seed: 2 * MIN,
   };
 }

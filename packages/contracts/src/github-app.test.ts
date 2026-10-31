@@ -60,6 +60,15 @@ test("an organisation's App links to the organisation's pages: its installation'
   );
 });
 
+test("an organisation's owners: its people page, filtered to owners, on the web address the service gives", () => {
+  expect(githubLinks.owners(GITHUB_WEB, "ledger-dev")).toBe(
+    "https://github.com/orgs/ledger-dev/people?query=role%3Aowner",
+  );
+  expect(githubLinks.owners(DEMO_API.github, "ledger-dev")).toBe(
+    "/api/v1/demo/github/orgs/ledger-dev/people?query=role%3Aowner",
+  );
+});
+
 test("a refusal gives the connection the cause the adapter named, else unreachable or a key refused; others cut nothing", () => {
   const suspended = { kind: "uninstalled", suspended: true } as const;
   expect(connectionCauseOf(new HostError("unauthorized", "x", { connectionCause: suspended }))).toEqual(

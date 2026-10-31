@@ -50,6 +50,25 @@ export const appInstallations = z.array(
   z.object({ id: z.int(), account, suspended_at: z.string().nullable().optional() }),
 );
 
+/**
+ * The installations the person's token reaches, each with its App's id, one page (`GET /user/installations`), and
+ * who suspended it when GitHub names them (`suspended_by`, a user, ADR 0067).
+ */
+export const userInstallations = z.object({
+  installations: z.array(
+    z.object({
+      id: z.int(),
+      app_id: z.int(),
+      account,
+      suspended_at: z.string().nullable().optional(),
+      suspended_by: z
+        .object({ login: z.string().min(1) })
+        .nullable()
+        .optional(),
+    }),
+  ),
+});
+
 /** The repositories an installation grants, one page. */
 export const installationRepositories = z.object({
   repositories: z.array(
@@ -139,7 +158,13 @@ export const replyId = z.object({ id: z.int() });
 /** A comment in the pull request's conversation (an "issue comment" to GitHub). */
 export const issueComment = z.object({ id: z.int(), user, body: z.string() });
 
-export const issueComments = z.array(issueComment);
+/**
+ * The conversation as the summary is looked for in it: each comment with the App a user token posted it through
+ * (`performed_via_github_app`, spike 20), null or absent for one written any other way.
+ */
+export const issueComments = z.array(
+  issueComment.extend({ performed_via_github_app: z.object({ id: z.int() }).nullish() }),
+);
 
 /** The conversation as `view` reads it: each comment with GitHub's count of each of its reactions. */
 export const viewedComments = z.array(
@@ -199,6 +224,31 @@ export const refusal = z.object({
   message: z.string().optional(),
   errors: z.array(z.union([z.string(), z.object({ message: z.string().optional() })])).optional(),
 });
+
+/** The device flow's code (`POST /login/device/code`): times in seconds. */
+export const deviceCode = z.object({
+  device_code: z.string().min(1),
+  user_code: z.string().min(1),
+  verification_uri: z.string().min(1),
+  expires_in: z.number().positive(),
+  interval: z.number().positive(),
+});
+
+/**
+ * The OAuth endpoint's answer (`POST /login/oauth/access_token`): its refusal, with status 200, is an `error` field;
+ * a token for the shared App, which expires, comes with its refresh token and both lifetimes, in seconds.
+ */
+export const oauthRefusal = z.object({ error: z.string().min(1) });
+export const oauthToken = z.object({
+  access_token: z.string().min(1),
+  expires_in: z.number().positive(),
+  refresh_token: z.string().min(1),
+  refresh_token_expires_in: z.number().positive(),
+});
+export const oauthAnswer = z.union([oauthRefusal, oauthToken]);
+
+/** The signed-in person (`GET /user`). */
+export const person = user;
 
 /** The payload as `schema` reads it. Throws `HostError("unavailable")` when it has another shape. */
 export function parse<T>(schema: z.ZodType<T>, payload: unknown, what: string): T {

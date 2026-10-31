@@ -131,6 +131,11 @@ export interface HostIntake {
    */
   threads(change: ChangeRef): Promise<HostThread[]>;
   /**
+   * Who posts in the repository (ADR 0066): the App's bot on the own App, the person signed in on the shared one, by
+   * numeric id. Lookover's threads are this account's, and so are its replies (`core.lookoversReply`).
+   */
+  poster(repo: RepositoryRef): Promise<{ id: number; login: string }>;
+  /**
    * How many commits `to` has that `from` hasn't, and whether `from` is no ancestor of `to`. Throws
    * `HostError("not_found")` for a commit the repository doesn't have.
    */

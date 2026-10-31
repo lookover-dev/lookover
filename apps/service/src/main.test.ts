@@ -123,12 +123,12 @@ test("--frozen stands the demo service's clock at that instant once S10's seed i
   expect(started.engines.claude.state).toBe("ready");
   expect(started.engines.codex).toMatchObject({ state: "ready", version: "0.162.1" });
   // The first id made is the first review's job; the seed's stamps are on the clock, so every run gives the same.
-  const clean = started.reviews[asChangeId("lookover-sandbox#135")];
+  const clean = started.reviews[asChangeId("sasensi/lookover-sandbox#135")];
   expect(clean?.job?.id).toBe(jobId("1"));
   expect(clean?.rounds.map((r) => [r.startedAt, r.endedAt])).toEqual([
     [FROZEN_AT - 149 * MIN, FROZEN_AT - 149 * MIN + 75_000],
   ]);
-  const settled = started.reviews[asChangeId("lookover-sandbox#146")];
+  const settled = started.reviews[asChangeId("sasensi/lookover-sandbox#146")];
   expect(settled?.rounds).toHaveLength(2);
   expect(settled?.loop).toBe("settled");
 
@@ -169,7 +169,7 @@ test("--frozen and --scenario are for demo mode only, and a scenario must exist"
 });
 
 // A live config with no App is taken (ADR 0053): the data folder's App, or the setup, gives it.
-test("live mode refuses, before taking the lock or calling GitHub, a live config with two of one name, and never for its `watch`", async () => {
+test("live mode refuses, before taking the lock or calling GitHub, a live config listing one repository twice, and never for its `watch`", async () => {
   const folder = home();
   const key = join(folder, "app.pem");
   writeFileSync(key, "-----BEGIN RSA PRIVATE KEY-----\nnot a key\n-----END RSA PRIVATE KEY-----\n");
@@ -186,11 +186,11 @@ test("live mode refuses, before taking the lock or calling GitHub, a live config
   const sandbox = "sasensi/lookover-sandbox";
   const twins = await live({
     app,
-    repositories: ["lookover-dev/lookover-private", "someone/lookover-private"],
+    repositories: ["lookover-dev/lookover-private", "lookover-dev/Lookover-Private"],
     watch: sandbox,
   });
   expect(twins).toContain(
-    `"repositories" lists two repositories named lookover-private, lookover-dev/lookover-private and someone/lookover-private`,
+    `"repositories" lists lookover-dev/lookover-private twice, the second time as lookover-dev/Lookover-Private`,
   );
   // `watch` is ignored (the owner's own file keeps it): never a refusal, its one line printed once a config is taken.
   expect(twins).not.toMatch(/"watch"|`watch`/);

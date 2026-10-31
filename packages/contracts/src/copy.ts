@@ -57,6 +57,13 @@ export function asSentence(phrase: string): string {
   return `${upperFirst(phrase)}.`;
 }
 
+/**
+ * What the review's body and each of its line comments open with on GitHub, on both ways (ADR 0066), and the app's
+ * mock of the pull request too: signed in on the shared App, Lookover posts as the person, and this is the only thing
+ * on GitHub that says the words are Lookover's.
+ */
+export const LOOKOVERS_OPENING = "Lookover · ";
+
 /** An engine whose version failed the self-test (ADR 0044), as a phrase after its name, or as its state. */
 export const FAILED_SAFETY_CHECK = "didn't pass Lookover's safety check";
 

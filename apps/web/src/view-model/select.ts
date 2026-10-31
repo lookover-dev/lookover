@@ -1,10 +1,12 @@
 // The view model: read-only views of the snapshot, what Home, the status pill and the rows show.
 import {
+  type AccountCause,
   asSentence,
   type Change,
   CODEX_REVIEWS,
   type Command,
   type Connection,
+  type ConnectionAccount,
   type ConnectionCause,
   type Deferral,
   type Engine,
@@ -13,13 +15,16 @@ import {
   type Finding,
   type FixAction,
   githubLinks,
+  type HostAccount,
   isUnsettled,
   type KeyRefusal,
+  ownInstallation,
   type Repository,
   type RepositoryId,
   type Review,
   type Reviewers,
   type SettingKey,
+  SHARED_APP,
   type SkipReason,
   type State,
   shortSha,
@@ -27,10 +32,12 @@ import {
   type Turn,
 } from "@lookover/contracts";
 import type { Tone } from "../ui/basics.tsx";
+import { accountFix, installFirstFix, ownsAccount, ssoFix } from "./accounts.ts";
 import { deferralText, waitingNotice } from "./deferral.ts";
-import { ago, agoSentence, clock, isToday, itOrThem, plural, until } from "./format.ts";
-import { accountText, causeText, engineStateText } from "./health.ts";
+import { ago, agoSentence, clock, isToday, itOrThem, plural, until, type WithCommand } from "./format.ts";
+import { accountText, causeText, connectionText, engineStateText } from "./health.ts";
 import { runLine } from "./run.ts";
+import { FINISHING, SIGN_IN_TEXT, waitingText } from "./sign-in.ts";
 import { atLoginMismatch } from "./start-at-login.ts";
 import { type DisplayStatus, displayStatus, failureText } from "./status.ts";
 
@@ -51,20 +58,31 @@ export function changeReviews(state: State): ChangeReview[] {
   return out.sort((a, b) => b.review.updatedAt - a.review.updatedAt);
 }
 
-/** The change at a page address: repository name and number, as in "/reviews/ledger-api/148". */
+/**
+ * The change at a page address: its repository's owner and name, and its number, as in
+ * "/reviews/sasensi/ledger-api/148" (ADR 0066).
+ */
 export function changeReviewAt(
   state: State,
-  repoName: string | undefined,
+  owner: string | undefined,
+  name: string | undefined,
   number: string | undefined,
 ): ChangeReview | null {
   return (
-    changeReviews(state).find((i) => i.repo.name === repoName && String(i.change.number) === number) ?? null
+    changeReviews(state).find(
+      (i) => i.repo.owner === owner && i.repo.name === name && String(i.change.number) === number,
+    ) ?? null
   );
 }
 
-/** "ledger-api #148" */
+/** "sasensi/ledger-api #148": the owner too, since two accounts may each have a ledger-api (ADR 0066). */
 export function changeLabel(change: Change): string {
-  return `${change.repoId.split("/")[1]} #${change.number}`;
+  return `${change.repoId} #${change.number}`;
+}
+
+/** "sasensi/ledger-api": a repository with its owner, as Repositories lists every account's (ADR 0066). */
+export function repositoryLabel(repo: Pick<Repository, "owner" | "name">): string {
+  return `${repo.owner}/${repo.name}`;
 }
 
 /**
@@ -489,16 +507,26 @@ export function homeGroups(state: State): HomeGroups {
 
 export interface Problem {
   id: string;
+  /** The account it is of, by its login, when it is one account's own on the shared App (ADR 0066). */
+  account?: string;
   tone: "need" | "warn";
   /** Short, for the pill. */
   short: string;
   title: string;
-  detail: string;
+  /** One sentence; a code to type elsewhere in it as inline code. */
+  detail: string | WithCommand;
   /**
-   * Its one fix: a command the service answers, a page to open (GitHub's, for what only GitHub can change), or a
-   * place in the app (`path`: what the owner changes in Settings).
+   * Its one fix: a command the service answers, a page to open (GitHub's, for what only GitHub can change), with the
+   * code to `copy` as it opens when the page asks for one (Sign in again's), or a place in the app (`path`: what the
+   * owner changes in Settings).
    */
-  fix: ({ label: string } & (FixAction | { path: string })) | null;
+  fix:
+    | ({ label: string } & (
+        | Exclude<FixAction, { href: string }>
+        | { href: string; copy?: string }
+        | { path: string }
+      ))
+    | null;
   busy: boolean;
 }
 
@@ -508,6 +536,8 @@ function engineUsed(state: State, id: EngineId): boolean {
 }
 
 const RECONNECT = { label: "Reconnect GitHub", command: { type: "connection.reconnect" } } as const;
+/** A new sign-in to the shared App (ADR 0066): the one fix of a sign-in GitHub no longer takes. */
+const SIGN_IN_AGAIN = { label: "Sign in again", command: { type: "connection.signIn" } } as const;
 
 /** "Add a new key": the App's page on GitHub, where a new key is generated; Reconnect while no App is known. */
 function newKey(connection: Connection): Problem["fix"] {
@@ -529,10 +559,29 @@ const keyRefusedText = (can: string): Record<KeyRefusal | "unknown", string> => 
   unknown: `It may have been revoked, or the App deleted. Generate a new key on the App's page${can}, ${GIVE_IT}`,
 });
 
-/** "an admin of acme" on an organisation's App (ADR 0059): who changes it on GitHub. Null on a personal App. */
-function adminOf(app: Connection["app"]): string | null {
-  return app?.account.type === "Organization" ? `an admin of ${app.account.login}` : null;
+/**
+ * "an admin of acme" on an organisation's App or installation (ADR 0059): who changes it on GitHub. Null on a
+ * personal account, or none.
+ */
+function adminOf(account: HostAccount | undefined): string | null {
+  return account?.type === "Organization" ? `an admin of ${account.login}` : null;
 }
+
+/** "until an admin of acme unsuspends it on GitHub": who lifts a suspended installation's suspension. */
+const unsuspendedBy = (admin: string | null): string =>
+  `until ${admin === null ? "you unsuspend" : `${admin} unsuspends`} it on GitHub`;
+
+/** The one fix of a suspended installation: its page on GitHub, where it is unsuspended. */
+const unsuspendFix = (web: string, account: HostAccount, installationId: number) => ({
+  label: "Unsuspend it on GitHub",
+  href: githubLinks.installation(web, account, installationId),
+});
+
+/** The one fix of an App no longer installed: its install page on GitHub. */
+const installFix = (web: string, slug: string) => ({
+  label: "Install it on GitHub",
+  href: githubLinks.install(web, slug),
+});
 
 /** "Check again" (ADR 0059): the person's `gh` read again, their membership with it. */
 const CHECK_AGAIN = { label: "Check again", command: { type: "gh.check" } } as const;
@@ -546,33 +595,36 @@ function causeProblem(connection: Connection, cause: ConnectionCause): Omit<Prob
 }
 
 /** The App's installation suspended: "you" unsuspend it, or an admin of its organisation. */
-function suspendedFix({
-  app,
-  web,
-  installationId,
-}: Connection): Omit<Problem, "id" | "tone" | "busy" | "short"> {
-  const admin = adminOf(app);
+function suspendedFix({ app, web, accounts }: Connection): Omit<Problem, "id" | "tone" | "busy" | "short"> {
+  const installation = ownInstallation(accounts);
   return {
     title: "Lookover's App is suspended on GitHub",
-    detail: `Reviews cannot be read or posted until ${admin === null ? "you unsuspend" : `${admin} unsuspends`} it on GitHub.`,
+    detail: `Reviews cannot be read or posted ${unsuspendedBy(adminOf(app?.account))}.`,
     fix:
-      app && installationId !== null
-        ? {
-            label: "Unsuspend it on GitHub",
-            href: githubLinks.installation(web, app.account, installationId),
-          }
+      app && installation !== undefined
+        ? unsuspendFix(web, app.account, installation.installationId)
         : RECONNECT,
   };
 }
 
-/** The App no longer installed on its account: your GitHub account, or an organisation, whose admin installs it. */
-function uninstalledFix({ app, web }: Connection): Omit<Problem, "id" | "tone" | "busy" | "short"> {
-  const admin = adminOf(app);
+/**
+ * The App no longer installed on its account: your GitHub account, or an organisation, whose admin installs it. On
+ * the shared App (ADR 0066), installed on none of the person's accounts any more: the accounts list's first fix.
+ */
+function uninstalledFix(connection: Connection): Omit<Problem, "id" | "tone" | "busy" | "short"> {
+  const { app, web, way } = connection;
+  if (way === "shared")
+    return {
+      title: "Lookover's App is no longer installed",
+      detail: `${SHARED_APP.slug} is installed on none of your GitHub accounts. Reviews cannot be read or posted until it is installed again.`,
+      fix: installFirstFix(connection),
+    };
+  const admin = adminOf(app?.account);
   const until = admin === null ? "it is installed again" : `${admin} installs it again`;
   return {
     title: "Lookover's App is no longer installed",
     detail: `${app?.slug ?? "The App"} was removed from ${app ? accountText(app) : "your GitHub account"}. Reviews cannot be read or posted until ${until}.`,
-    fix: app ? { label: "Install it on GitHub", href: githubLinks.install(web, app.slug) } : RECONNECT,
+    fix: app ? installFix(web, app.slug) : RECONNECT,
   };
 }
 
@@ -581,7 +633,7 @@ function causeFix(
   connection: Connection,
   cause: ConnectionCause,
 ): Omit<Problem, "id" | "tone" | "busy" | "short"> {
-  const admin = adminOf(connection.app);
+  const admin = adminOf(connection.app?.account);
   const can = admin === null ? "" : ` (${admin} can)`;
   switch (cause.kind) {
     case "unreachable":
@@ -611,10 +663,24 @@ function causeFix(
         detail: `Your gh says you aren't an active member of ${cause.organisation}, so Lookover stopped reviewing. Once an admin adds you back, check again.`,
         fix: CHECK_AGAIN,
       };
+    case "signed-out":
+      // Only a new sign-in brings it back (ADR 0066): its code shows on the connection once asked.
+      return {
+        title: "You're signed out of GitHub",
+        detail:
+          "GitHub no longer takes your sign-in. Reviews cannot be read or posted until you sign in again.",
+        fix: SIGN_IN_AGAIN,
+      };
+    case "sso":
+      return {
+        title: `${cause.organisation} asks you to sign in with SSO`,
+        detail: `${cause.organisation} protects its repositories with single sign-on. Its reviews cannot be read or posted until you sign in there.`,
+        fix: ssoFix(connection, cause.organisation, cause.url),
+      };
   }
 }
 
-function connectionProblem(connection: Connection): Problem {
+function connectionProblem(connection: Connection, now: number): Problem {
   const said =
     connection.cause === null
       ? {
@@ -625,7 +691,25 @@ function connectionProblem(connection: Connection): Problem {
           fix: RECONNECT,
         }
       : causeProblem(connection, connection.cause);
-  return { id: "connection", tone: "need", busy: false, ...said };
+  return { id: "connection", tone: "need", busy: false, ...said, ...codeAsked(connection, now) };
+}
+
+/**
+ * Signed out, once Sign in again gave a code (ADR 0066): the setup's sentence for it, and its one button, which copies
+ * the code and opens GitHub's page; past its expiry and still shown, the code was taken and the sign-in finishes, Sign
+ * in again waiting. Nothing to change otherwise.
+ */
+function codeAsked(
+  { cause, signIn }: Connection,
+  now: number,
+): Pick<Problem, "detail" | "fix" | "busy"> | null {
+  if (cause?.kind !== "signed-out" || signIn === null) return null;
+  if (now >= signIn.expiresAt) return { detail: FINISHING, fix: SIGN_IN_AGAIN, busy: true };
+  return {
+    detail: waitingText(signIn.userCode, until(now, signIn.expiresAt)),
+    fix: { label: SIGN_IN_TEXT.copy, href: signIn.verificationUri, copy: signIn.userCode },
+    busy: false,
+  };
 }
 
 /** GitHub's rate limit: Lookover waits until the time it gave, and nothing needs doing (ADR 0043). */
@@ -641,12 +725,50 @@ function connectionLimit(until: number): Problem {
   };
 }
 
-/** What GitHub's connection needs said: disconnected, or a wait GitHub asked for that isn't over. */
+/**
+ * One account the shared App reaches that can't be used now (ADR 0066), its other accounts still used, with its one
+ * fix from the accounts list's table (ADR 0067, `accountFix`): SSO asked, said as the connection's would be; its
+ * installation suspended, lifted by the person when they own the account, else by one of its owners (who suspended it
+ * named when GitHub said); or gone, installed again by an owner. Its short line names the account, for the pill.
+ */
+function accountProblem(connection: Connection, a: ConnectionAccount, cause: AccountCause): Problem {
+  const { login } = a.account;
+  const said = { id: `account:${login}`, account: login, tone: "need", busy: false } as const;
+  const fix = accountFix(connection, a, cause);
+  if (cause.kind === "sso")
+    return { ...said, ...causeProblem(connection, cause), short: `${login} needs SSO`, fix };
+  const mine = ownsAccount(connection, a);
+  const cannot = "Its repositories' reviews cannot be read or posted";
+  if (!cause.suspended)
+    return {
+      ...said,
+      short: `App uninstalled on ${login}`,
+      title: `Lookover's App is no longer installed on ${login}`,
+      detail: `${cannot} until ${mine ? "you install" : `an owner of ${login} installs`} it there again.`,
+      fix,
+    };
+  const by = cause.suspendedBy === undefined ? "" : ` ${cause.suspendedBy} suspended it.`;
+  return {
+    ...said,
+    short: `App suspended on ${login}`,
+    title: `Lookover's App is suspended on ${login}`,
+    detail: `${cannot} until ${mine ? "you unsuspend" : `an owner of ${login} unsuspends`} it on GitHub.${by}`,
+    fix,
+  };
+}
+
+/**
+ * What GitHub's connection needs said: disconnected, or a wait GitHub asked for that isn't over; then each account
+ * that holds a cause of its own, in GitHub's order.
+ */
 function connectionProblems(state: State): Problem[] {
   const { connection } = state;
-  if (connection.state !== "connected") return [connectionProblem(connection)];
+  if (connection.state !== "connected") return [connectionProblem(connection, state.now)];
   const until = connection.limitUntil;
-  return until !== null && until > state.now ? [connectionLimit(until)] : [];
+  const accounts = connection.accounts.flatMap((a) =>
+    a.cause === null ? [] : [accountProblem(connection, a, a.cause)],
+  );
+  return [...(until !== null && until > state.now ? [connectionLimit(until)] : []), ...accounts];
 }
 
 /**
@@ -755,6 +877,21 @@ export function problems(state: State): Problem[] {
   // Its start at login can be wrong, though: last, the machine's.
   const login = loginProblem(state);
   return [...connectionProblems(state), ...engines, ...(login ? [login] : [])];
+}
+
+/**
+ * The status menu's GitHub line (ADR 0067): what the connection is ("connected as sam"), whether its dot is on (a
+ * wait GitHub asked for is no fault: only a cause turns it off), and every GitHub problem under it, each with its one
+ * fix: the connection's, then each account's, in GitHub's order.
+ */
+export function githubStatus(state: State): { ok: boolean; text: string; problems: Problem[] } {
+  const { connection } = state;
+  const list = problems(state).filter((p) => p.id === "connection" || p.account !== undefined);
+  return {
+    ok: connection.state === "connected" && list.every((p) => p.account === undefined),
+    text: connectionText(connection),
+    problems: list,
+  };
 }
 
 export function pill(state: State): { tone: "ok" | "warn" | "mute"; label: string } {

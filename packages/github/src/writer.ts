@@ -1,7 +1,8 @@
-// `HostWriter` on GitHub: the `Lookover` check run, carrying its job's id as GitHub's `external_id` (found by it
-// among the App's runs on the commit); one review
-// with its inline comments, found again by its marker among the bot's own; the summary comment found by its marker
-// among the bot's own. Both lookups read every page GitHub's `Link` header gives. GitHub's rules from spike 03
+// `HostWriter` on GitHub: the `Lookover` check run, carrying its external id as GitHub's `external_id` (found by it
+// among the session's App's runs on the commit); one review
+// with its inline comments, found again by its marker among the poster's own (the session's: the bot, or the person
+// signed in, ADR 0066); the summary comment found by its marker among the poster's own, a person's only when the
+// App posted it. Both lookups read every page GitHub's `Link` header gives. GitHub's rules from spike 03
 // (ADR 0022) are applied before a request leaves: the check output and every body are counted in UTF-8 bytes.
 import type {
   CheckOutput,
@@ -23,7 +24,6 @@ import {
 } from "@lookover/contracts";
 import type { Allowed } from "./allowed.ts";
 import type { GitHubApi } from "./api.ts";
-import type { AppSession } from "./auth.ts";
 import { graphql } from "./graphql.ts";
 import {
   authoredReviews,
@@ -36,6 +36,7 @@ import {
   replyId,
   reviewId,
 } from "./schemas.ts";
+import type { Session } from "./session.ts";
 
 /** Throws `too_large` when GitHub would refuse or cut the output; nothing has been sent yet. */
 function fits(output: CheckOutput): void {
@@ -62,6 +63,8 @@ function fitsBody(what: string, body: string): void {
 }
 
 const repoPath = (repo: RepositoryRef) => `/repos/${repo.owner}/${repo.name}`;
+
+type IssueComment = ReturnType<typeof issueComments.parse>[number];
 
 /** A check not yet completed, as GitHub names its status. */
 const STATUS: Record<OpenCheckStatus, "queued" | "in_progress"> = {
@@ -108,7 +111,7 @@ const unprocessable = (words: string): HostError | null =>
       )
     : null;
 
-export function createWriter(api: GitHubApi, session: AppSession, allowed: Allowed): HostWriter {
+export function createWriter(api: GitHubApi, session: Session, allowed: Allowed): HostWriter {
   /** Every item of a listing, page after page as GitHub's `Link` header gives them. */
   async function everyPage<T>(path: string, token: string, read: (body: unknown, where: string) => T[]) {
     const items: T[] = [];
@@ -188,11 +191,11 @@ export function createWriter(api: GitHubApi, session: AppSession, allowed: Allow
     },
     async findReview(change, marker) {
       allowed(change.repo);
-      const bot = await session.botId(change.repo);
+      const poster = await session.poster(change.repo);
       const path = `${repoPath(change.repo)}/pulls/${change.number}/reviews?per_page=100`;
       return session.withToken(change.repo, async (token) => {
         const listed = await everyPage(path, token, (body, where) => parse(authoredReviews, body, where));
-        const own = listed.find((r) => r.user?.id === bot && r.body.includes(marker));
+        const own = listed.find((r) => r.user?.id === poster.id && r.body.includes(marker));
         return own ? String(own.id) : null;
       });
     },
@@ -205,13 +208,19 @@ export function createWriter(api: GitHubApi, session: AppSession, allowed: Allow
         );
       }
       fitsBody("summary", body);
-      const bot = await session.botId(change.repo);
+      const poster = await session.poster(change.repo);
       const issue = `${repoPath(change.repo)}/issues/${change.number}/comments`;
+      // The bot's comment is its own; a person's is Lookover's only when the App posted it (ADR 0066): one the person
+      // wrote by hand holding the marker is theirs.
+      const ours = (c: IssueComment) =>
+        c.user.id === poster.id &&
+        c.body.includes(SUMMARY_MARKER) &&
+        (poster.bot || c.performed_via_github_app?.id === session.appId);
       return session.withToken(change.repo, async (token) => {
         const comments = await everyPage(`${issue}?per_page=100`, token, (listed, where) =>
           parse(issueComments, listed, where),
         );
-        const own = comments.find((c) => c.user.id === bot && c.body.includes(SUMMARY_MARKER));
+        const own = comments.find(ours);
         if (own) {
           const path = `${repoPath(change.repo)}/issues/comments/${own.id}`;
           await api.request({ method: "PATCH", path, bearer: token, body: { body } });

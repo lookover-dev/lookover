@@ -22,7 +22,7 @@ import {
   scenarioOf,
   startDemoService,
 } from "../index.ts";
-import { api, messages, openApp, T0 } from "../service.test-support.ts";
+import { api, messages, openApp, SANDBOX, T0 } from "../service.test-support.ts";
 
 export { T0, until } from "../service.test-support.ts";
 
@@ -39,7 +39,7 @@ export function brief(): Scenario {
   return {
     ...scenarioOf("S10"),
     id: "T-brief",
-    script: [{ at: 60_000, move: { kind: "open", change: 135 } }],
+    script: [{ at: 60_000, move: { kind: "open", change: { repo: SANDBOX, number: 135 } } }],
     seed: 5 * 60_000,
   };
 }
@@ -225,4 +225,13 @@ export async function onGitHub(
         });
   if (res.status !== 200) throw new Error(`GitHub's ${path} answered ${res.status}`);
   return res.text();
+}
+
+/**
+ * A link the app shows, built on `Connection.web` (a path on the service in demo mode), followed as the owner's
+ * browser does: GitHub's fake page there, as `onGitHub` gives it.
+ */
+export function following(door: Door, href: string, fields?: [string, string][]): Promise<string> {
+  const url = new URL(href, door.service.origin);
+  return onGitHub(door, `${url.pathname.slice(DEMO_API.github.length)}${url.search}`, fields);
 }

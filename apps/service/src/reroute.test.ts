@@ -16,7 +16,7 @@ import {
   until,
 } from "./demo/demo.test-support.ts";
 import type { Scenario } from "./index.ts";
-import { TEST_LIMIT_MS } from "./service.test-support.ts";
+import { SANDBOX, TEST_LIMIT_MS } from "./service.test-support.ts";
 
 setDefaultTimeout(TEST_LIMIT_MS);
 afterEach(stopAll);
@@ -24,8 +24,8 @@ afterEach(stopAll);
 const MIN = 60_000;
 const OWNER = { id: 1, login: "sasensi" };
 const MIRA = { id: 7, login: "mira" };
-const MINE = changeId("lookover-sandbox#1");
-const MIRAS = changeId("lookover-sandbox#2");
+const MINE = changeId("sasensi/lookover-sandbox#1");
+const MIRAS = changeId("sasensi/lookover-sandbox#2");
 
 /** A one-line change to `path`, as git prints it. */
 const diffOf = (path: string) =>
@@ -48,7 +48,7 @@ const scenario: Scenario = {
   later: "",
   path: "/",
   world: {
-    repo: { owner: "sasensi", name: "lookover-sandbox" },
+    repo: SANDBOX,
     bot: { id: 2, login: "lookover-spike-sasensi[bot]" },
     owner: OWNER,
     engines: {
@@ -87,9 +87,9 @@ const scenario: Scenario = {
     },
   ],
   script: [
-    { at: 1 * MIN, move: { kind: "open", change: 1 } },
-    { at: 2 * MIN, move: { kind: "open", change: 2 } },
-    { at: 3 * MIN, move: { kind: "ask", change: 2 } },
+    { at: 1 * MIN, move: { kind: "open", change: { repo: SANDBOX, number: 1 } } },
+    { at: 2 * MIN, move: { kind: "open", change: { repo: SANDBOX, number: 2 } } },
+    { at: 3 * MIN, move: { kind: "ask", change: { repo: SANDBOX, number: 2 } } },
   ],
   seed: 4 * MIN,
 };

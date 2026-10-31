@@ -6,7 +6,7 @@
 // request") is then skipped. Several repositories come with onboarding (row 7). Every diff is hand-written fixture
 // data a review reads; nothing here is a real recording.
 import { commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { BY_CLAUDE, MIN, OWNER, SHORT_FIND_MS, unified } from "./ledger-api.ts";
 import { SANDBOX } from "./sandbox.ts";
 
@@ -123,6 +123,9 @@ const CHANGES: ScenarioChange[] = [
   },
 ];
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(SANDBOX.repo);
+
 export const S9: Scenario = {
   id: "S9",
   title: "The one repository",
@@ -146,10 +149,10 @@ export const S9: Scenario = {
   },
   changes: CHANGES,
   script: [
-    { at: 1 * MIN, move: { kind: "open", change: 168 } },
-    { at: 12 * MIN, move: { kind: "close", change: 168 } },
-    { at: 15 * MIN, move: { kind: "open", change: 169 } },
-    { at: 22 * MIN, move: { kind: "open", change: 170 } },
+    { at: 1 * MIN, move: { kind: "open", change: pr(168) } },
+    { at: 12 * MIN, move: { kind: "close", change: pr(168) } },
+    { at: 15 * MIN, move: { kind: "open", change: pr(169) } },
+    { at: 22 * MIN, move: { kind: "open", change: pr(170) } },
   ],
   seed: 30 * MIN,
 };

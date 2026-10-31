@@ -2,6 +2,20 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.3.0](https://github.com/lookover-dev/lookover/compare/v0.2.3...v0.3.0) (2026-10-31)
+
+Already set up with your own App? Nothing changes until you choose to sign in: your App keeps working as before.
+
+### Features
+
+- **setup:** **Sign in with GitHub.** Lookover runs on Lookover Dev, one GitHub App for everyone: enter the code Lookover shows on GitHub's page, and there is no App to make and no key to keep. Lookover Dev has no private key.
+- **setup:** one list of your accounts, yours and your organisations': where Lookover Dev is installed, **Install on** the others, **Ask to install on** an organisation you don't own, and **Waiting for an owner** until one does.
+- **review:** signed in, Lookover reviews your pull requests on every account where Lookover Dev is installed, at once. Your teammates see your review written by you, a summary with Lookover's badge, and a Lookover check.
+- **review:** the review and each comment on a line open with "Lookover".
+- **app:** each problem with an account has one fix, the same in the setup, Settings › GitHub, Repositories and the status menu: sign in again, install, ask an owner, or open the organisation's single sign-on page.
+- **app:** Repositories are grouped by account, and a pull request is named `owner/repository#number` everywhere.
+- **agent:** `lookover wait`, `feedback` and `reply` find Lookover Dev's check by default, and read only your own; `--app` or `LOOKOVER_APP` name your own App.
+
 ## [0.2.3](https://github.com/lookover-dev/lookover/compare/v0.2.1...v0.2.3) (2026-10-26)
 
 ### Bug Fixes

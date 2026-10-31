@@ -158,7 +158,7 @@ test("the App installed after the start: the install read every 4 s, nothing gra
   const cookie = await openApp(service);
   const before = await snapshot(service, cookie);
   expect(before.setup.github).toBe("waiting-for-install");
-  expect(before.connection).toMatchObject({ state: "not-connected", installationId: null });
+  expect(before.connection).toMatchObject({ state: "not-connected", accounts: [] });
   expect(before.repos).toEqual([]);
 
   // Installed with no repository: "nothing granted", connected, still checked.
@@ -166,7 +166,10 @@ test("the App installed after the start: the install read every 4 s, nothing gra
   await time.advance(4_000);
   const nothing = await snapshot(service, cookie);
   expect(nothing.setup).toMatchObject({ github: "nothing-granted", step: "github" });
-  expect(nothing.connection).toMatchObject({ state: "connected", installationId: installation });
+  expect(nothing.connection).toMatchObject({
+    state: "connected",
+    accounts: [{ installationId: installation }],
+  });
   expect(nothing.repos).toEqual([]);
 
   // The owner grants the sandbox on GitHub: within 4 s it is listed and switched on; the step waits for Continue.
@@ -175,9 +178,9 @@ test("the App installed after the start: the install read every 4 s, nothing gra
   const granted = await snapshot(service, cookie);
   expect(granted.setup).toMatchObject({ github: "done", step: "github", reached: "repos" });
   expect(granted.repos.map((r: Repository) => [r.id, r.enabled])).toEqual([[idOf(SANDBOX), true]]);
-  expect(granted.changes[changeId("lookover-sandbox#1")]).toMatchObject({ author: "you" });
+  expect(granted.changes[changeId("sasensi/lookover-sandbox#1")]).toMatchObject({ author: "you" });
   // What was open before is listed, not reviewed.
-  expect(granted.reviews[changeId("lookover-sandbox#1")]?.job ?? null).toBeNull();
+  expect(granted.reviews[changeId("sasensi/lookover-sandbox#1")]?.job ?? null).toBeNull();
 
   // Granted: no more reads every 4 s; the installation is next read by the discovery, 5 minutes on.
   const reads = host.reads;
@@ -194,7 +197,9 @@ test("uninstalled and installed again while nothing is granted: the new installa
   const cookie = await openApp(service);
   const first = host.install([]);
   await time.advance(4_000);
-  expect((await snapshot(service, cookie)).connection).toMatchObject({ installationId: first });
+  expect((await snapshot(service, cookie)).connection).toMatchObject({
+    accounts: [{ installationId: first }],
+  });
 
   // The owner uninstalls the App and installs it again, still granting nothing: the links lead to the new one.
   host.uninstall();
@@ -204,13 +209,13 @@ test("uninstalled and installed again while nothing is granted: the new installa
   await time.advance(4_000);
   const again = await snapshot(service, cookie);
   expect(again.setup.github).toBe("nothing-granted");
-  expect(again.connection).toMatchObject({ state: "connected", installationId: second });
+  expect(again.connection).toMatchObject({ state: "connected", accounts: [{ installationId: second }] });
 
   host.addRepository(SANDBOX);
   await time.advance(4_000);
   const granted = await snapshot(service, cookie);
   expect(granted.setup.github).toBe("done");
-  expect(granted.connection).toMatchObject({ state: "connected", installationId: second });
+  expect(granted.connection).toMatchObject({ state: "connected", accounts: [{ installationId: second }] });
 });
 
 test("a repository added to the installation and one removed appear and leave within one listing; the removed one's jobs are cancelled and its unsent posts dropped", async () => {
@@ -237,15 +242,15 @@ test("a repository added to the installation and one removed appear and leave wi
   host.open(opened(LEDGER, 2));
   await time.advance(MIN);
   await host.asked;
-  expect((await post(service, cookie, { type: "review.request", changeId: "ledger-api#2" })).status).toBe(
-    200,
-  );
-  const first = changeId("ledger-api#1");
-  const second = changeId("ledger-api#2");
+  expect(
+    (await post(service, cookie, { type: "review.request", changeId: "sasensi/ledger-api#2" })).status,
+  ).toBe(200);
+  const first = changeId("sasensi/ledger-api#1");
+  const second = changeId("sasensi/ledger-api#2");
   expect(store.jobs.latest(first)?.job.state).toBe("running");
   expect(store.jobs.pending(second)).toBe(true);
   const runId = (await snapshot(service, cookie)).reviews[first]?.run?.id;
-  if (runId === undefined) throw new Error("ledger-api#1 has a run");
+  if (runId === undefined) throw new Error("sasensi/ledger-api#1 has a run");
   expect(store.posts.of(runId)?.posts.filter((p) => p.hostId === null).length).toBeGreaterThan(0);
 
   // On GitHub: ledger-api leaves the installation, ledger-web joins it. One listing, at most 5 minutes on.
@@ -262,7 +267,7 @@ test("a repository added to the installation and one removed appear and leave wi
     [idOf(SANDBOX), true],
     [idOf(WEB), true],
   ]);
-  expect(Object.keys(state.changes)).toEqual(["ledger-web#4"]);
+  expect(Object.keys(state.changes)).toEqual(["sasensi/ledger-web#4"]);
   // Its jobs cancelled, the running one stopped, and the UI told; no post of its round left owed.
   for (const id of [first, second]) {
     expect(store.jobs.latest(id)?.job).toMatchObject({ state: "cancelled", cancel: "closed" });
@@ -278,8 +283,12 @@ test("a repository added to the installation and one removed appear and leave wi
   await until(stream, "repo.added");
   const back = await snapshot(service, cookie);
   expect(back.repos.map((r: Repository) => r.id)).toEqual([idOf(SANDBOX), idOf(WEB), idOf(LEDGER)]);
-  expect(store.jobs.pendingIn("ledger-api#")).toBe(false);
-  expect(Object.keys(back.changes)).toEqual(["ledger-web#4", "ledger-api#1", "ledger-api#2"]);
+  expect(store.jobs.pendingIn("sasensi/ledger-api#")).toBe(false);
+  expect(Object.keys(back.changes)).toEqual([
+    "sasensi/ledger-web#4",
+    "sasensi/ledger-api#1",
+    "sasensi/ledger-api#2",
+  ]);
 });
 
 test("with an allow-list, a repository the installation lists outside it never appears and is never polled", async () => {
@@ -312,9 +321,9 @@ test("the App kept in the data folder: its owner and bot, its installation's rep
     state: "connected",
     bot: BOT.login,
     app: personalApp(1, "lookover-spike-sasensi"),
-    installationId: 60_000_001,
+    accounts: [{ installationId: 60_000_001 }],
   });
-  expect(state.changes[changeId("lookover-sandbox#1")]).toMatchObject({ author: "you" });
+  expect(state.changes[changeId("sasensi/lookover-sandbox#1")]).toMatchObject({ author: "you" });
   expect((await post(service, cookie, { type: "service.runChecks" })).status).toBe(200);
   const checked = await snapshot(service, cookie);
   expect(checked.service.checks?.items).toContainEqual(
@@ -343,14 +352,14 @@ test("an organisation's App kept: its account shown apart from the person, whose
     account: ACME,
     person: OWNER,
   });
-  expect(state.changes[changeId("web#1")]).toMatchObject({ author: "you" });
-  expect(state.changes[changeId("web#2")]).toMatchObject({ author: "other" });
+  expect(state.changes[changeId("acme/web#1")]).toMatchObject({ author: "you" });
+  expect(state.changes[changeId("acme/web#2")]).toMatchObject({ author: "other" });
 
   await time.advance(5_000);
   host.seedComment({ repo: ACME_WEB, number: 2 }, { author: OWNER, body: "/lookover review" });
   await time.advance(MIN);
   const finished = (await until(stream, "round.finished")).find((e) => e.type === "round.finished");
-  expect(finished).toMatchObject({ changeId: changeId("web#2") });
+  expect(finished).toMatchObject({ changeId: changeId("acme/web#2") });
 });
 
 test("live.json naming an organisation's App: the start refuses it, never keeping the organisation as the person", async () => {
@@ -436,7 +445,7 @@ test("a repository removed from the installation while its listing is under way 
   expect(room.snapshot().repos.map((r: Repository) => r.id)).toEqual([idOf(SANDBOX)]);
   expect(room.snapshot().changes).toEqual({});
   expect(store.repos.listed()).toEqual([SANDBOX]);
-  expect(store.jobs.pendingIn("ledger-api#")).toBe(false);
+  expect(store.jobs.pendingIn("sasensi/ledger-api#")).toBe(false);
   expect(lines).toEqual([]);
 });
 
@@ -500,7 +509,7 @@ test("an App adopted while the setup waits for it: kept, its bot shown once, the
   // The room started set up: the step stays where the owner is, the furthest reached is kept (ADR 0058).
   expect(room.snapshot().setup).toMatchObject({ github: "done", step: "github", reached: "background" });
   expect(room.snapshot().connection).toMatchObject({ state: "connected" });
-  expect(room.snapshot().changes[changeId("lookover-sandbox#1")]).toBeDefined();
+  expect(room.snapshot().changes[changeId("sasensi/lookover-sandbox#1")]).toBeDefined();
 });
 
 test("a new key adopted for the App kept, installed already, whose key was lost: reconnected and listed", async () => {
@@ -519,7 +528,7 @@ test("a new key adopted for the App kept, installed already, whose key was lost:
   await room.github.adopt(await describedApp(room, host), key);
   expect(await apps.read()).toMatchObject({ state: "kept", privateKey: key });
   expect(room.snapshot().connection).toMatchObject({ state: "connected", cause: null });
-  expect(room.snapshot().changes[changeId("lookover-sandbox#1")]).toMatchObject({ author: "you" });
+  expect(room.snapshot().changes[changeId("sasensi/lookover-sandbox#1")]).toMatchObject({ author: "you" });
 });
 
 test("another App adopted while live.json names one: refused, and nothing changes", async () => {
@@ -579,7 +588,7 @@ for (const github of ["start", "waiting-for-app"] as const) {
     await time.advance(4_000);
     expect(room.snapshot().setup).toMatchObject({ github: "done", step: "github", reached: "repos" });
     expect(room.snapshot().connection).toMatchObject({ state: "connected", app: { id: app.id } });
-    expect(room.snapshot().changes[changeId("lookover-sandbox#1")]).toBeDefined();
+    expect(room.snapshot().changes[changeId("sasensi/lookover-sandbox#1")]).toBeDefined();
   });
 }
 

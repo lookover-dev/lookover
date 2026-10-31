@@ -1,5 +1,6 @@
 // Port: the Git host as the coding agent sees it, with its own login (ADR 0021, ADR 0043). `lookover wait`
-// (`agent-cli`) reads and writes through it with the agent's token, never with the App's key: the open change
+// (`agent-cli`) reads and writes through it with the agent's token, never with the App's key: the token's own
+// account (ADR 0066), the open change
 // of a branch, a change's head, the `Lookover` checks of a commit from one App, the change's conversation
 // comments with their reactions, and a comment written as the agent; Lookover's review threads, a reply in one
 // and resolving one (ADR 0052: the App can't resolve, the agent's login can). `agent-cli` holds the real adapter
@@ -10,6 +11,8 @@
 // Error modes: every refusal is a `HostError` (`not_found` for a repository, change, commit, comment or thread the
 // host doesn't have; `too_large` for a reply over `COMMENT_MAX_BYTES`; `unauthorized` for a token refused, or one
 // without the right to resolve a thread, said plainly; `rate_limited`, `unavailable` as for the App's ports).
+
+import type { HostLogin } from "./github-app.ts";
 import type { ChangeRef, RepositoryRef } from "./host.ts";
 import type { HostThread } from "./host-thread.ts";
 import type { HostCheck, HostComment } from "./host-view.ts";
@@ -31,7 +34,20 @@ export interface AgentThread extends HostThread {
   resolved: boolean;
 }
 
+/**
+ * A `Lookover` check as the agent reads it: with the external id its App created it with (GitHub's `external_id`,
+ * `checkExternalId`'s `<job>@<person's id>`; empty when it has none), which tells whose it is (ADR 0066).
+ */
+export interface AgentCheck extends HostCheck {
+  externalId: string;
+}
+
 export interface AgentHost {
+  /**
+   * The account the token belongs to (GitHub's `GET /user`): the person whose checks the agent waits on, among
+   * several people's under one App (ADR 0066). Throws `HostError("unauthorized")` for a token the host refuses.
+   */
+  account(): Promise<HostLogin>;
   /**
    * The open change whose head is `branch` of the repository itself (not of a fork), or null when there is none.
    * Throws `HostError("not_found")` for a repository the host doesn't have.
@@ -41,10 +57,10 @@ export interface AgentHost {
   getChange(change: ChangeRef): Promise<AgentChange>;
   /**
    * The `Lookover` checks on the commit created by the App `app` (its slug, which the host keeps unique), oldest
-   * first: a check of that name from any other App is left out. Empty when it has none. Throws
-   * `HostError("not_found")` for a commit the repository doesn't have.
+   * first, each with its external id: a check of that name from any other App is left out. Empty when it has
+   * none. Throws `HostError("not_found")` for a commit the repository doesn't have.
    */
-  checks(repo: RepositoryRef, sha: CommitSha, app: string): Promise<HostCheck[]>;
+  checks(repo: RepositoryRef, sha: CommitSha, app: string): Promise<AgentCheck[]>;
   /**
    * The change's conversation comments, oldest first, each with who wrote it and the counts of Lookover's
    * reactions on it. Throws `HostError("not_found")` for a change that isn't one.
@@ -57,11 +73,13 @@ export interface AgentHost {
   comment(change: ChangeRef, body: string): Promise<string>;
   /**
    * Lookover's review threads on the change, oldest first: those whose root comment is the App `app`'s (its slug:
-   * the App's bot) and holds a finding marker, resolved and outdated ones included. Each reply after the root,
-   * oldest first, whoever wrote it, the App's own included (`author.bot`, its login `<slug>[bot]` as REST names
-   * it); a reply by a deleted account is left out. Throws `HostError("not_found")` for a change that isn't one.
+   * the App's bot) or, given `person` (a numeric id), that person's, whom the App posts as on the shared App (ADR
+   * 0066), and holds a finding marker, resolved and outdated ones included. Each reply after the root, oldest first,
+   * whoever wrote it, the App's own included (`author.bot`, its login `<slug>[bot]` as REST names it; a person's
+   * reply is `bot: false`); a reply by a deleted account is left out. Throws `HostError("not_found")` for a change
+   * that isn't one.
    */
-  threads(change: ChangeRef, app: string): Promise<AgentThread[]>;
+  threads(change: ChangeRef, app: string, person?: number): Promise<AgentThread[]>;
   /**
    * Replies as the token's account in the thread holding the change's review comment `commentId`: a reply's id
    * files it under that thread's root, as GitHub does. Returns the reply's id. Throws `HostError("too_large")` over

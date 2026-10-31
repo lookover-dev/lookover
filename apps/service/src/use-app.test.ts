@@ -105,7 +105,9 @@ test("an App of the owner's with every permission: kept, shown, and its install 
   expect(await apps.read()).toMatchObject({ state: "kept", app: { id }, privateKey: key });
   const state = await snapshot(service, cookie);
   expect(state.setup).toMatchObject({ github: "waiting-for-install", githubRefused: null });
+  // Use your own App switches the way without a restart (ADR 0066).
   expect(state.connection).toMatchObject({
+    way: "own",
     bot: BOT.login,
     app: { id, account: { ...OWNER, type: "User" }, person: OWNER },
   });
@@ -158,9 +160,9 @@ function counted(gh: Gh) {
       asked.push("person");
       return gh.person();
     },
-    adminOrganisations: () => {
-      asked.push("adminOrganisations");
-      return gh.adminOrganisations();
+    memberships: () => {
+      asked.push("memberships");
+      return gh.memberships();
     },
     membership: (organisation) => {
       asked.push(`membership ${organisation}`);

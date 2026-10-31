@@ -57,7 +57,11 @@ function snapshot(seq: number, title: string): State {
       cause: null,
       bot: null,
       app: null,
-      installationId: null,
+      accounts: [],
+      unreached: [],
+      way: null,
+      signIn: null,
+      person: null,
       web: GITHUB_WEB,
       since: NOW,
       limitUntil: null,
@@ -180,12 +184,12 @@ test("a pull request the service doesn't hold is a refusal too; a request that n
   const noSuch = service(snapshot(5, "first"), new Refused(404, { error: "no such change" }));
   const store = new Store(noSuch.api);
   await settled();
-  await store.send({ type: "review.request", changeId: changeId("app#9") });
+  await store.send({ type: "review.request", changeId: changeId("sam/app#9") });
   await settled();
   expect(store.getStatus().refusal).toEqual({
     status: 404,
     error: "no such change",
-    command: { type: "review.request", changeId: changeId("app#9") },
+    command: { type: "review.request", changeId: changeId("sam/app#9") },
   });
   const down = service(snapshot(5, "first"), new TypeError("fetch failed"));
   const other = new Store(down.api);

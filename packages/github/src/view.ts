@@ -17,7 +17,6 @@ import type {
 import { CHECK_NAME, commitSha } from "@lookover/contracts";
 import type { Allowed } from "./allowed.ts";
 import type { GitHubApi } from "./api.ts";
-import type { AppSession } from "./auth.ts";
 import { graphql } from "./graphql.ts";
 import {
   checkRuns,
@@ -28,6 +27,7 @@ import {
   reviews,
   viewedComments,
 } from "./schemas.ts";
+import type { Session } from "./session.ts";
 
 /** The words Lookover concludes a check with: a new `CheckConclusion` fails here until it is listed. */
 const POSTED = { success: true, neutral: true, skipped: true } satisfies Record<CheckConclusion, true>;
@@ -70,7 +70,7 @@ const NODES = `query($ids: [ID!]!) {
   nodes(ids: $ids) { id ... on Minimizable { isMinimized minimizedReason } }
 }`;
 
-export function createView(api: GitHubApi, session: AppSession, allowed: Allowed) {
+export function createView(api: GitHubApi, session: Session, allowed: Allowed) {
   /** The checks of `commit`, or of the head commit when none is named (a round reviews an earlier head). */
   return async (change: ChangeRef, commit?: CommitSha): Promise<HostView> => {
     allowed(change.repo);

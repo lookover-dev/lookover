@@ -119,6 +119,12 @@ export interface Posts {
    * 0052). Null before any.
    */
   latest<P>(changeId: ChangeId): { runId: RunId; plan: P; degraded: boolean; checkId: string | null } | null;
+  /**
+   * The host's ids of every reply the change's rounds and dismissals posted and kept, in order: what tells
+   * Lookover's replies on its threads from the person's it posts as (ADR 0066). A reply begun and never marked sent
+   * has none.
+   */
+  replies(changeId: ChangeId): number[];
 }
 
 const PLAIN = { check: true, review: true, summary: true, completed: true } satisfies Record<
@@ -157,6 +163,8 @@ const latestRow = z.object({
   check_id: z.string().nullable(),
 });
 const postRows = z.array(z.object({ kind: KIND, host_id: z.string().nullable(), tries: z.int() }));
+/** A reply's id as `sent` kept it: the host's numeric id, as text. */
+const replyRows = z.array(z.object({ host_id: z.string().regex(/^\d+$/) }));
 export function posts(db: Database): Posts {
   const selectRun = db.query("SELECT * FROM runs WHERE id = ?");
   const selectJob = db.query("SELECT * FROM jobs WHERE id = ?");
@@ -186,6 +194,15 @@ export function posts(db: Database): Posts {
         WHERE check_post.run_id = plans.run_id AND check_post.kind = 'check') AS check_id
      FROM plans WHERE plans.change_id = ? AND EXISTS (SELECT 1 FROM posts WHERE posts.run_id = plans.run_id)
      ORDER BY plans.n DESC LIMIT 1`,
+  );
+  // The change's replies kept: its rounds' (`reply:<finding>`) and its dismissals'.
+  const selectReplies = db.query(
+    `SELECT posts.host_id AS host_id FROM posts JOIN plans ON plans.run_id = posts.run_id
+     WHERE plans.change_id = ?1 AND posts.kind LIKE 'reply:%' AND posts.host_id IS NOT NULL
+     UNION ALL
+     SELECT dismissal_posts.host_id FROM dismissal_posts
+     JOIN dismissals ON dismissals.id = dismissal_posts.dismissal_id
+     WHERE dismissals.change_id = ?1 AND dismissal_posts.kind = 'reply' AND dismissal_posts.host_id IS NOT NULL`,
   );
   const insertPlan = db.query(
     "INSERT INTO plans (run_id, change_id, n, plan, ledger) VALUES (?, ?, ?, ?, ?)",
@@ -318,5 +335,11 @@ export function posts(db: Database): Posts {
       planOf(id, "degrade");
       degradePlan.run(id);
     },
+    // The host's ids grow with time: in their order, the oldest first.
+    replies: (change) =>
+      replyRows
+        .parse(selectReplies.all(change))
+        .map((row) => Number(row.host_id))
+        .sort((a, b) => a - b),
   };
 }

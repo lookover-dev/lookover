@@ -66,6 +66,7 @@ test("a repository the list doesn't hold is refused by every call, before any re
     github.intake.threads(change),
     github.view(change),
     github.identity(other),
+    github.intake.poster(other),
   ];
   for (const call of calls) await expect(call).rejects.toMatchObject(refused);
   // The same name under another owner is another repository.
@@ -965,6 +966,21 @@ const identity: Route = (call) => {
   return undefined;
 };
 
+test("who posts is asked of the repository: once the bot is known, a repository the App isn't installed on is refused", async () => {
+  const api = stubGitHub(
+    signIn(() => AT, "ghs_one"),
+    identity,
+  );
+  const github = createGitHub({ app: APP, repositories: LISTED, fetch: api.fetch, clock: { now: () => AT } });
+  expect(await github.intake.poster(SANDBOX_REPO)).toEqual(BOT);
+  // The bot is kept for the session; the repository is still asked for its installation.
+  await expect(github.intake.poster(OWN_REPO)).rejects.toMatchObject({
+    failure: "not_found",
+    message:
+      "The GitHub App is not installed on lookover-dev/lookover-private: add the repository to the App's installation on GitHub, then try again.",
+  });
+});
+
 /** The pull request's conversation: comments created by the bot, and edited in place. */
 function conversation(comments: Comment[]): Route {
   let nextId = 100;
@@ -1550,7 +1566,7 @@ test("the identities a live snapshot shows: the repository's owner, and the App'
   const github = createGitHub({ app: APP, repositories: LISTED, fetch: api.fetch, clock: { now: () => AT } });
   expect(await github.identity(SANDBOX_REPO)).toEqual({
     owner: { id: 11247504, login: "sasensi" },
-    bot: { id: 338297044, login: "lookover-spike-sasensi[bot]" },
+    poster: { id: 338297044, login: "lookover-spike-sasensi[bot]" },
   });
 });
 

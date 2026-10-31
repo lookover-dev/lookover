@@ -14,7 +14,11 @@ Your code goes only where it already goes:
 
 Lookover never reads your subscription's tokens, and gives the CLIs no API key and no GitHub token.
 
-On GitHub, Lookover acts as your App, except in two places that use your own `gh` login: the setup reads who you are and the organisations you administer, and `lookover wait` and `lookover reply` write as you.
+On GitHub, Lookover acts as you, through Lookover Dev: the App you sign in to with GitHub. Its token reaches only what both you and the App may reach, on the accounts where it is installed. Lookover also reads your organisations, and whether you own each, from your own `gh`, when it is signed in as you; it decides nothing from them.
+
+**Lookover Dev has no private key.** None was ever generated, and nobody holds one, Lookover's makers included: there is no server to keep it. What an organisation that installs it trusts is the `lookover-dev` account on GitHub, which could make a key. Your sign-in is yours alone: its token lasts 8 hours, Lookover renews it on your computer, and the renewal lasts about 6 months unused.
+
+With [your own App](/docs/setup/#use-your-own-app), Lookover acts as that App instead, except in two places that use your own `gh` login: the setup reads who you are and the organisations you administer, and `lookover wait` and `lookover reply` write as you.
 
 ## What the AI may do
 
@@ -26,9 +30,13 @@ On GitHub, Lookover acts as your App, except in two places that use your own `gh
 
 ## What it posts
 
-As your App, on the pull request it reviewed: the review, its inline comments, one summary comment kept up to date, and a check on the commit. Always as a comment: it never approves, requests changes or merges.
+On the pull request it reviewed: the review, its inline comments, one summary comment kept up to date, and a check on the commit. Always as a comment: it never approves, requests changes or merges.
 
-As you, when your coding agent runs them: `lookover wait`'s `/lookover review` comment and the threads it resolves once fixed, and `lookover reply`'s answers on a thread.
+Your teammates see your review written by you, opening with “Lookover”, a summary with Lookover's badge, and a Lookover check. The review and each inline comment start with “Lookover ·”, so its words read as Lookover's, not yours.
+
+As you too, when your coding agent runs them: `lookover wait`'s `/lookover review` comment and the threads it resolves once fixed, and `lookover reply`'s answers on a thread.
+
+With your own App, the review, its comments, the summary and the check are posted as your App, under its own name.
 
 Secrets in a known shape are taken out of what it posts and of its logs.
 
@@ -38,7 +46,9 @@ Everything is in one data folder on your computer ([the commands](/docs/commands
 
 - **The logs:** `logs/lookover-<date>.log`, one file a day, kept 30 days. The app shows the same file.
 - **Each review's raw material:** `runs/`, the prompts it sent the AI and the AI's raw output, your private code included. Kept 30 days, then deleted.
-- **The App's private key** is encrypted there, and the key that opens it is in your system's credential store (Windows Credential Manager, macOS Keychain, or the Secret Service on Linux). With no credential store, as on some Linux systems, the private key is kept unencrypted in a file only you can open.
+- **Your sign-in with GitHub,** its token and the token that renews it, is encrypted there, and the key that opens it is in your system's credential store (Windows Credential Manager, macOS Keychain, or the Secret Service on Linux). With no credential store, as on some Linux systems, it is kept unencrypted in a file only you can open.
+- **The organisations you asked to install on,** and when, until Lookover Dev reaches them or you sign in as someone else.
+- **With your own App, its private key,** kept as the sign-in is.
 
 ## How Lookover ships
 

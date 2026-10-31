@@ -34,5 +34,6 @@ On macOS it is `~/Library/LaunchAgents/dev.lookover.plist`; on Linux, `lookover.
 1. In Settings › Your coding agent, **Remove the skill**.
 2. In Settings, turn off **Start at login**.
 3. `lookover stop`, then `npm uninstall -g lookover`.
-4. Delete Lookover's entry in your system's credential store. Its name is `key.entry` in `github/app.json`, in the data folder (`lookover status` names the folder). With `"kept": "file"` there, there is no entry: the key is a file in that folder. On Windows, `cmdkey /list | findstr lookover` lists the entries and `cmdkey /delete:lookover/<entry>` deletes one.
-5. Delete the data folder, and the App on GitHub if you no longer want it.
+4. Delete Lookover's entry in your system's credential store. Its name is `key.entry` in `github/sign-in.json` when you signed in with GitHub, or in `github/app.json` with your own App, in the data folder (`lookover status` names the folder). With `"kept": "file"` there, there is no entry: the secret is a file in that folder. On Windows, `cmdkey /list | findstr lookover` lists the entries and `cmdkey /delete:lookover/<entry>` deletes one.
+5. Delete the data folder.
+6. Signed in with GitHub: on GitHub, under Settings › Applications › **Authorized GitHub Apps**, **Revoke** Lookover Dev. That ends your sign-in on every computer. Lookover Dev stays installed where it is, for your teammates; an owner uninstalls it from the account's **Installed GitHub Apps**. With your own App: delete the App if you no longer want it.

@@ -3,7 +3,7 @@
 // colleague, opens #152 from her fork. #150 is skipped as not yours, #152 as a fork, each as it opens with its check
 // saying why, and nothing runs: no engine is asked.
 import { commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { DEPENDABOT, LEDGER_API, MIN, MIRA, SHORT_FIND_MS, unified } from "./ledger-api.ts";
 
 const BUMP: ScenarioChange = {
@@ -67,6 +67,9 @@ const RETRIES: ScenarioChange = {
   ],
 };
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(LEDGER_API.repo);
+
 export const S5: Scenario = {
   id: "S5",
   title: "Skipped on purpose",
@@ -81,8 +84,8 @@ export const S5: Scenario = {
   world: LEDGER_API,
   changes: [BUMP, RETRIES],
   script: [
-    { at: MIN + 20_000, move: { kind: "open", change: 150 } },
-    { at: 2 * MIN + 20_000, move: { kind: "open", change: 152 } },
+    { at: MIN + 20_000, move: { kind: "open", change: pr(150) } },
+    { at: 2 * MIN + 20_000, move: { kind: "open", change: pr(152) } },
   ],
   seed: MIN,
 };

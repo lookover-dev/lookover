@@ -52,7 +52,7 @@ const opened = (number: number, more: Partial<FakeChange> = {}): FakeChange => (
   head: { ref: `branch-${number}`, sha: commitSha(`${number}`.padStart(7, "e").padEnd(40, "0")) },
   ...more,
 });
-const idOf = (number: number) => changeId(`lookover-sandbox#${number}`);
+const idOf = (number: number) => changeId(`sasensi/lookover-sandbox#${number}`);
 
 /** Claude and Codex both signed in, each with one find pass scripted for its own runs. */
 function bothEngines() {

@@ -7,7 +7,9 @@
 // loads of a scenario at the same instant give the same events. The drawer's faults (`inject`) are moves played
 // now; the listing is what the drawer shows. The room keeps its App in an App store on a keychain of its own (ADR
 // 0053), written before the room starts when the setup says the App was made, so "Use an existing App" and the
-// manifest flow keep theirs as they would on the owner's computer. Start at login is the fake's, kept across restarts
+// manifest flow keep theirs as they would on the owner's computer. The shared App is offered beside it (ADR 0066):
+// the fake's device flow, its code entered on GitHub's fake device page or by the drawer, the sign-in kept in a
+// sign-in store on the same keychain. Start at login is the fake's, kept across restarts
 // as the computer keeps it (ADR 0054). Three faults restart the service (the key gone from the keychain, which a running
 // service never reads again; start at login gone and refused, which a service matches only at its start; the program
 // installed by npm, which a service learns only at its start): the room
@@ -27,10 +29,17 @@ import {
   type JobFailure,
   type PathOffer,
   type RepositoryRef,
+  SHARED_APP,
   type State,
 } from "@lookover/contracts";
 import { openStore, type Store } from "@lookover/store";
-import { DemoClock, fakeGitHubPages, type MemoryGh, memoryGh } from "@lookover/testkit/demo";
+import {
+  DemoClock,
+  type FakeGitHost,
+  fakeGitHubPages,
+  type MemoryGh,
+  memoryGh,
+} from "@lookover/testkit/demo";
 import { appStore } from "../app-store.ts";
 import { memoryCommandPath } from "../command-path.ts";
 import { storedOf } from "../installation.ts";
@@ -38,6 +47,7 @@ import { memoryKeychain } from "../keychain.ts";
 import { memoryLoginItem } from "../login-item.ts";
 import { buildRoom, type Room, type RoomOptions } from "../room.ts";
 import { said } from "../said.ts";
+import { type SignInStore, signInStore } from "../sign-in-store.ts";
 import { memorySkillFolders, SKILL_NAME } from "../skill-folders.ts";
 import { appMade } from "../snapshot.ts";
 import type { Timers } from "../timers.ts";
@@ -87,7 +97,11 @@ export type InjectRefusal =
   | "nothing_to_add"
   | "nothing_to_remove"
   | "nothing_departed"
-  | "no_organisation";
+  | "no_organisation"
+  | "no_sign_in"
+  | "not_signed_in"
+  | "no_organisation_reached"
+  | "nothing_asked";
 
 export interface DemoRoom {
   /** The room now: another one once a fault restarted the service. */
@@ -142,6 +156,8 @@ const GITHUB_LIMIT_MS = 20 * 60_000;
 const CODEX_RESETS_IN_MS = 2 * 24 * 60 * 60_000;
 /** How long GitHub is out of reach when the drawer says so: long enough to see, short enough to come back. */
 const CONNECTION_LOST_MS = 20_000;
+/** Who suspends the shared App on an organisation when the drawer says so, as GitHub names them: an owner of it. */
+const SUSPENDED_BY = "mira";
 /** The repositories "A repository is added to your App" makes on the owner's account, in turn. */
 const ADDABLE = ["docs-site", "status-page", "billing-worker"];
 
@@ -227,9 +243,15 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     keychain,
     ...(o.userOnly === undefined ? {} : { userOnly: o.userOnly }),
   });
-  const { setup } = scenario.world;
+  const signIns = signInStore({
+    home: o.home,
+    keychain,
+    ...(o.userOnly === undefined ? {} : { userOnly: o.userOnly }),
+  });
+  const { setup, shared } = scenario.world;
   const onGitHub = world.host.onGitHub().app;
-  if (onGitHub !== null && (setup === undefined || appMade(setup))) {
+  if (shared !== undefined) await signedIn(world.host, signIns);
+  else if (onGitHub !== null && (setup === undefined || appMade(setup))) {
     const { id, key } = world.host.credentials();
     await apps.write(storedOf({ ...onGitHub, id }), key);
   }
@@ -268,9 +290,21 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
       installations: world.host,
       connect: ({ key }) => {
         world.host.useKey(key);
+        world.host.postAs("bot");
         return { intake: world.host, writer: world.host };
       },
       apps,
+      // The shared App (ADR 0066): the fake's device flow, on its device page, the sign-in kept in the room's
+      // sign-in store beside the App store; signed in, the fake's ports post as the owner.
+      shared: {
+        signIn: world.host,
+        signIns,
+        accounts: () => world.host,
+        connect: () => {
+          world.host.postAs("person");
+          return { intake: world.host, writer: world.host };
+        },
+      },
     },
     engines: world.engines,
     selfTests: world.engines,
@@ -389,6 +423,13 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     return "ok";
   };
   const installed = () => world.host.onGitHub().installation;
+  /** The person's move on the code the sign-in shows; nothing when none waits. */
+  const onTheCode = (move: (userCode: string) => void): Promise<"ok" | InjectRefusal> => {
+    const code = room.snapshot().connection.signIn;
+    if (code === null) return Promise.resolve("no_sign_in");
+    move(code.userCode);
+    return Promise.resolve("ok");
+  };
   const opens = (by: "agent" | "other"): Promise<"ok" | InjectRefusal> => {
     const change = world.unopened(by);
     return change === null ? Promise.resolve("nothing_to_open") : played({ kind: "open", change });
@@ -416,6 +457,40 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     "engines-missing": async () => {
       await played({ kind: "missing", engine: "claude" });
       return played({ kind: "missing", engine: "codex" });
+    },
+    // The code a sign-in to the shared App shows, entered or refused on GitHub (ADR 0066), as on its fake device page:
+    // the service's next poll, on the clock, finds it.
+    "sign-in-entered": () => onTheCode((code) => world.host.enterCode(code)),
+    "sign-in-denied": () => onTheCode((code) => world.host.denyCode(code)),
+    // The person signed out on GitHub (ADR 0066): the sign-in no longer renews, every call refused as signed out until
+    // Sign in again's code is entered.
+    "github-signed-out": () =>
+      room.snapshot().connection.way === "shared"
+        ? onGitHubThen(() => world.host.signOut())
+        : Promise.resolve("not_signed_in" as const),
+    // The first organisation the shared App reaches asks for SAML SSO the person's sign-in hasn't (ADR 0066): its
+    // account holds the cause, found by the poll now; the others go on.
+    "sso-asked": () => {
+      const [first] = scenario.world.shared?.reaches ?? [];
+      return first === undefined
+        ? Promise.resolve("no_organisation_reached" as const)
+        : onGitHubThen(() => world.host.askSso(first.organisation.login));
+    },
+    // An owner of the first organisation the shared App reaches suspends it there (ADR 0067), GitHub naming them: its
+    // account holds the cause, found by the accounts listed again now (the 5-minute discovery's); the others go on.
+    "organisation-suspended": () => {
+      const [first] = scenario.world.shared?.reaches ?? [];
+      return first === undefined
+        ? Promise.resolve("no_organisation_reached" as const)
+        : discovered(() => world.host.suspend(first.organisation.login, SUSPENDED_BY));
+    },
+    // An owner of the organisation the person asked about first installs the shared App there (ADR 0067), on all its
+    // repositories: listed again now, as the 5-minute discovery would, the ask forgotten in the same event.
+    "owner-installs": () => {
+      const asked = room.snapshot().connection.unreached.find((u) => u.askedAt !== null);
+      return asked === undefined
+        ? Promise.resolve("nothing_asked" as const)
+        : discovered(() => world.host.installOn(asked.account.login));
     },
     "connection-lost": () => played({ kind: "refuse", failure: "unavailable", forMs: CONNECTION_LOST_MS }),
     "app-uninstalled": () =>
@@ -551,7 +626,7 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     scenario,
     inject: (fault, settled = () => Promise.resolve()) => faults[fault](settled),
     restarting: () => restarting,
-    github: fakeGitHubPages(world.host, DEMO_API.github),
+    github: fakeGitHubPages(world.host, DEMO_API.github, { sharedApp: SHARED_APP.slug, gh }),
     appName: DEMO_APP_NAME,
     listing: () => ({
       scenarios: (o.scenarios ?? SCENARIOS).map(({ id, title, what, steps, later, path }) => ({
@@ -583,7 +658,23 @@ function ghOf(world: Scenario["world"], given: MemoryGh | undefined): MemoryGh {
     const { account, admin } = world.organisation;
     gh.join(account, world.owner, { state: "active", admin });
   }
+  for (const { organisation, role } of world.memberships ?? [])
+    gh.join(organisation, world.owner, { state: "active", admin: role === "owner" });
   return gh;
+}
+
+/**
+ * The owner signed in to the shared App before the room starts (ADR 0066), as a code entered on GitHub's page would
+ * have: a sign-in the fake issued through its own device flow, so it renews there, kept in the room's sign-in store.
+ * The fake's ports post as the owner from then on.
+ */
+async function signedIn(host: FakeGitHost, signIns: SignInStore): Promise<void> {
+  const grant = await host.startSignIn();
+  host.enterCode(grant.userCode);
+  const polled = await host.pollSignIn(grant);
+  if (polled.kind !== "issued") throw new Error(`The fake didn't sign the owner in: ${polled.kind}`);
+  await signIns.write({ ...polled.tokens, person: await host.person(polled.tokens.token) });
+  host.postAs("person");
 }
 
 /** A refusal of GitHub's: the connection shows it, the fault was played all the same. */

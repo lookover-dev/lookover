@@ -44,7 +44,7 @@ afterEach(stopAll);
 const MIN = 60_000;
 const OCTOCAT = { id: 583231, login: "octocat" };
 const ref = (number: number) => ({ repo: SANDBOX, number });
-const DRAFT = changeId("lookover-sandbox#2");
+const DRAFT = changeId("sasensi/lookover-sandbox#2");
 
 /** A post as a short line: a reaction with its comment, a check with its state. */
 function line(p: HostPost): string {
@@ -136,7 +136,7 @@ test("the owner's request on a draft, and on another author's pull request, is r
   const rounds = [...(await until(stream, "round.finished")), ...(await until(stream, "round.finished"))]
     .filter((e) => e.type === "round.finished")
     .map((e) => ("changeId" in e ? e.changeId : ""));
-  expect(rounds).toEqual([DRAFT, changeId("lookover-sandbox#3")]);
+  expect(rounds).toEqual([DRAFT, changeId("sasensi/lookover-sandbox#3")]);
   await time.advance(0);
   expect(reactions(host.posts)).toEqual(["eyes 1", "eyes 2", "rocket 1", "rocket 2"]);
 });
@@ -314,10 +314,10 @@ test("a request GitHub lists twice in one poll is answered once, in that poll", 
   expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
   // Nothing went wrong: the log says the one review, and nothing else (ADR 0055).
   expect(logged).toEqual([
-    "lookover-sandbox#1 opened by sasensi: Add unpaid filter and rewrite total",
-    "lookover-sandbox#1 review queued (asked on GitHub) for a1b2c3d",
-    "lookover-sandbox#1 round 1 started on a1b2c3d, standard: Claude finds, Claude double-checks",
-    "lookover-sandbox#1 round 1 posted: no open findings",
+    "sasensi/lookover-sandbox#1 opened by sasensi: Add unpaid filter and rewrite total",
+    "sasensi/lookover-sandbox#1 review queued (asked on GitHub) for a1b2c3d",
+    "sasensi/lookover-sandbox#1 round 1 started on a1b2c3d, standard: Claude finds, Claude double-checks",
+    "sasensi/lookover-sandbox#1 round 1 posted: no open findings",
   ]);
 });
 

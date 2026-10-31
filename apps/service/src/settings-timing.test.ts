@@ -27,7 +27,7 @@ setDefaultTimeout(TEST_LIMIT_MS);
 afterEach(stopAll);
 
 const SANDBOX_ID = "sasensi/lookover-sandbox";
-const PR1 = changeId("lookover-sandbox#1");
+const PR1 = changeId("sasensi/lookover-sandbox#1");
 const own = (key: string, value: unknown) => ({ type: "repo.setSetting", repoId: SANDBOX_ID, key, value });
 
 test("a job deferred on Codex, reviewers set to Claude only: its step-in is sent again and it runs on Claude", async () => {

@@ -42,7 +42,7 @@ Each exits 0 when done (for `status`: running), 1 on an error, 2 when it can't r
 | `lookover feedback` | The findings waiting on you in the newest round, each with its thread |
 | `lookover reply <finding> <claim> <text>` | Answers a finding on its thread: `fixed`, `wont-fix`, `disputed`, `deferred` or `question` |
 
-They take `--pr N` and `--app SLUG`; `wait` and `feedback` take `--json`. Their exit codes and the loop are in [Your coding agent](/docs/coding-agent/).
+They take `--pr N` and `--app SLUG` (by default `LOOKOVER_APP`, else the data folder's App, else the shared App); `wait` and `feedback` take `--json`. Their exit codes and the loop are in [Your coding agent](/docs/coding-agent/).
 
 ## The data folder
 

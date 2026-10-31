@@ -90,7 +90,7 @@ function round(extra: Partial<Round> = {}): Round {
 }
 
 const reviewWith = (rounds: Round[], findings: Finding[] = []): Review => ({
-  ...emptyReview(changeId("app#1"), 0),
+  ...emptyReview(changeId("sam/app#1"), 0),
   rounds,
   findings,
 });

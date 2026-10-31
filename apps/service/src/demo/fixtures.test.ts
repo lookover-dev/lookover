@@ -3,6 +3,7 @@
 // whose text isn't in the diff goes to the summary); each confirm verdict names a candidate the find pass gave;
 // each change's commits are its own, and every id is one of a kind.
 import { expect, test } from "bun:test";
+import type { RepositoryRef } from "@lookover/contracts";
 import { findLine, indexDiff } from "@lookover/diff";
 import { SCENARIOS, type Scenario } from "../index.ts";
 
@@ -39,15 +40,19 @@ test("every confirm verdict names a candidate of its commit's find pass, C1 to C
   }
 });
 
-test("every scenario's ids are one of a kind: the scenarios', the changes' numbers, the commits' shas", () => {
+test("every scenario's ids are one of a kind: the scenarios', the changes' (repository and number), the commits' shas", () => {
   const ids = SCENARIOS.map((s) => s.id);
   expect(new Set(ids).size).toBe(ids.length);
   for (const scenario of SCENARIOS) {
-    const numbers = scenario.changes.map((c) => c.number);
-    expect(new Set(numbers).size).toBe(numbers.length);
+    const changes = scenario.changes.map((c) => nameOf(c.repo ?? scenario.world.repo, c.number));
+    expect(new Set(changes).size).toBe(changes.length);
     const shas = scenario.changes.flatMap((c) => c.commits.map((k) => k.sha));
     expect(new Set(shas).size).toBe(shas.length);
-    // The script's moves name the scenario's own changes.
-    for (const { move } of scenario.script) if ("change" in move) expect(numbers).toContain(move.change);
+    // The script's moves name the scenario's own changes, by repository and number.
+    for (const { move } of scenario.script)
+      if ("change" in move) expect(changes).toContain(nameOf(move.change.repo, move.change.number));
   }
 });
+
+/** A change as written: `<owner>/<name>#<number>`. */
+const nameOf = (repo: RepositoryRef, number: number) => `${repo.owner}/${repo.name}#${number}`;

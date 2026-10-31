@@ -4,7 +4,7 @@
 // right now, Claude finding. Every diff is hand-written fixture data a review reads; nothing here is a real
 // recording.
 import { commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { CONFIRM_MS, FIND_MS, MIN, OWNER, unified } from "./ledger-api.ts";
 import { SANDBOX } from "./sandbox.ts";
 
@@ -101,6 +101,9 @@ const CHANGES: ScenarioChange[] = [
   },
 ];
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(SANDBOX.repo);
+
 export const S11: Scenario = {
   id: "S11",
   title: "Phone glance",
@@ -116,8 +119,8 @@ export const S11: Scenario = {
   world: { ...SANDBOX, remote: true },
   changes: CHANGES,
   script: [
-    { at: 2 * MIN, move: { kind: "open", change: 180 } },
-    { at: 19 * MIN + 30_000, move: { kind: "open", change: 181 } },
+    { at: 2 * MIN, move: { kind: "open", change: pr(180) } },
+    { at: 19 * MIN + 30_000, move: { kind: "open", change: pr(181) } },
   ],
   seed: 20 * MIN,
 };

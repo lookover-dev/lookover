@@ -24,7 +24,7 @@ import { flowLines, logLineOf } from "./index.ts";
 
 /** Sunday 11 October 2026, 10:00 in the machine's own zone. */
 const AT = new Date(2026, 9, 11, 10, 0).getTime();
-const ID = changeId("ledger-api#151");
+const ID = changeId("sasensi/ledger-api#151");
 const SHA = commitSha("a1f9c2e7d3b4");
 const PUSHED = commitSha("b2e8d1f0c9a7");
 
@@ -139,7 +139,11 @@ function before(
       cause: null,
       bot: null,
       app: null,
-      installationId: null,
+      accounts: [],
+      unreached: [],
+      way: null,
+      signIn: null,
+      person: null,
       web: GITHUB_WEB,
       since: AT,
       limitUntil: null,
@@ -173,13 +177,13 @@ const jobChanged = (j: ReviewJob): EventBody => ({ type: "job.changed", at: AT, 
 test("a change opened, marked ready, pushed and closed each say so, its title included", () => {
   const opened: EventBody = { type: "change.opened", at: AT, change: CHANGE };
   expect(logLineOf(opened, before({ change: null }))).toBe(
-    "ledger-api#151 opened by sasensi: Retry the ledger sync",
+    "sasensi/ledger-api#151 opened by sasensi: Retry the ledger sync",
   );
   expect(logLineOf({ ...opened, change: { ...CHANGE, draft: true } }, before({ change: null }))).toBe(
-    "ledger-api#151 opened as a draft by sasensi: Retry the ledger sync",
+    "sasensi/ledger-api#151 opened as a draft by sasensi: Retry the ledger sync",
   );
   expect(logLineOf(opened, before({ change: { draft: true } }))).toBe(
-    "ledger-api#151 marked ready for review",
+    "sasensi/ledger-api#151 marked ready for review",
   );
   // Seen again at a start, as it was: nothing happened.
   expect(logLineOf(opened, before())).toBeNull();
@@ -191,9 +195,11 @@ test("a change opened, marked ready, pushed and closed each say so, its title in
     commits: 0,
     by: "agent",
   };
-  expect(logLineOf(pushed, before())).toBe("ledger-api#151 pushed b2e8d1f by the agent");
-  expect(logLineOf({ ...pushed, by: "you" }, before())).toBe("ledger-api#151 pushed b2e8d1f by you");
-  expect(logLineOf({ type: "change.closed", at: AT, changeId: ID }, before())).toBe("ledger-api#151 closed");
+  expect(logLineOf(pushed, before())).toBe("sasensi/ledger-api#151 pushed b2e8d1f by the agent");
+  expect(logLineOf({ ...pushed, by: "you" }, before())).toBe("sasensi/ledger-api#151 pushed b2e8d1f by you");
+  expect(logLineOf({ type: "change.closed", at: AT, changeId: ID }, before())).toBe(
+    "sasensi/ledger-api#151 closed",
+  );
 });
 
 test("a job queued says what asked for it and the commit; waiting, back in the queue or moved, why", () => {
@@ -206,56 +212,58 @@ test("a job queued says what asked for it and the commit; waiting, back in the q
   ];
   for (const [trigger, words] of triggers)
     expect(logLineOf(jobChanged(job("queued", { trigger })), before())).toBe(
-      `ledger-api#151 review queued (${words}) for a1f9c2e`,
+      `sasensi/ledger-api#151 review queued (${words}) for a1f9c2e`,
     );
   const paused = job("deferred", { deferral: { reason: "paused" } });
-  expect(logLineOf(jobChanged(paused), before())).toBe("ledger-api#151 review waits: reviews are paused");
+  expect(logLineOf(jobChanged(paused), before())).toBe(
+    "sasensi/ledger-api#151 review waits: reviews are paused",
+  );
   expect(logLineOf(jobChanged(paused), before({ review: { job: paused } }))).toBeNull();
   const signedOut = job("deferred", { deferral: { reason: "engine-signed-out", engine: "claude" } });
   expect(logLineOf(jobChanged(signedOut), before({ review: { job: paused } }))).toBe(
-    "ledger-api#151 review waits: Claude is signed out",
+    "sasensi/ledger-api#151 review waits: Claude is signed out",
   );
   expect(logLineOf(jobChanged(job("queued")), before({ review: { job: paused } }))).toBe(
-    "ledger-api#151 review back in the queue",
+    "sasensi/ledger-api#151 review back in the queue",
   );
   expect(
     logLineOf(jobChanged(job("queued", { sha: PUSHED })), before({ review: { job: job("queued") } })),
-  ).toBe("ledger-api#151 review moved to b2e8d1f");
+  ).toBe("sasensi/ledger-api#151 review moved to b2e8d1f");
   expect(logLineOf(jobChanged(job("queued")), before({ review: { job: job("queued") } }))).toBeNull();
 });
 
 test("a job left running at the last stop says it runs again, or failed, once", () => {
   const running = before({ review: { job: job("running"), run: RUN } });
   expect(logLineOf(jobChanged(job("queued")), running)).toBe(
-    "ledger-api#151 review runs again: the service stopped while it ran",
+    "sasensi/ledger-api#151 review runs again: the service stopped while it ran",
   );
   expect(
     logLineOf(
       jobChanged(job("failed", { failure: { kind: "service_stopped", detail: "", engine: null } })),
       running,
     ),
-  ).toBe("ledger-api#151 review failed: the service stopped before the review finished");
+  ).toBe("sasensi/ledger-api#151 review failed: the service stopped before the review finished");
 });
 
 test("a job skipped, cancelled or failed says why, a failure with what the module said", () => {
   expect(logLineOf(jobChanged(job("skipped", { skip: "draft" })), before())).toBe(
-    "ledger-api#151 review skipped: still a draft",
+    "sasensi/ledger-api#151 review skipped: still a draft",
   );
   expect(logLineOf(jobChanged(job("cancelled", { cancel: "closed" })), before())).toBe(
-    "ledger-api#151 review cancelled: the pull request was closed",
+    "sasensi/ledger-api#151 review cancelled: the pull request was closed",
   );
   expect(
     logLineOf(
       jobChanged(job("failed", { failure: { kind: "review_failed", detail: "crashed", engine: "codex" } })),
       before(),
     ),
-  ).toBe("ledger-api#151 review failed: Codex gave no review (crashed)");
+  ).toBe("sasensi/ledger-api#151 review failed: Codex gave no review (crashed)");
   expect(
     logLineOf(
       jobChanged(job("failed", { failure: { kind: "host_failed", detail: "", engine: null } })),
       before(),
     ),
-  ).toBe("ledger-api#151 review failed: GitHub did not answer");
+  ).toBe("sasensi/ledger-api#151 review failed: GitHub did not answer");
   // Running and done are the run's and the round's lines.
   expect(logLineOf(jobChanged(job("running")), before())).toBeNull();
   expect(logLineOf(jobChanged(job("done")), before())).toBeNull();
@@ -270,16 +278,16 @@ test("a run started names its round, commit, depth, finder and confirmer", () =>
     run,
   });
   expect(logLineOf(started(RUN), before())).toBe(
-    "ledger-api#151 round 1 started on a1f9c2e, standard: Codex finds, Claude double-checks",
+    "sasensi/ledger-api#151 round 1 started on a1f9c2e, standard: Codex finds, Claude double-checks",
   );
   expect(logLineOf(started({ ...RUN, confirmer: null }), before({ review: { rounds: [round(1)] } }))).toBe(
-    "ledger-api#151 round 2 started on a1f9c2e, quick: Codex finds, nobody double-checks",
+    "sasensi/ledger-api#151 round 2 started on a1f9c2e, quick: Codex finds, nobody double-checks",
   );
   expect(logLineOf(started({ ...RUN, secondFinder: "claude" }), before())).toBe(
-    "ledger-api#151 round 1 started on a1f9c2e, deep: Codex and Claude find, Claude double-checks",
+    "sasensi/ledger-api#151 round 1 started on a1f9c2e, deep: Codex and Claude find, Claude double-checks",
   );
   expect(logLineOf(started({ ...RUN, preview: true }), before())).toBe(
-    "ledger-api#151 round 1 started on a1f9c2e, standard, a preview: Codex finds, Claude double-checks",
+    "sasensi/ledger-api#151 round 1 started on a1f9c2e, standard, a preview: Codex finds, Claude double-checks",
   );
   expect(logLineOf({ type: "run.step", at: AT, changeId: ID, step: "finding" }, before())).toBeNull();
 });
@@ -297,13 +305,13 @@ test("a round finished says posted with its open findings and what failed, kept 
     preview,
   });
   expect(logLineOf(finished(round(1), job("done")), before())).toBe(
-    "ledger-api#151 round 1 posted: 2 open findings",
+    "sasensi/ledger-api#151 round 1 posted: 2 open findings",
   );
   expect(logLineOf(finished(round(2, { open: 1 }), job("done")), before())).toBe(
-    "ledger-api#151 round 2 posted: 1 open finding",
+    "sasensi/ledger-api#151 round 2 posted: 1 open finding",
   );
   expect(logLineOf(finished(round(1, { open: 0 }), job("done"), true), before())).toBe(
-    "ledger-api#151 round 1 kept as a preview: no open findings",
+    "sasensi/ledger-api#151 round 1 kept as a preview: no open findings",
   );
   expect(
     logLineOf(
@@ -314,7 +322,7 @@ test("a round finished says posted with its open findings and what failed, kept 
       before(),
     ),
   ).toBe(
-    "ledger-api#151 round 1 posted: 2 open findings; second find failed: Claude stopped before it answered; not double-checked: Claude ran out of time",
+    "sasensi/ledger-api#151 round 1 posted: 2 open findings; second find failed: Claude stopped before it answered; not double-checked: Claude ran out of time",
   );
   expect(
     logLineOf(
@@ -326,7 +334,9 @@ test("a round finished says posted with its open findings and what failed, kept 
       ),
       before(),
     ),
-  ).toBe("ledger-api#151 round 1 kept, its posts given up: GitHub refused the review (GitHub answered 422)");
+  ).toBe(
+    "sasensi/ledger-api#151 round 1 kept, its posts given up: GitHub refused the review (GitHub answered 422)",
+  );
 });
 
 test("a post that meets a refusal and waits says until when and why, once per wait; a post sent says nothing", () => {
@@ -340,11 +350,11 @@ test("a post that meets a refusal and waits says until when and why, once per wa
   const posting1 = (p: RunPosting | null) =>
     before({ review: { rounds: [round(1)], run: { ...RUN, posting: p } } });
   expect(logLineOf(posting(2, limited), posting1({ sent: 2, owed: 4, wait: null }))).toBe(
-    "ledger-api#151 round 2 posts wait: GitHub asked to wait, trying again at 10:05 (2 of 4 sent)",
+    "sasensi/ledger-api#151 round 2 posts wait: GitHub asked to wait, trying again at 10:05 (2 of 4 sent)",
   );
   const down = { until: new Date(2026, 9, 12, 0, 1).getTime(), refusal: "unavailable" as const };
   expect(logLineOf(posting(0, down), posting1(null))).toBe(
-    "ledger-api#151 round 2 posts wait: GitHub did not answer, trying again at 2026-10-12 00:01 (0 of 4 sent)",
+    "sasensi/ledger-api#151 round 2 posts wait: GitHub did not answer, trying again at 2026-10-12 00:01 (0 of 4 sent)",
   );
   // The same wait said again, a post sent, a wait over: no line.
   expect(logLineOf(posting(2, limited), posting1({ sent: 2, owed: 4, wait: limited }))).toBeNull();
@@ -361,7 +371,7 @@ test("findings dismissed say which", () => {
     findings: [],
     loop: "open",
   };
-  expect(logLineOf(dismissed, before())).toBe("ledger-api#151 F2, F3 marked wrong by you");
+  expect(logLineOf(dismissed, before())).toBe("sasensi/ledger-api#151 F2, F3 marked wrong by you");
 });
 
 test("the service paused until when, or until resumed, and resumed", () => {

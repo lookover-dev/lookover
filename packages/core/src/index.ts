@@ -49,7 +49,8 @@
 // kept in the app (unsettled, not posted); `obsolete` waits), answered as contracts' `Reconciled`, which `publish`
 // posts as it is; the claims on Lookover's threads (`readThreads`, ADR 0052, ADR 0048: per unsettled finding, by the
 // root comment's marker, never its line, the newest reply newer than the claim last answered, the one the finding
-// holds or the one a bot's reply marker names (`readReplyMarker`), never cut at that reply: a claim written while a
+// holds or the one Lookover's reply marker names (`readReplyMarker`; Lookover's reply: `lookoversReply`, ADR 0066, one
+// whose id it kept, else by who posts holding a reply marker), never cut at that reply: a claim written while a
 // round ran is read by the next; from the owner, or the change's author unless a fork's, by account id; its first
 // line read case-insensitive, `Fixed`, `Won't fix`/`Wontfix`, `Disputed`/`False positive`/`Not a bug`,
 // `Deferred`/`Out of scope` as whole words, anything else a question); the `Round` a finished
@@ -107,5 +108,11 @@ export { roundOf } from "./round.ts";
 export { type ParsedRule, parseRules, promptRules } from "./rules.ts";
 export { engineHold, type MayStart, mayStart, type StartFacts } from "./start.ts";
 export { type EngineHold, type TakeDecision, type TakeFacts, takeDecision } from "./take.ts";
-export { type Claimants, readThreads, type ThreadReading } from "./threads.ts";
+export {
+  type Claimants,
+  type LookoversReply,
+  lookoversReply,
+  readThreads,
+  type ThreadReading,
+} from "./threads.ts";
 export { type WriterFacts, writerOf } from "./writer.ts";

@@ -12,6 +12,7 @@ import { clock } from "../view-model/format.ts";
 import {
   agentLine,
   checkOf,
+  INLINE_OPENING,
   quotedLines,
   summaryComment,
   summaryFooter,
@@ -50,6 +51,7 @@ function Inline({ change, finding, bot }: { change: Change; finding: Finding; bo
         <div>
           <b>{bot}</b> <span className="gh-muted">bot</span>
           <p>
+            {INLINE_OPENING}
             <b>{severityLabel(finding)}:</b> {finding.title}. {finding.body}
           </p>
         </div>
@@ -84,8 +86,8 @@ function AgentTerminal({ it }: { it: ChangeReview }) {
 export function GitHubMock() {
   const state = useAppState();
   const navigate = useNavigate();
-  const { repo, number } = useParams();
-  const it = changeReviewAt(state, repo, number);
+  const { owner, name, number } = useParams();
+  const it = changeReviewAt(state, owner, name, number);
   if (!it) {
     return (
       <div className="gh">

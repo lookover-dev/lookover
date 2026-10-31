@@ -33,7 +33,7 @@ afterEach(stopAll);
 
 const MIN = 60_000;
 const PR1: ChangeRef = { repo: SANDBOX, number: 1 };
-const ID = changeId("lookover-sandbox#1");
+const ID = changeId("sasensi/lookover-sandbox#1");
 
 /** A block as the engine writes it. */
 const answered = (block: unknown): ScriptedRun => ({
@@ -409,8 +409,8 @@ test("a dismissal stuck on one change doesn't hold another change's", async () =
   const before = host.posts.length;
   // #1's summary waits a minute at GitHub's word; #3's dismissal, saved after, is sent meanwhile.
   host.refuseNext("rate_limited", { post: "summary" });
-  expect((await wrong("lookover-sandbox#1")).status).toBe(200);
-  expect((await wrong("lookover-sandbox#3")).status).toBe(200);
+  expect((await wrong("sasensi/lookover-sandbox#1")).status).toBe(200);
+  expect((await wrong("sasensi/lookover-sandbox#3")).status).toBe(200);
   await time.advance(1_000);
   expect([summariesOf(1, before), summariesOf(3, before)]).toEqual([0, 1]);
   await time.advance(2 * MIN);

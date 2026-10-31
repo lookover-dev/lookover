@@ -6,7 +6,7 @@
 // when the owner presses "Check again". The service stopping is not a problem shown here: a stopped service can't
 // be reached from its UI. Every diff is hand-written fixture data a review reads; nothing here is a real recording.
 import { commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { MIN, OWNER, SHORT_FIND_MS, unified } from "./ledger-api.ts";
 import { SANDBOX } from "./sandbox.ts";
 
@@ -43,6 +43,9 @@ const CHANGES: ScenarioChange[] = [
   },
 ];
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(SANDBOX.repo);
+
 export const S13: Scenario = {
   id: "S13",
   title: "Service problems",
@@ -58,7 +61,7 @@ export const S13: Scenario = {
   world: SANDBOX,
   changes: CHANGES,
   script: [
-    { at: 1 * MIN, move: { kind: "open", change: 200 } },
+    { at: 1 * MIN, move: { kind: "open", change: pr(200) } },
     { at: 40 * MIN + 40_000, move: { kind: "refuse", failure: "unavailable", forMs: 150_000 } },
     { at: 46 * MIN, move: { kind: "missing", engine: "claude" } },
     { at: 46 * MIN, move: { kind: "missing", engine: "codex" } },

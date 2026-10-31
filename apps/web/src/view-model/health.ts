@@ -44,6 +44,10 @@ export function causeText(cause: ConnectionCause): string {
       return "key lost";
     case "not-a-member":
       return "membership lost";
+    case "signed-out":
+      return "signed out";
+    case "sso":
+      return "SSO needed";
   }
 }
 
@@ -58,16 +62,21 @@ export function accountText({ account, person }: Pick<ConnectionApp, "account" |
 
 /**
  * "connected as sam-reviewer[bot]", "App uninstalled"; with the App, the status menu names its account: "connected as
- * sam-reviewer[bot], on the ledger-dev organisation". Run checks' line has no App (`app` null).
+ * sam-reviewer[bot], on the ledger-dev organisation". Run checks' line has no App (`app` null). Signed in to the shared
+ * App (ADR 0066), no bot: "connected as sam", the person who posts, or "connected" when the line doesn't know them.
  */
 export function connectionText({
   state,
   cause,
   bot,
   app,
-}: Pick<Connection, "state" | "cause" | "bot" | "app">): string {
-  if (state === "connected")
-    return app ? `connected as ${bot}, on ${accountText(app)}` : `connected as ${bot}`;
+  person,
+}: Pick<Connection, "state" | "cause" | "bot" | "app"> & { person?: Connection["person"] }): string {
+  if (state === "connected") {
+    const who = bot ?? person?.login ?? null;
+    if (who === null) return "connected";
+    return app ? `connected as ${who}, on ${accountText(app)}` : `connected as ${who}`;
+  }
   if (state === "not-connected") return "not connected";
   return cause ? causeText(cause) : "disconnected";
 }

@@ -5,6 +5,10 @@ import {
   type CommitSha,
   type ConnectionId,
   changeId,
+  changeIdOf,
+  changeName,
+  changeNameParts,
+  changePrefixOf,
   commitSha,
   connectionId,
   type FindingId,
@@ -14,6 +18,7 @@ import {
   type RepositoryId,
   type RunId,
   repositoryId,
+  repositoryRefOf,
   runId,
 } from "./index.ts";
 
@@ -56,4 +61,25 @@ test("a commit SHA is 7 to 40 lowercase hex digits", () => {
   for (const bad of ["a1f9c2", "A1F9C2E", "main", "a1f9c2g"]) {
     expect(() => commitSha(bad)).toThrow("is not a commit SHA");
   }
+});
+
+test("a change is named by its repository's owner and name and its number, and read back", () => {
+  const change = { repo: { owner: "lookover-dev", name: "ledger-api" }, number: 148 };
+  expect(changeName(change)).toBe("lookover-dev/ledger-api#148");
+  expect(changePrefixOf(change.repo)).toBe("lookover-dev/ledger-api#");
+  expect(String(changeIdOf(change.repo, 148))).toBe("lookover-dev/ledger-api#148");
+  expect(changeNameParts("lookover-dev/ledger-api#148")).toEqual({
+    repository: "lookover-dev/ledger-api",
+    number: 148,
+  });
+  // Before ADR 0066 a change was named by its repository's name alone: read as written.
+  expect(changeNameParts("ledger-api#148")).toEqual({ repository: "ledger-api", number: 148 });
+  for (const bad of ["ledger-api", "ledger-api#", "ledger-api#0", "ledger-api#1.5", "#3"])
+    expect(changeNameParts(bad)).toBeNull();
+});
+
+test("a repository is read from its owner and name", () => {
+  expect(repositoryRefOf("lookover-dev/ledger-api")).toEqual({ owner: "lookover-dev", name: "ledger-api" });
+  for (const bad of ["ledger-api", "/ledger-api", "lookover-dev/", "a/b/c"])
+    expect(repositoryRefOf(bad)).toBeNull();
 });

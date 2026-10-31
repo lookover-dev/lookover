@@ -169,6 +169,65 @@ test("on an organisation's App, the person's reply on a teammate's fork counts, 
   });
 });
 
+test("signed in on the shared App, the owner's own reply is their claim, Lookover's replies as them never are, nor a teammate's copy of its marker", async () => {
+  const time = new DemoClock({ at: T0 });
+  // Lookover posts as the owner (ADR 0066): its threads, its replies and the owner's words are by one account.
+  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [], clock: time, person: OWNER });
+  const w = await roundOne({ host, time });
+  const claim = w.host.seedReply(PR1, w.root, {
+    author: OWNER,
+    body: "Won't fix: the last invoice is a sentinel.",
+  });
+  // A teammate copies the marker of a reply answering it: never Lookover's word, so the claim is still read.
+  const copied = `${REPLY_MARKER}${JSON.stringify({ v: 1, run: "run-x", finding: "F1", claim })} -->`;
+  w.host.seedReply(PR1, w.root, { author: OCTOCAT, body: `Answered.\n\n${copied}` });
+  await w.ask(again(true, STILL));
+  expect(w.prompt()).toContain("Reply on its thread from @sasensi (won't fix)");
+  expect(w.result().findings[0]).toMatchObject({ claim: { kind: "wont_fix", by: "sasensi", count: 1 } });
+  const replies = w.host.posts.filter((p) => p.kind === "reply");
+  expect(replies).toHaveLength(1);
+  // Lookover's reply is the owner's on GitHub; kept by its id, it is never read back as the owner's claim.
+  const thread = (await w.host.threads(PR1))[0];
+  expect(thread?.replies.at(-1)?.author).toEqual({ ...OWNER, bot: false });
+  await w.ask(again(true, STILL));
+  expect(w.prompt()).not.toContain("Reply on its thread");
+  expect(w.result().findings[0]).toMatchObject({ claim: { kind: "wont_fix", count: 1 } });
+  expect(w.host.posts.filter((p) => p.kind === "reply")).toHaveLength(1);
+});
+
+/** The fake GitHub whose threads show the replies `edited` names without their markers, as an owner's edit leaves them. */
+class EditedReplies extends FakeGitHost {
+  readonly edited = new Set<number>();
+
+  override async threads(change: ChangeRef): Promise<HostThread[]> {
+    return (await super.threads(change)).map((t) => ({
+      ...t,
+      replies: t.replies.map((r) =>
+        this.edited.has(r.commentId) ? { ...r, body: r.body.split(REPLY_MARKER)[0]?.trim() ?? "" } : r,
+      ),
+    }));
+  }
+}
+
+test("signed in on the shared App, Lookover's reply the owner edited, its marker gone, is still Lookover's by its kept id", async () => {
+  const time = new DemoClock({ at: T0 });
+  const host = new EditedReplies({ repo: SANDBOX, bot: BOT, changes: [], clock: time, person: OWNER });
+  const w = await roundOne({ host, time });
+  w.host.seedReply(PR1, w.root, { author: OWNER, body: "Won't fix: the last invoice is a sentinel." });
+  await w.ask(again(true, STILL));
+  const sent = w.host.posts.filter((p) => p.kind === "reply");
+  expect(sent).toHaveLength(1);
+  // The owner edits Lookover's reply, written as them, and the marker goes with the edit.
+  host.edited.add(Number(sent[0]?.kind === "reply" ? sent[0].replyId : 0));
+  const thread = (await w.host.threads(PR1))[0];
+  expect(thread?.replies.at(-1)?.body).not.toContain(REPLY_MARKER);
+  await w.ask(again(true, STILL));
+  // Never read as the owner's claim: no new claim, the won't fix still counted once, no second reply.
+  expect(w.prompt()).not.toContain("Reply on its thread");
+  expect(w.result().findings[0]).toMatchObject({ claim: { kind: "wont_fix", count: 1 } });
+  expect(w.host.posts.filter((p) => p.kind === "reply")).toHaveLength(1);
+});
+
 /** The fake GitHub whose threads read is refused while `refusing` is set, as `failure`. */
 class RefusedThreads extends FakeGitHost {
   refusing = false;

@@ -30,7 +30,7 @@ afterEach(stopAll);
 const HOUR = 3_600_000;
 /** How often the service lists while a change is hot: `demo.step` lands on the poll's next wake. */
 const WAKE_MS = 10_000;
-const NINTH = changeId("lookover-sandbox#9");
+const NINTH = changeId("sasensi/lookover-sandbox#9");
 /** Another pull request of the owner's, a draft: listed when it opens, reviewed by nobody. */
 const ninth: FakeChange = { ...pr1, number: 9, url: pr1.url.replace(/\/1$/, "/9"), draft: true };
 const pausedJob: ReviewJob = {

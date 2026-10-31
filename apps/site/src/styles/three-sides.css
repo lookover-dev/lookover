@@ -279,7 +279,7 @@
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 9px;
 }
 .ts-empty {
   gap: 6px;
@@ -375,12 +375,29 @@
   column-gap: 12px;
   align-items: start;
 }
-/* the App's avatar is the icon file */
-.ts-avatar {
+/* the person signed in: a round with their initial; Lookover's badge, the icon file, on what GitHub badges */
+.ts-person {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 34px;
   height: 34px;
+  border-radius: var(--r-pill);
+  background: var(--gh-surface);
+  border: var(--line-w) solid var(--gh-border);
+  font: 600 15px / 1 var(--body);
+  color: var(--gh-muted);
 }
-.ts-avatar svg {
+.ts-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 12px;
+  height: 12px;
+  display: flex;
+}
+.ts-badge svg {
   width: 100%;
   height: 100%;
 }
@@ -389,15 +406,6 @@
 }
 .ts-rvhead b {
   font-weight: 600;
-}
-.ts-bot {
-  display: inline-block;
-  padding: 0 var(--s-1);
-  border: var(--line-w) solid var(--gh-border);
-  border-radius: var(--r-pill);
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--gh-muted);
 }
 .ts-rvslot {
   position: relative;
@@ -512,6 +520,35 @@
   font-style: normal;
   color: var(--ok);
 }
+/* the summary comment, on one line: the badged avatar and its words, which change with the review's */
+.ts-summary {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  column-gap: 12px;
+  align-items: center;
+}
+.ts-summary .ts-person {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  justify-self: center;
+}
+.ts-sumslot {
+  position: relative;
+  height: 22px;
+}
+.ts-sumtext {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font: 400 15px / 22px var(--body);
+  color: var(--gh-text);
+  white-space: nowrap;
+  opacity: 0;
+}
+.ts-sumtext b {
+  font-weight: 600;
+}
 .ts-merge {
   margin-top: 2px;
   display: flex;
@@ -533,6 +570,7 @@
 /* the last frame: the second verdict, the check clear, the finding verified fixed */
 .ts-chktext[data-chk="clear"],
 .ts-rvtext[data-verdict="2"],
+.ts-sumtext[data-verdict="2"],
 .ts-sev[data-sev="fixed"] {
   opacity: 1;
 }
@@ -938,18 +976,19 @@
     .ts-empty,
     .ts-chktext:not([data-chk="clear"]),
     .ts-rvtext[data-verdict="1"],
+    .ts-sumtext[data-verdict="1"],
     .ts-sev[data-sev="blocking"]
   ) {
   display: none;
 }
-.ts-card :is(.ts-rvslot, .ts-sevslot, .ts-chkslot) {
+.ts-card :is(.ts-rvslot, .ts-sumslot, .ts-sevslot, .ts-chkslot) {
   height: auto;
 }
-.ts-card :is(.ts-rvtext, .ts-chktext, .ts-sev) {
+.ts-card :is(.ts-rvtext, .ts-sumtext, .ts-chktext, .ts-sev) {
   position: static;
   display: block;
 }
-.ts-card .ts-chktext {
+.ts-card :is(.ts-chktext, .ts-sumtext) {
   white-space: normal;
 }
 .ts-card .ts-fcode {
@@ -974,6 +1013,8 @@
       .ts-chktext,
       [data-review],
       .ts-rvtext,
+      [data-summary],
+      .ts-sumtext,
       [data-finding],
       .ts-sev,
       .ts-thread,

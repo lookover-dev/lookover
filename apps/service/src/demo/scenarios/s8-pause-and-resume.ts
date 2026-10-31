@@ -5,7 +5,7 @@
 // double-check), and come back clean. "Run all checks" then reads everything again. Every diff is hand-written
 // fixture data a review reads; nothing here is a real recording.
 import { commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { BY_CLAUDE, MIN, OWNER, SHORT_FIND_MS, unified } from "./ledger-api.ts";
 import { SANDBOX } from "./sandbox.ts";
 
@@ -118,6 +118,9 @@ const CHANGES: ScenarioChange[] = [
   },
 ];
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(SANDBOX.repo);
+
 export const S8: Scenario = {
   id: "S8",
   title: "Pause and resume",
@@ -133,10 +136,10 @@ export const S8: Scenario = {
   world: SANDBOX,
   changes: CHANGES,
   script: [
-    { at: 1 * MIN, move: { kind: "open", change: 160 } },
+    { at: 1 * MIN, move: { kind: "open", change: pr(160) } },
     { at: 5 * MIN, move: { kind: "command", command: { type: "service.pause", for: "hour" } } },
-    { at: 7 * MIN, move: { kind: "open", change: 161 } },
-    { at: 8 * MIN, move: { kind: "open", change: 162 } },
+    { at: 7 * MIN, move: { kind: "open", change: pr(161) } },
+    { at: 8 * MIN, move: { kind: "open", change: pr(162) } },
   ],
   seed: 5 * MIN,
 };

@@ -1,5 +1,5 @@
-// The person's own `gh` (ADR 0059): a port, `Gh`, that says who the GitHub CLI is signed in as, the organisations where
-// that account is an active admin, and that account's membership of one organisation. Before an App exists the service
+// The person's own `gh` (ADR 0059): a port, `Gh`, that says who the GitHub CLI is signed in as, that account's active
+// organisation memberships with its role in each (ADR 0067), and its membership of one organisation. Before an App exists the service
 // has no GitHub credential of its own, and an App's credentials can't say which person runs Lookover: the person's
 // `gh` login can, since GitHub vouches for it. Every read answers, never rejects: `missing` (no `gh`), `signed-out`,
 // or `unanswered` with why (GitHub out of reach, an organisation's SAML single sign-on, a token without `read:org`, no
@@ -15,7 +15,15 @@
 // to search, or it is `bun run live`'s suite (`scripts/live-gh.ts`), which reads the owner's real `gh`.
 import { execFile } from "node:child_process";
 import { delimiter, isAbsolute, join } from "node:path";
-import type { Gh, GhMembership, GhUnanswered, GhWhy, HostLogin } from "@lookover/contracts";
+import type {
+  Gh,
+  GhMembership,
+  GhOrganisation,
+  GhPerson,
+  GhUnanswered,
+  GhWhy,
+  HostLogin,
+} from "@lookover/contracts";
 import { programEnv } from "@lookover/engines";
 import { z } from "zod";
 import { caseBlind, isFile, runnable, savedPath } from "./command-path.ts";
@@ -257,57 +265,76 @@ const MAX_PAGES = 10;
 const API = "https://api.github.com/";
 
 /**
- * One page of the person's memberships: the organisations it admins, and the path of the next page from the `Link`
- * header (null on the last). No answer when GitHub says it left organisations out for their single sign-on (a 200 with
- * `X-GitHub-SSO: partial-results`), sent another shape, or links a next page off the API's address.
+ * One page of the person's memberships: each active organisation with the person's role there (GitHub's `admin` an
+ * owner), and the path of the next page from the `Link` header (null on the last). No answer when GitHub says it left
+ * organisations out for their single sign-on (a 200 with `X-GitHub-SSO: partial-results`), sent another shape, or
+ * links a next page off the API's address.
  */
-function adminPage(
+function membershipsPage(
   response: Response,
-): { kind: "page"; admins: HostLogin[]; next: string | null } | GhUnanswered {
+): { kind: "page"; listed: GhOrganisation[]; next: string | null } | GhUnanswered {
   const sso = response.headers.get("x-github-sso");
   if (sso?.startsWith("partial-results"))
     return unanswered("sso", `GitHub left organisations out of your list for their single sign-on: ${sso}`);
   const parsed = z.array(listed).safeParse(response.body);
   if (!parsed.success) return unexpected("your organisations", parsed.error);
-  const admins = parsed.data
-    .filter((m) => m.state === "active" && m.role === "admin")
-    .map((m) => accountOf(m.organization));
+  const found = parsed.data
+    .filter((m) => m.state === "active")
+    .map(
+      (m): GhOrganisation => ({
+        organisation: accountOf(m.organization),
+        role: m.role === "admin" ? "owner" : "member",
+      }),
+    );
   const next = /<([^>]+)>;\s*rel="next"/.exec(response.headers.get("link") ?? "")?.[1];
   if (next !== undefined && !next.startsWith(API))
     return unanswered("failed", `GitHub's next page isn't on api.github.com: ${next}`);
-  return { kind: "page", admins, next: next === undefined ? null : next.slice(API.length) };
+  return { kind: "page", listed: found, next: next === undefined ? null : next.slice(API.length) };
 }
 
 /** Not a member of the organisation, or no such organisation. */
 const ABSENT: GhMembership = { kind: "absent" };
 
+/** Who `gh` is signed in as (`GET /user`), or why it can't say. */
+async function you(api: (path: string) => Promise<Heard>): Promise<GhPerson> {
+  const got = await api("user");
+  if (got.kind === "refused") return refusal(got.response);
+  if (got.kind !== "ok") return got;
+  const parsed = account.safeParse(got.response.body);
+  return parsed.success
+    ? { kind: "signed-in", account: accountOf(parsed.data) }
+    : unexpected("you", parsed.error);
+}
+
+/** Every page of the person's active memberships, by the `Link` GitHub gives, or why it can't list them. */
+async function everyMembership(
+  api: (path: string) => Promise<Heard>,
+): Promise<{ kind: "listed"; organisations: GhOrganisation[] } | GhUnanswered> {
+  const organisations: GhOrganisation[] = [];
+  let path: string | null = "user/memberships/orgs?state=active&per_page=100";
+  for (let page = 0; path !== null; page++) {
+    if (page === MAX_PAGES)
+      return unanswered("failed", `GitHub listed your organisations on more than ${MAX_PAGES} pages`);
+    const got = await api(path);
+    if (got.kind === "refused") return refusal(got.response);
+    if (got.kind !== "ok") return got;
+    const read = membershipsPage(got.response);
+    if (read.kind !== "page") return read;
+    organisations.push(...read.listed);
+    path = read.next;
+  }
+  return { kind: "listed", organisations };
+}
+
 /** The reads, made sense of, on any way to call `gh api <path>`. */
 function reads(api: (path: string) => Promise<Heard>): Gh {
   return {
-    person: async () => {
-      const got = await api("user");
-      if (got.kind === "refused") return refusal(got.response);
-      if (got.kind !== "ok") return got;
-      const parsed = account.safeParse(got.response.body);
-      return parsed.success
-        ? { kind: "signed-in", account: accountOf(parsed.data) }
-        : unexpected("you", parsed.error);
-    },
-    adminOrganisations: async () => {
-      const organisations: HostLogin[] = [];
-      let path: string | null = "user/memberships/orgs?state=active&per_page=100";
-      for (let page = 0; path !== null; page++) {
-        if (page === MAX_PAGES)
-          return unanswered("failed", `GitHub listed your organisations on more than ${MAX_PAGES} pages`);
-        const got = await api(path);
-        if (got.kind === "refused") return refusal(got.response);
-        if (got.kind !== "ok") return got;
-        const read = adminPage(got.response);
-        if (read.kind !== "page") return read;
-        organisations.push(...read.admins);
-        path = read.next;
-      }
-      return { kind: "listed", organisations };
+    person: () => you(api),
+    memberships: async () => {
+      const who = await you(api);
+      if (who.kind !== "signed-in") return who;
+      const listed = await everyMembership(api);
+      return listed.kind === "listed" ? { ...listed, person: who.account } : listed;
     },
     membership: async (organisation) => {
       if (!ORGANISATION_LOGIN.test(organisation)) return ABSENT;

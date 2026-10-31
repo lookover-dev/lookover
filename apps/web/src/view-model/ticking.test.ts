@@ -86,9 +86,9 @@ test("a browser clock that stands still (proof's) shows the service's now", () =
 });
 
 test("the time is redrawn only while a review runs", () => {
-  const idle = emptyReview(changeId("app#1"), NOW);
+  const idle = emptyReview(changeId("sam/app#1"), NOW);
   const busy: Review = {
-    ...emptyReview(changeId("app#2"), NOW),
+    ...emptyReview(changeId("sam/app#2"), NOW),
     run: {
       id: runId("run-1"),
       reviewer: "claude",

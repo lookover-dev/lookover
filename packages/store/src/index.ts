@@ -42,7 +42,9 @@
 //   for this run and where its posts are" (what a restart resumes), "a send of this post began", "the host took it,
 //   as this id" (the check sent is the job's; the review sent lands the ledger; the check completed completes it; a
 //   reply on a thread, `reply:<finding>`, and a comment minimized, `minimize:<global id>`, settle nothing else),
-//   "the change's latest round that posted, with its plan and its check" (what a dismissal restates);
+//   "the change's latest round that posted, with its plan and its check" (what a dismissal restates), and "the ids
+//   of every reply the host took for this change", its rounds' and its dismissals' (`replies(changeId)`: what tells
+//   Lookover's replies from the person's it posts as, ADR 0066);
 // - `dismissals`: the owner's "This finding is wrong" (ADR 0052), an outbox of its own keyed by the dismissal: "the
 //   owner dismissed this finding" (the ledger it leaves, the round's plan's too, and its posts owed, in one
 //   transaction, refused while a run of the change goes), "this dismissal and its posts", "a send began", "the host
@@ -74,7 +76,10 @@
 //   rounds and rules kept as history);
 // - `appFlows`: the manifest flows (ADR 0053): "make the App here" (your own account, or an organisation and the
 //   person it works for, ADR 0059: chosen last, kept), "a flow was opened with this state for this place" (its hash
-//   only), "when was it opened and for where", "it is used up", "forget those opened before then".
+//   only), "when was it opened and for where", "it is used up", "forget those opened before then";
+// - `installAsks`: the shared App's asks to install (ADR 0067): "which accounts did this person ask to install it
+//   on, and when", "they asked on this one" (one ask per account, by GitHub's id for it, the last winning, with its
+//   login as last asked), "this one is reached" (forgotten), "this person signed in" (every other person's forgotten).
 // Ordering and invariants: a migration runs once, in its own transaction, in name order; `migrated` names the
 // ones this open applied, so a second open reports none; a change keeps the moment it was first seen across
 // listings; `events.append` numbers one more than the last, even after a restart; a job runs only with its one
@@ -106,6 +111,7 @@ import { type AppFlows, appFlows } from "./app-flows.ts";
 import { type Dismissals, dismissals } from "./dismissals.ts";
 import { type Events, events } from "./events.ts";
 import { type Inbox, inbox } from "./inbox.ts";
+import { type InstallAsks, installAsks } from "./install-asks.ts";
 import { type Jobs, jobs } from "./jobs.ts";
 import { migrate } from "./migrations.ts";
 import { type Pause, pause } from "./pause.ts";
@@ -151,6 +157,7 @@ export interface Store {
   selfTests: SelfTestResults;
   setup: Setup;
   appFlows: AppFlows;
+  installAsks: InstallAsks;
   close(): void;
 }
 
@@ -164,6 +171,7 @@ export type {
 } from "./dismissals.ts";
 export type { Events } from "./events.ts";
 export type { Inbox, InboxDelta, InboxEntry, OpenChange, WriterRead } from "./inbox.ts";
+export type { InstallAsk, InstallAsks } from "./install-asks.ts";
 export type {
   Ask,
   Asked,
@@ -222,6 +230,7 @@ export function openStore({ home, migrations, durable = true, eventsFrom = 0 }: 
       selfTests: selfTests(db),
       setup: setup(db),
       appFlows: appFlows(db),
+      installAsks: installAsks(db),
       close: () => db.close(),
     };
   } catch (error) {

@@ -12,7 +12,7 @@ import {
   REPLY_MARKER,
   type Severity,
 } from "@lookover/contracts";
-import { readThreads } from "./index.ts";
+import { lookoversReply, readThreads } from "./index.ts";
 
 const OWNER = { id: 1, login: "owner", bot: false };
 const AUTHOR = { id: 2, login: "author", bot: false };
@@ -24,7 +24,13 @@ const OTHER_BOT = { id: 98, login: "linter[bot]", bot: true };
 const answers = (claim: HostThreadReply, finding = "F1") =>
   `${REPLY_MARKER}${JSON.stringify({ v: 1, run: "run-2", finding, claim: claim.commentId })} -->`;
 
-const SAME_REPO = { owner: { id: 1 }, author: { id: 2 }, fork: false };
+/** On the own App: Lookover posts as its bot, and kept no reply's id. */
+const SAME_REPO = {
+  owner: { id: 1 },
+  author: { id: 2 },
+  fork: false,
+  lookovers: lookoversReply([], LOOKOVER),
+};
 
 function finding(n: number, status: FindingStatus = "open", extra: Partial<Finding> = {}): Finding {
   const severity: Severity = "should_fix";
@@ -154,6 +160,24 @@ test("the newest reply from the owner or the author counts; anyone else's, a bot
     ["F1", "disputed", "owner"],
     ["F3", "deferred", "author"],
   ]);
+});
+
+test("on a change a bot opened, the bot's reply is never a claim, nor Lookover's bot's without a marker", () => {
+  const renovate = { id: 97, login: "renovate[bot]", bot: true };
+  const ledger = [finding(1), finding(2)];
+  const threads = [
+    thread(1, [reply(OWNER, "Won't fix"), reply(renovate, "Fixed")]),
+    thread(2, [reply(renovate, "Not a bug")]),
+  ];
+  const byBot = { ...SAME_REPO, author: { id: renovate.id } };
+  const reading = readThreads(ledger, threads, byBot);
+  expect(reading.claims.map((c) => [String(c.findingId), c.kind, c.by])).toEqual([
+    ["F1", "wont_fix", "owner"],
+  ]);
+  // On a change Lookover's own bot opened, its reply that lost its marker is not the author's claim either.
+  const lost = reply(LOOKOVER, "Fixed: edited.");
+  const onOwn = readThreads([finding(1)], [thread(1, [lost])], { ...SAME_REPO, author: { id: LOOKOVER.id } });
+  expect(onOwn.claims).toEqual([]);
 });
 
 test("on a fork's change only the owner's reply counts, even from the change's author", () => {
@@ -301,4 +325,70 @@ test("the owner's dismissal, as publish writes it, is Lookover's word, answers n
   const before = reply(AUTHOR, "Deferred");
   const reading = readThreads([finding(1)], [thread(1, [before, dismissal])], SAME_REPO);
   expect(reading.claims.map((c) => [c.kind, c.commentId])).toEqual([["deferred", before.commentId]]);
+});
+
+// Signed in on the shared App (ADR 0066), Lookover posts as the owner: what tells its replies from theirs is the ids
+// it kept, else its reply marker on a reply by who posts.
+const asOwner = (kept: number[] = []) => ({ ...SAME_REPO, lookovers: lookoversReply(kept, OWNER) });
+
+test("signed in as the owner, the owner's own reply on a thread is their claim", () => {
+  const own = reply(OWNER, "Won't fix: the header is needed.");
+  const reading = readThreads([finding(1)], [thread(1, [own])], asOwner());
+  expect(reading.claims.map((c) => [c.kind, c.by, c.commentId])).toEqual([
+    ["wont_fix", "owner", own.commentId],
+  ]);
+});
+
+test("signed in as the owner, Lookover's reply answers the claim by its marker, or is Lookover's by its kept id", () => {
+  const claim = reply(AUTHOR, "Disputed: the client sets a timeout.");
+  const marked = reply(OWNER, `Still there: line 9 reads it.\n\n${answers(claim)}`);
+  expect(readThreads([finding(1)], [thread(1, [claim, marked])], asOwner()).claims).toEqual([]);
+  // A reply with no marker kept by its id: Lookover's, never the owner's claim.
+  const kept = reply(OWNER, "Fixed: the check moved up.");
+  expect(readThreads([finding(1)], [thread(1, [kept])], asOwner([kept.commentId])).claims).toEqual([]);
+});
+
+test("a teammate's copied reply marker is never Lookover's: the claim it names is still read", () => {
+  const claim = reply(AUTHOR, "Deferred to #42.");
+  const copied = reply(STRANGER, `Looks fine.\n\n${answers(claim)}`);
+  const onOwn = readThreads([finding(1)], [thread(1, [claim, copied])], SAME_REPO);
+  expect(onOwn.claims.map((c) => c.commentId)).toEqual([claim.commentId]);
+  const onShared = readThreads([finding(1)], [thread(1, [claim, copied])], asOwner());
+  expect(onShared.claims.map((c) => c.commentId)).toEqual([claim.commentId]);
+});
+
+test("another App's reply holding a reply marker is not Lookover's: only who posts writes Lookover's", () => {
+  const claim = reply(AUTHOR, "Fixed");
+  const quoted = reply(OTHER_BOT, `Lookover said:\n\n${answers(claim)}`);
+  const reading = readThreads([finding(1)], [thread(1, [claim, quoted])], SAME_REPO);
+  expect(reading.claims.map((c) => c.commentId)).toEqual([claim.commentId]);
+});
+
+test("Lookover's reply is one whose id it kept, else one by who posts holding a reply marker", () => {
+  const lookovers = lookoversReply([7001], OWNER);
+  const of = (commentId: number, author: HostThreadReply["author"], marker: boolean) =>
+    lookovers({
+      commentId,
+      nodeId: `PRRC_${commentId}`,
+      author,
+      body: marker ? `Noted.\n\n${REPLY_MARKER}{"v":1} -->` : "Noted.",
+      at: "2026-10-10T10:00:00Z",
+    });
+  expect([
+    of(7001, OWNER, false),
+    of(7002, OWNER, true),
+    of(7003, OWNER, false),
+    of(7004, STRANGER, true),
+    of(7005, LOOKOVER, true),
+  ]).toEqual([true, true, false, false, false]);
+  // Who posts not asked (no thread to read): only the kept ids.
+  const keptOnly = lookoversReply([7001], null);
+  const marked = (commentId: number) => ({
+    commentId,
+    nodeId: `PRRC_${commentId}`,
+    author: OWNER,
+    body: `Noted.\n\n${REPLY_MARKER}{"v":1} -->`,
+    at: "2026-10-10T10:00:00Z",
+  });
+  expect([keptOnly(marked(7001)), keptOnly(marked(7002))]).toEqual([true, false]);
 });

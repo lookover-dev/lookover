@@ -386,7 +386,7 @@ test("the setup starts at its first step, keeps each write across a restart, and
     again.setup.write({
       step: "first-review",
       github: "done",
-      firstReviewChange: changeId("lookover-sandbox#1"),
+      firstReviewChange: changeId("sasensi/lookover-sandbox#1"),
     }),
   ).toEqual({
     done: false,
@@ -394,7 +394,7 @@ test("the setup starts at its first step, keeps each write across a restart, and
     reached: "first-review",
     github: "done",
     githubRefused: null,
-    firstReviewChange: changeId("lookover-sandbox#1"),
+    firstReviewChange: changeId("sasensi/lookover-sandbox#1"),
   });
   // Set up at once, as live mode writes it at the first start of a data folder.
   expect(again.setup.write({ done: true, step: "background" })).toEqual({
@@ -403,7 +403,7 @@ test("the setup starts at its first step, keeps each write across a restart, and
     reached: "background",
     github: "done",
     githubRefused: null,
-    firstReviewChange: changeId("lookover-sandbox#1"),
+    firstReviewChange: changeId("sasensi/lookover-sandbox#1"),
   });
 });
 
@@ -469,7 +469,7 @@ test("a self-test's result is kept per engine, program and version, across a res
   expect(again.selfTests.result({ ...claude, engine: "codex" })).toBeNull();
 });
 
-const CHANGE = changeId("lookover-sandbox#1");
+const CHANGE = changeId("sasensi/lookover-sandbox#1");
 const job: ReviewJob = {
   id: jobId("j1"),
   sha: pr1.head.sha,
@@ -498,8 +498,8 @@ const run: Run = {
   posting: null,
 };
 
-const OTHER = changeId("lookover-sandbox#2");
-const THIRD = changeId("lookover-sandbox#3");
+const OTHER = changeId("sasensi/lookover-sandbox#2");
+const THIRD = changeId("sasensi/lookover-sandbox#3");
 const SIGNED_OUT = { reason: "engine-signed-out", engine: "claude" } as const;
 /** Behind Claude reviewing the other change. */
 const BEHIND: Turn = { behind: "engines", engines: ["claude"], changes: [OTHER], testing: false };
@@ -689,7 +689,7 @@ test("a preview has no check: completed from the start, joined as one too, unles
   store.jobs.asked(OTHER, { sha: other.sha, trigger: "first-review", id: () => jobId("j3"), preview: true });
   expect(store.jobs.checkOf(other.id)).toEqual({ ref: null, completed: true });
   // One whose check the host already shows keeps following it.
-  const third = changeId("lookover-sandbox#3");
+  const third = changeId("sasensi/lookover-sandbox#3");
   const shown: ReviewJob = { ...job, id: jobId("j4"), trigger: "opened" };
   asked(store, third, shown);
   store.jobs.checked(shown.id, { id: "c1", sha: shown.sha });
@@ -796,7 +796,7 @@ test("a job's reroute is cleared when the job ends, by the take's skip, cancel a
   asked(store, CHANGE, job);
   asked(store, OTHER, second);
   asked(store, THIRD, third);
-  asked(store, changeId("lookover-sandbox#4"), fourth);
+  asked(store, changeId("sasensi/lookover-sandbox#4"), fourth);
   for (const j of [job, second, third, fourth]) store.jobs.reroute(j.id, "codex");
   expect(store.jobs.waiting().jobs.map((w) => w.reroute)).toEqual(["codex", "codex", "codex", "codex"]);
   const failure = { kind: "host_failed", detail: "not_found" } as const;
@@ -1364,7 +1364,7 @@ test("two processes taking from one database start every job once, waiting on ea
   const dir = home();
   const store = open(dir);
   const ids = Array.from({ length: 40 }, (_, i) => jobId(`j${i}`));
-  for (const id of ids) asked(store, changeId(`lookover-sandbox#${id}`), { ...job, id });
+  for (const id of ids) asked(store, changeId(`sasensi/lookover-sandbox#${id}`), { ...job, id });
   const takers = ["a", "b"].map((tag) =>
     Bun.spawn([process.execPath, "-e", taker(dir, tag)], { stdout: "pipe", stderr: "pipe" }),
   );
@@ -1576,7 +1576,7 @@ test("\"Too noisy?\"'s counts: the repository's 30 most recently reviewed change
   const dir = home();
   const store = open(dir);
   const SANDBOX_REPO = repositoryId("sasensi/lookover-sandbox");
-  expect(store.rounds.noise(SANDBOX_REPO, "lookover-sandbox#")).toEqual({
+  expect(store.rounds.noise(SANDBOX_REPO, "sasensi/lookover-sandbox#")).toEqual({
     reviews: 0,
     postedBelowBlocking: 0,
     raisedByRule: {},
@@ -1599,22 +1599,22 @@ test("\"Too noisy?\"'s counts: the repository's 30 most recently reviewed change
   });
   try {
     // The oldest change of 31, left out: had it counted, `a1` would have raised 2 and 4 would be posted.
-    planted("lookover-sandbox#1", 1, T1, [f("should_fix", true, "a1"), f("consider", true)]);
-    for (let n = 2; n <= 31; n++) planted(`lookover-sandbox#${n}`, 1, T1 + n, [f("blocking", true)]);
+    planted("sasensi/lookover-sandbox#1", 1, T1, [f("should_fix", true, "a1"), f("consider", true)]);
+    for (let n = 2; n <= 31; n++) planted(`sasensi/lookover-sandbox#${n}`, 1, T1 + n, [f("blocking", true)]);
     // #2's last round: a posted Should fix citing `a1`, a blocking one citing `b2`, a Consider held off the pull
     // request; its first round's findings don't count.
-    planted("lookover-sandbox#2", 2, T2, [
+    planted("sasensi/lookover-sandbox#2", 2, T2, [
       f("should_fix", true, "a1"),
       f("blocking", true, "b2"),
       f("consider", false),
     ]);
     // Other repositories' changes, reviewed last, one named as this one's start: not this repository's.
-    planted("ledger-api#2", 1, T2 + 1, [f("should_fix", true, "a1")]);
-    planted("lookover-sandbox-2#1", 1, T2 + 2, [f("consider", true, "a1")]);
+    planted("sasensi/ledger-api#2", 1, T2 + 1, [f("should_fix", true, "a1")]);
+    planted("sasensi/lookover-sandbox-2#1", 1, T2 + 2, [f("consider", true, "a1")]);
   } finally {
     db.close();
   }
-  expect(store.rounds.noise(SANDBOX_REPO, "lookover-sandbox#")).toEqual({
+  expect(store.rounds.noise(SANDBOX_REPO, "sasensi/lookover-sandbox#")).toEqual({
     reviews: 30,
     postedBelowBlocking: 1,
     raisedByRule: { a1: 1, b2: 1 },
@@ -1622,9 +1622,15 @@ test("\"Too noisy?\"'s counts: the repository's 30 most recently reviewed change
   // `a1` and `b2` nested in `p0`, which raised nothing itself: turning it off removes theirs (Lookover #156 F4).
   const read = (id: string, parentIds: string[]) => ({ ...rule(id), text: id, parentIds });
   store.rules.read(SANDBOX_REPO, [read("p0", []), read("a1", ["p0"]), read("b2", ["p0"])]);
-  expect(store.rounds.noise(SANDBOX_REPO, "lookover-sandbox#").raisedByRule).toEqual({ p0: 2, a1: 1, b2: 1 });
+  expect(store.rounds.noise(SANDBOX_REPO, "sasensi/lookover-sandbox#").raisedByRule).toEqual({
+    p0: 2,
+    a1: 1,
+    b2: 1,
+  });
   // Fewer than 30 reviewed: as many as there are.
-  expect(store.rounds.noise(repositoryId("sasensi/lookover-sandbox-2"), "lookover-sandbox-2#")).toEqual({
+  expect(
+    store.rounds.noise(repositoryId("sasensi/lookover-sandbox-2"), "sasensi/lookover-sandbox-2#"),
+  ).toEqual({
     reviews: 1,
     postedBelowBlocking: 1,
     raisedByRule: { a1: 1 },
@@ -1650,13 +1656,13 @@ test("the rounds of a change are kept in order, and the ledger is what the last 
     { n: 2, sha: fixedSha },
   ]);
   expect(store.rounds.ledger(CHANGE)).toEqual([fixed]);
-  expect(store.rounds.ledger(changeId("lookover-sandbox#2"))).toEqual([]);
+  expect(store.rounds.ledger(changeId("sasensi/lookover-sandbox#2"))).toEqual([]);
 });
 
 test("when a repository's last round was posted: none before its first, another repository's not counted (ADR 0043's hot window)", () => {
   const dir = home();
   const store = open(dir);
-  expect(store.rounds.lastPostedAt("lookover-sandbox#")).toBeNull();
+  expect(store.rounds.lastPostedAt("sasensi/lookover-sandbox#")).toBeNull();
   asked(store, CHANGE, job);
   started(store, job.id, run);
   roundEnded(store, run.id, 1, [], T2);
@@ -1665,29 +1671,29 @@ test("when a repository's last round was posted: none before its first, another 
   started(store, second.id, { ...run, id: runId("r2"), sha: pr2.head.sha });
   // A run that ends without a round posted nothing.
   store.jobs.runEnded(runId("r2"), { kind: "deferred", deferral: SIGNED_OUT }, T2 + 5);
-  // Another repository's round, later, is its own: ids of `lookover-sandbox-2#` sort past the sandbox's.
+  // Another repository's round, later, is its own: ids of `sasensi/lookover-sandbox-2#` sort past the sandbox's.
   const elsewhere: ReviewJob = { ...job, id: jobId("j3") };
-  asked(store, changeId("lookover-sandbox-2#1"), elsewhere);
+  asked(store, changeId("sasensi/lookover-sandbox-2#1"), elsewhere);
   started(store, elsewhere.id, { ...run, id: runId("r3") });
   roundEnded(store, runId("r3"), 1, [], T2 + 10);
   store.close();
   const again = open(dir);
-  expect(again.rounds.lastPostedAt("lookover-sandbox#")).toBe(T2);
-  expect(again.rounds.lastPostedAt("lookover-sandbox-2#")).toBe(T2 + 10);
-  expect(again.rounds.lastPostedAt("ledger-api#")).toBeNull();
+  expect(again.rounds.lastPostedAt("sasensi/lookover-sandbox#")).toBe(T2);
+  expect(again.rounds.lastPostedAt("sasensi/lookover-sandbox-2#")).toBe(T2 + 10);
+  expect(again.rounds.lastPostedAt("sasensi/ledger-api#")).toBeNull();
 });
 
 test("a repository is asked while a job of one of its changes waits or runs; another repository's doesn't count", () => {
   const store = open(home());
-  expect(store.jobs.pendingIn("lookover-sandbox#")).toBe(false);
+  expect(store.jobs.pendingIn("sasensi/lookover-sandbox#")).toBe(false);
   asked(store, CHANGE, job);
-  expect(store.jobs.pendingIn("lookover-sandbox#")).toBe(true);
-  expect(store.jobs.pendingIn("ledger-api#")).toBe(false);
-  expect(store.jobs.pendingIn("lookover-sandbox-2#")).toBe(false);
+  expect(store.jobs.pendingIn("sasensi/lookover-sandbox#")).toBe(true);
+  expect(store.jobs.pendingIn("sasensi/ledger-api#")).toBe(false);
+  expect(store.jobs.pendingIn("sasensi/lookover-sandbox-2#")).toBe(false);
   started(store, job.id, run);
-  expect(store.jobs.pendingIn("lookover-sandbox#")).toBe(true);
+  expect(store.jobs.pendingIn("sasensi/lookover-sandbox#")).toBe(true);
   roundEnded(store, run.id, 1, [], T2);
-  expect(store.jobs.pendingIn("lookover-sandbox#")).toBe(false);
+  expect(store.jobs.pendingIn("sasensi/lookover-sandbox#")).toBe(false);
 });
 
 test("a job skipped is recorded with its reason, never waits, and lets a review be asked beside it", () => {
@@ -2385,6 +2391,46 @@ function postedRound(store: Store, ledger: Finding[]): void {
   store.jobs.runEnded(run.id, { kind: "round" }, T1 + 1);
 }
 
+test("the replies Lookover kept for a change are its rounds' and its dismissals', each by the host's id (ADR 0066)", () => {
+  const dir = home();
+  const store = open(dir);
+  expect(store.posts.replies(CHANGE)).toEqual([]);
+  asked(store, CHANGE, job);
+  started(store, job.id, run);
+  const posts = [
+    "check",
+    "review",
+    "reply:F1",
+    "reply:F2",
+    "summary",
+    "completed",
+    "minimize:IC_c1",
+  ] as const;
+  store.posts.saved(run.id, { n: 1, held: [finding], ledger: [finding], plan: PLAN, posts }, T1);
+  store.posts.sent(run.id, "check", "111");
+  store.posts.sent(run.id, "reply:F1", "100004");
+  store.posts.sent(run.id, "minimize:IC_c1", "IC_c1");
+  store.posts.sending(run.id, "reply:F2");
+  store.jobs.runEnded(run.id, { kind: "round" }, T1 + 1);
+  store.dismissals.saved({
+    id: "d1",
+    changeId: CHANGE,
+    findingId: finding.id,
+    runId: run.id,
+    checkId: "111",
+    dismiss: dismissing("F1"),
+    posts: DISMISSAL_POSTS,
+    at: T2,
+  });
+  store.dismissals.sent("d1", "reply", "100009");
+  store.dismissals.sent("d1", "summary", "9001");
+  store.close();
+  const again = open(dir);
+  // A reply begun and never marked sent has no id: the reply marker finds it.
+  expect(again.posts.replies(CHANGE)).toEqual([100004, 100009]);
+  expect(again.posts.replies(changeId("sasensi/lookover-sandbox#2"))).toEqual([]);
+});
+
 test("the change's latest round that posted is given with its plan and its check; a preview after it is passed over", () => {
   const store = open(home());
   expect(store.posts.latest(CHANGE)).toBeNull();
@@ -2525,7 +2571,7 @@ test("a repository gone from the installation: its jobs cancelled, what it owes 
   const dir = home();
   const store = open(dir);
   const ledger = { owner: "sasensi", name: "ledger-api" };
-  const ledgerChange = changeId("ledger-api#1");
+  const ledgerChange = changeId("sasensi/ledger-api#1");
   store.inbox.replace(REPO, [pr1, pr2], T1);
   store.inbox.replace(ledger, [pr1], T1);
   store.repos.setEnabled(REPO, false);
@@ -2546,14 +2592,14 @@ test("a repository gone from the installation: its jobs cancelled, what it owes 
   const elsewhere: ReviewJob = { ...job, id: jobId("j9") };
   asked(store, ledgerChange, elsewhere);
 
-  store.repos.removed(REPO, "lookover-sandbox#", T2);
+  store.repos.removed(REPO, "sasensi/lookover-sandbox#", T2);
   store.close();
 
   const again = open(dir);
   expect(again.jobs.latest(CHANGE)?.job).toMatchObject({ id: job.id, state: "cancelled", cancel: "closed" });
   expect(again.jobs.latest(OTHER)?.job).toMatchObject({ id: other.id, state: "cancelled", cancel: "closed" });
   expect(again.jobs.leftRunning()).toEqual([]);
-  expect(again.jobs.pendingIn("lookover-sandbox#")).toBe(false);
+  expect(again.jobs.pendingIn("sasensi/lookover-sandbox#")).toBe(false);
   expect(again.jobs.waiting().jobs.map((w) => w.changeId)).toEqual([ledgerChange]);
   // Nothing is owed to a repository Lookover can't reach: no check's end, no post, no reaction.
   expect(again.jobs.checksEnding()).toEqual([]);
@@ -2615,4 +2661,100 @@ test("where the App is made is chosen once and kept across a restart, and each f
   expect(third.appFlows.chosen()).toBe("none");
   third.appFlows.choose(acme);
   expect(third.appFlows.chosen()).toEqual(acme);
+});
+
+/** The migration that names each change by its repository's owner too (ADR 0066). */
+const OWNER_IDS_MIGRATION = "20261030090000-change-ids-with-owner";
+
+test("a data folder from before ADR 0066 names its changes by owner and name: its jobs, rounds, plans, dismissals and first review follow, its events not", () => {
+  const dir = home();
+  const store = open(dir);
+  const ledgerApi = { owner: "ledger-dev", name: "ledger-api" };
+  // Both repositories listed: the store keeps them, each of one name in this data folder.
+  store.inbox.replace(REPO, [pr1], T1);
+  store.inbox.replace(ledgerApi, [{ ...pr2, url: "https://github.com/ledger-dev/ledger-api/pull/2" }], T1);
+  // The ids the service wrote before: the repository's name alone.
+  const old = changeId("lookover-sandbox#1");
+  const oldLedger = changeId("ledger-api#2");
+  asked(store, old, job);
+  started(store, job.id, run);
+  store.posts.saved(run.id, { n: 1, held: [finding], ledger: [finding], plan: PLAN, posts: POSTS }, T1);
+  for (const kind of POSTS) store.posts.sent(run.id, kind, kind === "check" ? "111" : `${kind}-1`);
+  store.jobs.runEnded(run.id, { kind: "round" }, T1 + 1);
+  store.dismissals.saved({
+    id: "d1",
+    changeId: old,
+    findingId: finding.id,
+    runId: run.id,
+    checkId: "111",
+    dismiss: dismissing("F1"),
+    posts: DISMISSAL_POSTS,
+    at: T2,
+  });
+  // A job waiting its turn behind the sandbox's change, as its turn said it.
+  const waiting: ReviewJob = { ...job, id: jobId("j2"), sha: pr2.head.sha };
+  asked(store, oldLedger, waiting);
+  const behind: Turn = { behind: "engines", engines: ["claude"], changes: [old], testing: false };
+  store.jobs.take((s) => (s.job.id === waiting.id ? { kind: "queue", holds: [], turn: behind } : null));
+  // A change of a repository the store keeps no row of.
+  const gone = changeId("gone#4");
+  asked(store, gone, { ...job, id: jobId("j3") });
+  store.setup.write({ firstReviewChange: old });
+  store.events.append({ type: "change.closed", at: T2, changeId: old });
+  store.close();
+  // As the data folder was before the migration ran: it runs again on the next open.
+  const db = new Database(join(dir, DATABASE), { strict: true });
+  db.run("DELETE FROM migrations WHERE name = ?", [OWNER_IDS_MIGRATION]);
+  db.close();
+
+  const again = open(dir);
+  expect(again.migrated).toEqual([OWNER_IDS_MIGRATION]);
+  const sandbox1 = changeId("sasensi/lookover-sandbox#1");
+  const ledger2 = changeId("ledger-dev/ledger-api#2");
+  expect(again.jobs.latest(old)).toBeNull();
+  expect(again.jobs.latest(sandbox1)?.job).toMatchObject({ id: job.id, state: "done" });
+  expect(again.rounds.of(sandbox1)).toEqual([{ n: 1, sha: job.sha }]);
+  expect(again.rounds.ledger(sandbox1)).toEqual([{ ...finding, status: "dismissed", closedIn: 1 }]);
+  expect(again.posts.latest(sandbox1)).toMatchObject({ runId: run.id, plan: PLAN, checkId: "111" });
+  expect(again.dismissals.of("d1")).toMatchObject({ changeId: sandbox1 });
+  expect(again.dismissals.owing()).toEqual(["d1"]);
+  expect(again.setup.read().firstReviewChange).toBe(sandbox1);
+  // The waiting job is its repository's; its turn is said again by the next take, in the new ids.
+  expect(again.jobs.latest(ledger2)?.job).toMatchObject({ id: waiting.id, state: "queued", turn: null });
+  expect(again.jobs.pendingIn("ledger-dev/ledger-api#")).toBe(true);
+  // A name the store keeps no repository of stays as it was; the events are history, as written.
+  expect(again.jobs.latest(gone)?.job).toMatchObject({ id: "j3" });
+  expect(again.events.all()).toEqual([{ seq: 1, type: "change.closed", at: T2, changeId: old }]);
+});
+
+test("an ask to install on an account is kept per person across a restart, the last one winning, by its id, until reached or another signs in (ADR 0067)", () => {
+  const dir = home();
+  const store = open(dir);
+  const sam = 1234;
+  const bob = 5678;
+  const ledger = { id: 9101, login: "ledger-dev" };
+  const acme = { id: 9102, login: "acme" };
+  const bobsOrg = { id: 9104, login: "bobs-org" };
+  expect(store.installAsks.of(sam)).toEqual([]);
+  store.installAsks.asked(sam, ledger, T1);
+  store.installAsks.asked(sam, acme, T1 + 1);
+  // Asked again, by its id whatever its login says (renamed since): one ask, at the later time, under its new login.
+  store.installAsks.asked(sam, { ...ledger, login: "ledger-co" }, T2);
+  store.close();
+  const again = open(dir);
+  // Each with the account's id, so it can be shown when nothing else names it.
+  expect(again.installAsks.of(sam)).toEqual([
+    { account: acme, askedAt: T1 + 1 },
+    { account: { ...ledger, login: "ledger-co" }, askedAt: T2 },
+  ]);
+  // Another person's asks are theirs alone.
+  expect(again.installAsks.of(bob)).toEqual([]);
+  // Reached: forgotten, by its id, whatever login it has now.
+  again.installAsks.reached(acme.id);
+  expect(again.installAsks.of(sam)).toEqual([{ account: { ...ledger, login: "ledger-co" }, askedAt: T2 }]);
+  // Bob signs in: Sam's asks are forgotten, Bob's kept.
+  again.installAsks.asked(bob, bobsOrg, T2);
+  again.installAsks.signedIn(bob);
+  expect(again.installAsks.of(sam)).toEqual([]);
+  expect(again.installAsks.of(bob)).toEqual([{ account: bobsOrg, askedAt: T2 }]);
 });

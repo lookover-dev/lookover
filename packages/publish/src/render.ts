@@ -35,6 +35,7 @@ import {
   isCounted,
   isUnsettled,
   keptText,
+  LOOKOVERS_OPENING,
   replyMarker as markerOf,
   NOT_RAISED_AGAIN,
   REVIEW_MARKER,
@@ -219,7 +220,7 @@ function inlineComment(round: RoundToPost, finding: Finding, at: Omit<InlineComm
     ...at,
     body: marked(
       [
-        `**${postableLine(finding.title)}** · ${severityOf(finding)}`,
+        `${LOOKOVERS_OPENING}**${postableLine(finding.title)}** · ${severityOf(finding)}`,
         fenceClosed(finding.body),
         ...ruleLine(finding),
       ].join("\n\n"),
@@ -240,11 +241,13 @@ function reviewBody(round: RoundToPost, inline: Finding[], summary: SummaryPlace
   const first = inline[0] ?? summary[0]?.finding;
   const lines: string[] = [];
   if (!first) {
-    lines.push(`Looked over ${sha}. Nothing ${fresh}to fix.`);
+    lines.push(`${LOOKOVERS_OPENING}Looked over ${sha}. Nothing ${fresh}to fix.`);
   } else if (posted === 1) {
-    lines.push(`Looked over ${sha}. One ${fresh}thing to fix, ${where(first)}.`);
+    lines.push(`${LOOKOVERS_OPENING}Looked over ${sha}. One ${fresh}thing to fix, ${where(first)}.`);
   } else {
-    lines.push(`Looked over ${sha}. ${posted} ${fresh}things to fix, starting with ${where(first)}.`);
+    lines.push(
+      `${LOOKOVERS_OPENING}Looked over ${sha}. ${posted} ${fresh}things to fix, starting with ${where(first)}.`,
+    );
   }
   if (earlier > 0) {
     lines.push(

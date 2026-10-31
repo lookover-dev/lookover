@@ -53,7 +53,11 @@ test("the fake: another sign-in reads that account's memberships, and a failure 
   gh.signIn(teammate);
   expect(await gh.person()).toEqual({ kind: "signed-in", account: teammate });
   expect(await gh.membership("lookover-dev")).toEqual({ kind: "active", person: teammate, admin: false });
-  expect(await gh.adminOrganisations()).toEqual({ kind: "listed", organisations: [] });
+  expect(await gh.memberships()).toEqual({
+    kind: "listed",
+    person: teammate,
+    organisations: [{ organisation: lookoverDev, role: "member" }],
+  });
 
   gh.signIn(sam);
   gh.leave("lookover-dev", sam);
@@ -72,6 +76,6 @@ test("the fake emptied: signed out, every organisation and failure forgotten", a
   gh.empty();
   expect(await gh.person()).toEqual({ kind: "signed-out" });
   gh.signIn(sam);
-  expect(await gh.adminOrganisations()).toEqual({ kind: "listed", organisations: [] });
+  expect(await gh.memberships()).toEqual({ kind: "listed", person: sam, organisations: [] });
   expect(await gh.membership("orbit")).toEqual({ kind: "absent" });
 });

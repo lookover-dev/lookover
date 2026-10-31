@@ -296,7 +296,7 @@ test("the organisation's repositories are its own, apart from its sandbox and fr
     `${path}: "organisation.repositories" names lookover-dev/lookover-private, which "repositories" lists too: the two Apps never watch one repository, so take it out of one of them.\nWrite it as:`,
   );
   expect(refused(["lookover-dev/lookover-private", "lookover-dev/Lookover-Private"])).toThrow(
-    `${path}: "organisation.repositories" lists two repositories named lookover-private, lookover-dev/lookover-private and lookover-dev/Lookover-Private: a change is known by its repository's name, so keep one of them.\nWrite it as:`,
+    `${path}: "organisation.repositories" lists lookover-dev/lookover-private twice, the second time as lookover-dev/Lookover-Private: keep one of them.\nWrite it as:`,
   );
 });
 
@@ -368,15 +368,27 @@ test("live.json's organisation App works for the person gh is signed in as, and 
   await expect(person()).rejects.toThrow(`${refused} gh gave no answer (offline:`);
 });
 
-test("a live config listing two repositories of one name is refused: a change is known by its repository's name", () => {
+test("a live config may list two repositories of one name on two accounts: a change is known by its owner and name (ADR 0066)", () => {
   const path = liveConfigPath(dir());
   writeFileSync(
     path,
-    JSON.stringify({ repositories: ["lookover-dev/lookover-private", "someone/Lookover-Private"] }),
+    JSON.stringify({ repositories: ["sasensi/lookover-sandbox", "lookover-dev/lookover-sandbox"] }),
+  );
+  expect(readLiveConfig(path).repositories).toEqual([
+    { owner: "sasensi", name: "lookover-sandbox" },
+    { owner: "lookover-dev", name: "lookover-sandbox" },
+  ]);
+});
+
+test("a live config listing one repository twice is refused, whatever its case", () => {
+  const path = liveConfigPath(dir());
+  writeFileSync(
+    path,
+    JSON.stringify({ repositories: ["lookover-dev/lookover-private", "Lookover-Dev/Lookover-Private"] }),
   );
   expect(() => readLiveConfig(path)).toThrow(
-    `${path}: "repositories" lists two repositories named lookover-private, lookover-dev/lookover-private and ` +
-      `someone/Lookover-Private: a change is known by its repository's name, so keep one of them.\nWrite it as:`,
+    `${path}: "repositories" lists lookover-dev/lookover-private twice, the second time as ` +
+      `Lookover-Dev/Lookover-Private: keep one of them.\nWrite it as:`,
   );
 });
 

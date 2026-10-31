@@ -578,7 +578,7 @@ function Details({ it, state }: { it: ChangeReview; state: State }) {
         >
           <p className="t-small">
             {diffs.length > 0 ? `${repo.name} differs from your defaults. ` : "Your defaults were used. "}
-            <Link to={`/repositories/${repo.name}`}>See what applies to {repo.name}</Link>
+            <Link to={`/repositories/${repo.owner}/${repo.name}`}>See what applies to {repo.name}</Link>
           </p>
         </Disclosure>
         <Disclosure row summary="Log" value={<>{plural(log.length, "line")} · secrets removed</>}>
@@ -706,8 +706,8 @@ export function Review() {
   const send = useSend();
   const toast = useToast();
   const navigate = useNavigate();
-  const { repo, number } = useParams();
-  const it = changeReviewAt(state, repo, number);
+  const { owner, name, number } = useParams();
+  const it = changeReviewAt(state, owner, name, number);
 
   const open = it ? unsettledFindings(it.review) : [];
   const again =

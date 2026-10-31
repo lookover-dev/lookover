@@ -428,7 +428,7 @@ function world(
   const changes: State["changes"] = {};
   const reviews: State["reviews"] = {};
   for (const pr of prs) {
-    const id = changeId(`ledger-api#${pr.n}`);
+    const id = changeId(`sasensi/ledger-api#${pr.n}`);
     changes[id] = {
       id,
       repoId,
@@ -460,7 +460,7 @@ function world(
       reached: "agent",
       github: "done",
       githubRefused: null,
-      firstReviewChange: firstReview === null ? null : changeId(`ledger-api#${firstReview}`),
+      firstReviewChange: firstReview === null ? null : changeId(`sasensi/ledger-api#${firstReview}`),
     },
     engines: { claude: engine("claude", "Claude"), codex: engine("codex", "Codex") },
     connection: {
@@ -469,7 +469,11 @@ function world(
       cause: null,
       bot: "lookover-k3x9q2[bot]",
       app: null,
-      installationId: null,
+      accounts: [],
+      unreached: [],
+      way: "own",
+      signIn: null,
+      person: null,
       web: GITHUB_WEB,
       since: NOW,
       limitUntil: null,

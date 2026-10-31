@@ -1,8 +1,10 @@
 ---
-// The setup as a vertical timeline. "Five minutes" was measured on the released package: from
-// `npm install -g lookover` to the first review posted, 5 min 07 s, said rounded down. The terminal shows what npm
-// and `lookover start` print (facts.ts); the setup, not the command, checks the AIs. The App is made by "Create your
-// App" and posts as itself.
+// The setup as a vertical timeline. Five minutes was measured on 0.1.0 with "Use an existing App" (from
+// `npm install -g lookover` to the first review posted, 5 min 07 s); Sign in with GitHub is not timed yet (ADR 0067's
+// timed run is the owner's), so the page says "a few minutes", as the docs do. The terminal shows what npm and
+// `lookover start` print (facts.ts); the setup, not the command, checks the AIs. GitHub is the shared App, Lookover
+// Dev (ADR 0065, 0067): the person signs in with a code and Lookover posts as them, each review opening with
+// "Lookover".
 import { eyes, mark } from "../../brand/eyes.generated.ts";
 import { COMMANDS, START_LINES } from "../../landing/facts.ts";
 
@@ -13,7 +15,7 @@ const [install, start] = COMMANDS;
   <div class="wrap">
     <div class="slab">
       <p class="label">Setup</p>
-      <h2 class="display">Up and running in five minutes.</h2>
+      <h2 class="display">Up and running in a few minutes.</h2>
       <p class="lede">Three steps. The first review posts for real, on a pull request you pick.</p>
     </div>
     <ol class="timeline">
@@ -43,8 +45,8 @@ const [install, start] = COMMANDS;
         <div class="text">
           <h3 class="h3">Connect GitHub</h3>
           <p>
-            Create your App: a GitHub App on your account or an organisation's, which posts the reviews as itself. Then
-            you pick the repositories it reviews.
+            Sign in with GitHub: one code, entered on GitHub's page. Install Lookover Dev on your account or an
+            organisation's, and pick the repositories it reviews. It posts as you, each review opening with “Lookover”.
           </p>
         </div>
         <div class="shot">
@@ -61,7 +63,7 @@ const [install, start] = COMMANDS;
                   stroke-linejoin="round"
                   aria-hidden="true"><path d="M3 8.5l3 3 7-7"></path></svg
                 ></span
-              ><span>App created<span class="sub">lookover-q7x2ka posts as itself, never as you.</span></span>
+              ><span>Signed in as mira<span class="sub">Reviews post as you, opening with “Lookover”.</span></span>
             </div>
             <div class="sc-row">
               <span class="sq ok"

@@ -7,7 +7,7 @@
 // colleague's. main holds a REVIEW.md of three rules: #139's finding follows the first, #146's first finding the
 // second, so Settings lists them with their counts. Every diff is hand-written fixture data a review reads; nothing here is a real recording.
 import { commitSha } from "@lookover/contracts";
-import type { Scenario, ScenarioChange } from "../scenario.ts";
+import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import {
   BY_CLAUDE,
   CONFIRM_MS,
@@ -501,6 +501,9 @@ const CHANGES: ScenarioChange[] = [
   },
 ];
 
+/** A pull request of the world's repository, by its number. */
+const pr = on(SANDBOX.repo);
+
 export const S10: Scenario = {
   id: "S10",
   title: "A quiet day",
@@ -516,14 +519,14 @@ export const S10: Scenario = {
   world: { ...SANDBOX, rules: [{ path: "REVIEW.md", text: REVIEW_MD }] },
   changes: CHANGES,
   script: [
-    { at: 1 * MIN, move: { kind: "open", change: 135 } },
-    { at: 10 * MIN, move: { kind: "open", change: 137 } },
-    { at: 19 * MIN, move: { kind: "open", change: 139 } },
-    { at: 111 * MIN, move: { kind: "open", change: 141 } },
-    { at: 120 * MIN, move: { kind: "open", change: 144 } },
-    { at: 129 * MIN, move: { kind: "open", change: 146 } },
-    { at: 138 * MIN, move: { kind: "push", change: 146 } },
-    { at: 138 * MIN + 10_000, move: { kind: "ask", change: 146 } },
+    { at: 1 * MIN, move: { kind: "open", change: pr(135) } },
+    { at: 10 * MIN, move: { kind: "open", change: pr(137) } },
+    { at: 19 * MIN, move: { kind: "open", change: pr(139) } },
+    { at: 111 * MIN, move: { kind: "open", change: pr(141) } },
+    { at: 120 * MIN, move: { kind: "open", change: pr(144) } },
+    { at: 129 * MIN, move: { kind: "open", change: pr(146) } },
+    { at: 138 * MIN, move: { kind: "push", change: pr(146) } },
+    { at: 138 * MIN + 10_000, move: { kind: "ask", change: pr(146) } },
   ],
   seed: 150 * MIN,
 };

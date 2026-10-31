@@ -35,36 +35,59 @@ const change: FakeChange = {
 };
 const ref: ChangeRef = { repo, number: 1 };
 
+/** The person signed in to the App, on the fake's person mode (ADR 0066): spike 20's. */
+const person = { id: 11247504, login: "sasensi-signed-in" };
+/** Someone else on the pull request. */
+const teammate = { id: 1234567, login: "sasensi" };
+
 const host = () => new FakeGitHost({ repo, bot, changes: [change] });
 
-/** A fresh fake and the suite's fixture on it, refusing every call for `failure` when one is given. */
-const fixture = (failure?: HostRefusal) => async (): Promise<HostWriterFixture> => {
-  const fake = host();
-  if (failure) fake.refuse(failure);
-  return {
-    writer: fake,
-    change: ref,
-    sha,
-    inDiff: { path: "src/invoice.ts", side: "head", line: 12 },
-    offDiff: { path: "src/invoice.ts", side: "head", line: 1 },
-    removed: { path: "src/invoice.ts", side: "base", line: 8 },
-    range: { path: "src/invoice.ts", side: "head", line: 12, endLine: 14 },
-    bot,
-    comment: (body) =>
-      Promise.resolve(fake.seedComment(ref, { author: { id: 1234567, login: "sasensi" }, body })),
-    observe: () => Promise.resolve(fake.view(ref)),
-    intake: fake,
-  };
-};
+/**
+ * Who posts on each of the fake's modes: the App's bot, the person signed in to it, or the bot again with a person
+ * known, told to post as the bot (`postAs`: demo mode's own App, beside the sign-in its setup offers).
+ */
+const MODES = [
+  { name: "FakeGitHost", person: undefined, posts: "bot" },
+  { name: "FakeGitHost posting as a person", person, posts: "person" },
+  { name: "FakeGitHost with a person, posting as its bot", person, posts: "bot" },
+] as const;
 
-describeHostWriter("FakeGitHost", {
-  open: fixture(),
-  refusing: {
-    unauthorized: fixture("unauthorized"),
-    rate_limited: fixture("rate_limited"),
-    unavailable: fixture("unavailable"),
-  },
-});
+/** A fresh fake and the suite's fixture on it, refusing every call for `failure` when one is given. */
+const fixture =
+  (mode: (typeof MODES)[number], failure?: HostRefusal) => async (): Promise<HostWriterFixture> => {
+    const fake = new FakeGitHost({ repo, bot, changes: [change], ...(mode.person ? { person } : {}) });
+    fake.postAs(mode.posts);
+    if (failure) fake.refuse(failure);
+    return {
+      writer: fake,
+      change: ref,
+      sha,
+      inDiff: { path: "src/invoice.ts", side: "head", line: 12 },
+      offDiff: { path: "src/invoice.ts", side: "head", line: 1 },
+      removed: { path: "src/invoice.ts", side: "base", line: 8 },
+      range: { path: "src/invoice.ts", side: "head", line: 12, endLine: 14 },
+      poster: mode.posts === "person" ? { ...person, bot: false } : { ...bot, bot: true },
+      comment: (body) => Promise.resolve(fake.seedComment(ref, { author: teammate, body })),
+      ...(mode.posts === "person"
+        ? {
+            commentByHand: (body: string) => Promise.resolve(fake.seedComment(ref, { author: person, body })),
+          }
+        : {}),
+      observe: () => Promise.resolve(fake.view(ref)),
+      intake: fake,
+    };
+  };
+
+for (const mode of MODES)
+  describeHostWriter(mode.name, {
+    open: fixture(mode),
+    refusing: {
+      unauthorized: fixture(mode, "unauthorized"),
+      rate_limited: fixture(mode, "rate_limited"),
+      unavailable: fixture(mode, "unavailable"),
+    },
+    byHand: mode.posts === "person",
+  });
 
 describe("FakeGitHost writer on its own", () => {
   test("records every post in the order it was asked", async () => {

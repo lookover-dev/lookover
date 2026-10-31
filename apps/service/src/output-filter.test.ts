@@ -96,7 +96,7 @@ test("a secret the service knows and a mention in a finding never reach GitHub; 
   const { reviews, comments } = host.view({ repo: SANDBOX, number: pr1.number });
   const comment = reviews[0]?.comments[0]?.body ?? "";
   expect(comment).toStartWith(
-    "**The session [redacted] is logged** · Blocking\n\nAsk @\u{200B}dana before !\u{200B}[x](https://evil.example/p.png) ships.",
+    "Lookover · **The session [redacted] is logged** · Blocking\n\nAsk @\u{200B}dana before !\u{200B}[x](https://evil.example/p.png) ships.",
   );
   const check = host.posts.findLast((p) => p.kind === "check.completed");
   const posted = [comment, comments[0]?.body ?? "", JSON.stringify(check)];

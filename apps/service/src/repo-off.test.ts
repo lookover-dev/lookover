@@ -25,7 +25,7 @@ setDefaultTimeout(TEST_LIMIT_MS);
 afterEach(stopAll);
 
 const MIN = 60_000;
-const ONE = changeId("lookover-sandbox#1");
+const ONE = changeId("sasensi/lookover-sandbox#1");
 const REPO = repositoryId(`${SANDBOX.owner}/${SANDBOX.name}`);
 const ref = { repo: SANDBOX, number: 1 };
 const off = { type: "repo.setEnabled", repoId: REPO, enabled: false };

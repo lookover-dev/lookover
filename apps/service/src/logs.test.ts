@@ -144,12 +144,12 @@ test("a review's lines reach the file (ADR 0055), a token in a pull request's ti
   const lines = logOf(dir)
     .split("\n")
     .map((line) => line.slice(line.indexOf(" ") + 1))
-    .filter((line) => line.startsWith("lookover-sandbox#1 "));
+    .filter((line) => line.startsWith("sasensi/lookover-sandbox#1 "));
   expect(lines).toEqual([
-    "lookover-sandbox#1 opened by sasensi: Rotate the deploy key [redacted]",
-    "lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
-    "lookover-sandbox#1 round 1 started on a1b2c3d, standard: Claude finds, Claude double-checks",
-    "lookover-sandbox#1 round 1 kept, its posts given up: GitHub refused the review (unauthorized: Bad credentials for [redacted])",
+    "sasensi/lookover-sandbox#1 opened by sasensi: Rotate the deploy key [redacted]",
+    "sasensi/lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
+    "sasensi/lookover-sandbox#1 round 1 started on a1b2c3d, standard: Claude finds, Claude double-checks",
+    "sasensi/lookover-sandbox#1 round 1 kept, its posts given up: GitHub refused the review (unauthorized: Bad credentials for [redacted])",
   ]);
   expect(logOf(dir)).not.toContain(PAT);
   expect(logOf(dir)).not.toContain(INSTALLATION_TOKEN);
@@ -170,7 +170,7 @@ test("a review's line that can't be written is printed filtered: a token in a pu
     await time.advance(0);
   });
   expect(shown).toContain(
-    "lookover-sandbox#1 opened by sasensi: Rotate the deploy key [redacted] (not logged: ",
+    "sasensi/lookover-sandbox#1 opened by sasensi: Rotate the deploy key [redacted] (not logged: ",
   );
   expect(shown).not.toContain(PAT);
 });

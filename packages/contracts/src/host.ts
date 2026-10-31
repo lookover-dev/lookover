@@ -59,6 +59,8 @@ export class HostError extends Error {
   /**
    * What the connection shows for this refusal (ADR 0053), when the adapter can tell more than `failure` says: an
    * App uninstalled or suspended, a key GitHub refused and why. Undefined otherwise: `connectionCauseOf` reads it.
+   * On the shared App's acts on one repository (ADR 0066), one rule by kind: `uninstalled` and `sso` are that
+   * repository's account's, its other accounts still used; every other kind is the connection's.
    */
   readonly connectionCause: ConnectionCause | undefined;
 

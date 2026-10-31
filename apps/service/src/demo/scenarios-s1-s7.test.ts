@@ -26,7 +26,7 @@ import {
 setDefaultTimeout(TEST_LIMIT_MS);
 
 const MIN = 60_000;
-const id = (n: number) => changeId(`ledger-api#${n}`);
+const id = (n: number) => changeId(`sasensi/ledger-api#${n}`);
 
 let door: Awaited<ReturnType<typeof startScenario>>;
 beforeAll(async () => {
@@ -390,7 +390,7 @@ test("S6, new commits after a review: round 1 posted, the owner pushes two commi
 
 test("S7, too noisy: #148's round 1 counted at load; turning F2's rule off, then posting only blocking findings, written to ledger-api's file; F1 dismissed as wrong", async () => {
   const start = await loaded("S7");
-  expect(scenarioOf("S7")).toMatchObject({ path: "/reviews/ledger-api/148", later: "" });
+  expect(scenarioOf("S7")).toMatchObject({ path: "/reviews/sasensi/ledger-api/148", later: "" });
   expect(posted(start, 148)).toEqual([1]);
   expect(findingsOf(start, 148)).toEqual([
     ["F1", "blocking", "open", true],

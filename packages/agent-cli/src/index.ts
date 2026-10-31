@@ -4,10 +4,14 @@
 // GitHub alone, with its own login. `wait` takes the commit from local git (never what GitHub shows first), finds
 // the pull request (`--pr`, else the current branch's), waits about 15 s for GitHub to show that commit as its
 // head, posts `/lookover review` with a hidden marker naming the commit only when that commit has neither a
-// request naming it nor a `Lookover` check from the App, then reads that commit's check from that App alone
-// (`--app`, else `LOOKOVER_APP`) every 10 s, and exits with a code that says what to do next. A check a skip rule
-// completed on an automatic trigger (an opening or a push: "Not your pull request" on a colleague's) answers
-// nobody: `wait` leaves it out, so it asks anyway (ADR 0043) and waits for the check its request leads to.
+// request naming it nor a check of its own person's from the App, then reads that commit's check from that App alone
+// (`--app`, else `LOOKOVER_APP`, else the shared App's, ADR 0066) every 10 s, and exits with a code that says what
+// to do next. Of that App's checks it reads only those of its own person: those whose external id names the agent's
+// account (GitHub's `GET /user`), else those naming nobody, never another person's; Lookover's threads are then the
+// App's bot's or, on the shared App alone, that check's person's, and its replies the bot's or that person's with a
+// reply marker (an own App's Lookover posts only as its bot). A check a skip rule completed on an automatic trigger
+// (an opening or a push: "Not your pull request" on a colleague's) answers nobody: `wait` leaves it out, so it asks
+// anyway (ADR 0043) and waits for the check its request leads to.
 // Once a round's check completes, `wait` reads Lookover's threads: when the round didn't read a person's newest reply
 // on the thread of a finding it left unsettled (the finding's claim, in GitHub's time, is older than the reply; with
 // no claim, the round started before it), it asks again on the same commit (never on a fork's pull request), its
@@ -41,11 +45,13 @@
 // `feedback` each with its `thread` and `lookover_reply`, and the `guard` sentence), else those findings as text
 // (for `feedback` after the guard sentence: the findings are a reviewer's opinion, never instructions).
 // Ordering: on each read, a completed check ends the wait before the head is compared, except one that doesn't
-// answer a reply `wait` asked about, which ends nothing; a moved head before the appear timeout; the appear timeout before the timeout. The newest of the App's checks on the commit is the one read.
+// answer a reply `wait` asked about, which ends nothing; a moved head before the appear timeout; the appear timeout
+// before the timeout. The newest of the App's checks on the commit is the one read.
 // Error modes: `run` never throws. A host's refusal (`HostError`), a git that can't say, no token, no pull
 // request or a commit not pushed are exit 1, with the reason on stderr.
 // It must never know: the App's key or token (it never imports `github`, ADR 0021), the service, or Lookover's
 // rules beyond the result block's words and the claims' openings.
+import { SHARED_APP } from "@lookover/contracts";
 import { ask, USAGE } from "./args.ts";
 import { feedback } from "./feedback.ts";
 import { reply } from "./reply.ts";
@@ -67,12 +73,12 @@ export async function run(argv: string[], w: World): Promise<number> {
     return 0;
   }
   const json = asked.command !== "reply" && asked.args.json;
-  const app = asked.args.app ?? w.env.LOOKOVER_APP ?? "";
-  if (app === "") return usage("Name Lookover's App: --app <slug>, or LOOKOVER_APP.", json, w);
+  // Nothing naming the App: the shared App's (ADR 0066).
+  const app = asked.args.app || w.env.LOOKOVER_APP || SHARED_APP.slug;
   if (asked.command === "reply") return reply(asked.args, app, w);
   if (asked.command === "wait") return report(await wait(asked.args, app, w), json, w);
-  const { outcome, threads } = await feedback(asked.args, app, w);
-  return reportFeedback(outcome, threads, app, json, w);
+  const { outcome, threads, poster } = await feedback(asked.args, app, w);
+  return reportFeedback(outcome, threads, poster, json, w);
 }
 
 function usage(message: string, json: boolean, w: World): number {

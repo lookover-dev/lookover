@@ -27,11 +27,11 @@ test("a shot lands on the screen its path routes to, or the one it names", () =>
   expect(screenOf({ name: "a", scenario: "S10" })).toBe('[data-screen="home"]');
   expect(screenOf({ name: "a", scenario: "S10", path: "/" })).toBe('[data-screen="home"]');
   expect(screenOf({ name: "a", scenario: "S12", path: "/reviews" })).toBe('[data-screen="reviews"]');
-  expect(screenOf({ name: "a", scenario: "S4", path: "/reviews/ledger-api/149" })).toBe(
+  expect(screenOf({ name: "a", scenario: "S4", path: "/reviews/sasensi/ledger-api/149" })).toBe(
     '[data-screen="review"]',
   );
   expect(screenOf({ name: "a", scenario: "S9", path: "/repositories" })).toBe('[data-screen="repositories"]');
-  expect(screenOf({ name: "a", scenario: "S9", path: "/repositories/lookover-sandbox" })).toBe(
+  expect(screenOf({ name: "a", scenario: "S9", path: "/repositories/sasensi/lookover-sandbox" })).toBe(
     '[data-screen="repository"]',
   );
   expect(screenOf({ name: "a", scenario: "S10", path: "/settings" })).toBe('[data-screen="settings"]');
@@ -40,7 +40,9 @@ test("a shot lands on the screen its path routes to, or the one it names", () =>
   );
   expect(screenOf({ name: "a", scenario: "S10", path: "/logs" })).toBe('[data-screen="logs"]');
   // Only a pull request GitHub holds has the page: not the strip shown for a number it doesn't know.
-  expect(screenOf({ name: "a", scenario: "S2", path: "/github/ledger-api/148" })).toBe(".gh .gh-page");
+  expect(screenOf({ name: "a", scenario: "S2", path: "/github/sasensi/ledger-api/148" })).toBe(
+    ".gh .gh-page",
+  );
   expect(screenOf({ name: "a", scenario: "S1", screen: ".setup" })).toBe(".setup");
   expect(screenOf({ name: "a", scenario: "S14", noSession: true })).toBe(".session");
 });
@@ -49,6 +51,10 @@ test("a path the app doesn't route can't pass as Home, which the app falls back 
   expect(() => screenOf({ name: "a", scenario: "S10", path: "/repositoriez" })).toThrow("/repositoriez");
   expect(() => screenOf({ name: "a", scenario: "S10", path: "/reviews/ledger-api" })).toThrow();
   expect(() => screenOf({ name: "a", scenario: "S10", path: "/github/ledger-api" })).toThrow();
+  // An address without the repository's owner, as before ADR 0066, names no pull request.
+  expect(() => screenOf({ name: "a", scenario: "S10", path: "/reviews/ledger-api/149" })).toThrow();
+  expect(() => screenOf({ name: "a", scenario: "S10", path: "/github/ledger-api/149" })).toThrow();
+  expect(() => screenOf({ name: "a", scenario: "S10", path: "/repositories/ledger-api" })).toThrow();
 });
 
 test("every shot's path routes to a screen", () => {

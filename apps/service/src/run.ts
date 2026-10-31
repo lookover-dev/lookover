@@ -98,6 +98,8 @@ import {
 import {
   confirmPolicy,
   engineHold,
+  type LookoversReply,
+  lookoversReply,
   mergeFinds,
   parseRules,
   promptRules,
@@ -690,6 +692,23 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
     };
   }
 
+  /**
+   * The change's threads, outdated ones included, read before anything else of the round: a refusal fails the run
+   * like any host read, so no round goes on without the claims its author made. Only a posted finding still unsettled
+   * has a thread a claim counts on: without one (round 1, a settled loop) nothing is read, and nothing can fail. With
+   * them, what tells Lookover's replies (ADR 0066): those whose ids its rounds and dismissals kept, else by who posts
+   * holding a reply marker; who posts is asked only when there is a thread to read.
+   */
+  async function threadsOf(
+    c: Carried,
+    ledger: Finding[],
+  ): Promise<{ threads: HostThread[]; lookovers: LookoversReply }> {
+    const repo = d.repoOf(c.change.repoId);
+    const threads = ledger.some(isCounted) ? await d.intake.threads({ repo, number: c.change.number }) : [];
+    const poster = threads.length === 0 ? null : await d.intake.poster(repo);
+    return { threads, lookovers: lookoversReply(d.store.posts.replies(c.changeId), poster) };
+  }
+
   /** The run up to its round saved: prepare → find → confirm → reconcile → save. An `End` when it stops before. */
   async function carry(c: Carried): Promise<Saved | End> {
     try {
@@ -697,12 +716,7 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
       const host = await d.intake.getChange(d.repoOf(c.change.repoId), c.change.number);
       await landedUnsure(c.changeId);
       const ledger = d.store.rounds.ledger(c.changeId);
-      // The threads, outdated ones included, read before anything else of the round: a refusal fails the run like
-      // any host read, so no round goes on without the claims its author made. Only a posted finding still unsettled
-      // has a thread a claim counts on: without one (round 1, a settled loop) nothing is read, and nothing can fail.
-      const threads = ledger.some(isCounted)
-        ? await d.intake.threads({ repo: d.repoOf(c.change.repoId), number: c.change.number })
-        : [];
+      const { threads, lookovers } = await threadsOf(c, ledger);
       const prepared = await prepare(c, host);
       if ("kind" in prepared) return prepared;
       try {
@@ -725,6 +739,7 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
           owner: d.owner,
           author: host.author,
           fork: host.fork,
+          lookovers,
         });
         const so: SoFar = {
           n: d.store.rounds.of(c.changeId).length + 1,

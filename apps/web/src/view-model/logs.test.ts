@@ -180,13 +180,13 @@ test("a line shows its time and its words; the day too when it isn't the newest 
     logLinesShown([
       "2026-10-10T23:59:58.120+02:00 Lookover is stopping (Ctrl+C)",
       "2026-10-11T00:00:03.000+02:00 Lookover service (program) · http://127.0.0.1:4000",
-      "2026-10-11T09:30:00.000+02:00 lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
+      "2026-10-11T09:30:00.000+02:00 sasensi/lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
       "not a line of the file's",
     ]),
   ).toEqual([
     "10-10 23:59:58  Lookover is stopping (Ctrl+C)",
     "00:00:03  Lookover service (program) · http://127.0.0.1:4000",
-    "09:30:00  lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
+    "09:30:00  sasensi/lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
     "not a line of the file's",
   ]);
 });

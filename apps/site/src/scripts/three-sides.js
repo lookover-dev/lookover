@@ -172,6 +172,8 @@ export function threeSides(stage) {
     dur: 360,
   });
   show($('[data-sev="blocking"]'), arrive + 480);
+  tl.rise($("[data-summary]"), arrive + 400, 300);
+  show($('.ts-sumtext[data-verdict="1"]'), arrive + 400);
   swap($('[data-chk="r1"]'), $('[data-chk="found"]'), arrive + 560);
   focus(arrive + 400, ["github"]);
   // 4 · the agent is told, fixes, asks again (≈9.3 – 14 s)
@@ -214,6 +216,7 @@ export function threeSides(stage) {
   });
   swap($('[data-chk="r2"]'), $('[data-chk="clear"]'), arrive + 150);
   swap($('.ts-rvtext[data-verdict="1"]'), $('.ts-rvtext[data-verdict="2"]'), arrive + 150);
+  swap($('.ts-sumtext[data-verdict="1"]'), $('.ts-sumtext[data-verdict="2"]'), arrive + 150);
   const back2 = arrive + 250;
   const arrive2 = link(X.ghL, X.agentR, Y.back, back2, "clear", LINK, { from: 18, to: 30 });
   focus(back2, ["agent", "github", "app"]);

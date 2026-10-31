@@ -91,7 +91,7 @@ class HeldTimers {
 /** The log's tail the small server answers. */
 const TAIL = [
   "2026-10-06T08:51:00.000+00:00 Lookover service (demo mode, S1) · http://127.0.0.1:4000",
-  "2026-10-06T08:52:00.000+00:00 lookover-sandbox#1 opened by sasensi: Add unpaid filter",
+  "2026-10-06T08:52:00.000+00:00 sasensi/lookover-sandbox#1 opened by sasensi: Add unpaid filter",
 ];
 
 /** What the small server answers a command: two refused, as the service would, the others taken. */
@@ -198,7 +198,7 @@ test("a refused command rejects with the status and the service's words, for the
     reason: "not available yet",
     answer: { error: "not available yet" },
   });
-  const noSuch = await refused({ type: "review.request", changeId: changeId("app#9") });
+  const noSuch = await refused({ type: "review.request", changeId: changeId("sam/app#9") });
   expect(noSuch).toBeInstanceOf(Refused);
   expect(noSuch).toMatchObject({ status: 404, reason: "no such change" });
 });
@@ -817,12 +817,12 @@ test(
     expect(state.seq).toBe(68);
     expect(state.repos.map((r) => r.id)).toEqual([repositoryId("sasensi/lookover-sandbox")]);
     expect(Object.keys(state.changes).sort()).toEqual([
-      "lookover-sandbox#135",
-      "lookover-sandbox#137",
-      "lookover-sandbox#139",
-      "lookover-sandbox#141",
-      "lookover-sandbox#144",
-      "lookover-sandbox#146",
+      "sasensi/lookover-sandbox#135",
+      "sasensi/lookover-sandbox#137",
+      "sasensi/lookover-sandbox#139",
+      "sasensi/lookover-sandbox#141",
+      "sasensi/lookover-sandbox#144",
+      "sasensi/lookover-sandbox#146",
     ]);
     await Bun.sleep(100);
     expect(seen).toEqual([]);
@@ -843,14 +843,14 @@ test(
     } as const;
     await expect(api.send(elsewhere)).rejects.toMatchObject({ status: 404, reason: "no such repository" });
     await expect(
-      api.send({ type: "review.request", changeId: changeId("lookover-sandbox#9") }),
+      api.send({ type: "review.request", changeId: changeId("sasensi/lookover-sandbox#9") }),
     ).rejects.toMatchObject({ status: 404 });
     expect(seen).toEqual([]);
 
     // The log file of the scratch data folder (ADR 0055): the start, stamped, and the seed's reviews.
     const tail = await api.logs();
     expect(tail).toContainEqual(expect.stringMatching(/^\S+ Lookover service \(demo mode, S10\) · /));
-    expect(tail).toContainEqual(expect.stringMatching(/^\S+ lookover-sandbox#135 opened by /));
+    expect(tail).toContainEqual(expect.stringMatching(/^\S+ sasensi\/lookover-sandbox#135 opened by /));
   },
   ONE_START_MS,
 );
@@ -949,7 +949,8 @@ test(
     // S10 again in a new room: its sixty-eight events and the load's clock event, numbered on from 68.
     expect(seen.map((e) => [e.seq, e.type])).toEqual([[137, "state.replaced"]]);
     // The new room's seed wrote to the same log file, and its lines came live, on no event.
-    const opened = (m: LogMessage) => m.type === "line" && / lookover-sandbox#135 opened by /.test(m.line);
+    const opened = (m: LogMessage) =>
+      m.type === "line" && / sasensi\/lookover-sandbox#135 opened by /.test(m.line);
     await until(() => heard.some(opened));
     expect(heard.some(opened)).toBe(true);
     expect(heard[0]).toEqual({ type: "connected" });
