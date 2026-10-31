@@ -418,8 +418,8 @@ test("only the program without a live.json registers start at login on the machi
   expect(run.atLogin).toEqual([AT_LOGIN]);
   // The PATH on the machine too, for the binary (ADR 0058); the fake in memory for every other wiring.
   expect(run.onPath).toEqual(["C:\\Users\\Your Name\\lookover.exe"]);
-  expect(await run.loginItem.registered()).toBe(true);
-  expect((await stateOf(unguarded, bare)).service).toMatchObject({ startsAtLogin: true, loginItem: "os" });
+  expect(await run.loginItem.held()).toBe("this");
+  expect((await stateOf(unguarded, bare)).service).toMatchObject({ atLogin: "this", loginItem: "os" });
 
   const home = newHome();
   const guardedRun = deps(home);
@@ -431,7 +431,7 @@ test("only the program without a live.json registers start at login on the machi
   expect(guardedRun.atLogin).toEqual([]);
   expect(guardedRun.onPath).toEqual([]);
   // The fake's registration, in memory.
-  expect((await stateOf(guarded, home)).service).toMatchObject({ startsAtLogin: true, loginItem: "memory" });
+  expect((await stateOf(guarded, home)).service).toMatchObject({ atLogin: "this", loginItem: "memory" });
   await guarded.stop();
 
   // Live mode too: the UI says start at login isn't set up in development.

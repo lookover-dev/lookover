@@ -97,6 +97,14 @@ test("S1, first run: Codex signed in, the App made and installed on three reposi
   expect(installed.repos.map((r) => r.id)).toEqual(S1_REPOS);
   expect(installed.changes[id(148)]).toMatchObject({ author: "you", writtenBy: "claude" });
   expect(installed.reviews[id(148)]?.job ?? null).toBeNull();
+  // #131, opened on GitHub 19 days before the script shows it (a second after #148, a minute before the clock's
+  // T0): its age is GitHub's, not the listing's (ADR 0068).
+  expect(Object.keys(installed.changes)).toEqual([id(148), id(131)]);
+  expect(installed.changes[id(131)]).toMatchObject({
+    author: "you",
+    writtenBy: null,
+    openedAt: T0 - MIN + 1_000 - 19 * 24 * 60 * MIN,
+  });
   // Setup waits for the owner (ADR 0058): Continue goes to the repositories.
   expect(await sent({ type: "setup.goto", step: "repos" })).toBe(200);
   expect((await after(0)).setup).toMatchObject({ step: "repos", reached: "repos" });
@@ -141,6 +149,27 @@ test("S1, first run: Codex signed in, the App made and installed on three reposi
   expect((await snapshotOf(door)).service.agent.skills[0]).toMatchObject({ agent: "claude", state: "ours" });
   expect(await sent({ type: "setup.finish" })).toBe(200);
   expect((await snapshotOf(door)).setup).toMatchObject({ done: true, step: "agent" });
+});
+
+test("S1, the agent opens #152 while setup shows Repositories: listed at once, with no reload (ADR 0068)", async () => {
+  await loaded("S1");
+  expect(await sent({ type: "engine.signIn", id: "codex" })).toBe(200);
+  await after(5_000);
+  expect(await sent({ type: "setup.goto", step: "github" })).toBe(200);
+  expect(await sent({ type: "connection.createApp", organisation: null })).toBe(200);
+  expect(await installApp(door, await makeApp(door))).toContain("Lookover is installed");
+  await after(4_000);
+  expect(await sent({ type: "setup.goto", step: "repos" })).toBe(200);
+  const onRepos = await after(0);
+  expect(Object.keys(onRepos.changes)).toEqual([id(148), id(131)]);
+
+  expect(await inject(door, "agent-opens-change")).toBe(200);
+  const opened = await snapshotOf(door);
+  expect(Object.keys(opened.changes)).toEqual([id(148), id(131), id(152)]);
+  expect(opened.changes[id(152)]).toMatchObject({ author: "you", writtenBy: "claude", openedAt: opened.now });
+
+  // S1's agent has nothing more to open: the fault says so.
+  expect(await inject(door, "agent-opens-change")).toBe(409);
 });
 
 test("S1, an existing App: the one made on another computer, given its id and a new key from its page; the refusals first", async () => {

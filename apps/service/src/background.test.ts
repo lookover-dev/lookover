@@ -180,7 +180,7 @@ test("start runs the service in the background, start again reuses it; status, o
     version: VERSION,
     pid: expect.any(Number),
     since: expect.any(Number),
-    startsAtLogin: false,
+    atLogin: "none",
   });
 
   expect(await c.run("open", `--home=${home}`, "--no-open")).toBe(0);
@@ -195,7 +195,7 @@ test("start runs the service in the background, start again reuses it; status, o
   expect(await c.run("status", `--home=${home}`)).toBe(3);
   expect(c.out.join("\n")).toContain("Lookover is stopped.");
   expect(await c.run("status", `--home=${home}`, "--json")).toBe(3);
-  expect(JSON.parse(c.out.join("\n"))).toEqual({ running: false, home, startsAtLogin: false });
+  expect(JSON.parse(c.out.join("\n"))).toEqual({ running: false, home, atLogin: "none" });
 });
 
 /** The two lines `start` and `open` say once the browser was handed the link (ADR 0058). */
@@ -338,7 +338,7 @@ test("the data folder may come before the verb, as Lookover's command names it",
   const home = folder();
   const c = command();
   expect(await c.run(`--home=${home}`, "status", "--json")).toBe(3);
-  expect(JSON.parse(c.out.join("\n"))).toEqual({ running: false, home, startsAtLogin: false });
+  expect(JSON.parse(c.out.join("\n"))).toEqual({ running: false, home, atLogin: "none" });
 });
 
 test("status says whether the program on the data folder starts at login, asked with the command it registers", async () => {
@@ -346,7 +346,7 @@ test("status says whether the program on the data folder starts at login, asked 
   const c = command();
   await c.loginItem.register();
   expect(await c.run("status", `--home=${home}`, "--json")).toBe(3);
-  expect(JSON.parse(c.out.join("\n"))).toEqual({ running: false, home, startsAtLogin: true });
+  expect(JSON.parse(c.out.join("\n"))).toEqual({ running: false, home, atLogin: "this" });
   expect(c.atLogin).toEqual([loginCommand(home, realSystem(), selfCommand(SELF))]);
   expect(await c.run("status", `--home=${home}`)).toBe(3);
   expect(c.out.join("\n")).toBe(`Lookover is stopped. Data folder: ${home}\nIt starts at login.`);
@@ -354,12 +354,23 @@ test("status says whether the program on the data folder starts at login, asked 
   expect(await c.run("status", `--home=${home}`)).toBe(3);
   expect(c.out.join("\n")).toContain("It doesn't start at login.");
 
+  // Another install holds it (ADR 0068): named, in words and in JSON.
+  const theirs = String.raw`"C:\Program Files\Lookover\lookover.exe" start --no-open`;
+  c.loginItem.holdOther(theirs);
+  expect(await c.run("status", `--home=${home}`)).toBe(3);
+  expect(c.out.join("\n")).toBe(
+    `Lookover is stopped. Data folder: ${home}\nAnother Lookover starts at login: ${theirs}`,
+  );
+  expect(await c.run("status", `--home=${home}`, "--json")).toBe(3);
+  expect(JSON.parse(c.out.join("\n"))).toEqual({ running: false, home, atLogin: { other: theirs } });
+  await c.loginItem.register({ takeOver: true });
+
   // Guarded by a live.json, the program there registers nothing on the machine: the port isn't even asked.
   writeFileSync(join(home, "live.json"), JSON.stringify({ repositories: ["sasensi/lookover-sandbox"] }));
   await c.loginItem.register();
   c.atLogin.length = 0;
   expect(await c.run("status", `--home=${home}`, "--json")).toBe(3);
-  expect(JSON.parse(c.out.join("\n"))).toEqual({ running: false, home, startsAtLogin: false });
+  expect(JSON.parse(c.out.join("\n"))).toEqual({ running: false, home, atLogin: "none" });
   expect(c.atLogin).toEqual([]);
 });
 
@@ -553,7 +564,7 @@ test("a service still starting: status says starting; start waits for it to say 
     running: true,
     home,
     address: null,
-    startsAtLogin: false,
+    atLogin: "none",
   });
 
   const { time } = countedTime(async (wait) => {

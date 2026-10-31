@@ -35,7 +35,7 @@ export type CheckItem =
       check: "service";
       state: "running";
       startAtLogin: boolean;
-      startsAtLogin: boolean;
+      atLogin: LoginHolder;
       loginItem: LoginItemKind;
     }
   | { check: "settings"; invalid: SettingsFileError[] }
@@ -48,6 +48,17 @@ export type CheckItem =
  * at login isn't set up in development rather than that Lookover starts.
  */
 export type LoginItemKind = "os" | "memory";
+
+/**
+ * Who holds start at login on this computer (ADR 0068): there is one registration per user, and it belongs to the
+ * install whose command it holds. `this`, this install's command; `none`; or another install's, with the command it
+ * holds as the machine shows it (a moved clone or a swapped binary is another install).
+ */
+export type LoginHolder = "this" | "none" | { other: string };
+
+/** Whether two answers of who holds start at login are the same. */
+export const sameLoginHolder = (a: LoginHolder, b: LoginHolder): boolean =>
+  typeof a === "string" || typeof b === "string" ? a === b : a.other === b.other;
 
 export interface Service {
   state: "running";
@@ -70,11 +81,11 @@ export interface Service {
   /** The owner's choice to start Lookover at login (ADR 0054: on until they turn it off). */
   startAtLogin: boolean;
   /**
-   * Whether Lookover is registered to start at login now, with the command this service would register (ADR 0054):
-   * the machine's answer, where `startAtLogin` is the choice. Off until the setup is done; in demo mode, live mode and
-   * a guarded program, a registration kept in memory only.
+   * Who holds start at login now (ADR 0054, ADR 0068): the machine's answer, where `startAtLogin` is the choice. This
+   * install only once the setup is done, and never by taking another install's over unless the owner asks; in demo
+   * mode, live mode and a guarded program, a registration kept in memory only.
    */
-  startsAtLogin: boolean;
+  atLogin: LoginHolder;
   /** Where that registration is: the machine's, or development's in memory. */
   loginItem: LoginItemKind;
   paused: { since: number; until: number | null } | null;

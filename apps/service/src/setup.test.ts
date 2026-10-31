@@ -131,7 +131,7 @@ test("each step is kept, going back keeps the furthest reached, and finishing sa
     { type: "setup.changed", setup: { ...whole, step: "github", reached: "github" } },
     { type: "setup.changed", setup: { ...whole, step: "ai", reached: "github" } },
     { type: "setup.changed", setup: { ...whole, step: "ai", reached: "github", done: true } },
-    { type: "service.changed", patch: { startsAtLogin: true } },
+    { type: "service.changed", patch: { atLogin: "this" } },
   ]);
   expect(logOf(door).filter((e) => e.seq > from)).toHaveLength(4);
   const state = await snapshotOf(door);
@@ -151,7 +151,7 @@ test("after the first review the owner goes to Your coding agent, and finishes f
   expect((await send(door, { type: "setup.finish" })).status).toBe(200);
   expect(logOf(door).filter((e) => e.seq > from)).toMatchObject([
     { type: "setup.changed", setup: { step: "agent", reached: "agent", done: true } },
-    { type: "service.changed", patch: { startsAtLogin: true } },
+    { type: "service.changed", patch: { atLogin: "this" } },
   ]);
   const state = await snapshotOf(door);
   expect(state.setup).toMatchObject({ done: true, step: "agent" });

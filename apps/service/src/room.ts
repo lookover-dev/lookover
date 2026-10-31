@@ -114,7 +114,7 @@ import {
   settingsOf,
   snapshotOf,
 } from "./snapshot.ts";
-import { createStartAtLogin, matchedAtStart, startsAtLoginLeft } from "./start-at-login.ts";
+import { atLoginLeft, createStartAtLogin, matchedAtStart } from "./start-at-login.ts";
 import { REAL_TIMERS, type Timers } from "./timers.ts";
 import { createUnreached } from "./unreached.ts";
 
@@ -398,10 +398,11 @@ export interface Room {
     quiet(choice: NoiseChoice): Promise<SettingsAnswer | NoiseRefusal>;
   };
   /**
-   * "Start at login" (ADR 0054): once the setup is done, the registration on the machine changed first; then the
-   * owner's choice kept and sent as `service.changed`. Refused with the machine's reason, the choice as it was.
+   * "Start at login" (ADR 0054, ADR 0068): once the setup is done, the registration on the machine changed first
+   * (another install's replaced only with `takeOver`); then the owner's choice kept and sent as `service.changed`.
+   * Refused with the machine's reason, the choice as it was.
    */
-  startAtLogin(on: boolean): Promise<"ok" | { refused: string }>;
+  startAtLogin(on: boolean, takeOver?: boolean): Promise<"ok" | { refused: string }>;
   /**
    * Your coding agent (ADR 0058): `agent.check` reads the PATH and the skills again; `agent.path` puts Lookover's
    * folder on the PATH or takes it off (the binary alone: refused elsewhere), Lookover's command following;
@@ -508,7 +509,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   const logLine = o.log ?? ((line: string) => console.error(line));
   // Start at login made to match the owner's choice, once the setup is done (ADR 0054).
   const loginItem = loginItemOf(o);
-  const registeredAtStart = await matchedAtStart(loginItem.item, store, logLine);
+  const heldAtStart = await matchedAtStart(loginItem.item, store, logLine);
   const timers = o.timers ?? REAL_TIMERS;
   /** What the room watches: the store's last listing until the start's listing makes it the room's own. */
   const watching = { all: (): readonly RepositoryRef[] => store.repos.listed() };
@@ -597,7 +598,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       engines,
       setup: setupAtStart,
       startAtLogin: store.setup.startAtLogin(),
-      startsAtLogin: registeredAtStart,
+      atLogin: heldAtStart,
       loginItem: loginItem.kind,
       ...(o.remote === undefined ? {} : { remote: o.remote }),
     },
@@ -706,7 +707,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     ...signInsLeft(shown, startedAt),
     ...deviceCodeLeft(shown, startedAt),
     ...startAtLoginLeft(shown, store.setup.startAtLogin(), startedAt),
-    ...startsAtLoginLeft(shown.service.startsAtLogin, registeredAtStart, startedAt),
+    ...atLoginLeft(shown.service.atLogin, heldAtStart, startedAt),
     // The App and its installation as read now, where the log says those of before the stop (a reinstall meanwhile).
     ...identityLeft(shown, github, startedAt),
     // Whose changes are whose for the person held now, where the log says it for another (a sign-in replaced while
@@ -857,6 +858,10 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     // As the UI is told of it: with its noise counts.
     repository: (repo) => ({ ...repository(repo), noise: noise(repo) }),
     owner: github.owner,
+    setupShowsList: () => {
+      const setup = store.setup.read();
+      return !setup.done && (setup.step === "repos" || setup.step === "first-review");
+    },
     emit,
     connection: () => shown.connection,
     opened: (changeId) => queue.opened(changeId),
@@ -957,7 +962,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     store,
     clock: o.clock,
     emit,
-    shown: () => shown.service.startsAtLogin,
+    shown: () => shown.service.atLogin,
     log: logLine,
   });
   const setupFlow = createSetup({

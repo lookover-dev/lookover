@@ -142,6 +142,11 @@ export interface ScenarioChange {
    * the fake host fetches.
    */
   fork?: boolean;
+  /**
+   * How long before the script opens it GitHub says it was opened, in milliseconds: a pull request open for weeks
+   * before Lookover first lists it (ADR 0068). None: GitHub opens it as the script does.
+   */
+  openedAgo?: number;
   /** Oldest first: the first is the head when the change opens; each next one lands with a push. */
   commits: [ScenarioCommit, ...ScenarioCommit[]];
 }

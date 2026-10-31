@@ -14,6 +14,7 @@ import {
   type HostRefusal,
   type HostWriterFixture,
 } from "./index.ts";
+import { AT_ONCE, LAG, LAGGING_PATIENCE, laggingGitHost } from "./lagging-git-host.test-support.ts";
 
 const repo: RepositoryRef = { owner: "sasensi", name: "lookover-sandbox" };
 const sha = commitSha("5d9114c0a1b2c3d4e5f60718293a4b5c6d7e8f9a");
@@ -52,14 +53,19 @@ const MODES = [
   { name: "FakeGitHost with a person, posting as its bot", person, posts: "bot" },
 ] as const;
 
-/** A fresh fake and the suite's fixture on it, refusing every call for `failure` when one is given. */
+/**
+ * A fresh fake and the suite's fixture on it, refusing every call for `failure` when one is given; with `lag`, the App's
+ * reads made before a write answer stale for that many reads after it, as GitHub's do (ADR 0069).
+ */
 const fixture =
-  (mode: (typeof MODES)[number], failure?: HostRefusal) => async (): Promise<HostWriterFixture> => {
+  (mode: (typeof MODES)[number], failure?: HostRefusal, lag = 0) =>
+  async (): Promise<HostWriterFixture> => {
     const fake = new FakeGitHost({ repo, bot, changes: [change], ...(mode.person ? { person } : {}) });
     fake.postAs(mode.posts);
     if (failure) fake.refuse(failure);
+    const host = laggingGitHost(fake, lag).port;
     return {
-      writer: fake,
+      writer: host,
       change: ref,
       sha,
       inDiff: { path: "src/invoice.ts", side: "head", line: 12 },
@@ -67,27 +73,34 @@ const fixture =
       removed: { path: "src/invoice.ts", side: "base", line: 8 },
       range: { path: "src/invoice.ts", side: "head", line: 12, endLine: 14 },
       poster: mode.posts === "person" ? { ...person, bot: false } : { ...bot, bot: true },
-      comment: (body) => Promise.resolve(fake.seedComment(ref, { author: teammate, body })),
+      comment: (body) => Promise.resolve(host.seedComment(ref, { author: teammate, body })),
       ...(mode.posts === "person"
         ? {
-            commentByHand: (body: string) => Promise.resolve(fake.seedComment(ref, { author: person, body })),
+            commentByHand: (body: string) => Promise.resolve(host.seedComment(ref, { author: person, body })),
           }
         : {}),
-      observe: () => Promise.resolve(fake.view(ref)),
-      intake: fake,
+      observe: () => Promise.resolve(host.view(ref)),
+      intake: host,
     };
   };
 
-for (const mode of MODES)
-  describeHostWriter(mode.name, {
-    open: fixture(mode),
-    refusing: {
-      unauthorized: fixture(mode, "unauthorized"),
-      rate_limited: fixture(mode, "rate_limited"),
-      unavailable: fixture(mode, "unavailable"),
+for (const [mode, lag, patience] of [
+  ...MODES.map((mode) => [mode, 0, AT_ONCE] as const),
+  ...MODES.map((mode) => [mode, LAG, LAGGING_PATIENCE] as const),
+])
+  describeHostWriter(
+    lag === 0 ? mode.name : `${mode.name}, lagging as GitHub does after a write (ADR 0069)`,
+    {
+      open: fixture(mode, undefined, lag),
+      patience,
+      refusing: {
+        unauthorized: fixture(mode, "unauthorized", lag),
+        rate_limited: fixture(mode, "rate_limited", lag),
+        unavailable: fixture(mode, "unavailable", lag),
+      },
+      byHand: mode.posts === "person",
     },
-    byHand: mode.posts === "person",
-  });
+  );
 
 describe("FakeGitHost writer on its own", () => {
   test("records every post in the order it was asked", async () => {

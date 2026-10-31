@@ -18,7 +18,7 @@
 // others with their usage. Their exits are the command's (its help, `command.ts`).
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { API, type MintedLink } from "@lookover/contracts";
+import { API, type LoginHolder, type MintedLink } from "@lookover/contracts";
 import type { CommandPath } from "./command-path.ts";
 import {
   type Config,
@@ -194,8 +194,13 @@ export async function open(argv: string[], deps: VerbDeps): Promise<number> {
 export async function status(argv: string[], deps: VerbDeps): Promise<number> {
   if (!readsAll("status", argv, deps)) return 2;
   const home = dataFolder(argv, deps.system);
-  const now = statusOf(home, await startsAtLogin(home, deps));
-  const atLogin = now.startsAtLogin ? "It starts at login." : "It doesn't start at login.";
+  const now = statusOf(home, await atLoginOf(home, deps));
+  const atLogin =
+    now.atLogin === "this"
+      ? "It starts at login."
+      : now.atLogin === "none"
+        ? "It doesn't start at login."
+        : `Another Lookover starts at login: ${now.atLogin.other}`;
   if (argv.includes("--json")) deps.print.out(JSON.stringify(now, null, 2));
   else if (!now.running) deps.print.out(`Lookover is stopped. Data folder: ${home}\n${atLogin}`);
   else if (now.address === null) deps.print.out(`Lookover is starting. Data folder: ${home}\n${atLogin}`);
@@ -215,34 +220,34 @@ export async function status(argv: string[], deps: VerbDeps): Promise<number> {
 
 /**
  * What `status` says, and `--json` prints as it is: stopped, starting (its lock held, `instance.json` not written yet)
- * or running; in all three, whether Lookover starts at login on this data folder.
+ * or running; in all three, who starts at login (ADR 0068): the program on this data folder (`this`), no Lookover
+ * (`none`), or another install (`{ other }`, the command it registered).
  */
-type Status = { startsAtLogin: boolean } & (
+type Status = { atLogin: LoginHolder } & (
   | { running: false; home: string }
   | { running: true; home: string; address: null }
   | { running: true; home: string; address: string; version: string; pid: number; since: number }
 );
 
-function statusOf(home: string, startsAtLogin: boolean): Status {
-  if (!holds(home)) return { running: false, home, startsAtLogin };
+function statusOf(home: string, atLogin: LoginHolder): Status {
+  if (!holds(home)) return { running: false, home, atLogin };
   const serving = servingOf(home);
-  if (serving === null) return { running: true, home, address: null, startsAtLogin };
+  if (serving === null) return { running: true, home, address: null, atLogin };
   const { address, version, pid, since } = serving;
-  return { running: true, address, home, version, pid, since, startsAtLogin };
+  return { running: true, address, home, version, pid, since, atLogin };
 }
 
 /**
- * Whether the program on `home` starts at login (ADR 0054): registered on the machine with the command it registers.
- * A program guarded by a live config registers nothing there, so it doesn't; nor does one the machine can't say of.
+ * Who holds start at login, asked with the command the program on `home` registers (ADR 0054, ADR 0068). A program
+ * guarded by a live config registers nothing on the machine, so it isn't asked: none; nor does one the machine can't
+ * say of.
  */
-async function startsAtLogin(home: string, deps: VerbDeps): Promise<boolean> {
-  if (guardedHome(home, deps.system)) return false;
+async function atLoginOf(home: string, deps: VerbDeps): Promise<LoginHolder> {
+  if (guardedHome(home, deps.system)) return "none";
   try {
-    return await deps.background
-      .loginItem(loginCommand(home, deps.system, selfCommand(deps.self)))
-      .registered();
+    return await deps.background.loginItem(loginCommand(home, deps.system, selfCommand(deps.self))).held();
   } catch {
-    return false;
+    return "none";
   }
 }
 

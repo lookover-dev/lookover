@@ -86,6 +86,7 @@ const shown = (p: Pull): HostChange => ({
   draft: p.draft,
   // By id, never name (a rename keeps the id); a head repository gone is a deleted fork's (ADR 0048).
   fork: p.head.repo === null || p.head.repo.id !== p.base.repo.id,
+  openedAt: Date.parse(p.created_at),
   head: { ref: p.head.ref, sha: commitSha(p.head.sha) },
   base: { ref: p.base.ref, sha: commitSha(p.base.sha) },
 });
@@ -248,8 +249,6 @@ export function createIntake(api: GitHubApi, session: Session, allowed: Allowed)
       );
       return {
         cloneUrl: `https://github.com/${repo.owner}/${repo.name}.git`,
-        // GitHub's layout: the branches, and each pull request's head under `refs/pull/<n>/head`.
-        refspecs: ["+refs/heads/*:refs/heads/*", "+refs/pull/*/head:refs/pull/*/head"],
         defaultBranch: branch,
         // GitHub's form for an installation token over HTTPS: the token as the password of `x-access-token`.
         credentials: () =>

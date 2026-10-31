@@ -2,6 +2,19 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.4.0](https://github.com/lookover-dev/lookover/compare/v0.3.0...v0.4.0) (2026-10-31)
+
+### Features
+
+- **app:** when another copy of Lookover starts at login on this computer, setup, Settings, the status menu and `lookover status` say which one, by its command, and Settings offers **Start this one instead**.
+
+### Bug Fixes
+
+- **app:** a second copy of Lookover no longer takes over your start at login, and turning it off removes only its own.
+- **setup:** First review and Repositories show a pull request opened during setup within seconds, with no reload.
+- **app:** a pull request's age is when it was opened on GitHub, not when Lookover first saw it.
+- **review:** "Getting the changes" fetches only the pull request's commits and the default branch: on a repository with thousands of pull requests, seconds instead of half a minute.
+
 ## [0.3.0](https://github.com/lookover-dev/lookover/compare/v0.2.3...v0.3.0) (2026-10-31)
 
 Already set up with your own App? Nothing changes until you choose to sign in: your App keeps working as before.

@@ -1547,6 +1547,20 @@ dialog.dlg::backdrop {
   color: var(--muted);
   max-width: 52ch;
 }
+/* a row whose help changes length with its control: the control stays level with the title, under the pointer, at
+   every width (under 640 px too, where other rows put their control under the help) */
+.setrow.at-title {
+  align-items: start;
+}
+@media (max-width: 640px) {
+  .setrow.at-title {
+    grid-template-columns: 1fr auto;
+  }
+}
+/* a settings row's one action under its help, for the state the help names (design-system.md "Settings row") */
+.setrow-act {
+  margin-top: var(--s-2);
+}
 .steps {
   display: flex;
   gap: 8px;
@@ -1642,6 +1656,13 @@ dialog.dlg::backdrop {
    and the setup's lines: never broken at its hyphen */
 .code-whole code {
   white-space: nowrap;
+}
+/* a long command in a line of copy (another install's, with its path, ADR 0068) wraps inside its code, never past
+   the screen */
+.said code {
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 .session code {
   font-size: 0.85em;

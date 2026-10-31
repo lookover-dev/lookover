@@ -21,6 +21,8 @@ lookover start
 
 Lookover starts each time you log in. Settings › Start at login turns that off.
 
+One Lookover starts at login on a computer: the one whose command the entry holds. A second copy (a test copy, a moved clone, a download beside the npm install) never replaces it by itself, and turning start at login off there leaves it alone. Settings › Start at login names the other's command and, while it is on, **Start this one instead** moves start at login to the copy you are in. `lookover status` names it too.
+
 On Windows it is a value named `Lookover` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which runs `lookover start --no-open`. A console window flashes for a moment at each login: that is the value starting Lookover. To see it:
 
 ```bat

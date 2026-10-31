@@ -136,7 +136,7 @@ function snapshot(review: Partial<Review> = {}, change: Partial<Change> = {}): S
         skills: [{ agent: "claude", state: "none", folder: "~/.claude/skills/lookover-review-loop" }],
       },
       startAtLogin: true,
-      startsAtLogin: true,
+      atLogin: "this",
       loginItem: "os",
       paused: null,
       remote: false,
@@ -646,9 +646,25 @@ test("a draft opened again, marked ready, is a draft no more and keeps its revie
     type: "change.opened",
     at: NOW,
     seq: 1,
-    change: { ...base, draft: false, newCommits: 0, openedAt: NOW },
+    change: { ...base, draft: false, newCommits: 0 },
   });
   expect(after.changes[ID]).toEqual({ ...base, draft: false });
+  expect(reviewOf(after)).toEqual(reviewOf(before));
+});
+
+test("a change sent again takes the event's opened time, the host's (ADR 0068); its new commits stay", () => {
+  const before = snapshot({}, { openedAt: NOW - 60_000, newCommits: 2 });
+  const base = before.changes[ID];
+  if (!base) throw new Error("No change");
+  // 19 days before, as GitHub says it, where a data folder had kept when Lookover first listed it.
+  const opened = NOW - 19 * 24 * 3_600_000;
+  const after = apply(before, {
+    type: "change.opened",
+    at: NOW,
+    seq: 1,
+    change: { ...base, openedAt: opened, newCommits: 0 },
+  });
+  expect(after.changes[ID]).toEqual({ ...base, openedAt: opened, newCommits: 2 });
   expect(reviewOf(after)).toEqual(reviewOf(before));
 });
 

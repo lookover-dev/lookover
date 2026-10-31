@@ -3,6 +3,7 @@
 // Snapshots are built by hand: the view model reads state only.
 import { expect, test } from "bun:test";
 import {
+  apply,
   type ConnectionAccount,
   type ConnectionCause,
   changeId,
@@ -37,6 +38,7 @@ import {
   chip,
   differences,
   firstReviewCandidates,
+  firstReviewPick,
   fixOn,
   githubStatus,
   homeGroups,
@@ -123,7 +125,7 @@ function calm(): State {
       command: "lookover",
       agent: { path: { reach: "no", folder: "~/.local/bin" }, offer: "binary", skills: [] },
       startAtLogin: true,
-      startsAtLogin: true,
+      atLogin: "this",
       loginItem: "os",
       paused: null,
       remote: false,
@@ -898,7 +900,15 @@ test("a sign-in in progress shows as busy", () => {
 test("start at login not as chosen needs you, with Settings' row as its one fix, until the registration matches (ADR 0054)", () => {
   const atLogin = (startAtLogin: boolean, startsAtLogin: boolean, loginItem: "os" | "memory" = "os") => {
     const st = calm();
-    return { ...st, service: { ...st.service, startAtLogin, startsAtLogin, loginItem } };
+    return {
+      ...st,
+      service: {
+        ...st.service,
+        startAtLogin,
+        atLogin: startsAtLogin ? ("this" as const) : ("none" as const),
+        loginItem,
+      },
+    };
   };
   const openSettings = { label: "Open Settings", path: "/settings#login" };
   const refused = atLogin(true, false);
@@ -942,6 +952,10 @@ test("start at login not as chosen needs you, with Settings' row as its one fix,
   expect(pill(atLogin(true, true))).toEqual({ tone: "ok", label: "All good" });
   // In development the registration is the fake's: nothing on the machine to fix.
   expect(problems(atLogin(true, false, "memory"))).toEqual([]);
+  // Another install holds it: no band, a test copy is always so (ADR 0068).
+  const other = { other: String.raw`"C:\Program Files\Lookover\lookover.exe" start --no-open` };
+  const taken = { ...refused, service: { ...refused.service, atLogin: other } };
+  expect(problems(taken)).toEqual([]);
   // Nothing is registered before the setup is done.
   const setUp = refused.setup;
   expect(problems({ ...refused, setup: { ...setUp, done: false } })).toEqual([]);
@@ -1485,6 +1499,30 @@ test("setup's first review offers the owner's pull requests of the repositories 
     },
   };
   expect(firstReviewCandidates(st).map((it) => it.change.number)).toEqual([1]);
+});
+
+test("setup's first review picks from the list as it is: the first that appears, the next when the picked one closes (ADR 0068)", () => {
+  const listed = withChange(withChange(calm(), 1, "none"), 2, "none");
+  const opened = (n: number) => {
+    const c = listed.changes[changeId(`sam/app#${n}`)];
+    if (!c) throw new Error("No change");
+    return c;
+  };
+  // Setup on First review, nothing open yet: nothing to pick.
+  let st: State = { ...calm(), changes: {}, reviews: {} };
+  expect(firstReviewPick(st, null)).toBeNull();
+  // A pull request opened while the step is on screen: picked, with no click.
+  st = apply(st, { seq: 1, type: "change.opened", at: NOW, change: opened(1) });
+  expect(firstReviewPick(st, null)).toBe(changeId("sam/app#1"));
+  st = apply(st, { seq: 2, type: "change.opened", at: NOW, change: opened(2) });
+  expect(firstReviewPick(st, null)).toBe(changeId("sam/app#1"));
+  // The person's own pick stands while it is listed.
+  expect(firstReviewPick(st, changeId("sam/app#2"))).toBe(changeId("sam/app#2"));
+  // The picked one closes: the one still open is picked.
+  st = apply(st, { seq: 3, type: "change.closed", at: NOW, changeId: changeId("sam/app#2") });
+  expect(firstReviewPick(st, changeId("sam/app#2"))).toBe(changeId("sam/app#1"));
+  st = apply(st, { seq: 4, type: "change.closed", at: NOW, changeId: changeId("sam/app#1") });
+  expect(firstReviewPick(st, changeId("sam/app#1"))).toBeNull();
 });
 
 test("each skip explains itself, and only a skip a request reviews offers “Review now”", () => {

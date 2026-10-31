@@ -334,6 +334,10 @@ button {
 .st-note {
   padding: 2px 10px 8px;
 }
+/* a detail that names a command reads as one sentence: `.menu .st span` would lay its parts out side by side */
+.menu .st small .said {
+  display: inline;
+}
 /* a fix under its line and detail (an account's), in line with the text */
 .menu .st-fix {
   display: flex;

@@ -128,7 +128,7 @@ function onGitHub(
       command: "lookover",
       agent: { path: { reach: "no", folder: "~/.local/bin" }, offer: "binary", skills: [] },
       startAtLogin: true,
-      startsAtLogin: true,
+      atLogin: "this",
       loginItem: "os",
       paused: null,
       remote: false,

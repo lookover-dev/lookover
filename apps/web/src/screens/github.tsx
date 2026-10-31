@@ -8,7 +8,7 @@ import { reviewPath, useAppState } from "../store.tsx";
 import { BrandIcon } from "../ui/basics.tsx";
 import { severityLabel } from "../view-model/confirm.ts";
 import { placeText } from "../view-model/findings.ts";
-import { clock } from "../view-model/format.ts";
+import { agoSentence, clock } from "../view-model/format.ts";
 import {
   agentLine,
   checkOf,
@@ -120,7 +120,8 @@ export function GitHubMock() {
         <div className="gh-sub">
           <span className="gh-state">Open</span>
           <span className="gh-muted">
-            <b>{change.openedBy}</b> wants to merge into <code>main</code> · {change.repoId}
+            <b>{change.openedBy}</b> wants to merge into <code>main</code> · {change.repoId} · opened{" "}
+            {agoSentence(state.now, change.openedAt)}
           </span>
         </div>
         <div className="gh-timeline">

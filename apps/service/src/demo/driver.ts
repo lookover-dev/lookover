@@ -138,6 +138,11 @@ const DEMO_COMMAND = {
   onPath: "lookover",
   offPath: String.raw`& '${DEMO_USER_HOME}\Downloads\lookover.exe'`,
 };
+/**
+ * Another install's start at login, which the `login-taken` fault makes hold the computer's (ADR 0068): an npm install
+ * beside the downloaded program, as its `Run` value holds it.
+ */
+const DEMO_OTHER_AT_LOGIN = String.raw`"${DEMO_USER_HOME}\AppData\Roaming\npm\node_modules\lookover\bin\lookover.exe" start --no-open`;
 /** The binary as the skill calls it: forward slashes, one line Git Bash and PowerShell (with `&`) both read. */
 const DEMO_SKILL_COMMAND = "'C:/Users/Your Name/Downloads/lookover.exe'";
 /** The home of the room the `npm-install` fault restarts as an npm install (ADR 0061): its folders are under it. */
@@ -563,6 +568,15 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
       await restart(settled, async () => {
         await loginItem.unregister();
         loginItem.refuse("Access is denied.");
+      });
+      return "ok";
+    },
+    // Another install takes the computer's start at login while the service is stopped: the service, restarted, finds
+    // it chosen but held by the other one, and leaves it (ADR 0068), until the owner takes it over.
+    "login-taken": async (settled: () => Promise<void>) => {
+      await restart(settled, () => {
+        loginItem.holdOther(DEMO_OTHER_AT_LOGIN);
+        return Promise.resolve();
       });
       return "ok";
     },

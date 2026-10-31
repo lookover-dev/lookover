@@ -3,6 +3,7 @@ import {
   type AccountCause,
   asSentence,
   type Change,
+  type ChangeId,
   CODEX_REVIEWS,
   type Command,
   type Connection,
@@ -152,6 +153,16 @@ export function firstReviewCandidates(state: State): ChangeReview[] {
   return changeReviews(state).filter(
     (it) => it.repo.enabled && it.change.author !== "other" && !it.change.fork,
   );
+}
+
+/**
+ * The pull request setup's first review has picked (ADR 0068): the person's pick while it is still offered, else the
+ * first offered; null when none is. The list follows the host, so a pull request that appears is picked when none
+ * was, and one that closes hands the pick on.
+ */
+export function firstReviewPick(state: State, picked: ChangeId | null): ChangeId | null {
+  const offered = firstReviewCandidates(state);
+  return (offered.find((it) => it.change.id === picked) ?? offered[0])?.change.id ?? null;
 }
 
 /** The AI reviewing now, or the one that reviewed last. */

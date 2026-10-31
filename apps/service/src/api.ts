@@ -377,8 +377,8 @@ const COMMANDS: { [K in Parsed["type"]]?: Row<K> } = {
     await room.setup.finish();
     return OK;
   },
-  "service.startAtLogin": async ({ room }, { on }) => {
-    const answer = await room.startAtLogin(on);
+  "service.startAtLogin": async ({ room }, { on, takeOver }) => {
+    const answer = await room.startAtLogin(on, takeOver === true);
     return answer === "ok" ? OK : [{ error: `Start at login didn't change: ${answer.refused}` }, 500];
   },
   "agent.check": async ({ room }) => {

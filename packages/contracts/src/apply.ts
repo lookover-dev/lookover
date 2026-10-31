@@ -138,8 +138,9 @@ function changeOpened(s: State, event: Of<"change.opened">): State {
   const { change } = event;
   const shown = s.changes[change.id];
   if (shown) {
-    // A draft marked ready: what the host shows now, over what Lookover kept of it.
-    const next: Change = { ...change, openedAt: shown.openedAt, newCommits: shown.newCommits };
+    // Sent again (a draft marked ready, another writer, another opened time): what the host shows now, its opened
+    // time included (ADR 0068), over the commits Lookover counted since the last round.
+    const next: Change = { ...change, newCommits: shown.newCommits };
     return { ...s, changes: { ...s.changes, [change.id]: next } };
   }
   // New, or reopened: a reopened change goes on with the review it had, as the store goes on with its rounds.

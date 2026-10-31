@@ -84,7 +84,7 @@ A pull request you open now shows in about a minute. With none, **Continue**.
 
 All of it is optional. The step installs the `lookover-review-loop` skill for Claude Code and Codex, so your agent waits for the review, fixes what it found, pushes and asks again until nothing is left. [Your coding agent](/docs/coding-agent/) says how.
 
-Under it, a card says reviews keep running in the background: Lookover starts each time you log in. **Don't start at login** is one click away, and Settings changes it later. **Go to my reviews** ends the setup.
+Under it, a card says reviews keep running in the background: Lookover starts each time you log in. **Don't start at login** is one click away, and Settings changes it later. When another Lookover on the computer already starts at login, the card says so and names it: this one won't, until **Start this one instead** in Settings. **Go to my reviews** ends the setup.
 
 ## Then
 

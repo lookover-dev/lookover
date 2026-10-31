@@ -65,15 +65,22 @@ test("GitHub and the service in a few words", () => {
   // Signed in to the shared App (ADR 0066), no bot: connected as the person, and never as nobody.
   expect(line({ bot: null, person: { id: 7, login: "sam" } })).toBe("connected as sam");
   expect(line({ bot: null })).toBe("connected");
-  expect(serviceStatus({ startAtLogin: true, startsAtLogin: true, loginItem: "os" })).toEqual({
+  expect(serviceStatus({ startAtLogin: true, atLogin: "this", loginItem: "os" })).toEqual({
     ok: true,
     text: "running, starts at login",
   });
-  expect(serviceStatus({ startAtLogin: true, startsAtLogin: false, loginItem: "os" })).toEqual({
+  expect(serviceStatus({ startAtLogin: true, atLogin: "none", loginItem: "os" })).toEqual({
     ok: false,
     text: "running, doesn't start at login",
   });
-  expect(serviceStatus({ startAtLogin: true, startsAtLogin: true, loginItem: "memory" })).toEqual({
+  // Another install holds it (ADR 0068): said, not warned; a test copy is always so and needs nothing.
+  expect(
+    serviceStatus({ startAtLogin: true, atLogin: { other: "lookover start" }, loginItem: "os" }),
+  ).toEqual({
+    ok: true,
+    text: "running, another Lookover starts at login",
+  });
+  expect(serviceStatus({ startAtLogin: true, atLogin: "this", loginItem: "memory" })).toEqual({
     ok: true,
     text: "running, start at login isn't set up in development",
   });
@@ -94,7 +101,13 @@ test("GitHub disconnected says its cause in a few words (ADR 0053)", () => {
 
 test("the service's check says whether Lookover starts at login for real, warning when it isn't as chosen (ADR 0054)", () => {
   const line = (startAtLogin: boolean, startsAtLogin: boolean, loginItem: "os" | "memory" = "os") =>
-    checkLine(ENGINES, { check: "service", state: "running", startAtLogin, startsAtLogin, loginItem });
+    checkLine(ENGINES, {
+      check: "service",
+      state: "running",
+      startAtLogin,
+      atLogin: startsAtLogin ? "this" : "none",
+      loginItem,
+    });
   expect(line(true, true)).toEqual({ label: "Service", ok: true, detail: "running, starts at login" });
   expect(line(false, false)).toEqual({
     label: "Service",
@@ -180,7 +193,7 @@ test("each health check says what it checked, whether it is fine, and the detail
       },
     ],
     [
-      { check: "service", state: "running", startAtLogin: true, startsAtLogin: true, loginItem: "os" },
+      { check: "service", state: "running", startAtLogin: true, atLogin: "this", loginItem: "os" },
       { label: "Service", ok: true, detail: "running, starts at login" },
     ],
     [

@@ -11,7 +11,6 @@ const PLANTED = commitSha("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678");
 const FIXED = commitSha("4700cffc0000000000000000000000000000cffc");
 const fetch: FetchSpec = {
   cloneUrl: "https://github.com/sasensi/lookover-sandbox.git",
-  refspecs: ["+refs/heads/*:refs/heads/*"],
   defaultBranch: "main",
   credentials: () => Promise.resolve({ username: "x-access-token", password: "ghs_fake" }),
 };

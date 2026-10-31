@@ -92,7 +92,7 @@ const KEY_TEXT: Record<KeyProtection, string> = {
  * registered to start at login (ADR 0054); warned (`ok` false) when that isn't what the owner chose, the fix being
  * the alert band's (`problems`). In development: that start at login isn't set up.
  */
-export function serviceStatus(service: Pick<Service, "startAtLogin" | "startsAtLogin" | "loginItem">): {
+export function serviceStatus(service: Pick<Service, "startAtLogin" | "atLogin" | "loginItem">): {
   ok: boolean;
   text: string;
 } {

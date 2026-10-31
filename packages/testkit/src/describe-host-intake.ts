@@ -16,6 +16,11 @@
 // 0066), replies and comments inline as the owner,
 // and pushes a commit that replaces the finding's line.
 // Nothing in the suite is GitHub's: the clone URL is checked as any host's.
+// `setup.patience` is how long the host may take to show a write (ADR 0069): each read after a write that expects its
+// effect reads until it shows it, its predicate the `expect`s after it; a read that proves something absent, or a
+// listing unchanged, stays a single read. Reading a listing again moves the adapter's ETag, so a stale answer can be
+// followed by an unchanged one: a wait on a listing's change asks that it changed and shows what was written, never
+// that it changed alone.
 import { describe, expect, test } from "bun:test";
 import {
   type CommitSha,
@@ -28,9 +33,13 @@ import {
   HostError,
   type HostFailure,
   type HostIntake,
+  type HostThread,
+  type Listing,
   type RepositoryRef,
 } from "@lookover/contracts";
 import type { HostRefusal } from "./fake-git-host.ts";
+import { equals } from "./matchers.ts";
+import { holds, type Patience, readUntil } from "./read-until.ts";
 
 export interface HostIntakeFixture {
   intake: HostIntake;
@@ -97,6 +106,11 @@ export interface ForkIntakeFixture extends Pick<HostIntakeFixture, "intake" | "r
 
 export interface HostIntakeSetup {
   open(): Promise<HostIntakeFixture>;
+  /**
+   * How long the host may take to show a write (ADR 0069): the fakes `{ boundMs: 0, pauseMs: 0 }`, GitHub
+   * `LIVE_SHOWN_MS` and 1 s.
+   */
+  patience: Patience;
   /** An adapter whose every call the host refuses for that reason. `open` names a change it would hold. */
   refusing: Partial<Record<HostRefusal, () => Promise<RefusingIntakeFixture>>>;
   /**
@@ -130,11 +144,22 @@ const newestEditedFirst = (items: HostConversationComment[]) =>
   items.every((c, i) => i === 0 || c.updatedAt <= (items[i - 1]?.updatedAt ?? 0));
 
 export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
+  /**
+   * Reads until `shows` holds of the read, within the setup's patience, and returns the last read: the `expect` after
+   * it is unchanged. Only for a read that expects a write's effect (ADR 0069). A wait that runs out ends its case (its
+   * `expect` fails at once, or the case throws); one that passes costs GitHub's lag, seconds, so a case of N waits
+   * could near N whole bounds only if GitHub lagged near the bound at every one.
+   */
+  const shown = <T>(read: () => Promise<T>, shows: (read: T) => boolean, what: string): Promise<T> =>
+    readUntil(read, shows, what, setup.patience);
+
   describe(`HostIntake port: ${name}`, () => {
     test("the open changes include the one the fixture names, with its draft flag and author", async () => {
       const { intake, repo, open } = await setup.open();
-      const { items } = await intake.listOpenChanges(repo);
-      expect(items.find((c) => c.number === open.number)).toEqual(open);
+      // Just opened by the fixture: listed once the host shows it.
+      const listed = async () =>
+        (await intake.listOpenChanges(repo)).items.find((c) => c.number === open.number);
+      expect(await shown(listed, equals(open), "the change just opened, listed")).toEqual(open);
     });
 
     test("the open changes listed again unchanged say so; a push shows at the next listing", async () => {
@@ -145,9 +170,32 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       expect(again).toEqual({ unchanged: true, items: first.items });
 
       const head = await f.push(1);
-      const after = await f.intake.listOpenChanges(f.repo);
-      expect(after.unchanged).toBe(false);
-      expect(after.items.find((c) => c.number === f.open.number)?.head.sha).toBe(head);
+      const pushed = (after: Listing<HostChange>) => {
+        expect(after.unchanged).toBe(false);
+        expect(after.items.find((c) => c.number === f.open.number)?.head.sha).toBe(head);
+      };
+      const listing = () => f.intake.listOpenChanges(f.repo);
+      pushed(await shown(listing, holds(pushed), "the listing changed, with the pushed head"));
+    });
+
+    test("a change carries when the host says it was opened, to the second: listed and read, a push keeps it", async () => {
+      const f = await setup.open();
+      const listed = async () => {
+        const { items, at } = await f.intake.listOpenChanges(f.repo);
+        return { at, openedAt: items.find((c) => c.number === f.open.number)?.openedAt };
+      };
+      const carried = (first: { at: number; openedAt: number | undefined }) => {
+        expect(first.openedAt).toBe(f.open.openedAt);
+        expect(f.open.openedAt % 1000).toBe(0);
+        // Opened by the fixture before it handed it over, so after its point in time and by the listing at the latest.
+        expect(f.open.openedAt).toBeGreaterThanOrEqual(Math.floor(f.before / 1000) * 1000);
+        expect(f.open.openedAt).toBeLessThanOrEqual(first.at);
+      };
+      carried(await shown(listed, holds(carried), "the change just opened, listed"));
+
+      await f.push(1);
+      expect((await listed()).openedAt).toBe(f.open.openedAt);
+      expect((await f.intake.getChange(f.repo, f.open.number)).openedAt).toBe(f.open.openedAt);
     });
 
     test("a draft is listed open as a draft; marked ready, it is listed ready", async () => {
@@ -156,26 +204,32 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       expect(draft.draft).toBe(true);
       const listed = async () =>
         (await f.intake.listOpenChanges(f.repo)).items.find((c) => c.number === draft.number);
-      expect(await listed()).toEqual(draft);
+      expect(await shown(listed, equals(draft), "the draft listed")).toEqual(draft);
 
       await f.markReady(draft.number);
-      expect(await listed()).toEqual({ ...draft, draft: false });
+      const ready = { ...draft, draft: false };
+      expect(await shown(listed, equals(ready), "the draft listed ready")).toEqual(ready);
     });
 
     test("a closed change is no longer listed open, and is still read by its number", async () => {
       const f = await setup.open();
+      const numbers = async () => (await f.intake.listOpenChanges(f.repo)).items.map((c) => c.number);
+      // Listed open before the close, so its absence after is the close's own effect, and waiting can't fake it. Just
+      // opened by the fixture: listed once the host shows it.
+      const open = (numbers: number[]) => expect(numbers).toContain(f.open.number);
+      open(await shown(numbers, holds(open), "the change just opened, listed"));
       await f.close();
-      const { items } = await f.intake.listOpenChanges(f.repo);
-      expect(items.map((c) => c.number)).not.toContain(f.open.number);
+      const closed = (numbers: number[]) => expect(numbers).not.toContain(f.open.number);
+      closed(await shown(numbers, holds(closed), "the change closed"));
       expect(await f.intake.getChange(f.repo, f.open.number)).toEqual(f.open);
     });
 
     test("a change from a branch of the repository itself is no fork, listed and read", async () => {
       const { intake, repo, open } = await setup.open();
       expect(open.fork).toBe(false);
-      expect((await intake.listOpenChanges(repo)).items.find((c) => c.number === open.number)?.fork).toBe(
-        false,
-      );
+      const fork = async () =>
+        (await intake.listOpenChanges(repo)).items.find((c) => c.number === open.number)?.fork;
+      expect(await shown(fork, (read) => read === false, "the change just opened, listed")).toBe(false);
       expect((await intake.getChange(repo, open.number)).fork).toBe(false);
     });
 
@@ -186,7 +240,13 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
         if (!forks) return;
         const { intake, repo, fork, deletedFork } = await forks();
         expect([fork.fork, deletedFork.fork]).toEqual([true, true]);
-        const { items } = await intake.listOpenChanges(repo);
+        // Opened by the fixture: listed once the host shows both.
+        const listed = (items: HostChange[]) => {
+          for (const change of [fork, deletedFork])
+            expect(items.find((c) => c.number === change.number)).toEqual(change);
+        };
+        const open = async () => (await intake.listOpenChanges(repo)).items;
+        const items = await shown(open, holds(listed), "the changes from forks, listed");
         for (const change of [fork, deletedFork]) {
           expect(items.find((c) => c.number === change.number)).toEqual(change);
           expect(await intake.getChange(repo, change.number)).toEqual(change);
@@ -222,10 +282,6 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       await f.later();
       const second = await f.comment("Second comment of the intake suite.");
 
-      const { items } = await f.intake.listComments(f.repo, f.before);
-
-      expect(newestEditedFirst(items)).toBe(true);
-      expect(items.every((c) => c.updatedAt >= f.before)).toBe(true);
       const written = (id: string, body: string) => ({
         id,
         nodeId: expect.any(String),
@@ -235,23 +291,33 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
         createdAt: expect.any(Number),
         updatedAt: expect.any(Number),
       });
-      const shown = items
-        .filter((c) => c.id === first || c.id === second)
-        .sort((a, b) => a.createdAt - b.createdAt);
-      expect(shown).toEqual([
-        written(first, "First comment of the intake suite."),
-        written(second, "Second comment of the intake suite."),
-      ]);
-      for (const comment of shown) {
-        expect(comment.createdAt).toBeGreaterThanOrEqual(f.before);
-        expect(comment.updatedAt).toBe(comment.createdAt);
-      }
+      const listed = (items: HostConversationComment[]) => {
+        expect(newestEditedFirst(items)).toBe(true);
+        expect(items.every((c) => c.updatedAt >= f.before)).toBe(true);
+        const ours = items
+          .filter((c) => c.id === first || c.id === second)
+          .sort((a, b) => a.createdAt - b.createdAt);
+        expect(ours).toEqual([
+          written(first, "First comment of the intake suite."),
+          written(second, "Second comment of the intake suite."),
+        ]);
+        for (const comment of ours) {
+          expect(comment.createdAt).toBeGreaterThanOrEqual(f.before);
+          expect(comment.updatedAt).toBe(comment.createdAt);
+        }
+      };
+      const items = async () => (await f.intake.listComments(f.repo, f.before)).items;
+      listed(await shown(items, holds(listed), "the two comments"));
     });
 
     test("a comment last edited before the point is not listed; edited after it, it is listed first", async () => {
       const f = await setup.open();
       const id = await f.comment("Written before the point.");
-      const written = (await f.intake.listComments(f.repo, f.before)).items.find((c) => c.id === id);
+      const writtenIn = (listed: HostConversationComment[]) => listed.find((c) => c.id === id);
+      const before = async () => (await f.intake.listComments(f.repo, f.before)).items;
+      const written = writtenIn(
+        await shown(before, (listed) => writtenIn(listed) !== undefined, "the comment just written"),
+      );
       if (!written) throw new Error("The comment just written is not listed");
       const point = written.updatedAt + 1_000;
       expect((await f.intake.listComments(f.repo, point)).items.map((c) => c.id)).not.toContain(id);
@@ -260,19 +326,29 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       await f.later();
       await f.edit(id, "Edited after the point.");
 
-      const { items } = await f.intake.listComments(f.repo, point);
-      expect(items[0]).toMatchObject({ id, body: "Edited after the point.", createdAt: written.createdAt });
-      expect(items[0]?.updatedAt).toBeGreaterThanOrEqual(point);
+      const edited = (items: HostConversationComment[]) => {
+        expect(items[0]).toMatchObject({ id, body: "Edited after the point.", createdAt: written.createdAt });
+        expect(items[0]?.updatedAt).toBeGreaterThanOrEqual(point);
+      };
+      const since = async () => (await f.intake.listComments(f.repo, point)).items;
+      edited(await shown(since, holds(edited), "the comment edited, listed first"));
     });
 
     test("a listing says when the host answered, by the host's clock: after what was written before it", async () => {
       const f = await setup.open();
       const id = await f.comment("Written before the listing.");
       await f.later();
-      const comments = await f.intake.listComments(f.repo, f.before);
-      const written = comments.items.find((c) => c.id === id);
-      expect(written).toBeDefined();
-      expect(comments.at).toBeGreaterThan(written?.createdAt ?? Number.POSITIVE_INFINITY);
+      const answered = (comments: Listing<HostConversationComment>) => {
+        const written = comments.items.find((c) => c.id === id);
+        expect(written).toBeDefined();
+        expect(comments.at).toBeGreaterThan(written?.createdAt ?? Number.POSITIVE_INFINITY);
+      };
+      const comments = await shown(
+        () => f.intake.listComments(f.repo, f.before),
+        holds(answered),
+        "the comment just written",
+      );
+      answered(comments);
       const changes = await f.intake.listOpenChanges(f.repo);
       expect(changes.at).toBeGreaterThanOrEqual(comments.at);
       // Unchanged, it is still the host's time of this answer.
@@ -288,9 +364,12 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       expect(again).toEqual({ unchanged: true, items: first.items });
 
       const id = await f.comment("A comment the next listing shows.");
-      const after = await f.intake.listComments(f.repo, f.before);
-      expect(after.unchanged).toBe(false);
-      expect(after.items[0]?.id).toBe(id);
+      const commented = (after: Listing<HostConversationComment>) => {
+        expect(after.unchanged).toBe(false);
+        expect(after.items[0]?.id).toBe(id);
+      };
+      const listing = () => f.intake.listComments(f.repo, f.before);
+      commented(await shown(listing, holds(commented), "the listing changed, with the new comment first"));
     });
 
     test("the commits a push brought are counted, the history kept", async () => {
@@ -299,11 +378,9 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       const to = await f.push(2);
       // Each commit with its message, oldest first: who wrote a change is read from them (ADR 0044).
       const messages = [expect.any(String), expect.any(String)];
-      expect(await f.intake.countCommits(f.repo, from, to)).toEqual({
-        commits: 2,
-        diverged: false,
-        messages,
-      });
+      const brought = { commits: 2, diverged: false, messages };
+      const count = () => f.intake.countCommits(f.repo, from, to);
+      expect(await shown(count, equals(brought), "the two commits pushed")).toEqual(brought);
       expect(await f.intake.countCommits(f.repo, to, to)).toEqual({
         commits: 0,
         diverged: false,
@@ -320,18 +397,17 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
         "Rewrite the filter\n\nCo-authored-by: Codex <codex@openai.com>",
       ];
       const to = await f.push(2, false, messages);
-      expect((await f.intake.countCommits(f.repo, from, to)).messages).toEqual(messages);
+      const read = async () => (await f.intake.countCommits(f.repo, from, to)).messages;
+      expect(await shown(read, equals(messages), "the two commits' messages")).toEqual(messages);
     });
 
     test("a force-push that replaced the head commit is diverged, its own commits counted", async () => {
       const f = await setup.open();
       const from = f.open.head.sha;
       const to = await f.push(1, true);
-      expect(await f.intake.countCommits(f.repo, from, to)).toEqual({
-        commits: 1,
-        diverged: true,
-        messages: [expect.any(String)],
-      });
+      const diverged = { commits: 1, diverged: true, messages: [expect.any(String)] };
+      const count = () => f.intake.countCommits(f.repo, from, to);
+      expect(await shown(count, equals(diverged), "the force-push diverged")).toEqual(diverged);
     });
 
     test("a commit the repository doesn't have is not found", async () => {
@@ -351,9 +427,6 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       expect(url.username).toBe("");
       expect(url.password).toBe("");
       expect(url.pathname.replace(/\.git$/, "")).toEndWith(`/${repo.owner}/${repo.name}`);
-      // What to fetch, in the host's ref layout: forced refspecs from its refs to the same names in the mirror.
-      expect(spec.refspecs).not.toEqual([]);
-      for (const refspec of spec.refspecs) expect(refspec).toMatch(/^\+refs\/\S+:refs\/\S+$/);
       const { username, password } = await spec.credentials();
       expect(username).not.toBe("");
       expect(password).not.toBe("");
@@ -384,7 +457,6 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       // A marker in someone else's comment: quoted, or forged, it names no thread of Lookover's (ADR 0052).
       await f.commentInline(`Copied: ${FINDING_MARKER}{"v":1,"id":"F9"} -->`);
 
-      const threads = await f.intake.threads(change);
       const reply = (commentId: number, body: string) => ({
         commentId,
         nodeId: expect.any(String),
@@ -392,7 +464,7 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
         body,
         at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
       });
-      expect(threads).toEqual([
+      const thread = [
         {
           commentId: root,
           nodeId: expect.any(String),
@@ -404,7 +476,13 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
             reply(second, "Fixed in the next commit."),
           ],
         },
-      ]);
+      ];
+      const threads = await shown(
+        () => f.intake.threads(change),
+        equals(thread),
+        "Lookover's thread with its two replies",
+      );
+      expect(threads).toEqual(thread);
     });
 
     test("a thread whose line a push replaced is outdated, and still read by its marker", async () => {
@@ -413,11 +491,14 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       const root = await f.postFinding(findingId("F2"));
       const reply = await f.reply(root, "Fixed.");
       await f.outdate();
-      const threads = await f.intake.threads(change);
-      expect(threads.map((t) => [t.commentId, t.findingId, t.outdated])).toEqual([
-        [root, findingId("F2"), true],
-      ]);
-      expect(threads[0]?.replies.map((r) => [r.commentId, r.body])).toEqual([[reply, "Fixed."]]);
+      const outdated = (threads: HostThread[]) => {
+        expect(threads.map((t) => [t.commentId, t.findingId, t.outdated])).toEqual([
+          [root, findingId("F2"), true],
+        ]);
+        expect(threads[0]?.replies.map((r) => [r.commentId, r.body])).toEqual([[reply, "Fixed."]]);
+      };
+      const threads = () => f.intake.threads(change);
+      outdated(await shown(threads, holds(outdated), "the thread outdated, with its reply"));
     });
 
     /** Every call of the adapter `refusing` gives fails as `failure`. */

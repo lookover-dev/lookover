@@ -81,6 +81,34 @@ const openLog = (page: Page) => page.getByRole("button", { name: /^Log/ }).first
 /** A link that opens a page in a new tab: "Create it on GitHub" (ADR 0053). */
 const link = (page: Page, name: string) => page.getByRole("link", { name }).first();
 
+/**
+ * Settings' Start at login switched off while another Lookover holds it (ADR 0068): its help says so, and "Start this
+ * one instead" goes with the switch on. The input is hidden under its track: the click lands on the track, as the
+ * person's does.
+ */
+async function switchLoginOffWhileTaken(page: Page) {
+  const login = loginSwitch(page);
+  await centre(login);
+  const before = await login.boundingBox();
+  await login.click();
+  await page.getByText("after you log in. Another Lookover starts at login", { exact: false }).waitFor();
+  await button(page, "Start this one instead").waitFor({ state: "detached" });
+  // The switch stays under the pointer (rule 5): the shot fails when flipping it moved it.
+  const after = await login.boundingBox();
+  if (before?.x !== after?.x || before?.y !== after?.y)
+    throw new Error(
+      `Start at login's switch moved: from ${JSON.stringify(before)} to ${JSON.stringify(after)}`,
+    );
+}
+
+/** Settings' Start at login switch: its track, which the person clicks. */
+const loginSwitch = (page: Page) =>
+  page.locator("label.switch").filter({ has: page.getByLabel("Start at login", { exact: true }) });
+
+/** Scrolls `target` to the middle of the screen: shots of one row, on and off, show it at the same place. */
+const centre = (target: ReturnType<Page["locator"]>) =>
+  target.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
+
 /** Sign in again from the band, signed out of the shared App (ADR 0066): its code shows there once GitHub gave one. */
 async function signInAgain(page: Page) {
   await button(page, "Sign in again").click();
@@ -454,6 +482,14 @@ export const SHOTS: Shot[] = [
     scenario: "S10",
     inject: ["login-refused"],
     act: (p) => button(p, "Start at login refused").click(),
+  },
+  // Another Lookover holds start at login (ADR 0068): no band, the pill all good; its menu says so and names the
+  // command the computer runs at login.
+  {
+    name: "status-pill-login-taken",
+    scenario: "S10",
+    inject: ["login-taken"],
+    act: (p) => button(p, "All good").click(),
   },
   // A Codex version that failed Lookover's self-test (ADR 0044): the banner, then the status menu.
   { name: "home-failed-self-test", scenario: "S10", inject: ["codex-failed-self-test"] },
@@ -865,6 +901,61 @@ export const SHOTS: Shot[] = [
     path: "/settings",
     inject: ["login-refused"],
     act: (p) => p.getByLabel("Start at login", { exact: true }).scrollIntoViewIfNeeded(),
+  },
+  // Another Lookover holds start at login (ADR 0068): the help names its command, the switch is still the choice, and
+  // while it is on "Start this one instead" takes it on purpose; on a phone the command wraps inside its code and the
+  // switch stays level with the title. Taken over, the row says this one starts.
+  {
+    name: "settings-login-taken",
+    scenario: "S10",
+    path: "/settings",
+    inject: ["login-taken"],
+    act: async (p) => {
+      await button(p, "Start this one instead").waitFor();
+      await centre(loginSwitch(p));
+    },
+  },
+  {
+    name: "settings-login-taken-phone",
+    scenario: "S10",
+    path: "/settings",
+    phone: true,
+    inject: ["login-taken"],
+    act: async (p) => {
+      await button(p, "Start this one instead").waitFor();
+      await centre(loginSwitch(p));
+    },
+  },
+  {
+    name: "settings-login-taken-over",
+    scenario: "S10",
+    path: "/settings",
+    inject: ["login-taken"],
+    alone: true,
+    act: async (p) => {
+      await button(p, "Start this one instead").click();
+      await p.getByText("Lookover starts each time you log in to this computer.", { exact: false }).waitFor();
+      await p.getByLabel("Start at login", { exact: true }).scrollIntoViewIfNeeded();
+    },
+  },
+  // Taken and switched off: the help says it is off and names the other, "Start this one instead" gone, the switch
+  // level with the title where it was, on a phone too (rule 5).
+  {
+    name: "settings-login-taken-off",
+    scenario: "S10",
+    path: "/settings",
+    inject: ["login-taken"],
+    alone: true,
+    act: switchLoginOffWhileTaken,
+  },
+  {
+    name: "settings-login-taken-off-phone",
+    scenario: "S10",
+    path: "/settings",
+    phone: true,
+    inject: ["login-taken"],
+    alone: true,
+    act: switchLoginOffWhileTaken,
   },
   // The log file of the scratch data folder (ADR 0055), from the shot's own load on: its self-tests, then S10's seed.
   // The file holds every load the proof service made before it, which shots ran first decides, and the start's
@@ -1291,6 +1382,19 @@ export const SHOTS: Shot[] = [
     alone: true,
     act: setupUntilRepositories,
   },
+  // The agent opens #152 while Repositories is on screen (ADR 0068): ledger-api counts it with no reload.
+  {
+    name: "setup-3-repositories-new-pr",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilRepositories(p, demo);
+      await p.getByText("2 open pull requests").waitFor();
+      await demo.inject("agent-opens-change");
+      await p.getByText("3 open pull requests").waitFor();
+    },
+  },
   {
     name: "setup-back-to-github",
     scenario: "S1",
@@ -1311,6 +1415,26 @@ export const SHOTS: Shot[] = [
       await setupUntilRepositories(p, demo);
       await button(p, "Continue").click();
       await button(p, "Review this pull request").waitFor();
+      // #131's age is GitHub's opened time, not when Lookover first listed it (ADR 0068).
+      await p.getByText("19 days ago").waitFor();
+    },
+  },
+  // The agent opens #152 while First review is on screen (ADR 0068): listed with no reload, #148 still picked.
+  {
+    name: "setup-4-first-review-new-pr",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilRepositories(p, demo);
+      await button(p, "Continue").click();
+      await button(p, "Review this pull request").waitFor();
+      await demo.inject("agent-opens-change");
+      await p.getByText("Cache exchange rates for an hour").waitFor();
+      await p
+        .getByRole("radio", { name: /Add rate limiting to \/v1\/invoices/ })
+        .and(p.locator(":checked"))
+        .waitFor();
     },
   },
   {
@@ -1334,6 +1458,31 @@ export const SHOTS: Shot[] = [
     screen: ".setup",
     fullPage: true,
     alone: true,
+    act: async (p, demo) => {
+      await setupUntilAgent(p, demo);
+      await button(p, "Don't start at login").click();
+      await button(p, "Start at login after all").waitFor();
+    },
+  },
+  // Another Lookover holds start at login (ADR 0068): the last step says this one won't start, with its command, and
+  // where to change that; the finish leaves the other's alone.
+  {
+    name: "setup-5-agent-login-taken",
+    scenario: "S1",
+    screen: ".setup",
+    fullPage: true,
+    alone: true,
+    inject: ["login-taken"],
+    act: setupUntilAgent,
+  },
+  // Taken, then "Don't start at login": the shorter line in the taken one's height, the buttons where they were.
+  {
+    name: "setup-5-agent-login-taken-off",
+    scenario: "S1",
+    screen: ".setup",
+    fullPage: true,
+    alone: true,
+    inject: ["login-taken"],
     act: async (p, demo) => {
       await setupUntilAgent(p, demo);
       await button(p, "Don't start at login").click();

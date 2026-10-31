@@ -486,7 +486,7 @@ function world(
       command: "lookover",
       agent: agent(),
       startAtLogin: true,
-      startsAtLogin: false,
+      atLogin: "none",
       loginItem: "os",
       paused: null,
       remote: false,

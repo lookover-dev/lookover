@@ -29,6 +29,11 @@ export interface HostChange {
    * repository identities, never names (ADR 0048).
    */
   fork: boolean;
+  /**
+   * When the host says it was opened, in milliseconds since the Unix epoch, to the second as GitHub keeps it
+   * (`created_at`): its age, whenever Lookover first listed it (ADR 0068).
+   */
+  openedAt: number;
   head: { ref: string; sha: CommitSha };
   base: { ref: string; sha: CommitSha };
 }
@@ -93,13 +98,8 @@ export interface FetchSpec {
   /** The repository's HTTPS clone URL, without credentials. */
   cloneUrl: string;
   /**
-   * What to fetch, as git refspecs in the host's own ref layout: its branches and every change's head, so that
-   * one fetch brings a change's head commit (GitHub: the branches, and `refs/pull/<n>/head`).
-   */
-  refspecs: string[];
-  /**
    * The repository's default branch as the host names it now (a rename is followed): where its rules files are read
-   * (ADR 0048). The refspecs bring it as a branch.
+   * (ADR 0048). What else to fetch is retrieval's: the change's head and base commits, by commit (ADR 0068).
    */
   defaultBranch: string;
   /** Credentials valid for the fetch about to run. Asked for at fetch time, so they are never stale. */

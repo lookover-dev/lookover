@@ -25,6 +25,7 @@ import {
   engineHealthText,
   engineName,
   type HostLogin,
+  type LoginHolder,
   type LoginItemKind,
   type Repository,
   type RepositoryId,
@@ -70,8 +71,8 @@ export interface Facts {
   setup: Setup;
   /** Whether the owner chose to start Lookover at login, as the store keeps it beside the setup (ADR 0049). */
   startAtLogin: boolean;
-  /** Whether the machine says Lookover is registered to start at login, as read at start (ADR 0054). */
-  startsAtLogin: boolean;
+  /** Who the machine says holds start at login, as read at start (ADR 0054, ADR 0068). */
+  atLogin: LoginHolder;
   /** Where that registration is: the machine's, or development's in memory (ADR 0054). */
   loginItem: LoginItemKind;
   /**
@@ -137,10 +138,7 @@ export function repositoryOf(repo: RepositoryRef, enabled: boolean, settings: Re
 }
 
 /** The owner's changes are "you" (ADR 0016); the host gives no other identity than the author's. */
-export function changeOf(
-  { repo, change, writtenBy, firstSeenAt }: InboxEntry,
-  owner: { id: number },
-): Change {
+export function changeOf({ repo, change, writtenBy }: InboxEntry, owner: { id: number }): Change {
   return {
     id: changeIdOf(repo, change.number),
     repoId: repoIdOf(repo),
@@ -150,7 +148,7 @@ export function changeOf(
     author: change.author.id === owner.id ? "you" : "other",
     writtenBy,
     headSha: change.head.sha,
-    openedAt: firstSeenAt,
+    openedAt: change.openedAt,
     draft: change.draft,
     fork: change.fork,
     newCommits: 0,
@@ -303,7 +301,7 @@ function base(f: Facts): State {
       command: f.command,
       agent: f.agent,
       startAtLogin: f.startAtLogin,
-      startsAtLogin: f.startsAtLogin,
+      atLogin: f.atLogin,
       loginItem: f.loginItem,
       paused: null,
       remote: f.remote ?? false,

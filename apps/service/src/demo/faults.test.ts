@@ -463,11 +463,11 @@ test("login-refused: Lookover restarts and the computer refuses its start at log
   // Demo mode plays the program: its start at login is said as the machine's, though kept in memory.
   expect((await snapshotOf(door)).service).toMatchObject({
     startAtLogin: true,
-    startsAtLogin: true,
+    atLogin: "this",
     loginItem: "os",
   });
   expect(await inject(door, "login-refused")).toBe(200);
-  expect((await snapshotOf(door)).service).toMatchObject({ startAtLogin: true, startsAtLogin: false });
+  expect((await snapshotOf(door)).service).toMatchObject({ startAtLogin: true, atLogin: "none" });
   // Nothing registered to remove: turning it off is kept; turning it on asks the computer, which refuses.
   const off = await send(door, { type: "service.startAtLogin", on: false });
   expect(off.status).toBe(200);
@@ -476,7 +476,21 @@ test("login-refused: Lookover restarts and the computer refuses its start at log
     500,
     { error: "Start at login didn't change: Access is denied." },
   ]);
-  expect((await snapshotOf(door)).service).toMatchObject({ startAtLogin: false, startsAtLogin: false });
+  expect((await snapshotOf(door)).service).toMatchObject({ startAtLogin: false, atLogin: "none" });
+});
+
+test("login-taken: Lookover restarts and another Lookover holds start at login: left, named; off leaves it; take over makes it this one's (ADR 0068)", async () => {
+  const door = await morning();
+  expect(await inject(door, "login-taken")).toBe(200);
+  const other = {
+    other: String.raw`"C:\Users\Your Name\AppData\Roaming\npm\node_modules\lookover\bin\lookover.exe" start --no-open`,
+  };
+  expect((await snapshotOf(door)).service).toMatchObject({ startAtLogin: true, atLogin: other });
+  expect((await send(door, { type: "service.startAtLogin", on: false })).status).toBe(200);
+  expect((await snapshotOf(door)).service).toMatchObject({ startAtLogin: false, atLogin: other });
+  const taken = await send(door, { type: "service.startAtLogin", on: true, takeOver: true });
+  expect(taken.status).toBe(200);
+  expect((await snapshotOf(door)).service).toMatchObject({ startAtLogin: true, atLogin: "this" });
 });
 
 test("key-lost with no App kept (S1): nothing to lose, the fault says so", async () => {

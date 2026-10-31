@@ -36,6 +36,7 @@ import { type Asked, openStore, type ReadRule, type RunEnd, type Store, type Wai
 const DATABASE = "lookover.sqlite";
 /** The migration that brings the outbox (ADR 0044). */
 const OUTBOX_MIGRATION = "20261014090000-outbox.sql";
+const OPENED_AT_MIGRATION = "20261031090000-changes-opened-at.sql";
 
 const homes: string[] = [];
 const stores: Store[] = [];
@@ -68,6 +69,7 @@ const pr1: HostChange = {
   author: { login: "sasensi", id: 1234 },
   draft: false,
   fork: false,
+  openedAt: Date.UTC(2026, 8, 15, 14, 2, 11),
   head: { ref: "planted-bugs", sha: commitSha("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678") },
   base: { ref: "main", sha: commitSha("0123456789abcdef0123456789abcdef01234567") },
 };
@@ -79,18 +81,19 @@ const pr2: HostChange = {
   author: { login: "sasensi", id: 1234 },
   draft: true,
   fork: false,
+  openedAt: Date.UTC(2026, 9, 6, 8, 41, 3),
   head: { ref: "fix-filter", sha: commitSha("b2c3d4e5f60718293a4b5c6d7e8f9012345678a1") },
   base: { ref: "main", sha: commitSha("0123456789abcdef0123456789abcdef01234567") },
 };
 const T1 = Date.UTC(2026, 9, 6, 9, 0);
 const T2 = Date.UTC(2026, 9, 6, 9, 30);
 
-test("the inbox says what a listing added, opened or pushed, and keeps when a change was first seen", () => {
+test("the inbox says what a listing added, opened or pushed, each change with when the host says it was opened", () => {
   const dir = home();
   const store = open(dir);
-  expect(store.inbox.replace(REPO, [pr1], T1)).toEqual({
+  expect(store.inbox.replace(REPO, [pr1])).toEqual({
     repositoryAdded: true,
-    opened: [{ repo: REPO, change: pr1, writtenBy: null, firstSeenAt: T1 }],
+    opened: [{ repo: REPO, change: pr1, writtenBy: null }],
     ready: [],
     pushed: [],
     closed: [],
@@ -100,18 +103,18 @@ test("the inbox says what a listing added, opened or pushed, and keeps when a ch
     ...pr1,
     head: { ref: "planted-bugs", sha: commitSha("c3d4e5f60718293a4b5c6d7e8f9012345678a1b2") },
   };
-  expect(store.inbox.replace(REPO, [moved, pr2], T2)).toEqual({
+  expect(store.inbox.replace(REPO, [moved, pr2])).toEqual({
     repositoryAdded: false,
-    opened: [{ repo: REPO, change: pr2, writtenBy: null, firstSeenAt: T2 }],
+    opened: [{ repo: REPO, change: pr2, writtenBy: null }],
     ready: [],
-    pushed: [{ repo: REPO, change: moved, writtenBy: null, firstSeenAt: T1, from: pr1.head.sha }],
+    pushed: [{ repo: REPO, change: moved, writtenBy: null, from: pr1.head.sha }],
     closed: [],
     written: [],
   });
   store.close();
   // What was listed is kept: the same listing again, after a restart, says nothing new.
   const again = open(dir);
-  expect(again.inbox.replace(REPO, [moved, pr2], T2 + 1)).toEqual({
+  expect(again.inbox.replace(REPO, [moved, pr2])).toEqual({
     repositoryAdded: false,
     opened: [],
     ready: [],
@@ -121,44 +124,63 @@ test("the inbox says what a listing added, opened or pushed, and keeps when a ch
   });
 });
 
+test("a change whose opened time the host gives otherwise is kept so, and said as written, once (ADR 0068)", () => {
+  const dir = home();
+  const store = open(dir);
+  store.inbox.replace(REPO, [pr1, pr2]);
+  // As a data folder from before ADR 0068 kept it: the opened time the listing saw, not the host's.
+  const older = { ...pr1, openedAt: Date.UTC(2026, 8, 1, 7, 0, 0) };
+  expect(store.inbox.replace(REPO, [older, pr2])).toEqual({
+    repositoryAdded: false,
+    opened: [],
+    ready: [],
+    pushed: [],
+    closed: [],
+    written: [{ repo: REPO, change: older, writtenBy: null }],
+  });
+  store.close();
+  // Kept across a restart: the same listing again says nothing new.
+  expect(open(dir).inbox.replace(REPO, [older, pr2]).written).toEqual([]);
+});
+
 test("a draft listed ready for review is said once; listed a draft again, nothing is said", () => {
   const store = open(home());
-  store.inbox.replace(REPO, [pr1, pr2], T1);
+  store.inbox.replace(REPO, [pr1, pr2]);
   const ready = { ...pr2, draft: false };
   const pushedReady = {
     ...ready,
     head: { ref: "fix-filter", sha: commitSha("e5f60718293a4b5c6d7e8f9012345678a1b2c3d4") },
   };
-  expect(store.inbox.replace(REPO, [pr1, pushedReady], T2)).toMatchObject({
-    ready: [{ repo: REPO, change: pushedReady, firstSeenAt: T1 }],
-    pushed: [{ repo: REPO, change: pushedReady, firstSeenAt: T1, from: pr2.head.sha }],
+  expect(store.inbox.replace(REPO, [pr1, pushedReady])).toMatchObject({
+    ready: [{ repo: REPO, change: pushedReady }],
+    pushed: [{ repo: REPO, change: pushedReady, from: pr2.head.sha }],
   });
-  expect(store.inbox.replace(REPO, [pr1, pushedReady], T2 + 1).ready).toEqual([]);
-  expect(store.inbox.replace(REPO, [pr1, { ...pushedReady, draft: true }], T2 + 2).ready).toEqual([]);
+  expect(store.inbox.replace(REPO, [pr1, pushedReady]).ready).toEqual([]);
+  expect(store.inbox.replace(REPO, [pr1, { ...pushedReady, draft: true }]).ready).toEqual([]);
   expect(store.inbox.open(REPO).map((c) => c.draft)).toEqual([false, true]);
 });
 
 test("a change the host no longer lists leaves the inbox, said once, and is new again if it comes back", () => {
   const store = open(home());
-  store.inbox.replace(REPO, [pr1, pr2], T1);
-  expect(store.inbox.replace(REPO, [pr2], T2).closed).toEqual([1]);
-  expect(store.inbox.replace(REPO, [pr2], T2).closed).toEqual([]);
-  expect(store.inbox.replace(REPO, [pr1, pr2], T2 + 1).opened).toEqual([
-    { repo: REPO, change: pr1, writtenBy: null, firstSeenAt: T2 + 1 },
+  store.inbox.replace(REPO, [pr1, pr2]);
+  expect(store.inbox.replace(REPO, [pr2]).closed).toEqual([1]);
+  expect(store.inbox.replace(REPO, [pr2]).closed).toEqual([]);
+  expect(store.inbox.replace(REPO, [pr1, pr2]).opened).toEqual([
+    { repo: REPO, change: pr1, writtenBy: null },
   ]);
 });
 
-test("the inbox gives a repository's open changes as last listed: head, draft, author, first seen", () => {
+test("the inbox gives a repository's open changes as last listed: head, draft, author", () => {
   const dir = home();
   const store = open(dir);
   expect(store.inbox.open(REPO)).toEqual([]);
-  store.inbox.replace(REPO, [pr1, pr2], T1);
+  store.inbox.replace(REPO, [pr1, pr2]);
   const ready = {
     ...pr2,
     draft: false,
     head: { ref: "fix-filter", sha: commitSha("d4e5f60718293a4b5c6d7e8f9012345678a1b2c3") },
   };
-  store.inbox.replace(REPO, [ready], T2);
+  store.inbox.replace(REPO, [ready]);
   store.close();
   // Kept across a restart; a change the host no longer lists is not open.
   expect(open(dir).inbox.open(REPO)).toEqual([
@@ -171,7 +193,6 @@ test("the inbox gives a repository's open changes as last listed: head, draft, a
       authorId: 1234,
       writtenBy: null,
       writerThrough: null,
-      firstSeenAt: T1,
     },
   ]);
   expect(open(dir).inbox.open({ owner: "sasensi", name: "elsewhere" })).toEqual([]);
@@ -181,7 +202,7 @@ test("the inbox keeps whether each change is a fork's, across a restart, as the 
   const dir = home();
   const store = open(dir);
   const fromFork = { ...pr2, fork: true };
-  store.inbox.replace(REPO, [pr1, fromFork], T1);
+  store.inbox.replace(REPO, [pr1, fromFork]);
   store.close();
   const forks = (s: ReturnType<typeof open>) => s.inbox.open(REPO).map((c) => [c.number, c.fork]);
   const again = open(dir);
@@ -190,7 +211,7 @@ test("the inbox keeps whether each change is a fork's, across a restart, as the 
     [2, true],
   ]);
   // Nothing else moved: the listing that says otherwise is kept all the same, and tells nothing new.
-  expect(again.inbox.replace(REPO, [{ ...pr1, fork: true }, fromFork], T2)).toEqual({
+  expect(again.inbox.replace(REPO, [{ ...pr1, fork: true }, fromFork])).toEqual({
     repositoryAdded: false,
     opened: [],
     ready: [],
@@ -209,7 +230,7 @@ test("the inbox keeps who wrote each change and the commit it was read through; 
   const store = open(dir);
   const claude = { by: "claude", through: pr1.head.sha } as const;
   // Read for #1; #2 not read yet: unknown, through no commit.
-  expect(store.inbox.replace(REPO, [pr1, pr2], T1, new Map([[1, claude]]))).toMatchObject({
+  expect(store.inbox.replace(REPO, [pr1, pr2], new Map([[1, claude]]))).toMatchObject({
     opened: [
       { change: pr1, writtenBy: "claude" },
       { change: pr2, writtenBy: null },
@@ -226,7 +247,7 @@ test("the inbox keeps who wrote each change and the commit it was read through; 
     head: { ref: "planted-bugs", sha: commitSha("c3d4e5f60718293a4b5c6d7e8f9012345678a1b2") },
   };
   // A listing that says nothing of a change keeps who wrote it, and the commit it was read through.
-  expect(store.inbox.replace(REPO, [moved, pr2], T2)).toMatchObject({
+  expect(store.inbox.replace(REPO, [moved, pr2])).toMatchObject({
     pushed: [{ writtenBy: "claude" }],
     written: [],
   });
@@ -236,13 +257,13 @@ test("the inbox keeps who wrote each change and the commit it was read through; 
     [1, { by: "claude", through: moved.head.sha }],
     [2, { by: "codex", through: pr2.head.sha }],
   ] as const);
-  expect(store.inbox.replace(REPO, [moved, pr2], T2 + 1, writers)).toEqual({
+  expect(store.inbox.replace(REPO, [moved, pr2], writers)).toEqual({
     repositoryAdded: false,
     opened: [],
     ready: [],
     pushed: [],
     closed: [],
-    written: [{ repo: REPO, change: pr2, writtenBy: "codex", firstSeenAt: T1 }],
+    written: [{ repo: REPO, change: pr2, writtenBy: "codex" }],
   });
   store.close();
   expect(
@@ -265,13 +286,13 @@ test("a repository's switch is on until the owner turns it off, kept across a re
   expect(store.repos.enabled(REPO)).toBe(false);
   expect(store.repos.enabled(other)).toBe(true);
   // Switched off before its first listing: the listing still says the repository is new, and the switch holds.
-  expect(store.inbox.replace(REPO, [], T1).repositoryAdded).toBe(true);
-  expect(store.inbox.replace(REPO, [], T2).repositoryAdded).toBe(false);
+  expect(store.inbox.replace(REPO, []).repositoryAdded).toBe(true);
+  expect(store.inbox.replace(REPO, []).repositoryAdded).toBe(false);
   expect(store.repos.enabled(REPO)).toBe(false);
   // Listed first, then switched off: the same.
-  expect(store.inbox.replace(other, [pr1], T1).repositoryAdded).toBe(true);
+  expect(store.inbox.replace(other, [pr1]).repositoryAdded).toBe(true);
   store.repos.setEnabled(other, false);
-  expect(store.inbox.replace(other, [pr1], T2).repositoryAdded).toBe(false);
+  expect(store.inbox.replace(other, [pr1]).repositoryAdded).toBe(false);
   expect(store.repos.enabled(other)).toBe(false);
   store.close();
   const again = open(dir);
@@ -2306,6 +2327,40 @@ test("a database from before the outbox starts empty: its rounds' findings lack 
   expect(store.inbox.open(REPO)).toEqual([]);
 });
 
+test("a database from before ADR 0068 keeps its first listing's time, and the next listing writes the host's over it", () => {
+  const dir = home();
+  // The database as the migrations before the opened time left it, with a change its first listing saw at T1.
+  const db = new Database(join(dir, DATABASE), { create: true, strict: true });
+  db.run("PRAGMA synchronous = OFF");
+  db.run("CREATE TABLE migrations (name TEXT PRIMARY KEY)");
+  const own = join(import.meta.dir, "migrations");
+  for (const file of readdirSync(own)
+    .filter((f) => f < OPENED_AT_MIGRATION)
+    .sort()) {
+    db.run(readFileSync(join(own, file), "utf8"));
+    db.run("INSERT INTO migrations (name) VALUES (?)", [file.replace(/\.sql$/, "")]);
+  }
+  db.run("INSERT INTO repositories (owner, name) VALUES (?, ?)", [REPO.owner, REPO.name]);
+  db.run(
+    "INSERT INTO changes (repo_owner, repo_name, number, head_sha, draft, author_id, first_seen_at) VALUES (?, ?, 1, ?, 0, 1234, ?)",
+    [REPO.owner, REPO.name, pr1.head.sha, T1],
+  );
+  db.close();
+
+  const store = open(dir);
+  expect(store.migrated).toContain(OPENED_AT_MIGRATION.replace(/\.sql$/, ""));
+  // The host says it was opened before Lookover listed it: said as written, once, not as opened.
+  expect(store.inbox.replace(REPO, [pr1])).toEqual({
+    repositoryAdded: false,
+    opened: [],
+    ready: [],
+    pushed: [],
+    closed: [],
+    written: [{ repo: REPO, change: pr1, writtenBy: null }],
+  });
+  expect(store.inbox.replace(REPO, [pr1]).written).toEqual([]);
+});
+
 /** A folder of migrations: the store's own, which its handles need, then `files` written in the order given. */
 function migrations(files: [name: string, sql: string][]): string {
   const dir = home();
@@ -2572,8 +2627,8 @@ test("a repository gone from the installation: its jobs cancelled, what it owes 
   const store = open(dir);
   const ledger = { owner: "sasensi", name: "ledger-api" };
   const ledgerChange = changeId("sasensi/ledger-api#1");
-  store.inbox.replace(REPO, [pr1, pr2], T1);
-  store.inbox.replace(ledger, [pr1], T1);
+  store.inbox.replace(REPO, [pr1, pr2]);
+  store.inbox.replace(ledger, [pr1]);
   store.repos.setEnabled(REPO, false);
   store.requests.seen(REPO, [], at(T1));
   // #1's job runs, at publishing: its check posted, its review and the rest owed; a request waits for its 👀.
@@ -2612,7 +2667,7 @@ test("a repository gone from the installation: its jobs cancelled, what it owes 
   expect(again.repos.enabled(REPO)).toBe(true);
   // Its history stays: the round its run saved.
   expect(again.rounds.of(CHANGE)).toEqual([{ n: 1, sha: pr1.head.sha }]);
-  expect(again.inbox.replace(REPO, [pr1], T2 + 1).repositoryAdded).toBe(true);
+  expect(again.inbox.replace(REPO, [pr1]).repositoryAdded).toBe(true);
   expect(again.inbox.open(ledger).map((c) => c.number)).toEqual([1]);
 });
 
@@ -2671,8 +2726,8 @@ test("a data folder from before ADR 0066 names its changes by owner and name: it
   const store = open(dir);
   const ledgerApi = { owner: "ledger-dev", name: "ledger-api" };
   // Both repositories listed: the store keeps them, each of one name in this data folder.
-  store.inbox.replace(REPO, [pr1], T1);
-  store.inbox.replace(ledgerApi, [{ ...pr2, url: "https://github.com/ledger-dev/ledger-api/pull/2" }], T1);
+  store.inbox.replace(REPO, [pr1]);
+  store.inbox.replace(ledgerApi, [{ ...pr2, url: "https://github.com/ledger-dev/ledger-api/pull/2" }]);
   // The ids the service wrote before: the repository's name alone.
   const old = changeId("lookover-sandbox#1");
   const oldLedger = changeId("ledger-api#2");

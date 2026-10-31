@@ -323,6 +323,23 @@ test("another author's pull request is skipped, with the reason on its check", a
   ]);
 });
 
+test("a pull request's age is when GitHub opened it: a data folder that kept another is right after the next listing (ADR 0068)", async () => {
+  const dir = home();
+  // A data folder from before ADR 0068: the pull request kept as opened when Lookover first listed it, today.
+  const first = await start({ home: dir, changes: [{ ...pr1, openedAt: T0 }] });
+  expect((await snapshot(first.service, await openApp(first.service))).changes[PLANTED]?.openedAt).toBe(T0);
+  await first.service.stop();
+  const last = lastEvent(dir);
+  // GitHub says it was opened 19 days before.
+  const opened19DaysAgo = Date.UTC(2026, 8, 17, 14, 25, 9);
+  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [{ ...pr1, openedAt: opened19DaysAgo }] });
+  const { service } = await start({ home: dir, host, time: first.time });
+  const cookie = await openApp(service);
+  const events = await until(await sinceStart(service, cookie, last), "change.opened");
+  expect(events.filter((e) => e.type === "change.opened").map(named)).toEqual([`change.opened ${PLANTED}`]);
+  expect((await snapshot(service, cookie)).changes[PLANTED]?.openedAt).toBe(opened19DaysAgo);
+});
+
 test("a pull request from a fork is shown as one, from the first listing and across a restart", async () => {
   const dir = home();
   const first = await start({ home: dir, changes: [pr1, opened(7, { fork: true })] });

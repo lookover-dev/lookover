@@ -11,10 +11,9 @@ import type { BuiltCase, PreparedCase } from "./types.ts";
  */
 const OWNER = "evals";
 
-/** The fetch spec of a built repository: its path as the clone URL, its branches as they are, no credentials. */
+/** The fetch spec of a built repository: its path as the clone URL, its default branch, no credentials. */
 const localFetch = (built: BuiltCase): FetchSpec => ({
   cloneUrl: built.cloneUrl,
-  refspecs: ["+refs/heads/*:refs/heads/*"],
   defaultBranch: "main",
   credentials: () => Promise.resolve({ username: "", password: "" }),
 });

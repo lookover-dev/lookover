@@ -239,6 +239,7 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
         author: change.author,
         draft: change.draft ?? false,
         fork: change.fork ?? false,
+        ...(change.openedAgo === undefined ? {} : { openedAt: clock.now() - change.openedAgo }),
         head: { ref: change.branch, sha: first.sha },
         base: { ...world.main },
         diff: commentableOf(first.diff),

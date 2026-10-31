@@ -211,6 +211,7 @@ const PULL = {
   user: { login: "sasensi", id: 11247504, type: "User" },
   draft: false,
   state: "open",
+  created_at: "2026-10-06T09:14:27Z",
   head: {
     ref: "live/2026-10-06",
     sha: "126ba1dae30bd5bb918afe71a1ecd88ff9744fb1",
@@ -231,6 +232,8 @@ const CHANGE: HostChange = {
   author: { login: "sasensi", id: 11247504 },
   draft: false,
   fork: false,
+  // GitHub's `created_at`, to the second: when it was opened, whenever Lookover first lists it.
+  openedAt: Date.UTC(2026, 9, 6, 9, 14, 27),
   head: { ref: "live/2026-10-06", sha: commitSha("126ba1dae30bd5bb918afe71a1ecd88ff9744fb1") },
   base: { ref: "main", sha: commitSha("d6b858a68addf47ed12faffe1f4834e9c3faef6f") },
 };
@@ -604,7 +607,9 @@ test("the fetch spec keeps the token out of the clone URL, gives it in GitHub's 
   const spec = await github.intake.fetchSpec(SANDBOX_REPO);
   expect(spec.cloneUrl).toBe("https://github.com/sasensi/lookover-sandbox.git");
   expect(spec.cloneUrl).not.toContain("ghs_fetch");
-  expect(spec.refspecs).toEqual(["+refs/heads/*:refs/heads/*", "+refs/pull/*/head:refs/pull/*/head"]);
+  // What to fetch is retrieval's (ADR 0068): the spec says where and the default branch, never refs.
+  expect(Object.keys(spec).sort()).toEqual(["cloneUrl", "credentials", "defaultBranch"]);
+  expect(spec.defaultBranch).toBe("main");
   expect(await spec.credentials()).toEqual({ username: "x-access-token", password: "ghs_fetch" });
   // One token for the fetch, read-only: the default branch is read with it too.
   expect(tokensBought(api.calls)).toBe(1);

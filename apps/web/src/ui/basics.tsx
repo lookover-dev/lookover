@@ -751,19 +751,26 @@ export function Group({ title, children }: { title: string; children: ReactNode 
   );
 }
 
+/**
+ * A settings row (design-system.md "Settings row"): title, help, the control on the right, and `extra`, the slot for
+ * its one action under the help. `atTitle` aligns the control to the title instead of centring it: for a row whose
+ * help changes length with the control, so the control stays under the pointer.
+ */
 export function SetRow({
   title,
   help,
   children,
   extra,
+  atTitle = false,
 }: {
   title: string;
   help: ReactNode;
   children: ReactNode;
   extra?: ReactNode;
+  atTitle?: boolean;
 }) {
   return (
-    <div className="setrow">
+    <div className={atTitle ? "setrow at-title" : "setrow"}>
       <div>
         <b>{title}</b>
         <span>{help}</span>

@@ -42,14 +42,14 @@
 //   and the demo's scripted push all go through `poll`, so the inbox has one writer and a push is counted once.
 //   `poll` says whether it saw anything; the caller takes then (the loop does after each poll that saw something).
 // - The loop wakes every 10 s and polls each repository whose poll is due: every 10 s while it is hot, every 60 s
-//   otherwise (`core.pollEvery`: a review of one of its changes asked, waiting or running, or a round of one posted
-//   in the last 30 minutes). The rate limit is the installation's, one for every repository: a listing refused as
-//   rate limited waits until the time GitHub gave (a minute when it gave none), and the connection says so
-//   (`limitUntil`) until a listing answers again; meanwhile the loop asks GitHub nothing, of any repository, and a
-//   poll stops at the repository that met it. A refusal that is the installation's (the key refused, a cause the
-//   adapter named: the App uninstalled or suspended) stops a poll too: the repositories after it wait for the next
-//   one. GitHub unavailable, or not finding one repository, is that repository's: the others are asked all the same,
-//   so one answering 5xx at every poll never starves those after it.
+//   otherwise (`core.pollEvery`: a review of one of its changes asked, waiting or running, or a round of one posted in
+//   the last 30 minutes, or setup showing Repositories or First review, ADR 0068). The rate limit is the
+//   installation's, one for every repository: a listing refused as rate limited waits until the time GitHub gave (a
+//   minute when it gave none), and the connection says so (`limitUntil`) until a listing answers again; meanwhile the
+//   loop asks GitHub nothing, of any repository, and a poll stops at the repository that met it. A refusal that is the
+//   installation's (the key refused, a cause the adapter named: the App uninstalled or suspended) stops a poll too: the
+//   repositories after it wait for the next one. GitHub unavailable, or not finding one repository, is that
+//   repository's: the others are asked all the same, so one answering 5xx at every poll never starves those after it.
 // - The connection (ADR 0047, ADR 0053) is the installation's, one for every repository: a listing of the changes
 //   refused for the installation (unauthorised, or a cause the adapter named: the App uninstalled, refused as not
 //   found, or suspended) shows it `disconnected` with that cause, since now; GitHub unavailable shows it so (GitHub
@@ -159,6 +159,8 @@ export interface PollerDeps {
   repository(repo: RepositoryRef): Repository;
   /** The owner on the host: their changes are "you". */
   owner: { id: number };
+  /** Setup, not done, shows Repositories or First review: every repository is polled hot (ADR 0068). */
+  setupShowsList(): boolean;
   emit(body: EventBody): void;
   /** The connection as the UI shows it now: the service's in-memory copy. */
   connection(): Connection;
@@ -579,7 +581,7 @@ export function createPoller(d: PollerDeps): Poller {
   /** The listing kept in the inbox, what changed sent and handed to the queue; true when anything changed. */
   function recorded(repo: RepositoryRef, items: HostChange[], { counts, writers }: Compared): boolean {
     const at = now();
-    const delta = d.store.inbox.replace(repo, items, at, writers);
+    const delta = d.store.inbox.replace(repo, items, writers);
     // The first listing of a repository: what was open before Lookover watched it is shown, not reviewed.
     const asking = !delta.repositoryAdded;
     if (delta.repositoryAdded) d.emit({ type: "repo.added", at, repo: d.repository(repo) });
@@ -595,8 +597,8 @@ export function createPoller(d: PollerDeps): Poller {
       d.emit({ type: "change.pushed", at, changeId, sha, commits: count, by: "you" });
       d.pushed(changeId, sha);
     }
-    // Another writer read (a push signed by another agent, a read that failed before): the app's change is sent
-    // again, as the host shows it now.
+    // Another writer read (a push signed by another agent, a read that failed before), or another opened time
+    // (ADR 0068): the app's change is sent again, as the host shows it now.
     for (const entry of delta.written)
       d.emit({ type: "change.opened", at, change: changeOf(entry, d.owner) });
     for (const number of delta.closed)
@@ -683,6 +685,7 @@ export function createPoller(d: PollerDeps): Poller {
     const every = pollEvery({
       asked: !held && d.store.jobs.pendingIn(changes),
       lastPostedAt: held ? null : d.store.rounds.lastPostedAt(changes),
+      setupShowsList: !held && d.setupShowsList(),
       now: at,
     });
     return at - last >= every;

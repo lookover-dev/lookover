@@ -24,6 +24,7 @@ import {
   status,
 } from "./view-model/select.ts";
 import { settingValueText } from "./view-model/settings.ts";
+import { atLoginDetail } from "./view-model/start-at-login.ts";
 
 const PLACES: { to: string; label: string; icon: IconName; key: string }[] = [
   { to: "/", label: "Reviews", icon: "lines", key: "1" },
@@ -136,6 +137,7 @@ function HostAndServiceStatus() {
   // Whether it starts at login for real (ADR 0054), with the alert band's fix when the machine didn't do as chosen.
   const service = serviceStatus(state.service);
   const login = problems(state).find((x) => x.id === "login");
+  const takenDetail = atLoginDetail(state.service);
   return (
     <>
       <div className="st-block">
@@ -174,6 +176,12 @@ function HostAndServiceStatus() {
         {login ? (
           <small className="code-whole">
             <Said words={login.detail} />
+          </small>
+        ) : null}
+        {/* Another Lookover holds it (ADR 0068): which one, by its command; said, not warned, no fix. */}
+        {takenDetail ? (
+          <small>
+            <Said words={takenDetail} />
           </small>
         ) : null}
       </div>

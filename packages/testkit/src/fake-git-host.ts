@@ -119,7 +119,11 @@ export interface CommentableRange {
 }
 
 /** A change as the fake holds it: what the host shows (on GitHub, always), plus which lines its diff has. */
-export interface FakeChange extends Omit<HostChange, "host" | "fork"> {
+export interface FakeChange extends Omit<HostChange, "host" | "fork" | "openedAt"> {
+  /**
+   * When the host says it was opened, to the second (ADR 0068). None: when `open` is called, by the host's clock.
+   */
+  openedAt?: number;
   /** The repository it is in: one the host holds. The first (`FakeGitHostOptions.repo`) when not given. */
   repo?: RepositoryRef;
   /**
@@ -415,8 +419,9 @@ export interface PushHow {
 }
 
 /** A change as the fake keeps it: in its repository, open or closed. */
-interface Held extends Omit<FakeChange, "repo"> {
+interface Held extends Omit<FakeChange, "repo" | "openedAt"> {
   repo: RepositoryRef;
+  openedAt: number;
   closed: boolean;
 }
 
@@ -1020,7 +1025,8 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations, H
     if (this.changes.some((c) => c.number === change.number && sameRepository(c.repo, repo)))
       throw new Error(`The fake already holds pull request ${change.number}`);
     const { messages, ...held } = change;
-    this.changes.push({ ...held, repo, diff: [...change.diff], closed: false });
+    const openedAt = toSecond(change.openedAt ?? this.clock.now());
+    this.changes.push({ ...held, repo, openedAt, diff: [...change.diff], closed: false });
     if (messages && !this.history.has(change.head.sha))
       this.history.set(change.head.sha, { parent: change.base.sha, commits: messages.length, messages });
     for (const sha of [change.base.sha, change.head.sha])
@@ -1382,8 +1388,6 @@ export class FakeGitHost implements HostIntake, HostWriter, HostInstallations, H
   fetchSpec(repo: RepositoryRef): Promise<FetchSpec> {
     return this.answer(repo, () => ({
       cloneUrl: this.cloneUrl ?? `https://github.com/${repo.owner}/${repo.name}.git`,
-      // The planted sandbox keeps every change on a branch of its own: the branches are all there is to fetch.
-      refspecs: ["+refs/heads/*:refs/heads/*"],
       defaultBranch: this.defaultBranch,
       credentials: () =>
         this.answer(repo, () => ({ username: "x-access-token", password: "ghs_fake_installation_token" })),

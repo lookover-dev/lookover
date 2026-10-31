@@ -1,14 +1,19 @@
 // Start at login, as the app says it (ADR 0054): the owner's choice (`startAtLogin`), what is registered
-// (`startsAtLogin`) and where (`loginItem`: the machine's, or development's in memory) are three facts; the status,
+// (`atLogin`) and where (`loginItem`: the machine's, or development's in memory) are three facts; the status,
 // Settings and the setup's last step say each truthfully, and never claim it starts where nothing is set up.
 import { expect, test } from "bun:test";
 import {
+  atLoginDetail,
   atLoginStatus,
   BACKGROUND_TEXT,
   backgroundLine,
+  backgroundLines,
   devCommand,
+  offersStartThisOne,
+  START_THIS_ONE,
   startAtLoginHelp,
   startCommand,
+  takenBy,
 } from "./start-at-login.ts";
 
 /** Lookover's command (ADR 0058), as the service says it: found on the PATH, a binary's path, a clone's. */
@@ -16,13 +21,13 @@ const ON_PATH = "lookover";
 const BINARY = String.raw`& 'C:\Users\Your Name\Downloads\lookover.exe'`;
 const CLONE = "bun run lookover --home=/home/me/.lookover-test";
 const os = { loginItem: "os", command: ON_PATH } as const;
-const on = { ...os, startAtLogin: true, startsAtLogin: true };
-const off = { ...os, startAtLogin: false, startsAtLogin: false };
-const notRegistered = { ...os, startAtLogin: true, startsAtLogin: false };
-const stillRegistered = { ...os, startAtLogin: false, startsAtLogin: true };
+const on = { ...os, startAtLogin: true, atLogin: "this" } as const;
+const off = { ...os, startAtLogin: false, atLogin: "none" } as const;
+const notRegistered = { ...os, startAtLogin: true, atLogin: "none" } as const;
+const stillRegistered = { ...os, startAtLogin: false, atLogin: "this" } as const;
 /** Live mode and a guarded program: the registration is the fake's, kept in memory. */
 const dev = (startAtLogin: boolean) =>
-  ({ loginItem: "memory", command: ON_PATH, startAtLogin, startsAtLogin: startAtLogin }) as const;
+  ({ loginItem: "memory", command: ON_PATH, startAtLogin, atLogin: startAtLogin ? "this" : "none" }) as const;
 
 test("the command that starts Lookover: the program's own command (ADR 0058), which demo mode plays, or live mode's", () => {
   expect(startCommand("program", ON_PATH)).toBe("lookover start");
@@ -119,4 +124,80 @@ test("the setup's last step says the terminal can close, and what the choice doe
     expect(backgroundLine(dev(chosen), "live")).toBe(
       "Start at login isn't set up in development: nothing starts when you log in.",
     );
+});
+
+/** Another install's registration (ADR 0068): the npm install, beside this scratch copy. */
+const OTHER = String.raw`"C:\Users\Your Name\AppData\Roaming\npm\node_modules\lookover\bin\lookover.exe" start --no-open`;
+const taken = (startAtLogin: boolean) => ({ ...os, startAtLogin, atLogin: { other: OTHER } }) as const;
+
+test("another Lookover holding start at login: the status names it, no warning, whatever the choice (ADR 0068)", () => {
+  expect(atLoginStatus(taken(true))).toEqual({ ok: true, text: "another Lookover starts at login" });
+  expect(atLoginStatus(taken(false))).toEqual({ ok: true, text: "doesn't start at login" });
+});
+
+test("another Lookover holding start at login: Settings' help names its command, on or off (ADR 0068)", () => {
+  expect(startAtLoginHelp(taken(true), "program")).toEqual({
+    before:
+      "So reviews happen while the app is closed. On, but another Lookover starts at login on this computer:",
+    command: OTHER,
+    after: ".",
+  });
+  expect(startAtLoginHelp(taken(false), "program")).toEqual({
+    before: "So reviews happen while the app is closed. Off: run",
+    command: "lookover start",
+    after: {
+      before: "after you log in. Another Lookover starts at login on this computer:",
+      command: OTHER,
+      after: ".",
+    },
+  });
+});
+
+test("takenBy names another Lookover's command while it holds start at login, whatever the choice (ADR 0068)", () => {
+  expect(takenBy(taken(true))).toBe(OTHER);
+  expect(takenBy(taken(false))).toBe(OTHER);
+  for (const s of [on, off, notRegistered, stillRegistered, dev(true), dev(false)])
+    expect(takenBy(s)).toBeNull();
+});
+
+test("Settings offers “Start this one instead” only while it is on and another Lookover holds it (ADR 0068)", () => {
+  expect(START_THIS_ONE).toBe("Start this one instead");
+  expect(offersStartThisOne(taken(true))).toBe(true);
+  for (const s of [taken(false), on, off, notRegistered, stillRegistered, dev(true), dev(false)])
+    expect(offersStartThisOne(s)).toBe(false);
+});
+
+test("the setup's last step says when another Lookover starts at login and this one won't (ADR 0068)", () => {
+  expect(backgroundLine(taken(true), "program")).toEqual({
+    before: "Another Lookover starts at login on this computer:",
+    command: OTHER,
+    after: ". This one won't: choose “Start this one instead” in Settings, under “Start at login”.",
+  });
+  // Chosen off, this one won't anyway: the line says what to run, as with nothing registered.
+  expect(backgroundLine(taken(false), "program")).toEqual(backgroundLine(off, "program"));
+});
+
+test("the setup's last step holds every line its button can switch to, so the button row never moves", () => {
+  for (const chosen of [true, false]) {
+    expect(backgroundLines(taken(chosen), "program")).toEqual([
+      backgroundLine(taken(true), "program"),
+      backgroundLine(taken(false), "program"),
+    ]);
+    expect(backgroundLines(chosen ? on : off, "program")).toEqual([
+      backgroundLine(on, "program"),
+      backgroundLine(off, "program"),
+    ]);
+    // In development both choices say the same: one line.
+    expect(backgroundLines(dev(chosen), "live")).toEqual([backgroundLine(dev(chosen), "live")]);
+  }
+});
+
+test("the status menu names the command another Lookover starts at login with, on or off, as Settings does (ADR 0068)", () => {
+  for (const chosen of [true, false])
+    expect(atLoginDetail(taken(chosen))).toEqual({
+      before: "At login, this computer runs",
+      command: OTHER,
+      after: ".",
+    });
+  for (const s of [on, off, notRegistered, stillRegistered, dev(true)]) expect(atLoginDetail(s)).toBeNull();
 });

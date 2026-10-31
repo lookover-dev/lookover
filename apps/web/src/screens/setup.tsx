@@ -47,6 +47,7 @@ import {
   changeLabel,
   changeReviews,
   firstReviewCandidates,
+  firstReviewPick,
   openChangeCount,
   problems,
 } from "../view-model/select.ts";
@@ -59,7 +60,7 @@ import {
   signInStep,
   wayShown,
 } from "../view-model/sign-in.ts";
-import { BACKGROUND_TEXT, backgroundLine } from "../view-model/start-at-login.ts";
+import { BACKGROUND_TEXT, backgroundLine, backgroundLines } from "../view-model/start-at-login.ts";
 import { AgentRows } from "./coding-agent.tsx";
 import { HeldDetail, roundDuration, Sentence, StateSquare, StepList, SubStep } from "./common.tsx";
 import { AccountsList, CodeActions, FixButton, GitHubButton, UseAppForm } from "./github-app.tsx";
@@ -610,7 +611,10 @@ function BackgroundCard() {
       <h4 className="t-h4">Reviews keep running in the background</h4>
       <p>{BACKGROUND_TEXT}</p>
       <p className="t-small">
-        <Said words={backgroundLine(state.service, mode)} />
+        <HeldDetail
+          shown={backgroundLine(state.service, mode)}
+          details={backgroundLines(state.service, mode)}
+        />
       </p>
       <div className="setup-acts">
         <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "first-review" })}>
@@ -667,7 +671,13 @@ function StepFirstReview() {
   const state = useAppState();
   const send = useSend();
   const candidates = firstReviewCandidates(state);
-  const [picked, setPicked] = useState<ChangeId | null>(candidates[0]?.change.id ?? null);
+  // What is shown picked follows the list: the pick kept while it is listed, else the first (one opened on an empty
+  // list, the next when the picked one closes). Kept once shown, so a pull request opened above it never takes it.
+  const [kept, setKept] = useState<ChangeId | null>(null);
+  const picked = firstReviewPick(state, kept);
+  useEffect(() => {
+    if (picked !== kept) setKept(picked);
+  }, [picked, kept]);
   const firstReview = (preview: boolean) => {
     if (picked) send({ type: "setup.firstReview", changeId: picked, preview });
   };
@@ -690,7 +700,7 @@ function StepFirstReview() {
               key={change.id}
               name="first"
               checked={picked === change.id}
-              onChange={() => setPicked(change.id)}
+              onChange={() => setKept(change.id)}
             >
               <b>{change.title}</b>
               <span className="t-small">

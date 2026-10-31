@@ -60,7 +60,12 @@ export type Command =
   | { type: "service.resume" }
   | { type: "service.runChecks" }
   | { type: "service.unlock" }
-  | { type: "service.startAtLogin"; on: boolean }
+  /**
+   * The owner's choice to start at login (ADR 0054). On registers this install unless another holds start at login
+   * (ADR 0068): that one is left, unless `takeOver` ("Start this one instead") replaces it. Off removes only this
+   * install's registration.
+   */
+  | { type: "service.startAtLogin"; on: boolean; takeOver?: boolean }
   /**
    * Your coding agent (ADR 0058): `lookover` put on the PATH through Lookover's own folder, or taken off it. Offered
    * for the binary only. A write the machine refuses refuses the command with why, the state shown as it is.

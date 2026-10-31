@@ -8,6 +8,7 @@ import {
   SUMMARY_MARKER,
 } from "@lookover/contracts";
 import { describeHostIntake, FakeGitHost, type HostRefusal } from "./index.ts";
+import { AT_ONCE, LAG, LAGGING_PATIENCE, laggingGitHost } from "./lagging-git-host.test-support.ts";
 
 const repo: RepositoryRef = { owner: "sasensi", name: "lookover-sandbox" };
 const owner = { login: "sasensi", id: 1234567 };
@@ -22,6 +23,8 @@ const change: HostChange = {
   author: owner,
   draft: false,
   fork: false,
+  // 2026-10-07 12:00:00 UTC: opened as the suite's host starts, by its clock (`T0`).
+  openedAt: Date.UTC(2026, 9, 7, 12, 0, 0),
   head: { ref: "planted-bugs", sha: commitSha("5d9114c0a1b2c3d4e5f60718293a4b5c6d7e8f9a") },
   base: { ref: "main", sha: commitSha("0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3") },
 };
@@ -107,82 +110,112 @@ const refusing = (failure: HostRefusal) => () => {
   return Promise.resolve({ intake: fake, repo, open: change });
 };
 
-for (const mode of MODES)
-  describeHostIntake(mode.name, {
-    open: () => {
-      const clock = heldClock();
-      const fake = host(clock, mode.person);
-      // A second passes between two moves of the world, as it would on GitHub between two calls.
-      const tick = <T>(value: T) => {
-        clock.advance(1_000);
-        return Promise.resolve(value);
-      };
-      return Promise.resolve({
-        intake: fake,
-        repo,
-        open: change,
-        defaultBranch: DEFAULT_BRANCH,
-        owner,
-        before: T0,
-        comment: (body) => tick(fake.seedComment(ref, { author: owner, body })),
-        edit: (id, body) => tick(fake.editComment(id, body)),
-        later: () => tick(undefined),
-        push: (commits, rewrite = false, messages) => {
-          const sha = nextSha();
-          fake.push(ref, sha, [], [], {
-            commits,
-            ...(messages ? { messages } : {}),
-            ...(rewrite ? { onto: change.base.sha } : {}),
-          });
-          return tick(sha);
-        },
-        openDraft: () => {
-          fake.open({ ...wip, diff: [] });
-          return tick(wip);
-        },
-        markReady: (number) => tick(fake.markReady({ repo, number })),
-        close: () => tick(fake.close(ref)),
-        poster: mode.person ?? bot,
-        postFinding: async (finding) => {
-          const { head } = await fake.getChange(repo, 1);
-          const body = `**Off by one** · Should fix\n\n${FINDING_MARKER}${JSON.stringify({ v: 1, id: finding })} -->`;
-          const reviewId = await fake.publishReview(ref, {
-            sha: head.sha,
-            body: "",
-            comments: [{ ...FINDING_LINE, body }],
-          });
-          const root = fake.view(ref).reviews.find((r) => r.id === reviewId)?.comments[0]?.id;
-          return tick(Number(root));
-        },
-        commentInline: (body) => tick(fake.seedInline(ref, owner, { ...FINDING_LINE, line: 14, body })),
-        reply: (commentId, body) => tick(fake.seedReply(ref, commentId, { author: owner, body })),
-        outdate: () =>
-          tick(
-            fake.push(ref, nextSha(), DIFF, [{ path: FINDING_LINE.path, line: 12, removed: 1, added: 1 }]),
-          ),
-      });
+// Each mode as GitHub would be if it showed a write at once, then lagging as it does (ADR 0069): the App's reads made
+// before a write answer stale for a few reads after it.
+for (const [mode, lag, patience] of [
+  ...MODES.map((mode) => [mode, 0, AT_ONCE] as const),
+  ...MODES.map((mode) => [mode, LAG, LAGGING_PATIENCE] as const),
+])
+  describeHostIntake(
+    lag === 0 ? mode.name : `${mode.name}, lagging as GitHub does after a write (ADR 0069)`,
+    {
+      open: () => {
+        const clock = heldClock();
+        const fake = laggingGitHost(host(clock, mode.person), lag).port;
+        // A second passes between two moves of the world, as it would on GitHub between two calls.
+        const tick = <T>(value: T) => {
+          clock.advance(1_000);
+          return Promise.resolve(value);
+        };
+        return Promise.resolve({
+          intake: fake,
+          repo,
+          open: change,
+          defaultBranch: DEFAULT_BRANCH,
+          owner,
+          before: T0,
+          comment: (body) => tick(fake.seedComment(ref, { author: owner, body })),
+          edit: (id, body) => tick(fake.editComment(id, body)),
+          later: () => tick(undefined),
+          push: (commits, rewrite = false, messages) => {
+            const sha = nextSha();
+            fake.push(ref, sha, [], [], {
+              commits,
+              ...(messages ? { messages } : {}),
+              ...(rewrite ? { onto: change.base.sha } : {}),
+            });
+            return tick(sha);
+          },
+          openDraft: () => {
+            // Opened with no time given: now, by the host's clock.
+            const { openedAt: _, ...untimed } = wip;
+            fake.open({ ...untimed, diff: [] });
+            return tick({ ...wip, openedAt: clock.now() });
+          },
+          markReady: (number) => tick(fake.markReady({ repo, number })),
+          close: () => tick(fake.close(ref)),
+          poster: mode.person ?? bot,
+          postFinding: async (finding) => {
+            const { head } = await fake.getChange(repo, 1);
+            const body = `**Off by one** · Should fix\n\n${FINDING_MARKER}${JSON.stringify({ v: 1, id: finding })} -->`;
+            const reviewId = await fake.publishReview(ref, {
+              sha: head.sha,
+              body: "",
+              comments: [{ ...FINDING_LINE, body }],
+            });
+            const root = fake.view(ref).reviews.find((r) => r.id === reviewId)?.comments[0]?.id;
+            return tick(Number(root));
+          },
+          commentInline: (body) => tick(fake.seedInline(ref, owner, { ...FINDING_LINE, line: 14, body })),
+          reply: (commentId, body) => tick(fake.seedReply(ref, commentId, { author: owner, body })),
+          outdate: () =>
+            tick(
+              fake.push(ref, nextSha(), DIFF, [{ path: FINDING_LINE.path, line: 12, removed: 1, added: 1 }]),
+            ),
+        });
+      },
+      patience,
+      refusing: {
+        unauthorized: refusing("unauthorized"),
+        rate_limited: refusing("rate_limited"),
+        unavailable: refusing("unavailable"),
+      },
+      notInstalled: () =>
+        Promise.resolve({
+          intake: new FakeGitHost({ repo, bot, changes: [{ ...change, diff: [] }], installed: false }),
+          repo,
+          open: change,
+        }),
+      forks: () => {
+        const fake = host();
+        // To the fake a deleted fork is what GitHub makes of it: a change from a fork still.
+        fake.open({ ...fromFork, diff: [] });
+        fake.open({ ...fromDeletedFork, diff: [] });
+        return Promise.resolve({ intake: fake, repo, fork: fromFork, deletedFork: fromDeletedFork });
+      },
     },
-    refusing: {
-      unauthorized: refusing("unauthorized"),
-      rate_limited: refusing("rate_limited"),
-      unavailable: refusing("unavailable"),
-    },
-    notInstalled: () =>
-      Promise.resolve({
-        intake: new FakeGitHost({ repo, bot, changes: [{ ...change, diff: [] }], installed: false }),
-        repo,
-        open: change,
-      }),
-    forks: () => {
-      const fake = host();
-      // To the fake a deleted fork is what GitHub makes of it: a change from a fork still.
-      fake.open({ ...fromFork, diff: [] });
-      fake.open({ ...fromDeletedFork, diff: [] });
-      return Promise.resolve({ intake: fake, repo, fork: fromFork, deletedFork: fromDeletedFork });
-    },
-  });
+  );
 
 describe("FakeGitHost intake on its own", () => {
+  test("a change opened with no time is opened by the host's clock, to the second; one given its time keeps it", async () => {
+    const clock = heldClock();
+    clock.advance(2_750);
+    const fake = new FakeGitHost({ repo, bot, clock, changes: [] });
+    const { openedAt: _, ...untimed } = change;
+    fake.open({ ...untimed, diff: [] });
+    // Weeks before the host's clock: 2026-09-16 08:30:05 UTC.
+    fake.open({ ...wip, openedAt: Date.UTC(2026, 8, 16, 8, 30, 5), diff: [] });
+    clock.advance(60_000);
+    fake.close(ref);
+    fake.reopen(ref);
+
+    const { items } = await fake.listOpenChanges(repo);
+    expect(items.map((c) => [c.number, c.openedAt])).toEqual([
+      [1, Date.UTC(2026, 9, 7, 12, 0, 2)],
+      [2, Date.UTC(2026, 8, 16, 8, 30, 5)],
+    ]);
+  });
+
   test("a repository it does not hold is not found, as GitHub answers 404", async () => {
     await expect(host().listOpenChanges({ owner: "someone", name: "else" })).rejects.toMatchObject({
       failure: "not_found",

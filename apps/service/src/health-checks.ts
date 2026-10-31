@@ -42,7 +42,7 @@ export function checkItems(
       check: "service",
       state: "running",
       startAtLogin: service.startAtLogin,
-      startsAtLogin: service.startsAtLogin,
+      atLogin: service.atLogin,
       loginItem: service.loginItem,
     },
     { check: "settings", invalid },

@@ -15,7 +15,8 @@
 // `fingerprintWord`, a category or a kind key as fingerprints compare it;
 // `isWaiting`, a job not started yet (queued or deferred); `deferralEngine`, the engine a deferral waits for;
 // `engineDeferral`, what an engine's state makes a review wait for;
-// `sameDeferral`, when two deferrals are the same reason to wait; `sameTurn`, two turns the same thing to wait
+// `sameDeferral`, when two deferrals are the same reason to wait; `sameLoginHolder`, two answers of who holds start
+// at login the same (ADR 0068); `sameTurn`, two turns the same thing to wait
 // behind; `stepsDone`, a run's steps with its current one closed; `repositoryName` and `sameRepository`, a
 // repository as written and compared as GitHub does (ignoring case); `reviewResultV1`, the Zod schema of
 // `lookover.review-result/v1`, which parses a result where it enters, and `readResult`, which finds one in
@@ -383,7 +384,14 @@ export type {
 export { normalisedRuleText, RULES_FILES } from "./rule.ts";
 export type { FindRunPass, Run, RunPass, RunPosting, RunStep } from "./run.ts";
 export { stepsDone } from "./run.ts";
-export type { CheckItem, LoginItemKind, PauseFor, Service } from "./service.ts";
+export {
+  type CheckItem,
+  type LoginHolder,
+  type LoginItemKind,
+  type PauseFor,
+  type Service,
+  sameLoginHolder,
+} from "./service.ts";
 export type {
   Depth,
   ResolvedSetting,

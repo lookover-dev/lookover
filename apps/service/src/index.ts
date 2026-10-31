@@ -54,15 +54,18 @@
 // locks go and exits 0; `deps` gives it the clock, where it prints, the process (its signals, exit and id) and, for a
 // test, the home the live lock is taken in, the live adapters, the user-only step and start at login's port. Both locks
 // are OS-held (a SQLite file in exclusive locking mode, released by the system however the process ends, never a
-// process id). Start at login (ADR 0054) is a port, `LoginItem` (registered with this command, register, unregister):
+// process id). Start at login (ADR 0054, ADR 0068) is a port, `LoginItem` (`held`: this install, none, or another
+// install with the command it holds; `register`, which leaves another install's unless asked to take it over;
+// `unregister`, this install's only):
 // the program without a live config registers `config.atLogin` (`loginCommand`: `lookover start --no-open` as `lookover` runs, `selfCommand`, by absolute
 // paths, `--home=` unless the profile's folder) on the machine (`osLoginItem`: the `HKCU` `Run` value `Lookover` through
 // `reg.exe`, a LaunchAgent, an XDG autostart entry), which refuses to be built under `bun test` but for `bun run live`'s
 // `lookover-dev-` values (`windowsLoginItem`, `runValues`); every other wiring the room's fake (`memoryLoginItem`). The
 // choice is on until the owner turns it off; once the setup is done the room makes the registration match it, at start,
-// at the setup's finish and on each `service.startAtLogin` (refused with the machine's reason, the choice kept), and
-// the snapshot's `service.startsAtLogin` says what the machine says, `service.loginItem` whose it is (`os` for the real
-// one and demo mode, which plays the program; `memory` for live mode and a guarded program). `lookover status` says it too.
+// at the setup's finish and on each `service.startAtLogin` (refused with the machine's reason, the choice kept), never
+// taking another install's over but on `service.startAtLogin { takeOver }`, and the snapshot's `service.atLogin` says
+// who the machine says holds it, `service.loginItem` whose port it is (`os` for the real one and demo mode, which plays
+// the program; `memory` for live mode and a guarded program). `lookover status` says it too, naming another install.
 // Your coding agent (ADR 0058) is two ports beside it, `CommandPath` (reachable, add, remove: `lookover` on the PATH
 // through a folder of Lookover's own) and `SkillFolders` (read, install, remove: the `lookover-review-loop` skill in
 // Claude Code's and Codex's folders), each with a memory fake (`memoryCommandPath`, `memorySkillFolders`, with

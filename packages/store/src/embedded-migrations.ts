@@ -29,6 +29,7 @@ import m26 from "./migrations/20261028090000-app-flows-place.sql" with { type: "
 import m27 from "./migrations/20261028090100-setup-github-elsewhere.sql" with { type: "text" };
 import m28 from "./migrations/20261030090000-change-ids-with-owner.sql" with { type: "text" };
 import m29 from "./migrations/20261030100000-install-asks.sql" with { type: "text" };
+import m30 from "./migrations/20261031090000-changes-opened-at.sql" with { type: "text" };
 
 /** Every migration of `src/migrations/`, in name order, its SQL bundled with the code. */
 export const EMBEDDED: { name: string; sql: string }[] = [
@@ -62,4 +63,5 @@ export const EMBEDDED: { name: string; sql: string }[] = [
   { name: "20261028090100-setup-github-elsewhere", sql: m27 },
   { name: "20261030090000-change-ids-with-owner", sql: m28 },
   { name: "20261030100000-install-asks", sql: m29 },
+  { name: "20261031090000-changes-opened-at", sql: m30 },
 ];

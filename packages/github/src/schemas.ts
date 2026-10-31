@@ -16,6 +16,8 @@ export const pull = z.object({
   html_url: z.string(),
   user,
   draft: z.boolean(),
+  /** When it was opened, by GitHub's clock (ADR 0068). */
+  created_at: z.iso.datetime(),
   /** The head's repository is null once a fork it came from is deleted. */
   head: ref.extend({ repo: repo.nullable() }),
   base: ref.extend({ repo }),

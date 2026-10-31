@@ -13,6 +13,7 @@ export interface Change {
   /** The engine of the coding agent that wrote it, when an agent did. */
   writtenBy: EngineId | null;
   headSha: CommitSha;
+  /** When the host says it was opened (GitHub's `created_at`), whenever Lookover first listed it (ADR 0068). */
   openedAt: number;
   draft: boolean;
   /** Its head is in another repository than its base, or in one since deleted (ADR 0048). */

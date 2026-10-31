@@ -65,6 +65,14 @@
 // and a `setup` that gives, once per case, a fresh adapter in the state the case needs with what the suite needs
 // around it; a state the real adapter can't be brought to on demand is left out of its setup and that case is
 // skipped. The suite's tests are the port's contract, written once: every outcome and failure the port defines.
+// GitHub shows a write some seconds late (ADR 0069): a suite's setup says how long its host may take (`Patience`: 0 on
+// the fakes; live, `LIVE_PATIENCE`, every live check's: up to `LIVE_SHOWN_MS`, every second), and each read that
+// expects a write's effect goes through `readUntil` (`ReadUntilOptions`: the bound, the pause, where its line goes),
+// which reads until a predicate as strict as the `expect` after it holds or the bound runs out, returns the last read,
+// says once what GitHub didn't show, and lets a read's error go up; `holds` makes that predicate of the very check
+// that follows, a check that fails (any error, or those its `isFailure` names) reading false and any other error going
+// up; `lagging` (`Lagging`) wraps a fake's port to answer stale after a write, as GitHub does, so a suite on it proves
+// its waits in `bun run check`.
 // Invariants: a fake never calls the network, `claude` or `codex` (AGENTS.md rule 1); a fake with nothing
 // scripted fails rather than answering a default, with one exception: `ScriptedRetrieval` gives a commit nothing
 // is scripted for its default diff (`diff`, empty unless set) at a path of the job's, since the service's tests
@@ -152,6 +160,15 @@ export {
   type PushHow,
 } from "./fake-git-host.ts";
 export { fakeGitHubPages } from "./fake-github-pages.ts";
+export { type Lagging, lagging } from "./lagging.ts";
+export {
+  holds,
+  LIVE_PATIENCE,
+  LIVE_SHOWN_MS,
+  type Patience,
+  type ReadUntilOptions,
+  readUntil,
+} from "./read-until.ts";
 export {
   ORG_SANDBOX_REPOSITORY,
   type PlantedSandbox,

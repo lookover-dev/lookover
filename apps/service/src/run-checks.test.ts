@@ -51,7 +51,7 @@ test("Run all checks reads both engines again and reports each engine, the conne
     { check: "engine", engine: "codex", state: "ready", cli: "codex", version: "0.162.1", unusable: null },
     { check: "connection", state: "connected", cause: null, bot: BOT.login, key: null },
     // On by default, and registered once the setup is done (ADR 0054): the fake's registration, in memory.
-    { check: "service", state: "running", startAtLogin: true, startsAtLogin: true, loginItem: "memory" },
+    { check: "service", state: "running", startAtLogin: true, atLogin: "this", loginItem: "memory" },
     { check: "settings", invalid: [] },
     // The data folder's free space, as the machine has it: whole gigabytes.
     { check: "disk", freeGb: expect.any(Number) },

@@ -57,7 +57,7 @@ import {
   WHEN_TEXT,
 } from "../view-model/settings.ts";
 import { GITHUB_SETTINGS_TEXT, type GitHubSettingsView, githubSettings } from "../view-model/sign-in.ts";
-import { startAtLoginHelp } from "../view-model/start-at-login.ts";
+import { offersStartThisOne, START_THIS_ONE, startAtLoginHelp } from "../view-model/start-at-login.ts";
 import { AgentRows } from "./coding-agent.tsx";
 import { HeldDetail, Page, Sentence, useSaving } from "./common.tsx";
 import { AccountAction, AccountsList, AgentAppLine, CodeActions, UseAppForm } from "./github-app.tsx";
@@ -139,7 +139,26 @@ export function Settings() {
           </SetRow>
         </div>
         <div {...row("login")}>
-          <SetRow title="Start at login" help={<Said words={startAtLoginHelp(state.service, mode)} />}>
+          {/* Another Lookover holds it (ADR 0068): its command in the help and, while on, the one way to take it on
+              purpose. The switch sits level with the title at every width, so the help and action changing under
+              it never move it. */}
+          <SetRow
+            atTitle
+            title="Start at login"
+            help={<Said words={startAtLoginHelp(state.service, mode)} />}
+            extra={
+              offersStartThisOne(state.service) ? (
+                <div className="setrow-act">
+                  <Button
+                    size="sm"
+                    onClick={() => save({ type: "service.startAtLogin", on: true, takeOver: true })}
+                  >
+                    {START_THIS_ONE}
+                  </Button>
+                </div>
+              ) : null
+            }
+          >
             <Switch
               checked={state.service.startAtLogin}
               onChange={(on) => save({ type: "service.startAtLogin", on })}
