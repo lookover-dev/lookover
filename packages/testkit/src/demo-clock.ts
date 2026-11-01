@@ -2,9 +2,9 @@
 // cancel, as `apps/service/src/timers.ts` declares; it is not imported: testkit knows no service). One clock per
 // engine room: every wait of the service goes through it, so moving it fires the ticks, the poll, a pause's end
 // and the fakes' durations in order, and a test or the demo driver never waits on the wall clock (gotchas).
-// It stands still (time moves only by `advance` and `step`: the same script gives the same events every time) or
-// flows with the real time at a speed (`set(true, speed)`): one real timeout at most is armed, for the earliest
-// timer, and re-armed whenever the timers or the speed change. The real time it follows is a `Wall` it is given,
+// It stands still (time moves only by `advance`, `jump` and `step`: the same script gives the same events every
+// time) or flows with the real time at a speed (`set(true, speed)`): one real timeout at most is armed, for the
+// earliest timer, and re-armed whenever the timers or the speed change. The real time it follows is a `Wall` it is given,
 // so a test of the flow moves it by hand; the process's own by default.
 import type { Clock } from "@lookover/contracts";
 
@@ -44,7 +44,7 @@ interface Armed {
 const settled = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /**
- * The clock and the timers of one engine room. Standing still, `now` changes only with `advance` and `step`;
+ * The clock and the timers of one engine room. Standing still, `now` changes only with `advance`, `jump` and `step`;
  * flowing, it follows the real time at `speed`, and the timers fire by themselves when their time comes.
  */
 export class DemoClock implements Clock {
@@ -113,17 +113,41 @@ export class DemoClock implements Clock {
    * fires at the time reached, never earlier: `now` never goes back on what a callback or a caller saw.
    */
   async advance(ms: number): Promise<void> {
+    await this.move(ms, () => true);
+  }
+
+  /**
+   * Moves time on by `ms` as `advance` does, but fires each timer once at most, so a test reaches a moment hours or
+   * days away without playing every poll on the way: a timer armed before the jump fires at its own time, in order;
+   * one armed during it (a poll re-armed, a wait its work began) that falls due before the end fires once, where
+   * the jump lands, in the order it would have come due. Every timer that comes due fires at least once; with a
+   * poll that re-arms itself every 10 s, `jump(3_600_000)` fires it twice, at 10 s and at the hour, not 360 times.
+   * The work each one starts settles before the next, as with `advance`.
+   */
+  async jump(ms: number): Promise<void> {
+    const before = new Set(this.armed);
+    await this.move(ms, (timer) => before.has(timer));
+  }
+
+  /**
+   * Moves time on by `ms`, firing every timer due by then in order of its due; one `onTime` refuses fires where the
+   * move lands, after those that fire at their own time, even one due exactly there.
+   */
+  private async move(ms: number, onTime: (timer: Armed) => boolean): Promise<void> {
     this.fold();
     this.held = true;
     this.disarm();
     const until = this.base + ms;
+    const at = (timer: Armed) => (onTime(timer) ? timer.due : until);
     try {
       for (;;) {
         await settled();
-        const next = this.earliest(until);
+        const due = this.armed.filter((t) => t.due <= until);
+        const late = (timer: Armed) => (onTime(timer) ? 0 : 1);
+        const next = due.sort((a, b) => at(a) - at(b) || late(a) - late(b) || a.due - b.due)[0];
         if (!next) break;
         this.armed = this.armed.filter((t) => t !== next);
-        this.base = Math.max(this.base, next.due);
+        this.base = Math.max(this.base, at(next));
         next.fire();
       }
       this.base = until;

@@ -3,6 +3,7 @@ import { DemoClock, type Wall } from "./index.ts";
 
 /** 2026-10-06 08:52 UTC: where the clock starts. */
 const T0 = Date.UTC(2026, 9, 6, 8, 52);
+const HOUR = 3_600_000;
 
 /** The real time, moved by hand: what a flowing demo clock follows, under the test's control. */
 class HeldWall implements Wall {
@@ -266,5 +267,82 @@ describe("DemoClock standing still", () => {
     await clock.advance(2_000);
 
     expect(seen).toEqual(["first's work", "second"]);
+  });
+});
+
+describe("DemoClock jumping", () => {
+  test("a jump fires each timer armed before it at its own time, in order; one armed during it, once at its end", async () => {
+    const clock = new DemoClock({ at: T0 });
+    const fired: string[] = [];
+    const poll = () => {
+      fired.push(`poll at ${clock.now() - T0}`);
+      clock.after(10_000, poll);
+    };
+    clock.after(10_000, poll);
+    clock.after(25_000, () => fired.push(`tick at ${clock.now() - T0}`));
+    const cancel = clock.after(30_000, () => fired.push("cancelled"));
+    clock.after(HOUR + 1, () => fired.push("past the jump"));
+    cancel();
+
+    await clock.jump(HOUR);
+
+    // The poll comes due 360 times in the hour: at 10 s, then once more where the jump lands.
+    expect(fired).toEqual(["poll at 10000", "tick at 25000", `poll at ${HOUR}`]);
+    expect(clock.now()).toBe(T0 + HOUR);
+    // Re-armed from where the jump landed, and the one past it untouched: each fires at its own time again.
+    await clock.advance(10_000);
+    expect(fired.slice(3)).toEqual(["past the jump", `poll at ${HOUR + 10_000}`]);
+  });
+
+  test("a timer armed during a jump that falls due after it waits for its time", async () => {
+    const clock = new DemoClock({ at: T0 });
+    const fired: string[] = [];
+    clock.after(1_000, () => clock.after(HOUR, () => fired.push(`late at ${clock.now() - T0}`)));
+
+    await clock.jump(HOUR);
+    expect(fired).toEqual([]);
+    await clock.advance(1_000);
+    expect(fired).toEqual([`late at ${HOUR + 1_000}`]);
+  });
+
+  test("a timer armed before a jump and due where it lands fires before those armed during it", async () => {
+    const clock = new DemoClock({ at: T0 });
+    const fired: string[] = [];
+    clock.after(1_000, () => {
+      fired.push("first");
+      clock.after(1_000, () => fired.push(`re-armed at ${clock.now() - T0}`));
+    });
+    clock.after(HOUR, () => fired.push(`on time at ${clock.now() - T0}`));
+
+    await clock.jump(HOUR);
+
+    expect(fired).toEqual(["first", `on time at ${HOUR}`, `re-armed at ${HOUR}`]);
+  });
+
+  test("a jump lets the work each timer started settle before the next, as advance does", async () => {
+    const clock = new DemoClock({ at: T0 });
+    const seen: string[] = [];
+    const poll = async () => {
+      seen.push(`poll at ${clock.now() - T0}`);
+      await Promise.resolve();
+      seen.push("its work");
+      clock.after(0, () => seen.push(`at once at ${clock.now() - T0}`));
+      clock.after(10_000, () => void poll());
+    };
+    clock.after(10_000, () => void poll());
+    clock.after(20_000, () => seen.push("second"));
+
+    await clock.jump(60_000);
+
+    expect(seen).toEqual([
+      "poll at 10000",
+      "its work",
+      "second",
+      // Armed during the jump: each once, where it lands, in the order they would have come due.
+      "at once at 60000",
+      "poll at 60000",
+      "its work",
+      "at once at 60000",
+    ]);
   });
 });

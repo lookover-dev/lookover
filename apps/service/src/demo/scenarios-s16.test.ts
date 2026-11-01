@@ -11,6 +11,7 @@ import { scenarioOf } from "../index.ts";
 import { eventually, TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
   advance,
+  brief,
   following,
   inject,
   load,
@@ -32,7 +33,8 @@ const AGENT = changeId("sasensi/ledger-api#152");
 
 let door: Awaited<ReturnType<typeof startScenario>>;
 beforeAll(async () => {
-  door = await startScenario(scenarioOf("S10"));
+  // The door the scenarios load through: S10's world on its first five minutes, the story behind it unused.
+  door = await startScenario(brief());
 });
 afterAll(stopAll);
 

@@ -98,28 +98,31 @@ test("each step is said three ways: as it runs in a line, as it runs in the list
   }
 });
 
-test("a running review's line says its step and how long the run has taken", () => {
-  expect(runLine(NOW, running("finding", 72_000))).toBe("reading the code · 1:12");
-  expect(runLine(NOW, running("preparing", 0))).toBe("getting the changes · 0:00");
+test("a running review's line says its step and how long the run has taken, as a duration (ADR 0070)", () => {
+  expect(runLine(NOW, running("finding", 72_000))).toBe("reading the code · 1 min 12 s");
+  expect(runLine(NOW, running("preparing", 0))).toBe("getting the changes · 0 s");
 });
 
 test("a running review's line comes in its two parts, so its time can sit in a running time's cell", () => {
-  expect(runLineParts(NOW, running("finding", 72_000))).toEqual({ doing: "reading the code", time: "1:12" });
-  expect(runLineParts(NOW, running("finding", 3_723_000)).time).toBe("1:02:03");
+  expect(runLineParts(NOW, running("finding", 72_000))).toEqual({
+    doing: "reading the code",
+    time: "1 min 12 s",
+  });
+  expect(runLineParts(NOW, running("finding", 3_723_000)).time).toBe("1 h 2 min");
 });
 
-test("a run's time counts past the hour in hours", () => {
-  expect(runLine(NOW, running("finding", 599_000))).toBe("reading the code · 9:59");
-  expect(runLine(NOW, running("finding", 600_000))).toBe("reading the code · 10:00");
-  expect(runLine(NOW, running("finding", 3_723_000))).toBe("reading the code · 1:02:03");
+test("a run's time counts in seconds, then minutes, then hours", () => {
+  expect(runLine(NOW, running("finding", 599_000))).toBe("reading the code · 9 min 59 s");
+  expect(runLine(NOW, running("finding", 600_000))).toBe("reading the code · 10 min");
+  expect(runLine(NOW, running("finding", 3_723_000))).toBe("reading the code · 1 h 2 min");
 });
 
 test("the running step's time counts from its start; a finished step keeps its recorded time", () => {
   const review = running("finding", 5_000, false, "claude", ["preparing"]);
-  expect(stepTime(review, "finding", NOW + 61_000)).toBe("1:01");
-  expect(stepTime(review, "preparing", NOW + 61_000)).toBe("0:01");
+  expect(stepTime(review, "finding", NOW + 61_000)).toBe("1 min 1 s");
+  expect(stepTime(review, "preparing", NOW + 61_000)).toBe("1 s");
   expect(stepTime(review, "confirming", NOW + 61_000)).toBe("");
-  expect(stepTime(done(["preparing", "finding"]), "finding", NOW + 3_600_000)).toBe("0:01");
+  expect(stepTime(done(["preparing", "finding"]), "finding", NOW + 3_600_000)).toBe("1 s");
 });
 
 test("a preview never posts, so it has no posting step", () => {

@@ -27,9 +27,17 @@ const git = (repo: string, ...args: string[]) => {
 
 const root = (name: string) => mkdtempSync(join(temp, `${name}-`));
 
+/** The planted case built once into a folder of its own, for the tests that only read it: each build is three gits. */
+const shared = root("shared");
+let builtOnce: ReturnType<typeof buildCase> | undefined;
+const plantedBuilt = () => {
+  builtOnce ??= buildCase({ evalCase: planted, review: corpus.review, root: shared, git: GIT });
+  return builtOnce;
+};
+
 describe("buildCase", () => {
   test("gives the same commits for the same case, on every machine", () => {
-    const first = buildCase({ evalCase: planted, review: corpus.review, root: root("a"), git: GIT });
+    const first = plantedBuilt();
     const again = buildCase({ evalCase: planted, review: corpus.review, root: root("b"), git: GIT });
     // Pinned: a change to the builder, the case or REVIEW.md moves them, and the recorded answers go stale.
     expect([String(first.base), String(first.head)]).toEqual([
@@ -42,7 +50,7 @@ describe("buildCase", () => {
   test("gives the same commits from a case file checked out with CRLF line ends", () => {
     const text = readFileSync(join(CASES, "ts-checkout-all.yaml"), "utf8").replaceAll("\r\n", "\n");
     const crlf = parseCase("ts-checkout-all.yaml", text.replaceAll("\n", "\r\n"));
-    const lf = buildCase({ evalCase: planted, review: corpus.review, root: root("lf"), git: GIT });
+    const lf = plantedBuilt();
     const fromCrlf = buildCase({
       evalCase: crlf,
       review: corpus.review.replaceAll("\n", "\r\n"),
@@ -53,8 +61,8 @@ describe("buildCase", () => {
   });
 
   test("main holds the base and REVIEW.md; change holds one neutral commit on it", () => {
-    const where = root("layout");
-    const built = buildCase({ evalCase: planted, review: corpus.review, root: where, git: GIT });
+    const where = shared;
+    const built = plantedBuilt();
     expect(built.cloneUrl.startsWith(where)).toBe(true);
     // A neutral name: the case's id names its bug, and an engine that reads around could see the path.
     expect(built.name).toMatch(/^case-[0-9a-f]{8}$/);
@@ -93,8 +101,8 @@ describe("buildCase", () => {
   });
 
   test("builds a case again over the one already there", () => {
-    const where = root("again");
-    const first = buildCase({ evalCase: planted, review: corpus.review, root: where, git: GIT });
+    const where = shared;
+    const first = plantedBuilt();
     expect(buildCase({ evalCase: planted, review: corpus.review, root: where, git: GIT })).toEqual(first);
   });
 });

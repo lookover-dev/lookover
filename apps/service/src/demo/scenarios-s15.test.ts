@@ -9,6 +9,7 @@ import { MADE_APP, scenarioOf } from "../index.ts";
 import { TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
   advance,
+  brief,
   inject,
   installApp,
   load,
@@ -29,7 +30,8 @@ const PERSON = { id: 1, login: "sasensi" };
 
 let door: Awaited<ReturnType<typeof startScenario>>;
 beforeAll(async () => {
-  door = await startScenario(scenarioOf("S10"));
+  // The door the scenarios load through: S10's world on its first five minutes, the story behind it unused.
+  door = await startScenario(brief());
 });
 afterAll(stopAll);
 

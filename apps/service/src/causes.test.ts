@@ -16,9 +16,10 @@ import {
   repositoryId,
 } from "@lookover/contracts";
 import { DemoClock, FakeGitHost } from "@lookover/testkit";
-import { appStore, memoryKeychain, type Room } from "./index.ts";
+import { type AppStore, appStore, memoryKeychain, type Room } from "./index.ts";
 import {
   BOT,
+  eventually,
   fakeEngines,
   home,
   onFakeGitHub,
@@ -293,6 +294,90 @@ test("started while GitHub is down: up and unreachable; once GitHub answers, the
     accounts: [{ installationId: host.onGitHub().installation?.id }],
   });
   expect(room.snapshot().changes[PLANTED]).toMatchObject({ author: "you" });
+});
+
+test("started while the keychain didn't answer: unreachable, a wait; once it answers, the loop reads the App again and lists within a minute, nobody pressing anything (ADR 0070)", async () => {
+  const time = new DemoClock({ at: T0 });
+  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
+  const dir = home();
+  const kept = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
+  await kept.write(APP, host.credentials().key);
+  // The keychain silent at start, as a prompt nobody sees: the App read as lost for now, its record kept.
+  let silent = true;
+  const apps: AppStore = {
+    read: async () => {
+      const read = await kept.read();
+      if (!silent || read.state !== "kept") return read;
+      const { privateKey: _, ...rest } = read;
+      return { ...rest, state: "lost", why: "keychain" };
+    },
+    write: (app, key, membership) => kept.write(app, key, membership),
+    keepMembership: (membership) => kept.keepMembership(membership),
+  };
+  const { given: _, ...side } = onFakeGitHub(host);
+  const { room } = await startRoom({ home: dir, host, time, github: { ...side, apps }, log: () => {} });
+  expect(room.snapshot().connection).toMatchObject({
+    state: "disconnected",
+    cause: { kind: "unreachable" },
+  });
+
+  silent = false;
+  await time.advance(MIN);
+  // The minute's retry reads the App store (files on disk): its answer lands without the clock moving again.
+  const back = await eventually(
+    async () => room.snapshot(),
+    (st) => st.connection.state === "connected",
+  );
+  expect(back.connection).toMatchObject({ state: "connected", cause: null, app: APP });
+  expect(room.snapshot().changes[PLANTED]).toMatchObject({ author: "you" });
+});
+
+test("the keychain still silent at the first retry: the next comes a minute on, not five, so it lists within a minute of answering (ADR 0070)", async () => {
+  const time = new DemoClock({ at: T0 });
+  const host = new Counting({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
+  const dir = home();
+  const kept = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
+  await kept.write(APP, host.credentials().key);
+  const read = await kept.read();
+  if (read.state !== "kept") throw new Error("the App was not kept");
+  const { privateKey: _, ...rest } = read;
+  // While silent, the store answers from memory, so the clock's move settles each retry it fires, re-arming included.
+  let silent = true;
+  let reads = 0;
+  const apps: AppStore = {
+    read: async () => {
+      reads++;
+      return silent ? { ...rest, state: "lost", why: "keychain" } : kept.read();
+    },
+    write: (app, key, membership) => kept.write(app, key, membership),
+    keepMembership: (membership) => kept.keepMembership(membership),
+  };
+  const { given: _given, ...side } = onFakeGitHub(host);
+  const { room } = await startRoom({ home: dir, host, time, github: { ...side, apps }, log: () => {} });
+  const atStart = reads;
+
+  await time.advance(MIN);
+  // The first retry read the App store, still silent: the App still lost, the connection still waiting.
+  expect(reads).toBeGreaterThan(atStart);
+  expect(room.snapshot().connection).toMatchObject({ state: "disconnected", cause: { kind: "unreachable" } });
+
+  silent = false;
+  await time.advance(MIN);
+  const back = await eventually(
+    async () => room.snapshot(),
+    (st) => st.connection.state === "connected",
+  );
+  expect(back.connection).toMatchObject({ state: "connected", cause: null, app: APP });
+
+  // Connected, the cadence is five minutes again: no discovery a minute on, one at five.
+  await time.advance(0);
+  const listed = host.reads;
+  await time.advance(MIN);
+  await time.advance(0);
+  expect(host.reads).toBe(listed);
+  await time.advance(4 * MIN);
+  await time.advance(0);
+  expect(host.reads).toBe(listed + 1);
 });
 
 test("started with the App uninstalled: up and uninstalled; installed again, the loop lists by itself", async () => {

@@ -160,6 +160,7 @@ export {
   createAppRefusalText,
   dayText,
   deferralText,
+  engineDetailText,
   engineHealthText,
   engineName,
   FAILED_SAFETY_CHECK,

@@ -458,7 +458,7 @@ button {
   justify-content: space-between;
   gap: var(--s-4);
   padding: 6px 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-overlay);
   font-size: var(--t-14);
   color: var(--ink-2);
 }
@@ -726,6 +726,39 @@ button {
   display: grid;
   gap: 2px;
 }
+/* First review's list: the radio, then the place a reviewed row's chip and link take, held on every row, hidden on
+   one that can be picked, so a row getting reviewed moves nothing (design-system.md "First review's list") */
+.first-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--s-3);
+  align-items: center;
+}
+.first-row-reviewed {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+/* the chip against its link, whichever label it shows */
+.first-row-reviewed .same-width-slot {
+  justify-content: flex-end;
+}
+.first-row:not(.reviewed) .first-row-reviewed {
+  visibility: hidden;
+}
+.first-none-left {
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .first-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-2);
+  }
+  /* under the row's small line, at its label's start: past the radio's 18 px and its 10 px gap (`.check`) */
+  .first-row-reviewed {
+    padding-left: 28px;
+  }
+}
 .background-note {
   display: grid;
   gap: 10px;
@@ -963,6 +996,20 @@ dialog.cmdk {
 .setrow span span,
 .setrow span a {
   display: inline;
+}
+/* A help holding every text it can say, and an action as wide as each label it can take (Your App's, ADR 0070): their
+   own layouts, not a help's spans. */
+.setrow .held-detail {
+  display: grid;
+}
+.setrow .same-width {
+  display: inline-grid;
+}
+.setrow .same-width-slot {
+  display: flex;
+}
+.setrow .same-width-slot > .btn {
+  display: inline-flex;
 }
 .setrow .tag {
   display: inline-flex;

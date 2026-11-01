@@ -1,7 +1,7 @@
-// S13 "Service problems" (ADR 0046): each problem said plainly, with its one fix. Forty seconds after the room is
-// handed over, GitHub stops answering for two and a half minutes: the connection shows disconnected, "Reconnect
-// GitHub" is refused while it is down and finds it once it is back. #200 was reviewed forty minutes before, so the
-// repository is quiet and polled once a minute: "Reconnect GitHub" comes back sooner than the next poll. Six
+// S13 "Service problems" (ADR 0046): each problem said plainly, with its one fix or none when it only waits. Forty
+// seconds after the room is handed over, GitHub stops answering for two and a half minutes: the connection shows
+// disconnected, a wait with no button (ADR 0070). #200 was reviewed forty minutes before, so the repository is quiet
+// and polled once a minute: Lookover finds GitHub back within a minute of its answering, nobody pressing anything. Six
 // minutes in, both AIs' programs are gone; two minutes later they are installed again, which the service sees only
 // when the owner presses "Check again". The service stopping is not a problem shown here: a stopped service can't
 // be reached from its UI. Every diff is hand-written fixture data a review reads; nothing here is a real recording.
@@ -49,10 +49,10 @@ const pr = on(SANDBOX.repo);
 export const S13: Scenario = {
   id: "S13",
   title: "Service problems",
-  what: "GitHub out of reach, then both AIs missing: each problem said plainly, with its one fix.",
+  what: "GitHub out of reach, then both AIs missing: each problem said plainly, with its one fix or none.",
   steps: [
-    "In 40 seconds GitHub stops answering: the status pill says so.",
-    "“Reconnect GitHub” fails while it is down; two and a half minutes later it works.",
+    "In 40 seconds GitHub stops answering: Lookover says it waits, with nothing to press.",
+    "GitHub answers again two and a half minutes later; Lookover finds it within a minute.",
     "At 6 minutes both AIs are missing; they are installed again two minutes later.",
     "“Check again” finds them.",
   ],

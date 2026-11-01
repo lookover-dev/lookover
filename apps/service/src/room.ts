@@ -79,7 +79,7 @@ import {
 } from "./installation.ts";
 import { flowLines, logLineOf } from "./log-lines.ts";
 import { secretShapesRemoved } from "./log-sink.ts";
-import { type LoginItem, memoryLoginItem } from "./login-item.ts";
+import { type LoginItem, nowhereLoginItem } from "./login-item.ts";
 import { type GhMember, memberOf } from "./membership.ts";
 import { createPoller, type Poller } from "./poller.ts";
 import { createQueue } from "./queue.ts";
@@ -238,7 +238,7 @@ export interface RoomOptions {
   secretsRemoved?(text: string): string;
   /**
    * Start at login's registration on the machine (ADR 0054): the real one only for the program without a live
-   * config (`runService` chooses); a fake in memory by default.
+   * config (`runService` chooses); by default, the stand-in that registers nothing (ADR 0070).
    */
   loginItem?: AtLoginItem;
   /**
@@ -250,6 +250,11 @@ export interface RoomOptions {
    * each "Ask to install", never waited for by discovery.
    */
   gh?: Gh;
+  /**
+   * The machine the commands the app gives are for (an AI's install command, ADR 0070), as Node names it: the
+   * configuration's, demo mode's machine, or a test's.
+   */
+  platform: NodeJS.Platform;
 }
 
 /** A settings change's answer: written and sent, or refused with why. */
@@ -435,7 +440,7 @@ export interface Room {
 /**
  * Start at login's registration (ADR 0054), `item`, and where it registers as the UI says it, `kind`: `os` for the
  * machine's, which `runService` gives the program unguarded, and demo mode, which plays the program on its fake;
- * `memory` for the rest.
+ * `stand-in` for the rest, which registers nothing.
  */
 interface AtLoginItem {
   item: LoginItem;
@@ -480,9 +485,9 @@ function heldUntilReady<A extends unknown[]>(): {
   };
 }
 
-/** Start at login's registration: the one the options give, else a fake in memory. */
+/** Start at login's registration: the one the options give, else the stand-in that registers nothing (ADR 0070). */
 const loginItemOf = (o: RoomOptions): AtLoginItem =>
-  o.loginItem ?? { item: memoryLoginItem(), kind: "memory" };
+  o.loginItem ?? { item: nowhereLoginItem(), kind: "stand-in" };
 
 /** GitHub's web address the room's links are built on: GitHub's own unless the options name another. */
 const webOf = (o: RoomOptions): string => o.web ?? GITHUB_WEB;
@@ -600,6 +605,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       startAtLogin: store.setup.startAtLogin(),
       atLogin: heldAtStart,
       loginItem: loginItem.kind,
+      platform: o.platform,
       ...(o.remote === undefined ? {} : { remote: o.remote }),
     },
     store.events.all(),
@@ -817,6 +823,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     clock: o.clock,
     ids,
     engines: o.engines,
+    platform: o.platform,
     gate,
     engineStates: () => shown.engines,
     connection: (repoId) => connectionFor(shown.connection, repoId),

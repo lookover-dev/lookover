@@ -3,11 +3,10 @@ import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useApp, useAppState } from "../store.tsx";
 import { Button, Empty, Group, Icon, Search, Segmented } from "../ui/basics.tsx";
+import { allReviews, type Filter, matchesSearch } from "../view-model/filters.ts";
 import { plural } from "../view-model/format.ts";
 import {
-  authorLabel,
   type ChangeReview,
-  changeLabel,
   changeReviews,
   homeGroups,
   problems,
@@ -15,18 +14,7 @@ import {
   status,
   statusLine,
 } from "../view-model/select.ts";
-import type { DisplayStatus } from "../view-model/status.ts";
 import { Page, ReviewRow, Sentence } from "./common.tsx";
-
-function matches(item: ChangeReview, query: string, line: string): boolean {
-  const q = query.trim().toLowerCase();
-  return (
-    !q ||
-    `${item.change.title} ${changeLabel(item.change)} ${authorLabel(item.change)} ${line}`
-      .toLowerCase()
-      .includes(q)
-  );
-}
 
 /** Rows that arrived after the page was opened rise in. */
 function useFresh(ids: string[]): Set<string> {
@@ -47,7 +35,7 @@ export function Home() {
   const s = sentence(state);
   const all = changeReviews(state);
   const fresh = useFresh(all.map((i) => i.change.id));
-  const earlier = g.earlier.filter((i) => matches(i, query, statusLine(state, i)));
+  const earlier = g.earlier.filter((i) => matchesSearch(i, query, statusLine(state, i)));
   // Problems are shown by the alert band above every page, not here.
   const calm = g.needs.length === 0 && problems(state).length === 0 && !state.service.paused;
   const repoNames = state.repos.filter((r) => r.enabled).map((r) => r.name);
@@ -111,30 +99,11 @@ export function Home() {
   );
 }
 
-type Filter = "all" | "needs" | "open" | "done" | "skipped";
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "needs", label: "Needs you" },
-  { value: "open", label: "Findings open" },
-  { value: "done", label: "Clean or settled" },
-  { value: "skipped", label: "Skipped" },
-];
-const IN_FILTER: Record<Filter, DisplayStatus["kind"][] | null> = {
-  all: null,
-  needs: ["needs-you", "failed"],
-  open: ["to-fix"],
-  done: ["settled"],
-  skipped: ["skipped", "not-asked", "cancelled"],
-};
-
 export function AllReviews() {
   const state = useAppState();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
-  const wanted = IN_FILTER[filter];
-  const rows = changeReviews(state)
-    .filter((i) => !wanted || wanted.includes(status(i).kind))
-    .filter((i) => matches(i, query, statusLine(state, i)));
+  const { options, rows } = allReviews(changeReviews(state), filter, query, (i) => statusLine(state, i));
   return (
     <Page screen="reviews">
       <div className="crumb">
@@ -142,7 +111,7 @@ export function AllReviews() {
       </div>
       <Sentence title="All reviews." small="Every pull request Lookover has seen, with its outcome." />
       <div className="filters">
-        <Segmented label="Outcome" value={filter} options={FILTERS} onChange={setFilter} />
+        <Segmented label="Outcome" value={filter} options={options} onChange={setFilter} />
         <Search
           placeholder="Search"
           aria-label="Search all reviews"

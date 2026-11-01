@@ -51,8 +51,9 @@ test("Claude at its limit until T takes no job before T; its job starts at T; th
     limitUntil: reset,
   });
 
-  // Every tick before the reset leaves the job deferred: no run spent to find the limit again.
-  await time.advance(reset - time.now() - 1);
+  // Every tick before the reset leaves the job deferred: no run spent to find the limit again. Each timer comes due
+  // and fires at least once on the way (the poll, the queue's tick, discovery), and again a millisecond before T.
+  await time.jump(reset - time.now() - 1);
   expect(engines.runs).toHaveLength(1);
   expect((await snapshot(service, cookie)).reviews[PLANTED]?.job).toMatchObject({
     state: "deferred",
@@ -122,7 +123,8 @@ test("a self-test that meets the limit holds the engine until its reset the same
   ]);
 
   expect((await review(service, cookie)).status).toBe(200);
-  await time.advance(reset - time.now() - 1);
+  // To the next day, each timer firing at least once on the way and again a millisecond before the reset.
+  await time.jump(reset - time.now() - 1);
   expect(engines.runs).toHaveLength(0);
   expect(selfTests.ran).toHaveLength(1);
   // At the reset the version is tested again: once it passes, the job starts.

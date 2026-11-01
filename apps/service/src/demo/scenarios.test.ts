@@ -2,7 +2,7 @@
 // standing still at `T0`: the invariants demo mode keeps (every event applied, determinism, the rest of a script
 // armed on the clock) and the catalogue as the drawer lists it. Each scenario's milestones are in
 // `scenarios-s1-s7.test.ts` and `scenarios-s8-s14.test.ts`.
-import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { apply, changeId, FAULTS } from "@lookover/contracts";
 import { SCENARIOS, type Scenario, scenarioOf } from "../index.ts";
 import { SANDBOX, TEST_LIMIT_MS } from "../service.test-support.ts";
@@ -20,7 +20,8 @@ import {
 } from "./demo.test-support.ts";
 
 setDefaultTimeout(TEST_LIMIT_MS);
-afterEach(stopAll);
+// Stopped once the file is done: the quiet day below is shared, and the few rooms a test starts wait until then.
+afterAll(stopAll);
 
 const MIN = 60_000;
 const id = (n: number) => changeId(`sasensi/lookover-sandbox#${n}`);
@@ -30,8 +31,18 @@ const id = (n: number) => changeId(`sasensi/lookover-sandbox#${n}`);
  */
 const SEEDED = 68;
 
+/**
+ * S10 loaded once for the file (its seed is two and a half hours of polls), and the drawer's listing of it read as
+ * it loaded, before any test moves it: "every event applied" then moves it.
+ */
+let door: Awaited<ReturnType<typeof startScenario>>;
+let listed: Awaited<ReturnType<typeof listing>>;
+beforeAll(async () => {
+  door = await startScenario(scenarioOf("S10"));
+  listed = await listing(door);
+}, TEST_LIMIT_MS);
+
 test("every event applied: the snapshot after a move is the snapshot before it with the move's events applied", async () => {
-  const door = await startScenario(scenarioOf("S10"));
   const before = await snapshotOf(door);
   expect(before.seq).toBe(SEEDED);
   const events = await stream(door, SEEDED);
@@ -100,8 +111,7 @@ test("the moves after the seed are armed on the clock: a pause the owner sets, t
 });
 
 test("the listing: every scenario as the drawer shows it, the one loaded, the clock standing still, the faults", async () => {
-  const door = await startScenario(scenarioOf("S10"));
-  const { status, body } = await listing(door);
+  const { status, body } = listed;
   expect(status).toBe(200);
   // Every scenario of the catalogue, in its order; S10's and S14's spelt out.
   expect(body.scenarios.map((s: { id: string }) => s.id)).toEqual(SCENARIOS.map((s) => s.id));

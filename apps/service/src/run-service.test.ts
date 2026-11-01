@@ -1,7 +1,7 @@
 // The program's start as a function (`runService`, ADR 0054): what `main.ts` does once it has read the
 // configuration, here in this process with the printing, the signals and the exit in the test's hands. One
 // service per data folder: its instance lock, `instance.json` and the port it prefers.
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -15,8 +15,16 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { API, type Gh, type NoSession, type Setup, type State } from "@lookover/contracts";
-import { DemoClock, FakeGitHost, memoryGh, ScriptedRetrieval } from "@lookover/testkit";
+import { API, type Engines, type Gh, type NoSession, type Setup, type State } from "@lookover/contracts";
+import { openStore } from "@lookover/store";
+import {
+  DemoClock,
+  FakeGitHost,
+  memoryGh,
+  ScriptedRetrieval,
+  templateFolder,
+  waitUntil,
+} from "@lookover/testkit";
 import {
   acquireLiveLock,
   appStore,
@@ -42,7 +50,11 @@ import {
   type System,
   VERSION,
 } from "./index.ts";
-import { BOT, fakeEngines, linkOf, SANDBOX } from "./service.test-support.ts";
+import { BOT, fakeEngines, linkOf, SANDBOX, TEST_LIMIT_MS } from "./service.test-support.ts";
+
+// Each test starts a whole service in this process, some two or three: a real server, real locks and a real store
+// on the disk, which `bun run check` runs beside every other file. One start takes 0.1 to 0.5 s here, alone.
+setDefaultTimeout(TEST_LIMIT_MS);
 
 // Tuesday 6 October 2026, 08:52 UTC.
 const FROZEN_AT = Date.UTC(2026, 9, 6, 8, 52);
@@ -72,9 +84,20 @@ function heldProcess() {
   return { held, fire, exits };
 }
 
+/**
+ * A data folder whose store is already migrated, made once for the file: the program's store is durable, and
+ * migrating a fresh one waits on the disk at each commit (about 0.15 s on Windows). A start on a copy opens it as it
+ * opens the one an earlier start left. Demo mode keeps its rooms' stores in folders of their own, never this one.
+ */
+const MIGRATED = templateFolder("lookover-run-migrated-", (home) =>
+  openStore({ home, durable: false }).close(),
+);
+afterAll(() => MIGRATED.remove());
+
 function newHome(): string {
   const home = mkdtempSync(join(realpathSync.native(tmpdir()), "lookover-run-"));
   cleanups.push(() => rmSync(home, { recursive: true, force: true }));
+  MIGRATED.copy(home);
   return home;
 }
 
@@ -97,6 +120,7 @@ const demo = (home: string, port = 0): Config => ({
   eventsKept: undefined,
   env: {},
   git: "git",
+  platform: "linux",
   frozen: FROZEN_AT,
   scenario: "S1",
 });
@@ -150,9 +174,9 @@ function deps(home: string, reach: "yes" | "no" = "no") {
   return { given, out, err, userOnly, program, loginItem, atLogin, onPath, path, skillFolders, ghAsked };
 }
 
-/** Waits until `exits` has an entry, or 5 s. */
+/** Waits until `exits` has an entry, or 5 s have passed: a time limit, however long each look takes. */
 async function exited(exits: number[]): Promise<void> {
-  for (let i = 0; i < 250 && exits.length === 0; i++) await Bun.sleep(20);
+  await waitUntil(() => exits.length > 0, 5_000);
 }
 
 test("runService starts demo mode, announces it, prints the URL to open, and stops on SIGTERM, exiting 0", async () => {
@@ -296,6 +320,7 @@ const program = (home: string, live?: LiveConfig, asOrganisation?: string): Conf
   eventsKept: undefined,
   env: {},
   git: "git",
+  platform: "linux",
   live,
   processes: join(home, "processes.json"),
   atLogin: AT_LOGIN,
@@ -315,7 +340,10 @@ const AT_LOGIN = ["C:\\bun.exe", "C:\\clone\\main.ts", "start", "--no-open"];
  * The program's adapters on the fake GitHub holding the sandbox and the ledger: the fake's App as given, or (`noApp`)
  * none yet, the App store on a fake keychain. They guard nothing themselves: the program's wiring must.
  */
-function onFakeHost(home: string, { noApp = false } = {}): NonNullable<ProgramDeps["liveAdapters"]> {
+function onFakeHost(
+  home: string,
+  { noApp = false, engines = fakeEngines() }: { noApp?: boolean; engines?: Engines } = {},
+): NonNullable<ProgramDeps["liveAdapters"]> {
   const host = new FakeGitHost({
     repo: SANDBOX,
     repositories: [LEDGER],
@@ -336,7 +364,7 @@ function onFakeHost(home: string, { noApp = false } = {}): NonNullable<ProgramDe
   };
   return async () => ({
     github: side,
-    engines: fakeEngines(),
+    engines,
     selfTests: null,
     signIn: { open: async () => ({ opened: false, reason: "no terminal in a test" }) },
     retrieval: new ScriptedRetrieval(),
@@ -410,7 +438,22 @@ test("the program without a live.json is unguarded: every repository the install
   expect(names(await stateOf(service, home))).toEqual(["sasensi/ledger", "sasensi/lookover-sandbox"]);
 });
 
-test("only the program without a live.json registers start at login on the machine: with one, a fake does", async () => {
+test("the program gives a missing AI's install command for the machine its configuration was read on", async () => {
+  const home = newHome();
+  const run = deps(home);
+  const engines = fakeEngines();
+  engines.setHealth("claude", { installed: false, version: null, signedIn: false });
+  const service = await runService(
+    { ...program(home), platform: "win32" },
+    { ...run.given, liveAdapters: onFakeHost(home, { engines }) },
+  );
+  cleanups.push(() => service.stop());
+  expect((await stateOf(service, home)).engines.claude.detail).toContain(
+    "irm https://claude.ai/install.ps1 | iex",
+  );
+});
+
+test("only the program without a live.json registers start at login on the machine: with one, nothing is registered", async () => {
   const bare = newHome();
   const run = deps(bare);
   const unguarded = await runService(program(bare), { ...run.given, liveAdapters: onFakeHost(bare) });
@@ -430,11 +473,22 @@ test("only the program without a live.json registers start at login on the machi
   cleanups.push(() => guarded.stop());
   expect(guardedRun.atLogin).toEqual([]);
   expect(guardedRun.onPath).toEqual([]);
-  // The fake's registration, in memory.
-  expect((await stateOf(guarded, home)).service).toMatchObject({ atLogin: "this", loginItem: "memory" });
+  // The stand-in registers nothing, the setup's end included, and says so as `lookover status` does (ADR 0070).
+  const finished = await fetch(`${guarded.origin}${API.commands}`, {
+    method: "POST",
+    headers: { cookie: sessionOf(home), origin: guarded.origin, "content-type": "application/json" },
+    body: JSON.stringify({ type: "setup.finish" }),
+  });
+  expect(finished.status).toBe(200);
+  expect((await stateOf(guarded, home)).service).toMatchObject({
+    startAtLogin: true,
+    atLogin: "none",
+    loginItem: "stand-in",
+  });
+  expect(await guardedRun.loginItem.held()).toBe("none");
   await guarded.stop();
 
-  // Live mode too: the UI says start at login isn't set up in development.
+  // Live mode too: nothing registered, and the UI says start at login isn't set up in development.
   const liveHome = newHome();
   const liveRun = deps(liveHome);
   const live = await runService(
@@ -448,6 +502,7 @@ test("only the program without a live.json registers start at login on the machi
       eventsKept: undefined,
       env: {},
       git: "git",
+      platform: "linux",
       live: { repositories: [SANDBOX] },
       processes: join(liveHome, "processes.json"),
     },
@@ -456,7 +511,7 @@ test("only the program without a live.json registers start at login on the machi
   cleanups.push(() => live.stop());
   expect(liveRun.atLogin).toEqual([]);
   expect(liveRun.onPath).toEqual([]);
-  expect((await stateOf(live, liveHome)).service).toMatchObject({ loginItem: "memory" });
+  expect((await stateOf(live, liveHome)).service).toMatchObject({ atLogin: "none", loginItem: "stand-in" });
 });
 
 test("the program without a live.json is wired to the real start at login, which refuses to run under bun test", async () => {
@@ -894,6 +949,7 @@ test("runService refuses live mode while another live run holds the lock: prints
     eventsKept: undefined,
     env: {},
     git: "git",
+    platform: "linux",
     live: { repositories: [{ owner: "sasensi", name: "lookover-sandbox" }] },
     processes: join(home, "processes"),
   };
@@ -990,7 +1046,11 @@ test("an uncaught error or rejection is written to the log, its secrets removed,
 
   run.program.fire("uncaughtException", new Error(`the cookie ${session} met the link ${token}`));
   run.program.fire("unhandledRejection", new Error(`refused: Authorization: Bearer ghs_${"a".repeat(36)}`));
-  expect(run.program.exits).toEqual([1, 1]);
+  // #453: a stack that lost its message, as Bun 1.4.2 sometimes formats it under load, is written with it.
+  const lost = new Error("No scenario S99.");
+  lost.stack = "Error\n    at scenarioOf (scenarios.ts:47:25)";
+  run.program.fire("unhandledRejection", lost);
+  expect(run.program.exits).toEqual([1, 1, 1]);
   const log = logOf(home);
   expect(log).toContain("the cookie [redacted] met the link [redacted]");
   expect(log).toContain("refused: Authorization: [redacted]");
@@ -1002,6 +1062,64 @@ test("an uncaught error or rejection is written to the log, its secrets removed,
   // Printed too, as the file keeps it, with where it was thrown.
   expect(run.err.join("\n")).toContain("the cookie [redacted] met the link [redacted]");
   expect(log).toContain("run-service.test.ts");
+  expect(log).toContain("nothing caught: Error: No scenario S99.\n");
+  expect(log).toContain("at scenarioOf (scenarios.ts:47:25)");
+});
+
+/** An Error given this stack, as the engine sometimes formats it. */
+function withStack(message: string, stack: unknown): Error {
+  const error = new Error(message);
+  Object.defineProperty(error, "stack", { value: stack, configurable: true });
+  return error;
+}
+
+test("an uncaught error's line says its name and message once, then where it was thrown, whatever its stack holds", async () => {
+  const home = newHome();
+  const run = deps(home);
+  const service = await runService(demo(home), run.given);
+  cleanups.push(() => service.stop());
+  /** The line printed for `thrown`, from what follows "nothing caught: ". */
+  const lineOf = (thrown: unknown): string => {
+    run.program.fire("uncaughtException", thrown);
+    const line = run.err.at(-1) ?? "";
+    return line.slice(line.indexOf("nothing caught: ") + "nothing caught: ".length);
+  };
+
+  // A stack that starts with the error's name and message is written as it is.
+  expect(lineOf(withStack("the disk is full", "Error: the disk is full\n    at write (log.ts:3:9)"))).toBe(
+    "Error: the disk is full\n    at write (log.ts:3:9)",
+  );
+  // No message: its name, then its frames.
+  expect(lineOf(withStack("", "Error\n    at write (log.ts:3:9)"))).toBe("Error\n    at write (log.ts:3:9)");
+  // A name set after the error was made heads the line, the message once.
+  const renamed = withStack("no such scenario", "Error: no such scenario\n    at start (run.ts:9:1)");
+  renamed.name = "ScenarioError";
+  expect(lineOf(renamed)).toBe("ScenarioError: no such scenario\n    at start (run.ts:9:1)");
+  // A thrown value that is no Error, as text.
+  expect(lineOf("refused")).toBe("refused");
+  expect(lineOf(42)).toBe("42");
+  expect(lineOf(undefined)).toBe("undefined");
+  // No stack, or one that is no string: its name and message.
+  expect(lineOf(withStack("the disk is full", undefined))).toBe("Error: the disk is full");
+  expect(lineOf(withStack("the disk is full", 7))).toBe("Error: the disk is full");
+  // A stack that lost its message (#453): its head put back once, its frames kept.
+  expect(
+    lineOf(
+      withStack(
+        "No scenario S99.",
+        "Error\n    at scenarioOf (scenarios.ts:47:25)\n    at start (run.ts:9:1)",
+      ),
+    ),
+  ).toBe("Error: No scenario S99.\n    at scenarioOf (scenarios.ts:47:25)\n    at start (run.ts:9:1)");
+  // A name that can't be read as text: still its message.
+  const untold = withStack("the disk is full", "Error: the disk is full\n    at write (log.ts:3:9)");
+  Object.defineProperty(untold, "toString", {
+    value: () => {
+      throw new Error("no text");
+    },
+  });
+  expect(lineOf(untold)).toContain("the disk is full");
+  expect(run.program.exits).toEqual(Array(10).fill(1));
 });
 
 /** Makes the day's log file a folder: every later line's append throws, as on a full disk. */
@@ -1056,6 +1174,7 @@ test("in live mode GitHub's adapter is given the sink's secret: a value it regis
     eventsKept: undefined,
     env: {},
     git: "git",
+    platform: "linux",
     live: { repositories: [{ owner: "sasensi", name: "lookover-sandbox" }] },
     processes: join(home, "processes"),
   };

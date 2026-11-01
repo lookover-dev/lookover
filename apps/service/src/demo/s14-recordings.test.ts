@@ -2,14 +2,16 @@
 // the real `engines` module reads from the recording the scenario transcribes, run on the fake `claude` and `codex`.
 // Only the moments are the scenario's own, and Claude's `Read` path, which the recording gives in the recorder's
 // worktree, is written relative to it as a review's own worktree would give it.
-import { expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { join } from "node:path";
 import type { EngineActivity, EngineId } from "@lookover/contracts";
 import type { ClaudeRecording, CodexRecording } from "@lookover/testkit";
 import { scenarioOf } from "../index.ts";
-import { home, onFake, TEST_LIMIT_MS } from "../service.test-support.ts";
+import { home, onFake, stopAll, TEST_LIMIT_MS } from "../service.test-support.ts";
 
 setDefaultTimeout(TEST_LIMIT_MS);
+// The data folders the replays ran in go with the test.
+afterEach(stopAll);
 
 /** What `engine` reports on replaying its recording (the other engine's is never run), in order. */
 async function readFrom(

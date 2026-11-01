@@ -252,7 +252,7 @@
   color: var(--gh-muted);
 }
 .ts-gh code {
-  background: var(--gh-surface);
+  background: var(--gh-code-bg);
 }
 .ts-ghbar {
   display: flex;

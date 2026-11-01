@@ -1,10 +1,15 @@
 // The `lookover` program (`main.ts`): `--version`, and `serve` as `bun run proof` runs it: demo mode on a scenario with `--frozen=<ms>`, so two runs
-// serve the same facts and the shots of the app on the service are the same pixels every time (ADR 0046).
+// serve the same facts and the shots of the app on the service are the same pixels every time (ADR 0046). One real
+// program serves the file; the arguments `serve` refuses are read by the same `lookover` command in this process, its
+// service never started (ADR 0071: a test starts what it checks).
 import { afterAll, afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { API, changeId as asChangeId, jobId, type State } from "@lookover/contracts";
+import { waitUntil } from "@lookover/testkit";
+import { lookover, realSystem } from "./index.ts";
+import { NO_BACKGROUND } from "./service.test-support.ts";
 
 const MAIN = join(import.meta.dir, "main.ts");
 // Tuesday 6 October 2026, 08:52 UTC.
@@ -30,8 +35,30 @@ function home(): string {
   return made;
 }
 
-/** The program, started with `args` in a fresh data folder; its exit code and what it printed on stderr. */
+/**
+ * `lookover serve <args>` in a fresh data folder, as `main.ts` runs it on this machine, but in this process and with
+ * a service that is never started: its exit code and what it printed on stderr. Arguments it takes reach the service,
+ * which throws: a refusal is said before the lock is taken or GitHub called.
+ */
 async function refused(...args: string[]): Promise<{ code: number | null; stderr: string }> {
+  const err: string[] = [];
+  const code = await lookover(["serve", ...args, `--home=${home()}`], {
+    print: { out: () => {}, err: (line) => err.push(line) },
+    system: realSystem(),
+    self: { kind: "clone", bun: process.execPath, main: MAIN },
+    agent: async () => {
+      throw new Error("serve runs no agent verb");
+    },
+    serve: async () => {
+      throw new Error("The service was started: serve took the arguments it should refuse");
+    },
+    background: NO_BACKGROUND,
+  });
+  return { code, stderr: err.join("\n") };
+}
+
+/** The program, started with `args` in a fresh data folder; its exit code and what it printed on stderr. */
+async function refusedByProgram(...args: string[]): Promise<{ code: number | null; stderr: string }> {
   const proc = Bun.spawn([process.execPath, MAIN, "serve", ...args, `--home=${home()}`], {
     stdout: "ignore",
     stderr: "pipe",
@@ -71,8 +98,7 @@ async function start() {
     await proc.exited;
     rmSync(dir, { recursive: true, force: true });
   };
-  for (let i = 0; i < START_LIMIT_MS / 20 && !existsSync(announce) && proc.exitCode === null; i++)
-    await Bun.sleep(20);
+  await waitUntil(() => existsSync(announce) || proc.exitCode !== null, START_LIMIT_MS);
   if (!existsSync(announce)) {
     await stop();
     throw new Error(`The service did not start: ${await new Response(proc.stderr).text()}`);
@@ -108,7 +134,7 @@ test("the announce file appears whole: whoever waits for it never reads it empty
   expect(JSON.parse(readFileSync(announce, "utf8"))).toMatchObject({ openUrl: expect.any(String) });
   // The watcher's events arrive a moment after the file system's, later on a busy machine: wait for the
   // first, then a moment more, so that a "change" right behind it would be seen too.
-  for (let i = 0; i < START_LIMIT_MS / 20 && events.length === 0; i++) await Bun.sleep(20);
+  await waitUntil(() => events.length > 0, START_LIMIT_MS);
   expect(events.length).toBeGreaterThan(0);
   await Bun.sleep(200);
   expect(events).not.toContain("change");
@@ -136,17 +162,21 @@ test("--frozen stands the demo service's clock at that instant once S10's seed i
   // wall. The engines are checked at once, the new version is self-tested, and Codex shows it failed (ADR 0044).
   expect((await send({ type: "demo.inject", fault: "codex-failed-self-test" })).status).toBe(200);
   let state = await snapshot();
-  for (let i = 0; i < 300 && state.engines.codex.state !== "failed-self-test"; i++) {
-    await Bun.sleep(100);
-    state = await snapshot();
-  }
+  /** The snapshot read every 100 ms until Codex's state is `wanted`, for up to 30 s. */
+  const codexUntil = (wanted: string) =>
+    waitUntil(
+      async () => {
+        state = await snapshot();
+        return state.engines.codex.state === wanted;
+      },
+      30_000,
+      100,
+    );
+  await codexUntil("failed-self-test");
   expect(state.engines.codex).toMatchObject({ state: "failed-self-test", version: "0.163.0" });
   // "Codex is updated": the version after it passes.
   expect((await send({ type: "demo.inject", fault: "codex-updated" })).status).toBe(200);
-  for (let i = 0; i < 300 && state.engines.codex.state !== "ready"; i++) {
-    await Bun.sleep(100);
-    state = await snapshot();
-  }
+  await codexUntil("ready");
   expect(state.engines.codex).toMatchObject({ state: "ready", version: "0.164.0" });
 
   // The frozen clock is the demo clock standing still (ADR 0046): the drawer's `demo.advance` moves it, and the
@@ -163,7 +193,8 @@ test("--frozen and --scenario are for demo mode only, and a scenario must exist"
   const scenario = await refused("--live", "--scenario=S10");
   expect(scenario.code).not.toBe(0);
   expect(scenario.stderr).toContain("--scenario is for demo mode");
-  const unknown = await refused("--demo", "--scenario=S99");
+  // Known only once the program plays it: the real program, which says so and exits.
+  const unknown = await refusedByProgram("--demo", "--scenario=S99");
   expect(unknown.code).not.toBe(0);
   expect(unknown.stderr).toContain("No scenario S99");
 });

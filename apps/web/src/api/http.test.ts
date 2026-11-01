@@ -637,6 +637,8 @@ const SERVICE = resolve(import.meta.dir, "../../../service/src/main.ts");
 // (a dozen git commands) and checks the engines, under a second on an idle machine. A test against it is
 // given longer than the starts it waits for, or Bun's 5 s would cut a slow start short.
 const START_LIMIT_MS = 10_000;
+/** The events S10's seed sends: the default scenario's, which every start plays. */
+const S10_SEEDED = 68;
 const ONE_START_MS = START_LIMIT_MS + 5_000;
 const TWO_STARTS_MS = 2 * START_LIMIT_MS + 5_000;
 
@@ -680,8 +682,13 @@ async function startDemoService(
     if (options.home === undefined) cleanups.push(() => rmSync(home, { recursive: true, force: true }));
     cleanups.push(stop);
   }
-  for (let i = 0; i < START_LIMIT_MS / 20 && !existsSync(announce); i++) await Bun.sleep(20);
-  if (!existsSync(announce)) throw new Error("The service did not start");
+  // testkit's `waitUntil` everywhere else: the web app may import only contracts, its tests included (biome.jsonc).
+  const deadline = Date.now() + START_LIMIT_MS;
+  while (!existsSync(announce) && proc.exitCode === null && Date.now() < deadline) await Bun.sleep(20);
+  if (!existsSync(announce)) {
+    await stop();
+    throw new Error(`The service did not start within ${START_LIMIT_MS} ms`);
+  }
   const announced = JSON.parse(readFileSync(announce, "utf8"));
   const demo: Demo = { ...announced, home, stop };
   return demo;
@@ -747,12 +754,11 @@ async function openApp(demo: Demo): Promise<Fetch> {
 }
 
 /**
- * The file's demo services. A start is a program loading, planting the sandbox and checking the engines.
- * - `shared`: one service and one session for most of the real service's tests (the opened link works once),
- *   started as the file loads, while the small server's tests run. Kept 2 events, which the catch-up test relies
- *   on; the restart test, last, stops it.
- * - `ownDemo()`: the scenario load's alone, started the first time a test asks for it: a load moves the numbers
- *   the shared one's tests read.
+ * The file's one demo service (ADR 0071: one real service per file). A start is a program loading, planting the
+ * sandbox and checking the engines. One service and one session for every test against the real service (the opened
+ * link works once), started as the file loads, while the small server's tests run. Kept 2 events, which the catch-up
+ * test relies on. The tests run in the file's order: the ones that only read first, then the scenario load, which
+ * moves the numbers, then the restart, last, which stops it and starts it again on its data folder.
  */
 const shared = startDemoService({ eventsKept: 2, shared: true }).then(async (demo) => ({
   demo,
@@ -761,23 +767,14 @@ const shared = startDemoService({ eventsKept: 2, shared: true }).then(async (dem
 // A start that fails fails the test waiting for it, not the file as it loads.
 shared.catch(() => undefined);
 const sharedDemo = () => shared;
-/** The services the file started, stopped after its last test. */
-const started: Promise<Demo>[] = [shared.then(({ demo }) => demo)];
-let own: Promise<Demo> | undefined;
-function ownDemo(): Promise<Demo> {
-  if (own === undefined) {
-    own = startDemoService({ shared: true });
-    started.push(own);
-  }
-  return own;
-}
 afterAll(async () => {
-  for (const service of started) {
-    const demo = await service.catch(() => null);
-    if (demo === null) continue;
-    await demo.stop();
-    rmSync(demo.home, { recursive: true, force: true });
-  }
+  const demo = await shared.then(
+    (started) => started.demo,
+    () => null,
+  );
+  if (demo === null) return;
+  await demo.stop();
+  rmSync(demo.home, { recursive: true, force: true });
 });
 
 /**
@@ -814,7 +811,7 @@ test(
     // The demo wiring (ADR 0046): S10's seed, a quiet day, played before the first request: the start, the
     // repository, six pull requests opened and reviewed or skipped, main's rules read and counted, each round's
     // outbox as it posted, sixty-eight events.
-    expect(state.seq).toBe(68);
+    expect(state.seq).toBe(S10_SEEDED);
     expect(state.repos.map((r) => r.id)).toEqual([repositoryId("sasensi/lookover-sandbox")]);
     expect(Object.keys(state.changes).sort()).toEqual([
       "sasensi/lookover-sandbox#135",
@@ -923,9 +920,8 @@ test(
 test(
   "against the real service: a tab open when a scenario loads reloads, then follows the new room's events",
   async () => {
-    // Its own service: a load moves the numbers the shared one's tests read.
-    const demo = await ownDemo();
-    const withSession = await openApp(demo);
+    // After every test that reads the seed's numbers: a load moves them on.
+    const { demo, withSession } = await sharedDemo();
     const api = new HttpApi({
       base: demo.origin,
       fetch: withSession,
@@ -981,8 +977,8 @@ test(
     });
     const seen: Event[] = [];
     cleanups.push(api.subscribe((e) => seen.push(e)));
+    // Wherever the tests before left the numbers: the restart's claim is counted from here.
     const before = await api.snapshot();
-    expect(before.seq).toBe(68);
 
     tab.set(true);
     await first.stop();
@@ -996,8 +992,9 @@ test(
     const after = seen[0];
     if (after?.type !== "state.replaced") throw new Error(`Expected a replaced state, got ${after?.type}`);
     // The restart plays the scenario again in a new room, numbered on from the first one's last event (ADR
-    // 0046), so the tab reloads rather than mixing two stories; what the start fixed moved with it.
-    expect(after.seq).toBe(136);
+    // 0046), so the tab reloads rather than mixing two stories; what the start fixed moved with it. S10's sixty-eight
+    // events, on from the last number the tab had.
+    expect(after.seq).toBe(before.seq + S10_SEEDED);
     expect(after.state.service.since).toBeGreaterThanOrEqual(before.service.since);
     expect(Object.keys(after.state.changes).sort()).toEqual(Object.keys(before.changes).sort());
   },

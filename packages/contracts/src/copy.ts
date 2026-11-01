@@ -10,7 +10,7 @@
 // `Record` over its union: a new value fails the typecheck.
 import type { ConfirmFailure } from "./confirm.ts";
 import type { EngineId } from "./engine.ts";
-import type { EngineUnusable } from "./engines-port.ts";
+import type { EngineHealth, EngineUnusable } from "./engines-port.ts";
 import type { GhRefusal } from "./gh.ts";
 import type { CreateAppRefusal } from "./github-app.ts";
 import type { TransientHostFailure } from "./host.ts";
@@ -84,10 +84,44 @@ export function engineHealthText(why: EngineUnusable, engine: EngineId): string 
     case "signed-in-otherwise":
       return `${ENGINE[engine]} is signed in with ${why.how}. Lookover uses your ChatGPT plan only: sign in with ChatGPT.`;
     case "npm-launcher":
-      return `Only npm's ${engine} launcher was found, and it runs ${ENGINE[engine]} through Node. Install the native ${engine} program, then check again.`;
+      // npm's launcher is looked for on Windows only (the `engines` module's `claudeNpmLauncher`).
+      return npmLauncherText(engine, "win32");
     case "too-old":
       return `${why.model} needs ${ENGINE[engine]} ${why.needs} or later; this one is ${why.version}. Update it, then check again: npm install -g @openai/codex@latest`;
   }
+}
+
+/**
+ * What installs an engine's native program on `platform` (Node's name for it, `process.platform`: "win32" is
+ * Windows), after "Install it" or "Install the native claude program" (ADR 0070): Claude's own installer, which puts
+ * `claude` where Lookover looks and never npm's launcher it refuses; npm for Codex, everywhere.
+ */
+function installText(engine: EngineId, platform: string): string {
+  if (engine === "codex") return ", then check again: npm install -g @openai/codex";
+  return platform === "win32"
+    ? " in PowerShell, then check again: irm https://claude.ai/install.ps1 | iex"
+    : ", then check again: curl -fsSL https://claude.ai/install.sh | bash";
+}
+
+function npmLauncherText(engine: EngineId, platform: string): string {
+  return `Only npm's ${engine} launcher was found, and it runs ${ENGINE[engine]} through Node. Install the native ${engine} program${installText(engine, platform)}`;
+}
+
+/**
+ * An engine's detail as the status menu and the setup say it, from its health, on `platform` (Node's name for it):
+ * why it can't be used, with this machine's command to install it when its program wasn't found (ADR 0070), or
+ * nothing.
+ */
+export function engineDetailText(
+  engine: EngineId,
+  health: Pick<EngineHealth, "installed" | "why">,
+  platform: string,
+): string {
+  if (health.why?.kind === "npm-launcher") return npmLauncherText(engine, platform);
+  if (health.why !== undefined) return engineHealthText(health.why, engine);
+  return health.installed
+    ? ""
+    : `The ${engine} program was not found on this computer. Install it${installText(engine, platform)}`;
 }
 
 /** Why an engine found can't be used, as a phrase: "Codex 0.161.0 is too old for gpt-6.1-sol". */

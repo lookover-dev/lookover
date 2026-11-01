@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { appStylesheet, EYES_MODULE, eyesModule, STYLESHEET } from "./app.ts";
 import { ROOT } from "./checkout.ts";
+import { biome, type Formatter } from "./format.ts";
 import { icon } from "./icon.ts";
 import { COLOURS } from "./numbers.ts";
 import { SHEET, sheet } from "./sheet.ts";
@@ -11,9 +12,17 @@ import { wordmark } from "./wordmark.ts";
 
 /**
  * A copy: its path from the checkout's root, and its text as the source renders it. `render` is given the copy's
- * text on disk ("" when it is missing), so a copy that is only partly generated keeps its hand-written rest.
+ * text on disk ("" when it is missing), so a copy that is only partly generated keeps its hand-written rest, and
+ * the formatter the copies Biome formats go through.
  */
-export type Copy = { path: string; render: (current: string) => string };
+export type Copy = { path: string; render: (current: string, format: Formatter) => string | Promise<string> };
+
+/** Where the copies are written or checked, and how those Biome formats are formatted. */
+export type CopiesOptions = {
+  /** Biome's unless given: a test gives one that runs in its own process. */
+  format?: Formatter;
+  copies?: readonly Copy[];
+};
 
 const { ink, paper, accent } = COLOURS;
 const BRAND = "docs/product/brand";
@@ -32,7 +41,7 @@ export const COPIES: readonly Copy[] = [
   { path: `${BRAND}/lookover-mark-on-dark.svg`, render: () => icon(null, paper, accent, true) },
   { path: `${BRAND}/lookover-favicon.svg`, render: () => icon(ink, paper, accent, true) },
   { path: "apps/web/public/favicon.svg", render: () => icon(ink, paper, accent, true) },
-  { path: EYES_MODULE, render: eyesModule },
+  { path: EYES_MODULE, render: (_, format) => eyesModule(format) },
   { path: STYLESHEET, render: appStylesheet },
   { path: SHEET, render: sheet },
   { path: SITE_FAVICON, render: siteIcon },
@@ -41,8 +50,8 @@ export const COPIES: readonly Copy[] = [
     path: "apps/site/public/brand/lookover-wordmark-on-dark.svg",
     render: () => wordmark(paper, accent, true),
   },
-  { path: SITE_MODULE, render: siteModule },
-  { path: SITE_STYLESHEET, render: siteStylesheet },
+  { path: SITE_MODULE, render: (_, format) => siteModule(format) },
+  { path: SITE_STYLESHEET, render: (_, format) => siteStylesheet(format) },
 ];
 
 const lf = (text: string) => text.replaceAll("\r\n", "\n");
@@ -58,13 +67,25 @@ const onDisk = (root: string, copy: Copy) => {
   return existsSync(file) ? readFileSync(file, "utf8") : undefined;
 };
 
-/** Writes every copy that belongs in `root` (this checkout unless a test names another) as the source renders it. */
-export function writeCopies(root: string = ROOT, copies: readonly Copy[] = COPIES): string[] {
-  return copiesIn(root, copies).map((copy) => {
-    const file = join(root, copy.path);
+/**
+ * Writes every copy that belongs in `root` (this checkout unless a test names another) as the source renders it,
+ * each rendered from what is on disk before any is written, then names them in order.
+ */
+export async function writeCopies(
+  root: string = ROOT,
+  { format = biome, copies = COPIES }: CopiesOptions = {},
+): Promise<string[]> {
+  const rendered = await Promise.all(
+    copiesIn(root, copies).map(async (copy) => ({
+      path: copy.path,
+      text: await copy.render(lf(onDisk(root, copy) ?? ""), format),
+    })),
+  );
+  return rendered.map(({ path, text }) => {
+    const file = join(root, path);
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, copy.render(lf(onDisk(root, copy) ?? "")));
-    return copy.path;
+    writeFileSync(file, text);
+    return path;
   });
 }
 
@@ -72,13 +93,19 @@ export function writeCopies(root: string = ROOT, copies: readonly Copy[] = COPIE
  * One line per copy in `root` that is not what the source renders (line endings aside, for a checkout with CRLF),
  * naming it and saying to run `bun run brand`; none when every copy is.
  */
-export function driftedCopies(root: string = ROOT, copies: readonly Copy[] = COPIES): string[] {
-  return copiesIn(root, copies).flatMap((copy) => {
-    const text = onDisk(root, copy);
-    if (text === undefined) return [`${copy.path} is missing: run \`bun run brand\`.`];
-    const current = lf(text);
-    return current === lf(copy.render(current))
-      ? []
-      : [`${copy.path} is not what the source draws: run \`bun run brand\`.`];
-  });
+export async function driftedCopies(
+  root: string = ROOT,
+  { format = biome, copies = COPIES }: CopiesOptions = {},
+): Promise<string[]> {
+  const lines = await Promise.all(
+    copiesIn(root, copies).map(async (copy) => {
+      const text = onDisk(root, copy);
+      if (text === undefined) return [`${copy.path} is missing: run \`bun run brand\`.`];
+      const current = lf(text);
+      return current === lf(await copy.render(current, format))
+        ? []
+        : [`${copy.path} is not what the source draws: run \`bun run brand\`.`];
+    }),
+  );
+  return lines.flat();
 }

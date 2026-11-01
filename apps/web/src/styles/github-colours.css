@@ -5,6 +5,7 @@
 .gh {
   --gh-bg: #0d1117;
   --gh-surface: #151b23;
+  --gh-code-bg: #656c7633;
   --gh-border: #3d444d;
   --gh-text: #f0f6fc;
   --gh-muted: #9198a1;
@@ -16,6 +17,7 @@
 :root[data-theme="light"] .gh {
   --gh-bg: #ffffff;
   --gh-surface: #f6f8fa;
+  --gh-code-bg: #818b981f;
   --gh-border: #d1d9e0;
   --gh-text: #1f2328;
   --gh-muted: #59636e;

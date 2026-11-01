@@ -86,7 +86,8 @@ test("a run's folder is kept 30 days, and goes at the day's prune after them", a
   await first.time.advance(29.5 * DAY_MS);
   await start({ home: dir, host: first.host, time: first.time, idsFrom: 100, changes: [pr1] });
   expect(existsSync(run)).toBe(true);
-  await first.time.advance(DAY_MS - 1);
+  // To a millisecond before the day's prune, each timer firing at least once on the way, not every poll of the day.
+  await first.time.jump(DAY_MS - 1);
   expect(existsSync(run)).toBe(true);
   await first.time.advance(1);
   expect(existsSync(run)).toBe(false);

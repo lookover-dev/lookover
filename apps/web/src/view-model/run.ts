@@ -9,7 +9,7 @@ import {
   type RunPosting,
   type RunStep,
 } from "@lookover/contracts";
-import { elapsed, startsAt } from "./format.ts";
+import { duration, startsAt } from "./format.ts";
 
 const RUN_STEPS: RunStep[] = ["preparing", "finding", "confirming", "publishing"];
 
@@ -100,8 +100,8 @@ export function confirmerOf(review: Review): EngineId | null {
 export function stepTime(review: Review, step: RunStep, now: number): string {
   const { run } = review;
   const done = (run ? run.steps : review.rounds.at(-1)?.steps)?.find((s) => s.step === step);
-  if (done) return elapsed(done.ms);
-  return run?.step === step ? elapsed(now - run.stepAt) : "";
+  if (done) return duration(done.ms);
+  return run?.step === step ? duration(now - run.stepAt) : "";
 }
 
 /** A run line's two parts: the running step, and how long the run has taken (a running time, design system). */
@@ -113,11 +113,11 @@ export interface RunLineParts {
 export function runLineParts(now: number, review: Review): RunLineParts {
   return {
     doing: stepNow(review.run?.step ?? "preparing"),
-    time: elapsed(now - (review.run?.startedAt ?? now)),
+    time: duration(now - (review.run?.startedAt ?? now)),
   };
 }
 
-/** "reading the code · 1:12": the running step, and how long the run has taken. */
+/** "reading the code · 1 min 12 s": the running step, and how long the run has taken. */
 export function runLine(now: number, review: Review): string {
   const { doing, time } = runLineParts(now, review);
   return `${doing} · ${time}`;

@@ -1,11 +1,11 @@
 // Start at login, in words (ADR 0054). Three facts: the owner's choice (`startAtLogin`, on until they turn it off),
 // who holds the registration (`atLogin`: this install, none, or another install, ADR 0068) and where (`loginItem`): on
-// the machine (the program, and demo mode, which plays it), or in memory (live mode and a guarded program), where
-// nothing starts at login and the app says start at login isn't set up in development. The status and Settings say
-// the registration, never the choice alone; when the two differ (the machine refused to change it), they say so, and
-// the alert band carries the fix (`problems`). Another install holding it is no mismatch: no band; the status menu
-// and Settings name its command (`takenBy`), and while it is on, Settings offers "Start this one instead"
-// (`offersStartThisOne`, ADR 0068).
+// the machine (the program, and demo mode, which plays it), or a stand-in (live mode and a guarded program), which
+// registers nothing (ADR 0070): nothing starts at login and the app says start at login isn't set up in development.
+// The status and Settings say the registration, never the choice alone; when the two differ (the machine refused to
+// change it), they say so, and the alert band carries the fix (`problems`). Another install holding it is no mismatch:
+// no band; the status menu and Settings name its command (`takenBy`), and while it is on, Settings offers "Start this
+// one instead" (`offersStartThisOne`, ADR 0068).
 import type { Service } from "@lookover/contracts";
 import type { WebMode } from "../dev/mode.ts";
 import type { WithCommand } from "./format.ts";
@@ -39,7 +39,7 @@ export const atLoginMismatch = (s: Registration): boolean =>
  * machine.
  */
 export function takenBy(s: Registration): string | null {
-  if (s.loginItem === "memory" || typeof s.atLogin === "string") return null;
+  if (s.loginItem === "stand-in" || typeof s.atLogin === "string") return null;
   return s.atLogin.other;
 }
 
@@ -57,7 +57,7 @@ export const offersStartThisOne = (s: Registration): boolean => s.startAtLogin &
  * Another install holding it is said, never warned: a test copy is always so and needs nothing (ADR 0068).
  */
 export function atLoginStatus(s: Registration): { ok: boolean; text: string } {
-  if (s.loginItem === "memory") return { ok: true, text: NOT_SET_UP };
+  if (s.loginItem === "stand-in") return { ok: true, text: NOT_SET_UP };
   if (s.atLogin === "this")
     return { ok: s.startAtLogin, text: s.startAtLogin ? "starts at login" : "still starts at login" };
   if (s.startAtLogin && takenBy(s) !== null) return { ok: true, text: "another Lookover starts at login" };
@@ -81,7 +81,7 @@ const capital = (text: string): string => text.charAt(0).toUpperCase() + text.sl
 
 /** Settings' help under "Start at login": why, then what happens at the next login. */
 export function startAtLoginHelp(s: AtLogin, mode: WebMode): string | WithCommand {
-  if (s.loginItem === "memory")
+  if (s.loginItem === "stand-in")
     return `${WHY} Start at login isn't set up in development: your choice is kept, and nothing starts when you log in.`;
   const { startAtLogin } = s;
   const startsAtLogin = s.atLogin === "this";
@@ -117,7 +117,7 @@ export function backgroundLine(
   s: Pick<AtLogin, "startAtLogin" | "atLogin" | "loginItem" | "command">,
   mode: WebMode,
 ): string | WithCommand {
-  if (s.loginItem === "memory")
+  if (s.loginItem === "stand-in")
     return "Start at login isn't set up in development: nothing starts when you log in.";
   const other = takenBy(s);
   if (s.startAtLogin && other !== null)

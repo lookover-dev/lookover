@@ -4,8 +4,9 @@
 // autostart entry on Linux, those two unproven like the sign-in terminal (ADR 0047). The registration belongs to the
 // install whose command it holds: this one, none, or another install (a clone moved, another data folder, a swapped
 // binary), named by the command it holds. Another install's is never removed, and replaced only when asked to take it
-// over. The fake keeps the registration in memory, for demo mode, live mode, a guarded program and the tests: the
-// loop never registers anything on the owner's machine (ADR 0045). The real ones (`osLoginItem`, and
+// over. The fake keeps the registration in memory, for demo mode (which plays the machine on it) and the tests; live
+// mode and a guarded program have a stand-in that registers nothing and answers "none", as `lookover status` does
+// (ADR 0070): the loop never registers anything on the owner's machine (ADR 0045). The real ones (`osLoginItem`, and
 // `windowsLoginItem` on the real `reg.exe`) refuse to be built under `bun test`, but for `bun run live`'s check of the
 // Windows one on a `lookover-dev-` value of its own; the macOS and Linux ones write in the home they are given, a
 // test's scratch folder or, through `osLoginItem`, the user's.
@@ -24,9 +25,10 @@ export interface LoginItem {
   held(): Promise<LoginHolder>;
   /**
    * Registers the command, unless another install holds the registration and `takeOver` isn't asked: that one is
-   * left as it is. Answers who holds it after. Rejects with why the machine refused.
+   * left as it is. Answers who holds it after: never none, but on the stand-in, which registers nothing. Rejects with
+   * why the machine refused.
    */
-  register(o?: { takeOver?: boolean }): Promise<Exclude<LoginHolder, "none">>;
+  register(o?: { takeOver?: boolean }): Promise<LoginHolder>;
   /** Removes this install's registration; nothing when there is none or another install's. Rejects with why the machine refused. */
   unregister(): Promise<void>;
 }
@@ -73,6 +75,18 @@ export function memoryLoginItem(): MemoryLoginItem {
     holdOther: (command) => {
       value = command;
     },
+  };
+}
+
+/**
+ * The stand-in, for live mode and a guarded program (ADR 0070): it registers nothing, removes nothing and answers that
+ * none holds the registration, so the snapshot says what `lookover status` says.
+ */
+export function nowhereLoginItem(): LoginItem {
+  return {
+    held: () => Promise.resolve("none"),
+    register: () => Promise.resolve("none"),
+    unregister: () => Promise.resolve(),
   };
 }
 

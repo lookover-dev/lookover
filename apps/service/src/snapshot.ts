@@ -22,7 +22,7 @@ import {
   type EngineState,
   type Event,
   type EventBody,
-  engineHealthText,
+  engineDetailText,
   engineName,
   type HostLogin,
   type LoginHolder,
@@ -75,6 +75,8 @@ export interface Facts {
   atLogin: LoginHolder;
   /** Where that registration is: the machine's, or development's in memory (ADR 0054). */
   loginItem: LoginItemKind;
+  /** The machine the commands the app gives are for (an AI's install, ADR 0070), as Node names it. */
+  platform: NodeJS.Platform;
   /**
    * Whether the UI reaches this service from another device, so a session starts view-only until unlocked. Only a
    * demo scenario's world says so (S11): no service is reached from elsewhere until a server mode exists.
@@ -160,11 +162,6 @@ export function engineStateOf(health: EngineHealth): EngineState {
   return !health.installed ? "missing" : health.signedIn ? "ready" : "signed-out";
 }
 
-/** The engine's detail as the status menu says it, from its health: why it can't be used, or nothing. */
-export function engineDetailOf(id: EngineId, health: EngineHealth): string {
-  return health.why === undefined ? "" : engineHealthText(health.why, id);
-}
-
 /** What the queue and the run read of an open change: the inbox's, never the UI's state (#64). */
 export type ChangeFacts = Pick<
   Change,
@@ -243,14 +240,19 @@ export function settingsOf(repo: Repository): SettingsInForce {
   return { enabled: repo.enabled, values: settingValues(repo.settings) };
 }
 
-function engineOf(id: EngineId, { health, state }: Facts["engines"][EngineId], since: number): Engine {
+function engineOf(
+  id: EngineId,
+  { health, state }: Facts["engines"][EngineId],
+  since: number,
+  platform: NodeJS.Platform,
+): Engine {
   return {
     id,
     name: engineName(id),
     cli: id,
     version: health.version,
     state,
-    detail: engineDetailOf(id, health),
+    detail: engineDetailText(id, health, platform),
     unusable: health.why ?? null,
     since,
     limitUntil: null,
@@ -290,8 +292,8 @@ function base(f: Facts): State {
     now: f.now,
     setup: f.setup,
     engines: {
-      claude: engineOf("claude", f.engines.claude, f.startedAt),
-      codex: engineOf("codex", f.engines.codex, f.startedAt),
+      claude: engineOf("claude", f.engines.claude, f.startedAt, f.platform),
+      codex: engineOf("codex", f.engines.codex, f.startedAt, f.platform),
     },
     connection: connectionOf(f),
     service: {

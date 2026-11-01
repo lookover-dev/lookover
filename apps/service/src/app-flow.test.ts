@@ -702,27 +702,37 @@ test("an organisation gh doesn't list as the person's to admin is refused, as is
   }
 });
 
-/** The owner's `gh`, its organisations held until `answer` is called: "Create it on GitHub" waits on it meanwhile. */
+/**
+ * The owner's `gh`, each read of its organisations held until `answer` is called for it: "Create it on GitHub" waits
+ * on it meanwhile. `answer` lets the read under way go, or the next one when none is.
+ */
 function slowGh() {
-  const { gh, asked } = ownersGh();
-  let answer = () => {};
-  const held = new Promise<void>((resolve) => {
-    answer = resolve;
-  });
+  const { gh } = ownersGh();
+  const held: (() => void)[] = [];
+  let answeredAhead = 0;
+  let onAsk: (() => void) | null = null;
   const slow: Gh = {
     person: () => gh.person(),
     memberships: async () => {
-      asked.push("memberships");
-      await held;
+      onAsk?.();
+      onAsk = null;
+      if (answeredAhead > 0) answeredAhead--;
+      else await new Promise<void>((resolve) => held.push(resolve));
       return gh.memberships();
     },
     membership: (organisation) => gh.membership(organisation),
   };
-  /** Until gh is being asked for the organisations. */
-  const asking = async () => {
-    while (!asked.includes("memberships")) await Bun.sleep(1);
+  const answer = () => {
+    const go = held.shift();
+    if (go === undefined) answeredAhead++;
+    else go();
   };
-  return { slow, answer, asking };
+  /** The next read of the organisations from now on, never one already made: taken before the command is sent. */
+  const nextAsk = () =>
+    new Promise<void>((resolve) => {
+      onAsk = resolve;
+    });
+  return { slow, answer, nextAsk };
 }
 
 test("the page opened while gh is read for the organisation chosen waits for it, then posts there or refuses", async () => {
@@ -734,17 +744,19 @@ test("the page opened while gh is read for the organisation chosen waits for it,
     ["acme before, refused", "acme", "teammates", null],
   ];
   for (const [name, before, organisation, posted] of cases) {
-    const { slow, answer, asking } = slowGh();
+    const { slow, answer, nextAsk } = slowGh();
     const door = await newOwner({ time, host: acmeWithNoApp(time), gh: slow });
     if (before !== null) {
       answer();
       await post(door.service, door.cookie, { type: "connection.createApp", organisation: before });
     }
+    const asking = nextAsk();
     const chosen = post(door.service, door.cookie, { type: "connection.createApp", organisation });
-    await asking();
-    // The screen opens the page as it sends the command: the page comes while gh is still being read.
+    await asking;
+    // The screen opens the page as it sends the command: the page comes while gh is still being read, and waits.
     const opening = manifestPage(door);
-    await Bun.sleep(20);
+    const served = await Promise.race([opening.then(() => "served"), Bun.sleep(20).then(() => "waiting")]);
+    expect([name, served]).toEqual([name, "waiting"]);
     answer();
     await chosen;
     const page = await opening;
@@ -758,10 +770,11 @@ test("the page opened while gh is read for the organisation chosen waits for it,
 
 test("the last Create it on GitHub wins: your own account chosen while gh is read for an organisation, the page goes to yours", async () => {
   const time = new DemoClock({ at: T0 });
-  const { slow, answer, asking } = slowGh();
+  const { slow, answer, nextAsk } = slowGh();
   const door = await newOwner({ time, host: acmeWithNoApp(time), gh: slow });
+  const asking = nextAsk();
   const acme = post(door.service, door.cookie, { type: "connection.createApp", organisation: "acme" });
-  await asking();
+  await asking;
   const yours = await post(door.service, door.cookie, { type: "connection.createApp", organisation: null });
   expect(yours.status).toBe(200);
   answer();

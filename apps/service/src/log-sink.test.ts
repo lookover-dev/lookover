@@ -1,6 +1,7 @@
 // The log file (ADR 0054, "Logs"; exploration 09 J1, J2): one file a day under `<home>/logs`, the old ones removed,
 // the folders user-only, and every line through the one filter that removes secrets, on a clock the test holds.
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import {
   existsSync,
   mkdirSync,
@@ -15,6 +16,7 @@ import {
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { openLogSink } from "./index.ts";
+import { TEST_LIMIT_MS } from "./service.test-support.ts";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -296,25 +298,31 @@ function accessOf(path: string): string[] {
     .filter((line) => line !== "");
 }
 
-test("for real, the data folder and its logs folder are left to the user alone, and so is the day's file", async () => {
-  const home = newHome();
-  const sink = await openLogSink({ home, clock: { now: () => AT } });
-  sink.write("a line");
-  const file = join(home, "logs", "lookover-2026-10-11.log");
-  if (process.platform !== "win32") {
-    expect(statSync(home).mode & 0o777).toBe(0o700);
-    expect(statSync(join(home, "logs")).mode & 0o777).toBe(0o700);
-    return;
-  }
-  const me = userInfo().username.toLowerCase();
-  // One entry each, not inherited and passed on to what the folder holds: the user (`DOMAIN\user`), full control.
-  for (const folder of [home, join(home, "logs")])
-    expect(accessOf(folder)).toEqual([
-      expect.stringMatching(new RegExp(`\\\\${me}:\\(oi\\)\\(ci\\)\\(f\\)$`)),
-    ]);
-  // The day's file holds the one entry its folder passed on.
-  expect(accessOf(file)).toEqual([expect.stringMatching(new RegExp(`\\\\${me}:\\(i\\)\\(f\\)$`))]);
-});
+test(
+  "for real, the data folder and its logs folder are left to the user alone, and so is the day's file",
+  async () => {
+    const home = newHome();
+    const sink = await openLogSink({ home, clock: { now: () => AT } });
+    sink.write("a line");
+    const file = join(home, "logs", "lookover-2026-10-11.log");
+    if (process.platform !== "win32") {
+      expect(statSync(home).mode & 0o777).toBe(0o700);
+      expect(statSync(join(home, "logs")).mode & 0o777).toBe(0o700);
+      return;
+    }
+    const me = userInfo().username.toLowerCase();
+    // One entry each, not inherited and passed on to what the folder holds: the user (`DOMAIN\user`), full control.
+    for (const folder of [home, join(home, "logs")])
+      expect(accessOf(folder)).toEqual([
+        expect.stringMatching(new RegExp(`\\\\${me}:\\(oi\\)\\(ci\\)\\(f\\)$`)),
+      ]);
+    // The day's file holds the one entry its folder passed on.
+    expect(accessOf(file)).toEqual([expect.stringMatching(new RegExp(`\\\\${me}:\\(i\\)\\(f\\)$`))]);
+    // On Windows it waits on real processes, which are its subject: `whoami` and `icacls` to leave the folders to the
+    // user, then `icacls` to read them back, six in all; past Bun's 5 s beside the whole suite on a busy machine.
+  },
+  TEST_LIMIT_MS,
+);
 
 test("each subscriber gets every line the file gains, filtered and stamped as the file keeps it, until it leaves (ADR 0055)", async () => {
   const home = newHome();
@@ -362,19 +370,32 @@ test("the tail is empty with no file yet, and today's alone when yesterday has n
   expect(sink.tail().map((line) => line.slice(line.indexOf(" ") + 1))).toEqual(["the first line"]);
 });
 
-test("the tail of a day's file of many megabytes is its last 200 lines, read from its end, yesterday's left unread", async () => {
+test("the tail of a day's file of megabytes is its last 200 lines, read from its end, yesterday's left unread", async () => {
   const home = newHome();
   const { sink } = await sinkOn(home, () => AT);
   const logs = join(home, "logs");
-  // Characters of two and three bytes, so the edges of what is read at a time cut some of them.
+  // Characters of two and three bytes, so the edges of what is read at a time cut some of them; the tail is about a
+  // seventh of the file, and spans several of those reads.
   const big = Array.from(
-    { length: 100_000 },
+    { length: 2_000 },
     (_, n) => `2026-10-11T09:00:00.000+02:00 line ${n} été ${"✓".repeat(n % 700)}`,
   );
-  writeFileSync(join(logs, "lookover-2026-10-11.log"), big.map((line) => `${line}\n`).join(""));
+  const text = big.map((line) => `${line}\n`).join("");
+  writeFileSync(join(logs, "lookover-2026-10-11.log"), text);
   // Yesterday's is a folder: read, it would throw.
   mkdirSync(join(logs, "lookover-2026-10-10.log"));
-  expect(sink.tail()).toEqual(big.slice(-200));
+  // The bytes the sink reads, as `node:fs` counts them: the tail's and less than one 64 KB read more, not the file's.
+  const reads = spyOn(fs, "readSync");
+  try {
+    expect(sink.tail()).toEqual(big.slice(-200));
+    const read = reads.mock.results.reduce((sum, r) => sum + (r.type === "return" ? Number(r.value) : 0), 0);
+    const tailBytes = Buffer.byteLength(big.slice(-200).join("\n"));
+    expect(read).toBeGreaterThanOrEqual(tailBytes);
+    expect(read).toBeLessThan(tailBytes + 64 * 1024);
+    expect(read).toBeLessThan(Buffer.byteLength(text) / 4);
+  } finally {
+    reads.mockRestore();
+  }
 });
 
 test("yesterday's file tops the tail up with only the lines today's lacks, read from its end too", async () => {

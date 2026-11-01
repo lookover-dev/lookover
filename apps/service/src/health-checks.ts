@@ -15,10 +15,10 @@ export async function freeGbOf(dir: string): Promise<number> {
   return Math.floor((bavail * bsize) / 1e9);
 }
 
-/** One engine's item: its state, program and version as the UI shows them. */
+/** One engine's item: its state, program, version and detail as the UI shows them. */
 const engineItem = (engines: State["engines"], id: EngineId): CheckItem => {
-  const { state, cli, version, unusable } = engines[id];
-  return { check: "engine", engine: id, state, cli, version, unusable };
+  const { state, cli, version, unusable, detail } = engines[id];
+  return { check: "engine", engine: id, state, cli, version, unusable, detail };
 };
 
 /**

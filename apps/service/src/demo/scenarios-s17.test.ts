@@ -4,9 +4,9 @@
 // page offers each account its way: Install where they own it, Request where they are a member.
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { githubLinks, type State } from "@lookover/contracts";
-import { scenarioOf } from "../index.ts";
 import { eventually, TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
+  brief,
   following,
   inject,
   load,
@@ -22,7 +22,8 @@ setDefaultTimeout(TEST_LIMIT_MS);
 
 let door: Awaited<ReturnType<typeof startScenario>>;
 beforeAll(async () => {
-  door = await startScenario(scenarioOf("S10"));
+  // The door the scenarios load through: S10's world on its first five minutes, the story behind it unused.
+  door = await startScenario(brief());
 });
 afterAll(stopAll);
 

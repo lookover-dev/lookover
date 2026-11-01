@@ -22,6 +22,7 @@ import {
   codeToast,
   GITHUB_SETTINGS_TEXT,
   githubSettings,
+  OWN_APP_LINK,
   SIGN_IN_TEXT,
   signInEnd,
   signInStep,
@@ -455,8 +456,100 @@ test("Settings › GitHub signed out of the shared App: said, Sign in again offe
   expect(view.list.rows).toEqual([]);
 });
 
-test("Settings › GitHub on your own App, or before either way: the App's line, as before", () => {
-  expect(settings(at("start"))).toEqual({ way: "own", text: "No App yet." });
-  const own = settings(at("done", { way: "own" }));
-  expect(own.way).toBe("own");
+test("Settings › GitHub before either way: no App, no link, nothing to open", () => {
+  expect(settings(at("start"))).toEqual({
+    way: "own",
+    text: "No App yet.",
+    held: ["No App yet."],
+    link: null,
+    newKey: false,
+  });
+});
+
+// ---- Settings › GitHub on your own App: a refused or lost key's fix (ADR 0070) ----
+
+/** Your own App on your personal account, connected. */
+const OWN_APP = {
+  id: 424242,
+  slug: "lookover-q7x2ka",
+  account: { id: 7, login: "sam", type: "User" },
+  person: { id: 7, login: "sam" },
+} as const;
+const APP_LINE =
+  "lookover-q7x2ka, on your GitHub account. Pull requests opened by you or your agents are reviewed.";
+const APP_PAGE = "https://github.com/settings/apps/lookover-q7x2ka";
+const own = (connection: Partial<Connection> = {}, app: Connection["app"] = OWN_APP) =>
+  settings(at("done", { way: "own", state: "connected", app, ...connection }));
+const refused = (cause: Connection["cause"], app: Connection["app"] = OWN_APP) =>
+  own({ state: "disconnected", cause }, app);
+
+test("Settings › GitHub on your own App: its line and Open on GitHub, the key's form closed", () => {
+  expect(own()).toMatchObject({
+    way: "own",
+    text: APP_LINE,
+    link: { href: APP_PAGE, shown: "open" },
+    newKey: false,
+  });
+  expect(OWN_APP_LINK).toEqual({ open: "Open on GitHub", newKey: "Add a new key" });
+});
+
+test("a refused or lost key: Settings says it in the band's words, with Add a new key, the key's form open", () => {
+  const cases: [Connection["cause"], string][] = [
+    [
+      { kind: "key-refused", why: "revoked" },
+      "The key was revoked on GitHub. Add a new key, then give it below.",
+    ],
+    [
+      { kind: "key-refused", why: "app-deleted" },
+      "GitHub says the App was deleted. If it still is on GitHub, add a new key, then give it below.",
+    ],
+    [
+      { kind: "key-refused", why: null },
+      "GitHub refused the App's key. It may have been revoked, or the App deleted. Add a new key, then give it below.",
+    ],
+    [
+      { kind: "key-lost" },
+      "Lookover can't open the App's key: its entry in this computer's keychain is gone. Add a new key, then give it below.",
+    ],
+  ];
+  for (const [cause, text] of cases) {
+    const view = refused(cause);
+    expect([cause, view]).toEqual([
+      cause,
+      expect.objectContaining({ way: "own", text, link: { href: APP_PAGE, shown: "newKey" }, newKey: true }),
+    ]);
+  }
+});
+
+test("a refused key's help holds every text it can say, so a cause coming or going moves nothing", () => {
+  const calm = own();
+  const lost = refused({ kind: "key-lost" });
+  if (calm.way !== "own" || lost.way !== "own") throw new Error("expected your own App's settings");
+  expect(calm.held).toEqual(lost.held);
+  expect(calm.held).toContain(APP_LINE);
+  expect(calm.held).toContain(lost.text);
+  expect(calm.held).toHaveLength(5);
+});
+
+test("an organisation's App: who can make a new key is said in Settings, beside Add a new key (ADR 0059)", () => {
+  const acme = { ...OWN_APP, account: { id: 900, login: "acme", type: "Organization" } } as const;
+  expect(refused({ kind: "key-refused", why: "revoked" }, acme)).toMatchObject({
+    text: "The key was revoked on GitHub. Add a new key (an admin of acme can), then give it below.",
+    link: { href: "https://github.com/organizations/acme/settings/apps/lookover-q7x2ka", shown: "newKey" },
+  });
+});
+
+test("a clock that is off, or another cause: the App's line and Open on GitHub, the key's form closed", () => {
+  for (const cause of [
+    { kind: "key-refused", why: "clock" },
+    { kind: "uninstalled", suspended: false },
+    { kind: "unreachable" },
+  ] as const)
+    expect(refused(cause)).toMatchObject({ text: APP_LINE, link: { shown: "open" }, newKey: false });
+});
+
+test("on the shared App nothing changes: it has no key", () => {
+  const view = settings(connected({ cause: { kind: "key-lost" }, state: "disconnected" }));
+  expect(view.way).toBe("shared");
+  expect(JSON.stringify(view)).not.toMatch(/new key|newKey|Use an existing App/);
 });

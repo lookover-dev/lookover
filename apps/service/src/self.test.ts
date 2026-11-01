@@ -1,7 +1,7 @@
 // What `lookover` runs as (ADR 0054): Bun on a clone's `main.ts`, or the compiled binary that carries its web app.
 // `start` runs the same `serve` in the background either way, and refuses a clone with no program build only.
-import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -137,8 +137,19 @@ const TOOLS = String.raw`C:\Tools\lookover.exe`;
 const webFiles = carriedWebFiles(new Map());
 const npm: Self = { kind: "npm", path: EXECUTABLE, launcher: LAUNCHER, webFiles };
 
+/** A folder for an npm install's files, removed after the test. */
+const npmFolders: string[] = [];
+const npmScratch = () => {
+  const made = mkdtempSync(join(tmpdir(), "lookover-npm-"));
+  npmFolders.push(made);
+  return made;
+};
+afterEach(() => {
+  for (const folder of npmFolders.splice(0)) rmSync(folder, { recursive: true, force: true });
+});
+
 test("the executable started by npm's launcher knows it is an npm install; without it, the binary as before", () => {
-  const launcher = join(mkdtempSync(join(tmpdir(), "lookover-npm-")), "lookover.js");
+  const launcher = join(npmScratch(), "lookover.js");
   writeFileSync(launcher, "");
   expect(programSelf(TOOLS, { LOOKOVER_LAUNCHER: launcher }, webFiles)).toEqual({
     kind: "npm",
@@ -152,10 +163,10 @@ test("the executable started by npm's launcher knows it is an npm install; witho
 
 test("LOOKOVER_LAUNCHER is trusted only when it names a launcher that exists, by its absolute path", () => {
   expect(programSelf(TOOLS, { LOOKOVER_LAUNCHER: "lookover.js" }, webFiles).kind).toBe("binary");
-  const missing = join(mkdtempSync(join(tmpdir(), "lookover-npm-")), "lookover.js");
+  const missing = join(npmScratch(), "lookover.js");
   expect(programSelf(TOOLS, { LOOKOVER_LAUNCHER: missing }, webFiles).kind).toBe("binary");
   // A wrong one falls back on the launcher beside the executable, as start at login finds it.
-  const prefix = mkdtempSync(join(tmpdir(), "lookover-npm-"));
+  const prefix = npmScratch();
   const beside = join(prefix, "node_modules", "lookover", "bin", "lookover.js");
   mkdirSync(dirname(beside), { recursive: true });
   writeFileSync(beside, "");
@@ -177,7 +188,7 @@ test("LOOKOVER_LAUNCHER is trusted only when it names a launcher that exists, by
 });
 
 test("started at login, which runs the executable without Node, an npm install still knows it is one by its place", () => {
-  const prefix = mkdtempSync(join(tmpdir(), "lookover-npm-"));
+  const prefix = npmScratch();
   const place = (...parts: string[]) => {
     mkdirSync(join(prefix, ...parts.slice(0, -1)), { recursive: true });
     writeFileSync(join(prefix, ...parts), "");
@@ -191,7 +202,7 @@ test("started at login, which runs the executable without Node, an npm install s
   const hoisted = place("node_modules", "@lookover", "linux-x64", "bin", "lookover");
   expect(programSelf(hoisted, {}, webFiles)).toEqual({ kind: "npm", path: hoisted, launcher, webFiles });
   // A platform package with no launcher beside it, copied out by hand: the binary.
-  const alone = mkdtempSync(join(tmpdir(), "lookover-npm-"));
+  const alone = npmScratch();
   const copied = join(alone, "node_modules", "@lookover", "win32-x64", "lookover.exe");
   mkdirSync(dirname(copied), { recursive: true });
   writeFileSync(copied, "");

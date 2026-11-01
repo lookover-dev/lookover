@@ -22,6 +22,11 @@ export type CheckItem =
       version: string | null;
       /** Why the program found can't be used (`Engine.unusable`), null otherwise. */
       unusable: EngineUnusable | null;
+      /**
+       * The service's words for it (`Engine.detail`, `engineDetailText`): written with the service's platform, which
+       * the UI doesn't know, so an unusable one's command is this machine's.
+       */
+      detail: string;
     }
   | {
       check: "connection";
@@ -44,10 +49,10 @@ export type CheckItem =
 
 /**
  * Where start at login is registered (ADR 0054): `os`, on the machine (the program unguarded, and demo mode, which
- * plays it on a fake); `memory`, a fake that registers nothing (live mode and a guarded program), so the UI says start
- * at login isn't set up in development rather than that Lookover starts.
+ * plays it on a fake); `stand-in`, one that registers nothing and answers "none" (live mode and a guarded program,
+ * ADR 0070), so the UI says start at login isn't set up in development rather than that Lookover starts.
  */
-export type LoginItemKind = "os" | "memory";
+export type LoginItemKind = "os" | "stand-in";
 
 /**
  * Who holds start at login on this computer (ADR 0068): there is one registration per user, and it belongs to the
@@ -82,11 +87,12 @@ export interface Service {
   startAtLogin: boolean;
   /**
    * Who holds start at login now (ADR 0054, ADR 0068): the machine's answer, where `startAtLogin` is the choice. This
-   * install only once the setup is done, and never by taking another install's over unless the owner asks; in demo
-   * mode, live mode and a guarded program, a registration kept in memory only.
+   * install only once the setup is done, and never by taking another install's over unless the owner asks. Demo mode's
+   * is a registration kept in memory, which plays the machine's; in live mode and a guarded program, always "none":
+   * their stand-in registers nothing, as `lookover status` says (ADR 0070).
    */
   atLogin: LoginHolder;
-  /** Where that registration is: the machine's, or development's in memory. */
+  /** Where that registration is: the machine's, or development's stand-in that registers nothing. */
   loginItem: LoginItemKind;
   paused: { since: number; until: number | null } | null;
   /** Server mode: reachable over the network, so actions ask to unlock first. */

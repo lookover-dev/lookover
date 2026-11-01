@@ -2,14 +2,15 @@
 // (ADR 0045: no test registers anything on the owner's machine). The real ones' own work is tested here on what they
 // are given instead of the machine: a `reg` that answers as `reg.exe` would, and a scratch folder for the macOS and
 // Linux files. The command each registers is `loginCommand`'s.
-import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { afterEach, expect, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   launchAgentLoginItem,
   loginCommand,
   memoryLoginItem,
+  nowhereLoginItem,
   osLoginItem,
   type RegAnswer,
   runValues,
@@ -181,7 +182,15 @@ test("Windows: a refused reg.exe is said with its reason", async () => {
   await expect(item.unregister()).rejects.toThrow("Access is denied.");
 });
 
-const scratch = () => mkdtempSync(join(tmpdir(), "lookover-login-"));
+const scratches: string[] = [];
+const scratch = () => {
+  const made = mkdtempSync(join(tmpdir(), "lookover-login-"));
+  scratches.push(made);
+  return made;
+};
+afterEach(() => {
+  for (const folder of scratches.splice(0)) rmSync(folder, { recursive: true, force: true });
+});
 
 test("macOS: a LaunchAgent run at load with the command's words, held by this install with this command only, removed", async () => {
   const home = scratch();
@@ -399,4 +408,13 @@ test("the fake can be told another install holds it: never removed, replaced onl
   expect(await item.held()).toEqual({ other: theirs });
   expect(await item.register({ takeOver: true })).toBe("this");
   expect(await item.held()).toBe("this");
+});
+
+test("the stand-in registers nothing and always answers none, as `lookover status` does (ADR 0070)", async () => {
+  const item = nowhereLoginItem();
+  expect(await item.held()).toBe("none");
+  expect(await item.register()).toBe("none");
+  expect(await item.register({ takeOver: true })).toBe("none");
+  await item.unregister();
+  expect(await item.held()).toBe("none");
 });

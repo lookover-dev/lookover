@@ -2,7 +2,7 @@
 // user's `Path`, a launcher in their profile or a link in their home. Their own work is tested on what they are given
 // instead: a `reg` that keeps the registry's values as `reg.exe` answers, a broadcast counted, and scratch folders for
 // the launcher, the link and the folders on the PATH.
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -11,6 +11,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -25,6 +26,7 @@ import {
   type System,
   windowsCommandPath,
 } from "./index.ts";
+import { TEST_LIMIT_MS } from "./service.test-support.ts";
 
 const USER = "HKCU\\Environment";
 const MACHINE = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment";
@@ -81,7 +83,17 @@ function fakeReg(o: { user?: Record<string, Value>; machine?: Record<string, Val
   return { reg, user, calls };
 }
 
-const scratch = () => mkdtempSync(join(tmpdir(), "lookover-path-"));
+/** The scratch folders a test made, removed after it: one holds a copy of `cmd.exe`. */
+const scratches: string[] = [];
+afterEach(() => {
+  for (const dir of scratches.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+const scratch = () => {
+  const dir = mkdtempSync(join(tmpdir(), "lookover-path-"));
+  scratches.push(dir);
+  return dir;
+};
 
 /** A Windows-shaped machine in a scratch folder: the profile, Lookover's folder in it, and the executable. */
 function windowsMachine(o: Parameters<typeof fakeReg>[0] = {}, user = "Dell XPS") {
@@ -277,39 +289,46 @@ test("Windows: Lookover's own launcher running another copy is stale, with that 
   expect(await m.path.reachable()).toEqual({ reach: "yes", folder: m.folder });
 });
 
-test("Windows: a path beyond ASCII runs whatever the console's code page, which the launcher gives back", async () => {
-  const m = windowsMachine({}, "José");
-  await m.path.add();
-  const launcher = join(m.folder, "lookover.cmd");
-  expect(readFileSync(launcher, "utf8")).toBe(
-    [
-      "@setlocal",
-      `@for /f "tokens=2 delims=:." %%c in ('chcp') do @set "page=%%c"`,
-      "@chcp 65001>nul",
-      `@"${m.executable}" %*`,
-      '@set "code=%errorlevel%"',
-      "@chcp %page%>nul",
-      "@exit /b %code%",
-      "",
-    ].join("\r\n"),
-  );
-  expect(await m.path.reachable()).toEqual({ reach: "yes", folder: m.folder });
-  // Written by a copy elsewhere beyond ASCII: stale, with that copy.
-  const other = windowsMachine({}, "Zoë");
-  await other.path.add();
-  writeFileSync(launcher, readFileSync(join(other.folder, "lookover.cmd")));
-  expect(await m.path.reachable()).toEqual({ reach: "stale", folder: m.folder, other: other.executable });
-  if (process.platform !== "win32") return;
-  // On Windows, cmd.exe runs it on US English's code page: a copy of cmd.exe stands in for Lookover, its exit code
-  // comes back and so does the code page.
-  await m.path.add();
-  const line = `copy /y "%ComSpec%" "${m.executable}">nul & chcp 437>nul & "${launcher}" /c exit 7 & echo !errorlevel! & chcp`;
-  const ran = spawnSync("cmd.exe", ["/d", "/v:on", "/s", "/c", `"${line}"`], {
-    encoding: "utf8",
-    windowsVerbatimArguments: true,
-  });
-  expect(ran.stdout).toMatch(/^7 \r?\n.*437/);
-});
+test(
+  "Windows: a path beyond ASCII runs whatever the console's code page, which the launcher gives back",
+  async () => {
+    const m = windowsMachine({}, "José");
+    await m.path.add();
+    const launcher = join(m.folder, "lookover.cmd");
+    expect(readFileSync(launcher, "utf8")).toBe(
+      [
+        "@setlocal",
+        `@for /f "tokens=2 delims=:." %%c in ('chcp') do @set "page=%%c"`,
+        "@chcp 65001>nul",
+        `@"${m.executable}" %*`,
+        '@set "code=%errorlevel%"',
+        "@chcp %page%>nul",
+        "@exit /b %code%",
+        "",
+      ].join("\r\n"),
+    );
+    expect(await m.path.reachable()).toEqual({ reach: "yes", folder: m.folder });
+    // Written by a copy elsewhere beyond ASCII: stale, with that copy.
+    const other = windowsMachine({}, "Zoë");
+    await other.path.add();
+    writeFileSync(launcher, readFileSync(join(other.folder, "lookover.cmd")));
+    expect(await m.path.reachable()).toEqual({ reach: "stale", folder: m.folder, other: other.executable });
+    if (process.platform !== "win32") return;
+    // On Windows, cmd.exe runs it on US English's code page: a copy of cmd.exe stands in for Lookover, its exit code
+    // comes back and so does the code page.
+    await m.path.add();
+    const line = `copy /y "%ComSpec%" "${m.executable}">nul & chcp 437>nul & "${launcher}" /c exit 7 & echo !errorlevel! & chcp`;
+    const ran = spawnSync("cmd.exe", ["/d", "/v:on", "/s", "/c", `"${line}"`], {
+      encoding: "utf8",
+      windowsVerbatimArguments: true,
+    });
+    expect(ran.stdout).toMatch(/^7 \r?\n.*437/);
+    // On Windows it waits on real processes: cmd.exe, which copies itself (a new executable the antivirus scans), two
+    // `chcp` and the copy run through the launcher: 0.3 s on an idle machine, 3 s on a busy one, past Bun's 5 s
+    // beside the whole suite.
+  },
+  TEST_LIMIT_MS,
+);
 
 test("Windows: what reg.exe refuses is said with its reason; a Path it couldn't show is never written back", async () => {
   const refused = windowsMachine({ refuse: "Access is denied." });

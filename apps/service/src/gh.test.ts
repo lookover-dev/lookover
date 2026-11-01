@@ -5,11 +5,20 @@
 // with `gh`'s own variables, reads only, `gh` found as `lookover` on the PATH is, and never the real `gh` under
 // `bun test`.
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HostLogin } from "@lookover/contracts";
-import { describeGh } from "@lookover/testkit";
+import { cachedByContent, describeGh } from "@lookover/testkit";
 import { ghCli, osGh, realSystem } from "./index.ts";
 
 // Each read starts a Bun process: seconds apiece on a busy machine.
@@ -348,18 +357,39 @@ describe("where gh is", () => {
    * is the name of the folder it sits in, so a read says which `gh` ran.
    */
   let compiled = "";
-  beforeAll(() => {
-    const script = join(folder(), "gh.ts");
-    writeFileSync(
-      script,
-      `import { basename, dirname } from "node:path";
+  const script = `import { basename, dirname } from "node:path";
 const login = basename(dirname(process.execPath));
 process.stdout.write("HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n\\r\\n" + JSON.stringify({ id: 1, login }));
-`,
+`;
+  // Compiled once per script and Bun, kept outside the run (ADR 0071): an 86 MB program is seconds to build, and a new
+  // one is scanned by Defender.
+  beforeAll(async () => {
+    const built = await cachedByContent(
+      {
+        name: "lookover-fake-gh",
+        content: [script, Bun.version, Bun.revision, process.platform, process.arch].join("\n"),
+      },
+      (into) => {
+        const source = join(into, "gh.ts");
+        writeFileSync(source, script);
+        const made = Bun.spawnSync([
+          process.execPath,
+          "build",
+          "--compile",
+          source,
+          "--outfile",
+          join(into, exe),
+        ]);
+        if (made.exitCode !== 0) throw new Error(made.stderr.toString());
+      },
     );
     compiled = join(folder(), exe);
-    const built = Bun.spawnSync([process.execPath, "build", "--compile", script, "--outfile", compiled]);
-    if (built.exitCode !== 0) throw new Error(built.stderr.toString());
+    // Linked where the cache is on the scratch folder's disk; copied once otherwise, and linked from that copy.
+    try {
+      linkSync(join(built, exe), compiled);
+    } catch {
+      copyFileSync(join(built, exe), compiled);
+    }
   }, 60_000);
 
   /** A folder named `name` holding the scripted `gh`, linked, not copied: it is large. */

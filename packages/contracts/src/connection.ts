@@ -7,23 +7,25 @@ import type { ConnectionId } from "./ids.ts";
 import type { DeviceCode } from "./sign-in.ts";
 
 /**
- * Why the connection can't be used (ADR 0053), each with one fix the app offers. `unreachable`: GitHub could not be
- * reached or answered with an error of its own ("Reconnect GitHub"). `uninstalled`: the App is no longer installed on
- * its account, or its installation is `suspended` ("Install it on GitHub", a link to the install page, or to
- * the installation's settings when suspended). `key-refused`: GitHub refused the App's key; `why` is what GitHub
- * named, when it did: a key revoked on GitHub, the App deleted, or the computer's clock too far off ("Add a new
- * key"). `key-lost`: the key Lookover kept no longer opens, its keychain entry gone ("Add a new key" too).
- * `not-a-member`: the person's own `gh` says they are no longer an active member of `organisation` (its login), the
- * organisation whose App it is (ADR 0059): the App still works, but Lookover runs for that person, so reviews stop
- * until an admin adds them back ("Check again", `gh.check`) or another App is set up. `signed-out`: GitHub refused to
- * renew the person's sign-in to the shared App (its refresh token expired, revoked or spent), or refused a token just
- * renewed (ADR 0066): only a new sign-in brings it back. `sso`: `organisation` (its login) protects its resources with
- * SAML single sign-on, and the person's sign-in has no active SSO session there (ADR 0066): one account's cause, never
- * the connection's, its other accounts still used ("Sign in with SSO", GitHub's `url` for it when it gave one, else
- * the organisation's SSO page). With the shared App, one rule by kind: `uninstalled` and `sso` on an act on one
- * repository are that repository's account's; every other kind is the connection's. A suspension names who suspended
- * it (`suspendedBy`, their login) when GitHub said (ADR 0067: `suspended_by` on `/user/installations`); absent when
- * it didn't, or when the cause isn't a suspension of the shared App's.
+ * Why the connection can't be used (ADR 0053), each with one fix the app offers but the one that only waits.
+ * `unreachable`: GitHub could not be reached or answered with an error of its own: a wait with no fix, Lookover reading
+ * it again every minute (ADR 0070). `uninstalled`: the App is no longer installed on its account, or its installation
+ * is `suspended` ("Install it on GitHub", a link to the install page, or to the installation's settings when
+ * suspended). `key-refused`: GitHub refused the App's key; `why` is what GitHub named, when it did: a key revoked on
+ * GitHub, the App deleted ("Open Settings", where "Add a new key" is, ADR 0070), or the computer's clock too far off
+ * (Reconnect, once the clock is right). `key-lost`: the key Lookover kept no longer opens, its keychain entry gone
+ * ("Open Settings" too). With no App known, either one's fix is Reconnect. `not-a-member`: the person's own `gh` says they are no
+ * longer an active member of `organisation` (its login), the organisation whose App it is (ADR 0059): the App still
+ * works, but Lookover runs for that person, so reviews stop until an admin adds them back ("Check again", `gh.check`)
+ * or another App is set up. `signed-out`: GitHub refused to renew the person's sign-in to the shared App (its refresh
+ * token expired, revoked or spent), or refused a token just renewed (ADR 0066): only a new sign-in brings it back.
+ * `sso`: `organisation` (its login) protects its resources with SAML single sign-on, and the person's sign-in has no
+ * active SSO session there (ADR 0066): one account's cause, never the connection's, its other accounts still used
+ * ("Sign in with SSO", GitHub's `url` for it when it gave one, else the organisation's SSO page). With the shared App,
+ * one rule by kind: `uninstalled` and `sso` on an act on one repository are that repository's account's; every other
+ * kind is the connection's. A suspension names who suspended it (`suspendedBy`, their login) when GitHub said
+ * (ADR 0067: `suspended_by` on `/user/installations`); absent when it didn't, or when the cause isn't a suspension of
+ * the shared App's.
  */
 export type ConnectionCause =
   | { kind: "unreachable" }

@@ -27,27 +27,28 @@ export function agoSentence(now: number, at: number): string {
   return a === "just now" || a === "yesterday" ? a : `${a} ago`;
 }
 
-/** "1:12", "59:59"; from an hour, "1:02:03". The time cell is as wide as "9:59:59" (design system "Running time"). */
-export function elapsed(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(s / 60);
-  return m < 60
-    ? `${m}:${twoDigits(s % 60)}`
-    : `${Math.floor(m / 60)}:${twoDigits(m % 60)}:${twoDigits(s % 60)}`;
-}
-
-/** "3 min 14 s"; from an hour, "26 h 5 min" (the seconds dropped). */
+/**
+ * How long something took or has taken, in words (ADR 0070): "40 s", "12 min 40 s", "12 min"; from an hour,
+ * "26 h 5 min" (the seconds dropped). Floored, so a ticking time never shows a second early and the minutes carry
+ * into the hour ("1 h 59 min", never "1 h 60 min").
+ */
 export function duration(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
+  const s = Math.max(0, Math.floor(ms / 1000));
   if (s >= 3600) {
     const h = Math.floor(s / 3600);
-    const min = Math.round((s % 3600) / 60);
+    const min = Math.floor((s % 3600) / 60);
     return min === 0 ? `${h} h` : `${h} h ${min} min`;
   }
   if (s < 60) return `${s} s`;
   const m = Math.floor(s / 60);
   return s % 60 === 0 ? `${m} min` : `${m} min ${s % 60} s`;
 }
+
+/**
+ * The longest `duration`s a running time writes under a hundred hours, one with seconds and one with hours, as many
+ * characters each but not as wide in every face: its box is held as wide as the wider of them (design system).
+ */
+export const LONGEST_RUNNING_TIMES = ["59 min 59 s", "99 h 59 min"] as const;
 
 /** "08:52" */
 export function clock(at: number): string {

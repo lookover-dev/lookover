@@ -63,6 +63,22 @@ test("never registered before the setup is done; registered once it is, as the c
   expect(await loginItem.held()).toBe("this");
 });
 
+test("on the stand-in (live mode, a guarded program), the setup's end registers nothing and says so (ADR 0070)", async () => {
+  // No login item given: the room's own, the stand-in that registers nothing.
+  const { service } = await start({ setup: LAST_STEP });
+  const cookie = await openApp(service);
+  expect((await post(service, cookie, { type: "setup.finish" })).status).toBe(200);
+  expect((await snapshot(service, cookie)).service).toMatchObject({
+    startAtLogin: true,
+    atLogin: "none",
+    loginItem: "stand-in",
+  });
+  // The choice is still kept and sent; nothing is registered for it.
+  expect((await post(service, cookie, { type: "service.startAtLogin", on: false })).status).toBe(200);
+  expect((await post(service, cookie, { type: "service.startAtLogin", on: true })).status).toBe(200);
+  expect((await snapshot(service, cookie)).service).toMatchObject({ startAtLogin: true, atLogin: "none" });
+});
+
 test("a setup finished with start at login turned off registers nothing", async () => {
   const loginItem = memoryLoginItem();
   const { service } = await start({ loginItem, setup: LAST_STEP });

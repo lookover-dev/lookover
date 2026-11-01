@@ -189,8 +189,21 @@ async function ranIn(shell: string, line: string): Promise<{ code: number; out: 
 const bash = bashOf();
 const powershell = powershellOf();
 
-for (const [kind, words] of Object.entries(PROGRAMS)) {
-  const line = `${skillCommandLine([...words, "--home=D:/lookover data"])} wait --json`;
+/** Each folder's line, as the skill writes it. */
+const LINES = Object.values(PROGRAMS).map(
+  (words) => `${skillCommandLine([...words, "--home=D:/lookover data"])} wait --json`,
+);
+
+/**
+ * Every folder's line run by one bash, one line after the other on its standard input: what it printed, one line of
+ * output per line run. One bash start, not one per folder: a loaded pre-push timed the second out at 5 s (#453).
+ */
+let inBash: Promise<{ code: number; out: string[]; err: string }> | undefined;
+const ranInBash = () =>
+  (inBash ??= ranIn(bash ?? "", LINES.join("\n")).then((ran) => ({ ...ran, out: ran.out.split(/\r?\n/) })));
+
+for (const [index, kind] of Object.keys(PROGRAMS).entries()) {
+  const line = LINES[index] ?? "";
 
   test(`a folder with ${kind === "space" ? "a space only: its program in single quotes" : "an apostrophe: its program in double quotes"}`, () => {
     expect(line.startsWith(kind === "space" ? "'" : '"')).toBe(true);
@@ -199,10 +212,12 @@ for (const [kind, words] of Object.entries(PROGRAMS)) {
   test.skipIf(bash === null)(
     `the line as written runs in a POSIX shell (Git Bash on Windows), a folder with ${kind === "space" ? "a space" : "an apostrophe"}`,
     async () => {
-      const ran = await ranIn(bash ?? "", line);
+      const ran = await ranInBash();
       expect(ran.err).toBe("");
-      expect(JSON.parse(ran.out)).toEqual(["--home=D:/lookover data", "wait", "--json"]);
+      expect(JSON.parse(ran.out[index] ?? "")).toEqual(["--home=D:/lookover data", "wait", "--json"]);
     },
+    // Still a real bash and a real Bun, each started under whatever load the machine is under, as PowerShell's below.
+    30_000,
   );
 
   test.skipIf(powershell === null)(

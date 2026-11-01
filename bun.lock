@@ -199,6 +199,9 @@
         "@lookover/contracts": "workspace:*",
         "zod": "^4.6.5",
       },
+      "devDependencies": {
+        "@lookover/testkit": "workspace:*",
+      },
     },
     "packages/testkit": {
       "name": "@lookover/testkit",

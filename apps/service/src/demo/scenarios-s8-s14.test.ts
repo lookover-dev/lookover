@@ -16,10 +16,10 @@ import {
   repositoryId,
   type State,
 } from "@lookover/contracts";
-import { scenarioOf } from "../index.ts";
 import { TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
   advance,
+  brief,
   inject,
   listing,
   load,
@@ -36,7 +36,8 @@ setDefaultTimeout(TEST_LIMIT_MS);
 
 let door: Awaited<ReturnType<typeof startScenario>>;
 beforeAll(async () => {
-  door = await startScenario(scenarioOf("S10"));
+  // The door the scenarios load through: S10's world on its first five minutes, the story behind it unused.
+  door = await startScenario(brief());
 });
 afterAll(stopAll);
 
@@ -115,8 +116,24 @@ test("S8, pause and resume: two pull requests arrive while paused and wait; resu
     "version",
   ]);
   expect(checked?.items.slice(0, 3)).toEqual([
-    { check: "engine", engine: "claude", state: "ready", cli: "claude", version: "2.4.1", unusable: null },
-    { check: "engine", engine: "codex", state: "ready", cli: "codex", version: "0.162.1", unusable: null },
+    {
+      check: "engine",
+      engine: "claude",
+      state: "ready",
+      cli: "claude",
+      version: "2.4.1",
+      unusable: null,
+      detail: "",
+    },
+    {
+      check: "engine",
+      engine: "codex",
+      state: "ready",
+      cli: "codex",
+      version: "0.162.1",
+      unusable: null,
+      detail: "",
+    },
     // The App's key as demo mode keeps it: in the room's keychain (ADR 0053).
     {
       check: "connection",
@@ -351,7 +368,7 @@ test("S12, everything through the keyboard: the richest Home, a review waiting o
   expect(done.reviews[id(191)]?.rounds.map((r) => [r.reviewer, r.raised])).toEqual([["codex", 0]]);
 });
 
-test("S13, service problems: GitHub out of reach until Reconnect finds it back; both AIs missing until Check again finds them installed", async () => {
+test("S13, service problems: the connection.reconnect command is refused while GitHub is out of reach and connects once it answers, before the minute's retry; both AIs missing until Check again finds them installed", async () => {
   await loaded("S13");
   const seeded = await snapshotOf(door);
   expect(seeded.connection.state).toBe("connected");
@@ -360,11 +377,12 @@ test("S13, service problems: GitHub out of reach until Reconnect finds it back; 
   // Forty seconds on, GitHub stops answering: the connection shows it at once.
   await advance(door, 40_000);
   expect((await snapshotOf(door)).connection).toMatchObject({ state: "disconnected", since: T0 + 40_000 });
-  // "Reconnect GitHub" while it is still down: refused, and still disconnected.
+  // The connection.reconnect command while it is still down (the band offers none, ADR 0070): refused, and still disconnected.
   const early = await send(door, { type: "connection.reconnect" });
   expect(early.status).toBe(502);
   expect((await snapshotOf(door)).connection.state).toBe("disconnected");
-  // Two and a half minutes later GitHub answers again; "Reconnect GitHub" finds it before the next poll would.
+  // Two and a half minutes later GitHub answers again; the connection.reconnect command, sent before the minute's
+  // retry runs, connects at once.
   await advance(door, 150_000 + 1_000);
   expect((await snapshotOf(door)).connection.state).toBe("disconnected");
   expect((await send(door, { type: "connection.reconnect" })).status).toBe(200);
@@ -384,6 +402,19 @@ test("S13, service problems: GitHub out of reach until Reconnect finds it back; 
   const back = await snapshotOf(door);
   expect(back.engines.claude).toMatchObject({ state: "ready", version: "2.4.1" });
   expect(back.engines.codex).toMatchObject({ state: "ready", version: "0.162.1" });
+});
+
+test("S13, GitHub out of reach is a wait: once it answers, Lookover finds it within a minute, nobody pressing anything (ADR 0070)", async () => {
+  await loaded("S13");
+  await advance(door, 40_000);
+  expect((await snapshotOf(door)).connection).toMatchObject({ state: "disconnected", since: T0 + 40_000 });
+  // GitHub answers again two and a half minutes on; a minute later at most, the connection is back by itself.
+  await advance(door, 150_000);
+  await advance(door, MIN);
+  const back = await snapshotOf(door);
+  expect(back.connection).toMatchObject({ state: "connected", cause: null });
+  expect(back.connection.since).toBeGreaterThan(T0 + 190_000);
+  expect(back.connection.since).toBeLessThanOrEqual(T0 + 190_000 + MIN);
 });
 
 // S14 "The planted sandbox": the stages `bun run proof` shoots in place of the `service-*` story, each test
@@ -427,7 +458,8 @@ test("S14 plays the program's command: a tab without the session is told the bin
     expect(res.status).toBe(401);
     return res.json();
   };
-  await loaded("S10");
+  // Another scenario first: S2, whose seed is a minute (S10's, two and a half hours, said the same).
+  await loaded("S2");
   expect(await signedOut()).toEqual({ error: "no session" });
   const { state } = await s14At(0);
   const binary = String.raw`& 'C:\Users\Your Name\Downloads\lookover.exe'`;

@@ -452,7 +452,8 @@ export function Segmented<T extends string | number>({
   disabled = false,
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  /** An option disabled alone is dimmed in place, as the whole control is when disabled; used for an option with nothing behind it. */
+  options: { value: T; label: string; disabled?: boolean }[];
   onChange: (value: T) => void;
   label: string;
   disabled?: boolean;
@@ -463,7 +464,7 @@ export function Segmented<T extends string | number>({
         <button
           type="button"
           key={o.value}
-          disabled={disabled}
+          disabled={disabled || o.disabled === true}
           aria-pressed={o.value === value}
           onClick={() => onChange(o.value)}
         >
@@ -783,21 +784,24 @@ export function SetRow({
 
 /**
  * Depth that opens in place. The chevron turns and the content slides open over 240 ms; nothing is native.
- * `row` draws it as a row whose summary says the key number.
+ * `row` draws it as a row whose summary says the key number. `defaultOpen` is read once, as it appears: what changes
+ * after never opens or closes it, only the person does.
  */
 export function Disclosure({
   summary,
   value,
   children,
   row = false,
+  defaultOpen = false,
 }: {
   summary: ReactNode;
   /** Row style only: the key number, shown while closed and open. */
   value?: ReactNode;
   children: ReactNode;
   row?: boolean;
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const id = useId();
   return (
     <div className={`disc ${row ? "disc-row" : ""} ${open ? "open" : ""}`}>

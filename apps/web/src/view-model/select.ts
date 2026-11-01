@@ -3,7 +3,6 @@ import {
   type AccountCause,
   asSentence,
   type Change,
-  type ChangeId,
   CODEX_REVIEWS,
   type Command,
   type Connection,
@@ -18,7 +17,6 @@ import {
   githubLinks,
   type HostAccount,
   isUnsettled,
-  type KeyRefusal,
   ownInstallation,
   type Repository,
   type RepositoryId,
@@ -34,6 +32,7 @@ import {
 } from "@lookover/contracts";
 import type { Tone } from "../ui/basics.tsx";
 import { accountFix, installFirstFix, ownsAccount, ssoFix } from "./accounts.ts";
+import { adminOf, keyBand, RECONNECT } from "./app-key.ts";
 import { deferralText, waitingNotice } from "./deferral.ts";
 import { ago, agoSentence, clock, isToday, itOrThem, plural, until, type WithCommand } from "./format.ts";
 import { accountText, causeText, connectionText, engineStateText } from "./health.ts";
@@ -145,26 +144,6 @@ export function settledVerdict(review: Review): { closed: string; rest: string }
     : { closed: `${closed}, all closed in ${rounds}.`, rest: "The rest can go." };
 }
 
-/**
- * The pull requests setup's first review offers: the owner's, in a repository that is on. Never another author's,
- * nor one from a fork, whoever opened it (ADR 0048): neither is reviewed unless asked by hand.
- */
-export function firstReviewCandidates(state: State): ChangeReview[] {
-  return changeReviews(state).filter(
-    (it) => it.repo.enabled && it.change.author !== "other" && !it.change.fork,
-  );
-}
-
-/**
- * The pull request setup's first review has picked (ADR 0068): the person's pick while it is still offered, else the
- * first offered; null when none is. The list follows the host, so a pull request that appears is picked when none
- * was, and one that closes hands the pick on.
- */
-export function firstReviewPick(state: State, picked: ChangeId | null): ChangeId | null {
-  const offered = firstReviewCandidates(state);
-  return (offered.find((it) => it.change.id === picked) ?? offered[0])?.change.id ?? null;
-}
-
 /** The AI reviewing now, or the one that reviewed last. */
 export function reviewerOf(review: Review): EngineId | null {
   return review.run?.reviewer ?? review.rounds.at(-1)?.reviewer ?? null;
@@ -174,26 +153,42 @@ export function status(it: ChangeReview): DisplayStatus {
   return displayStatus(it.review);
 }
 
-export function chip(it: ChangeReview): { tone: Tone; label: string } {
+/** A state chip: its tone and its words. */
+export interface StateChip {
+  tone: Tone;
+  label: string;
+}
+
+/**
+ * The state chips whose words are fixed, by the status they show (a settled review with no finding is "clean"):
+ * `chip` reads them, and so does what holds a chip's place for the chips it may show.
+ */
+export const CHIPS = {
+  "needs-you": { tone: "need", label: "Needs you" },
+  failed: { tone: "need", label: "Failed" },
+  waiting: { tone: "warn", label: "Waiting" },
+  clean: { tone: "ok", label: "Clean" },
+  settled: { tone: "ok", label: "Settled" },
+  // Findings open: the ball is with the author.
+  "to-fix": { tone: "warn", label: "To fix" },
+  skipped: { tone: "mute", label: "Skipped" },
+  cancelled: { tone: "mute", label: "Cancelled" },
+} as const satisfies Record<Exclude<DisplayStatus["kind"], "running" | "not-asked"> | "clean", StateChip>;
+
+export function chip(it: ChangeReview): StateChip {
   const s = status(it);
   switch (s.kind) {
-    case "needs-you":
-      return { tone: "need", label: "Needs you" };
-    case "failed":
-      return { tone: "need", label: "Failed" };
     case "running":
       return { tone: "run", label: `Round ${s.round}` };
-    case "waiting":
-      return { tone: "warn", label: "Waiting" };
     case "settled":
-      return { tone: "ok", label: s.clean ? "Clean" : "Settled" };
+      return s.clean ? CHIPS.clean : CHIPS.settled;
+    case "needs-you":
+    case "failed":
+    case "waiting":
     case "to-fix":
-      // Findings open: the ball is with the author.
-      return { tone: "warn", label: "To fix" };
     case "skipped":
-      return { tone: "mute", label: "Skipped" };
     case "cancelled":
-      return { tone: "mute", label: "Cancelled" };
+      return CHIPS[s.kind];
     case "not-asked":
       return { tone: "mute", label: it.change.draft ? "Draft" : "No review" };
   }
@@ -526,6 +521,8 @@ export interface Problem {
   title: string;
   /** One sentence; a code to type elsewhere in it as inline code. */
   detail: string | WithCommand;
+  /** The sentence on the page its fix (`path`) leads to, where the band shows no button, when it differs. */
+  detailHere?: string;
   /**
    * Its one fix: a command the service answers, a page to open (GitHub's, for what only GitHub can change), with the
    * code to `copy` as it opens when the page asks for one (Sign in again's), or a place in the app (`path`: what the
@@ -541,41 +538,35 @@ export interface Problem {
   busy: boolean;
 }
 
+/** What a problem says and its fix, before its id, tone and pill words are known. */
+type ProblemSaid = Omit<Problem, "id" | "tone" | "busy" | "short">;
+
 function engineUsed(state: State, id: EngineId): boolean {
   const reviewers = state.settings.reviewers.value;
   return reviewers === "both" || reviewers === id;
 }
 
-const RECONNECT = { label: "Reconnect GitHub", command: { type: "connection.reconnect" } } as const;
 /** A new sign-in to the shared App (ADR 0066): the one fix of a sign-in GitHub no longer takes. */
 const SIGN_IN_AGAIN = { label: "Sign in again", command: { type: "connection.signIn" } } as const;
 
-/** "Add a new key": the App's page on GitHub, where a new key is generated; Reconnect while no App is known. */
-function newKey(connection: Connection): Problem["fix"] {
-  const { app, web } = connection;
-  return app ? { label: "Add a new key", href: githubLinks.app(web, app.account, app.slug) } : RECONNECT;
-}
-
-/** Where a new key goes once generated: said by every cause a new key fixes. */
-const GIVE_IT = "then give it in Settings, under “Use an existing App”.";
-
 /**
- * What a refused key says, by what GitHub named. `can`: who may generate a key on an organisation's App, " (an admin
- * of acme can)"; empty on a personal App, the person's own.
+ * A refused or lost key's one fix (ADR 0070): Settings' GitHub group, where "Add a new key" and "Use an existing App"
+ * are, said without "in Settings" on Settings itself (`detailHere`); Reconnect while no App is known, as there is no
+ * page to make a key on, on the shared App, which has no key (ADR 0066), and for the clock.
  */
-const keyRefusedText = (can: string): Record<KeyRefusal | "unknown", string> => ({
-  revoked: `The key was revoked on GitHub. Generate a new one on the App's page${can}, ${GIVE_IT}`,
-  "app-deleted": `GitHub says the App was deleted. If it still is on the App's page, generate a new key there${can}, ${GIVE_IT}`,
-  clock: "This computer's clock is off, so GitHub can't trust the key. Set the clock right, then reconnect.",
-  unknown: `It may have been revoked, or the App deleted. Generate a new key on the App's page${can}, ${GIVE_IT}`,
-});
-
-/**
- * "an admin of acme" on an organisation's App or installation (ADR 0059): who changes it on GitHub. Null on a
- * personal account, or none.
- */
-function adminOf(account: HostAccount | undefined): string | null {
-  return account?.type === "Organization" ? `an admin of ${account.login}` : null;
+function keyFix(
+  connection: Connection,
+  cause: Extract<ConnectionCause, { kind: "key-refused" | "key-lost" }>,
+): ProblemSaid {
+  const inSettings = connection.way === "own" && connection.app !== null;
+  const { title, detail, newKey } = keyBand(cause, inSettings ? "settings" : "reconnect");
+  if (!newKey || !inSettings) return { title, detail, fix: RECONNECT };
+  return {
+    title,
+    detail,
+    detailHere: keyBand(cause, "here").detail,
+    fix: { label: "Open Settings", path: "/settings#github" },
+  };
 }
 
 /** "until an admin of acme unsuspends it on GitHub": who lifts a suspended installation's suspension. */
@@ -601,12 +592,12 @@ const CHECK_AGAIN = { label: "Check again", command: { type: "gh.check" } } as c
  * What a connection that can't be used says, by its cause (ADR 0053), each with its one fix; its short line is the
  * status menu's words for the cause (`causeText`) after "GitHub".
  */
-function causeProblem(connection: Connection, cause: ConnectionCause): Omit<Problem, "id" | "tone" | "busy"> {
+function causeProblem(connection: Connection, cause: ConnectionCause): Omit<Problem, "id" | "busy"> {
   return { short: `GitHub ${causeText(cause)}`, ...causeFix(connection, cause) };
 }
 
 /** The App's installation suspended: "you" unsuspend it, or an admin of its organisation. */
-function suspendedFix({ app, web, accounts }: Connection): Omit<Problem, "id" | "tone" | "busy" | "short"> {
+function suspendedFix({ app, web, accounts }: Connection): ProblemSaid {
   const installation = ownInstallation(accounts);
   return {
     title: "Lookover's App is suspended on GitHub",
@@ -622,7 +613,7 @@ function suspendedFix({ app, web, accounts }: Connection): Omit<Problem, "id" | 
  * The App no longer installed on its account: your GitHub account, or an organisation, whose admin installs it. On
  * the shared App (ADR 0066), installed on none of the person's accounts any more: the accounts list's first fix.
  */
-function uninstalledFix(connection: Connection): Omit<Problem, "id" | "tone" | "busy" | "short"> {
+function uninstalledFix(connection: Connection): ProblemSaid {
   const { app, web, way } = connection;
   if (way === "shared")
     return {
@@ -639,55 +630,51 @@ function uninstalledFix(connection: Connection): Omit<Problem, "id" | "tone" | "
   };
 }
 
-/** The rest of what a cause says: its title, its detail and its one fix. */
-function causeFix(
-  connection: Connection,
-  cause: ConnectionCause,
-): Omit<Problem, "id" | "tone" | "busy" | "short"> {
-  const admin = adminOf(connection.app?.account);
-  const can = admin === null ? "" : ` (${admin} can)`;
+/** A problem said with its tone: whether it needs the person or only waits. */
+type ProblemToned = ProblemSaid & Pick<Problem, "tone">;
+
+/** What needs the person: every cause but one out of reach. */
+const needs = (said: ProblemSaid): ProblemToned => ({ tone: "need", ...said });
+
+/**
+ * The rest of what a cause says, decided here once: its tone, its title, its detail and its one fix. Out of reach
+ * only waits (ADR 0070), its tone `warn` and no fix; every other cause needs the person.
+ */
+function causeFix(connection: Connection, cause: ConnectionCause): ProblemToned {
   switch (cause.kind) {
     case "unreachable":
+      // The poller and discovery try again every minute by themselves, so no button.
       return {
+        tone: "warn",
         title: "GitHub can't be reached",
-        detail: `Since ${clock(connection.since)}. Reviews cannot be read or posted until it answers.`,
-        fix: RECONNECT,
+        detail: `Since ${clock(connection.since)}. Lookover tries again every minute. Nothing is lost.`,
+        fix: null,
       };
     case "uninstalled":
-      return cause.suspended ? suspendedFix(connection) : uninstalledFix(connection);
+      return needs(cause.suspended ? suspendedFix(connection) : uninstalledFix(connection));
     case "key-refused":
-      return {
-        title: "GitHub refused the App's key",
-        detail: keyRefusedText(can)[cause.why ?? "unknown"],
-        // A clock that is off is fixed on this computer: a new key wouldn't help.
-        fix: cause.why === "clock" ? RECONNECT : newKey(connection),
-      };
     case "key-lost":
-      return {
-        title: "Lookover can't open the App's key",
-        detail: `Its entry in this computer's keychain is gone. Generate a new key on the App's page${can}, ${GIVE_IT}`,
-        fix: newKey(connection),
-      };
+      return needs(keyFix(connection, cause));
     case "not-a-member":
-      return {
+      return needs({
         title: `You're no longer a member of ${cause.organisation}`,
         detail: `Your gh says you aren't an active member of ${cause.organisation}, so Lookover stopped reviewing. Once an admin adds you back, check again.`,
         fix: CHECK_AGAIN,
-      };
+      });
     case "signed-out":
       // Only a new sign-in brings it back (ADR 0066): its code shows on the connection once asked.
-      return {
+      return needs({
         title: "You're signed out of GitHub",
         detail:
           "GitHub no longer takes your sign-in. Reviews cannot be read or posted until you sign in again.",
         fix: SIGN_IN_AGAIN,
-      };
+      });
     case "sso":
-      return {
+      return needs({
         title: `${cause.organisation} asks you to sign in with SSO`,
         detail: `${cause.organisation} protects its repositories with single sign-on. Its reviews cannot be read or posted until you sign in there.`,
         fix: ssoFix(connection, cause.organisation, cause.url),
-      };
+      });
   }
 }
 
@@ -697,12 +684,13 @@ function connectionProblem(connection: Connection, now: number): Problem {
       ? {
           // No cause named: not connected yet after setup, or a service that gave none.
           short: "GitHub disconnected",
+          tone: "need" as const,
           title: "GitHub is disconnected",
           detail: `Your App lost its access at ${clock(connection.since)}. Reviews cannot be read or posted.`,
           fix: RECONNECT,
         }
       : causeProblem(connection, connection.cause);
-  return { id: "connection", tone: "need", busy: false, ...said, ...codeAsked(connection, now) };
+  return { id: "connection", busy: false, ...said, ...codeAsked(connection, now) };
 }
 
 /**
@@ -808,8 +796,8 @@ function engineProblem(e: Engine, now: number): Problem | null {
         tone: "need",
         short: `${e.name} needs attention`,
         title: `${e.name} is ${engineStateText(e)}`,
-        detail:
-          e.detail || `The ${e.cli} program was not found on this computer. Install it, then check again.`,
+        // The service says why, with the command that installs it on this machine (ADR 0070).
+        detail: e.detail,
         fix: checkAgain,
         busy: false,
       };
@@ -869,13 +857,14 @@ function loginProblem(state: State): Problem | null {
 }
 
 /**
- * A problem's fix as the band shows it on the page at `pathname`: none where the fix is a way to this very page
- * (Settings' "Open Settings" on Settings, #274), since the place to act is already in front of the owner.
+ * A problem as the band shows it on the page at `pathname`: no fix where the fix is a way to this very page
+ * (Settings' "Open Settings" on Settings, #274), since the place to act is already in front of the owner, and its
+ * sentence for that page (`detailHere`).
  */
-export function fixOn(problem: Problem, pathname: string): Problem["fix"] {
-  const { fix } = problem;
-  if (fix && "path" in fix && fix.path.split("#")[0] === pathname) return null;
-  return fix;
+export function bandOn(problem: Problem, pathname: string): Problem {
+  const { fix, detailHere } = problem;
+  if (!(fix && "path" in fix && fix.path.split("#")[0] === pathname)) return problem;
+  return { ...problem, fix: null, detail: detailHere ?? problem.detail };
 }
 
 export function problems(state: State): Problem[] {
@@ -892,24 +881,43 @@ export function problems(state: State): Problem[] {
 
 /**
  * The status menu's GitHub line (ADR 0067): what the connection is ("connected as sam"), whether its dot is on (a
- * wait GitHub asked for is no fault: only a cause turns it off), and every GitHub problem under it, each with its one
- * fix: the connection's, then each account's, in GitHub's order.
+ * wait GitHub asked for is no fault: only a cause turns it off), its colour when off (the pill's, `worstTone`), and
+ * every GitHub problem under it, each with its one fix: the connection's, then each account's, in GitHub's order.
  */
-export function githubStatus(state: State): { ok: boolean; text: string; problems: Problem[] } {
+export function githubStatus(state: State): {
+  ok: boolean;
+  text: string;
+  tone: Problem["tone"] | null;
+  problems: Problem[];
+} {
   const { connection } = state;
   const list = problems(state).filter((p) => p.id === "connection" || p.account !== undefined);
   return {
     ok: connection.state === "connected" && list.every((p) => p.account === undefined),
     text: connectionText(connection),
+    tone: worstTone(list),
     problems: list,
   };
 }
 
-export function pill(state: State): { tone: "ok" | "warn" | "mute"; label: string } {
+/** Several problems said as one (ADR 0070): pink when any needs the person, amber when every one only waits. */
+function worstTone(list: Problem[]): Problem["tone"] | null {
+  if (list.length === 0) return null;
+  return list.some((p) => p.tone === "need") ? "need" : "warn";
+}
+
+/**
+ * The status pill: the band's colour (ADR 0070), pink when any problem needs the person, amber when every one left
+ * only waits; several are counted, "waiting" unless one needs them. Then paused, then all good.
+ */
+export function pill(state: State): { tone: "ok" | "need" | "warn" | "mute"; label: string } {
   const list = problems(state);
-  if (list.length > 1) return { tone: "warn", label: `${list.length} things need attention` };
+  const tone = worstTone(list) ?? "warn";
+  if (list.length > 1) {
+    return { tone, label: `${list.length} things ${tone === "need" ? "need attention" : "waiting"}` };
+  }
   const one = list[0];
-  if (one) return { tone: "warn", label: one.short };
+  if (one) return { tone, label: one.short };
   if (state.service.paused) return { tone: "mute", label: "Paused" };
   return { tone: "ok", label: "All good" };
 }

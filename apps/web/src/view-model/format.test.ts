@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { itOrThem, startsAt, until } from "./format.ts";
+import { duration, itOrThem, LONGEST_RUNNING_TIMES, startsAt, until } from "./format.ts";
 
 const PARIS = "Europe/Paris";
 const NEW_YORK = "America/New_York";
@@ -46,4 +46,31 @@ test("a clock change between today and the day is no day more or less", () => {
 
 test("one thing is it, any other count them", () => {
   expect([itOrThem(1), itOrThem(2), itOrThem(0)]).toEqual(["it", "them", "them"]);
+});
+
+test("a duration reads in words, floored, its minutes carried into the hour (ADR 0070)", () => {
+  const cases: [number, string][] = [
+    [0, "0 s"],
+    [999, "0 s"],
+    [59_999, "59 s"],
+    [60_000, "1 min"],
+    [760_000, "12 min 40 s"],
+    [3_599_999, "59 min 59 s"],
+    [3_600_000, "1 h"],
+    [7_170_000, "1 h 59 min"],
+    [7_199_999, "1 h 59 min"],
+    [7_200_000, "2 h"],
+    [-5_000, "0 s"],
+  ];
+  expect(cases.map(([ms]) => [ms, duration(ms)])).toEqual(cases);
+});
+
+test("a running time's sizers are durations it writes, none shorter in characters than any under a hundred hours", () => {
+  expect<readonly string[]>(LONGEST_RUNNING_TIMES).toEqual([
+    duration(3_599_000),
+    duration(99 * 3_600_000 + 59 * 60_000),
+  ]);
+  let longest = 0;
+  for (let s = 0; s < 100 * 3600; s += 1) longest = Math.max(longest, duration(s * 1000).length);
+  for (const sizer of LONGEST_RUNNING_TIMES) expect(sizer.length).toBe(longest);
 });

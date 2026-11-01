@@ -3,7 +3,7 @@
 // and the fake codex confirming, as in demo mode (ADR 0039, ADR 0044). What only the queue decides (a deferral while
 // Claude is signed out, the re-ask that puts it back in line, who confirms when Codex can't) is tested on fakes, in
 // `queue.test.ts` and `confirm.test.ts`: this file spends its time on git and the fake programs alone.
-import { afterAll, afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -39,15 +39,24 @@ import {
   until,
 } from "./service.test-support.ts";
 
+// Each limit covers one round's real processes: round 1 in the file's `beforeAll`, round 2 in its own test.
 setDefaultTimeout(TEST_LIMIT_MS);
-afterEach(stopAll);
+// Round 2 goes on from round 1's service: the tests share it, and it stops once both ran.
+afterAll(stopAll);
 
 const { dir: sandboxDir, sandbox, head: HEAD, remove } = plantedSandbox();
 afterAll(remove);
-const plantedAuthor = sandbox.changes[0]?.author;
-if (!plantedAuthor) throw new Error("the planted sandbox has no pull request");
+const plantedAuthor = (() => {
+  const author = sandbox.changes[0]?.author;
+  if (!author) throw new Error("the planted sandbox has no pull request");
+  return author;
+})();
 
-test("round 1 posts in order with a valid result; the fix pushed, round 2 verifies it and posts what is new", async () => {
+/**
+ * Round 1 on the planted sandbox, played once for the file: the service and its event stream, the snapshot before,
+ * "Review now"'s answer and the events up to the round's end, and what the service held and GitHub received then.
+ */
+async function roundOne() {
   const dir = home();
   const { service, host } = await start({
     home: dir,
@@ -60,14 +69,39 @@ test("round 1 posts in order with a valid result; the fix pushed, round 2 verifi
   });
   const cookie = await openApp(service);
   const before: State = await snapshot(service, cookie);
-  expect(before.engines.claude.state).toBe("ready");
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
-  expect(before.changes[PLANTED]?.headSha).toBe(HEAD);
-
   // "Review now": the job is recorded and the take starts it at once; the round goes all the way through, on the
   // recorded real review of the planted bugs (`review`: three findings, one per severity).
-  expect((await review(service, cookie)).status).toBe(200);
+  const reviewed = (await review(service, cookie)).status;
   const events = await until(stream, "round.finished");
+  // Read twice, as a tab that loads the app's findings and one that loads its state each would.
+  const shown: State = await snapshot(service, cookie);
+  const after: State = await snapshot(service, cookie);
+  return {
+    dir,
+    service,
+    host,
+    cookie,
+    before,
+    stream,
+    reviewed,
+    events,
+    shown,
+    after,
+    posts: [...host.posts],
+  };
+}
+
+let one: Awaited<ReturnType<typeof roundOne>>;
+beforeAll(async () => {
+  one = await roundOne();
+}, TEST_LIMIT_MS);
+
+test("round 1 posts in order with a valid result", () => {
+  const { dir, before, reviewed, events, shown, after: state, posts } = one;
+  expect(before.engines.claude.state).toBe("ready");
+  expect(before.changes[PLANTED]?.headSha).toBe(HEAD);
+  expect(reviewed).toBe(200);
   expect(events.map((e) => e.type)).toEqual([
     "job.changed",
     "run.started",
@@ -168,7 +202,7 @@ test("round 1 posts in order with a valid result; the fix pushed, round 2 verifi
     ["F1", true],
     ["F2", true],
   ]);
-  expect(finished.findings).toEqual((await snapshot(service, cookie)).reviews[PLANTED]?.findings ?? []);
+  expect(finished.findings).toEqual(shown.reviews[PLANTED]?.findings ?? []);
   expect(finished.findings.map((f) => [f.confirmation.verdict, f.foundBy])).toEqual([
     ["confirmed", "claude"],
     ["unsure", "claude"],
@@ -191,18 +225,16 @@ test("round 1 posts in order with a valid result; the fix pushed, round 2 verifi
 
   // What GitHub received: the job's one check, waiting its turn, then in
   // progress (ADR 0043), then the round in the fixed order (ADR 0039), the result as the check's last line, valid.
-  expect(
-    host.posts.map((p) => (p.kind === "check.updated" ? `${p.kind} ${p.output.title}` : p.kind)),
-  ).toEqual([
+  expect(posts.map((p) => (p.kind === "check.updated" ? `${p.kind} ${p.output.title}` : p.kind))).toEqual([
     "check.created",
     "check.updated Looking over 703205d",
     "review",
     "summary.created",
     "check.completed",
   ]);
-  const completed = host.posts[4];
+  const completed = posts[4];
   if (completed?.kind !== "check.completed") throw new Error("no completed check");
-  expect(completed.checkId).toBe(host.posts[0]?.kind === "check.created" ? host.posts[0].checkId : "");
+  expect(completed.checkId).toBe(posts[0]?.kind === "check.created" ? posts[0].checkId : "");
   // A blocking finding is open on the pull request: neutral, never failure (ADR 0006).
   expect(completed.conclusion).toBe("neutral");
   expect(completed.output.title).toBe("Looked over 703205d: 2 things to fix");
@@ -243,7 +275,6 @@ test("round 1 posts in order with a valid result; the fix pushed, round 2 verifi
 
   // A tab that followed the events and one that loads the snapshot see the same thing; the round carries the
   // counts it moved (ADR 0049): one review, its Should fix posted one below blocking.
-  const state: State = await snapshot(service, cookie);
   expect(state).toEqual(events.reduce(apply, before));
   expect(finished.noise).toEqual({
     repoId: repositoryId("sasensi/lookover-sandbox"),
@@ -252,7 +283,10 @@ test("round 1 posts in order with a valid result; the fix pushed, round 2 verifi
   expect(state.repos[0]?.noise).toEqual(finished.noise?.counts);
   expect(state.reviews[PLANTED]?.rounds).toHaveLength(1);
   expect(state.engines.claude.state).toBe("ready");
+});
 
+test("the fix pushed, round 2 verifies it and posts what is new", async () => {
+  const { service, host, cookie, stream } = one;
   // A fake push: the planted pull request gets its fix commit, and the host shows the new head. It goes through
   // the poll, as a push seen on GitHub does: counted (one commit), and no review asked with the switch off.
   pushFix(host, sandboxDir);

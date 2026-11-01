@@ -11,6 +11,7 @@ import { HANDED_APP, REFUSED_PAGES, type RefusedPage, scenarioOf } from "../inde
 import { TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
   advance,
+  brief,
   inject,
   installApp,
   load,
@@ -30,7 +31,8 @@ const id = (n: number) => changeId(`sasensi/ledger-api#${n}`);
 
 let door: Awaited<ReturnType<typeof startScenario>>;
 beforeAll(async () => {
-  door = await startScenario(scenarioOf("S10"));
+  // The door the scenarios load through: S10's world on its first five minutes, the story behind it unused.
+  door = await startScenario(brief());
 });
 afterAll(stopAll);
 
@@ -170,6 +172,16 @@ test("S1, the agent opens #152 while setup shows Repositories: listed at once, w
 
   // S1's agent has nothing more to open: the fault says so.
   expect(await inject(door, "agent-opens-change")).toBe(409);
+
+  // #152 is reviewed by itself; picked on First review after its round was posted, it gets no second round (#425).
+  const reviewed = await after(5 * MIN);
+  expect(posted(reviewed, 152)).toEqual([1]);
+  expect(await sent({ type: "setup.goto", step: "first-review" })).toBe(200);
+  expect(await sent({ type: "setup.firstReview", changeId: id(152), preview: false })).toBe(200);
+  const picked = await after(5 * MIN);
+  expect(posted(picked, 152)).toEqual([1]);
+  expect(picked.reviews[id(152)]).toMatchObject({ run: null, job: { trigger: "opened", state: "done" } });
+  expect(picked.setup.firstReviewChange).toBe(id(152));
 });
 
 test("S1, an existing App: the one made on another computer, given its id and a new key from its page; the refusals first", async () => {
@@ -533,7 +545,7 @@ test("each refusal's page, as GitHub's redirect would get it, shown in demo mode
     expect(res.headers.get("content-security-policy")).toStartWith("default-src 'none'; style-src 'nonce-");
     const html = await res.text();
     expect(html).toContain(words);
-    // S10's setup is done: the page leads back to Lookover, not to setup.
+    // the door's setup is done (S10's world): the page leads back to Lookover, not to setup.
     expect(html).toContain(">Back to Lookover</a>");
   }
   for (const name of ["installed", "toString", "constructor"]) expect((await shown(name)).status).toBe(404);

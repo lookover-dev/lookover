@@ -47,11 +47,27 @@ test("Run all checks reads both engines again and reports each engine, the conne
   const agent = done.find((e) => changed(e, "agent"));
   expect(agent).toMatchObject({ patch: { agent: { skills: [{ agent: "claude" }, { agent: "codex" }] } } });
   const expected: CheckItem[] = [
-    { check: "engine", engine: "claude", state: "ready", cli: "claude", version: "2.4.1", unusable: null },
-    { check: "engine", engine: "codex", state: "ready", cli: "codex", version: "0.162.1", unusable: null },
+    {
+      check: "engine",
+      engine: "claude",
+      state: "ready",
+      cli: "claude",
+      version: "2.4.1",
+      unusable: null,
+      detail: "",
+    },
+    {
+      check: "engine",
+      engine: "codex",
+      state: "ready",
+      cli: "codex",
+      version: "0.162.1",
+      unusable: null,
+      detail: "",
+    },
     { check: "connection", state: "connected", cause: null, bot: BOT.login, key: null },
-    // On by default, and registered once the setup is done (ADR 0054): the fake's registration, in memory.
-    { check: "service", state: "running", startAtLogin: true, atLogin: "this", loginItem: "memory" },
+    // On by default (ADR 0054); the room's own stand-in registers nothing (ADR 0070).
+    { check: "service", state: "running", startAtLogin: true, atLogin: "none", loginItem: "stand-in" },
     { check: "settings", invalid: [] },
     // The data folder's free space, as the machine has it: whole gigabytes.
     { check: "disk", freeGb: expect.any(Number) },
@@ -96,6 +112,7 @@ test("a Codex too old for its model is not usable: its state and Run checks name
             cli: "codex",
             version: "0.154.0",
             unusable: tooOld,
+            detail,
           },
         ]),
       },
@@ -111,6 +128,43 @@ test("a Codex too old for its model is not usable: its state and Run checks name
   expect((await review(service, cookie)).status).toBe(200);
   await until(stream, "round.finished");
   expect(engines.runs.map((r) => r.engine)).not.toContain("codex");
+});
+
+test("a missing AI says its install command: Codex's at start, Claude's for Windows once Check again finds it gone", async () => {
+  // The fake engines start with Claude ready and Codex not installed: Codex's command is npm's, on every machine.
+  const engines = fakeEngines();
+  const { service } = await start({ engines, platform: "win32" });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  expect((await snapshot(service, cookie)).engines.codex).toMatchObject({
+    state: "missing",
+    detail:
+      "The codex program was not found on this computer. Install it, then check again: npm install -g @openai/codex",
+  });
+
+  // Claude gone: "Check again" says Windows' command, in PowerShell.
+  engines.setHealth("claude", { installed: false, version: null, signedIn: false });
+  expect((await post(service, cookie, { type: "engine.check" })).status).toBe(200);
+  expect(await until(stream, "engine.changed")).toMatchObject([
+    {
+      id: "claude",
+      patch: {
+        state: "missing",
+        detail:
+          "The claude program was not found on this computer. Install it in PowerShell, then check again: irm https://claude.ai/install.ps1 | iex",
+      },
+    },
+  ]);
+});
+
+test("on macOS and Linux, a Claude not installed gives its installer's curl command", async () => {
+  const engines = fakeEngines();
+  engines.setHealth("claude", { installed: false, version: null, signedIn: false });
+  const { service } = await start({ engines, platform: "darwin" });
+  const cookie = await openApp(service);
+  expect((await snapshot(service, cookie)).engines.claude.detail).toBe(
+    "The claude program was not found on this computer. Install it, then check again: curl -fsSL https://claude.ai/install.sh | bash",
+  );
 });
 
 test("Unlock marks the session unlocked, once: a second unlock changes nothing", async () => {

@@ -1,5 +1,5 @@
 // Start at login, as the app says it (ADR 0054): the owner's choice (`startAtLogin`), what is registered
-// (`atLogin`) and where (`loginItem`: the machine's, or development's in memory) are three facts; the status,
+// (`atLogin`) and where (`loginItem`: the machine's, or development's stand-in) are three facts; the status,
 // Settings and the setup's last step say each truthfully, and never claim it starts where nothing is set up.
 import { expect, test } from "bun:test";
 import {
@@ -25,9 +25,9 @@ const on = { ...os, startAtLogin: true, atLogin: "this" } as const;
 const off = { ...os, startAtLogin: false, atLogin: "none" } as const;
 const notRegistered = { ...os, startAtLogin: true, atLogin: "none" } as const;
 const stillRegistered = { ...os, startAtLogin: false, atLogin: "this" } as const;
-/** Live mode and a guarded program: the registration is the fake's, kept in memory. */
+/** Live mode and a guarded program: the stand-in registers nothing (ADR 0070). */
 const dev = (startAtLogin: boolean) =>
-  ({ loginItem: "memory", command: ON_PATH, startAtLogin, atLogin: startAtLogin ? "this" : "none" }) as const;
+  ({ loginItem: "stand-in", command: ON_PATH, startAtLogin, atLogin: "none" }) as const;
 
 test("the command that starts Lookover: the program's own command (ADR 0058), which demo mode plays, or live mode's", () => {
   expect(startCommand("program", ON_PATH)).toBe("lookover start");

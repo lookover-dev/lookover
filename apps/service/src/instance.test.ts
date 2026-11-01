@@ -20,7 +20,8 @@ afterEach(() => {
     try {
       rmSync(home, { recursive: true, force: true });
     } catch (error) {
-      // A lock this process still holds keeps its file busy on Windows: the folder goes with the system's temp files.
+      // A lock this process still holds (the first test drops its handle) keeps its file busy on Windows until the
+      // test worker exits: the folder goes with the run's temp folder, which `scripts/test-run.ts` removes then.
       if (!(error instanceof Error && "code" in error && error.code === "EBUSY")) throw error;
     }
   }

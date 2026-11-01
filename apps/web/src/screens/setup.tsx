@@ -20,6 +20,7 @@ import {
   Button,
   Card,
   Check,
+  Chip,
   Disclosure,
   Icon,
   LinkButton,
@@ -31,11 +32,20 @@ import {
 } from "../ui/basics.tsx";
 import { type AppPlaceView, appPlace } from "../view-model/app-place.ts";
 import { AGENT_INTRO } from "../view-model/coding-agent.ts";
+import {
+  type FirstReviewRow,
+  firstReviewPick,
+  firstReviewRows,
+  NONE_LEFT,
+  noneLeft,
+  REVIEWED_CHIPS,
+} from "../view-model/first-review.ts";
 import { agoSentence, plural } from "../view-model/format.ts";
 import {
   aiStepActs,
   aiStepLabels,
   chosenRepos,
+  engineSetupNext,
   engineSetupText,
   GITHUB_STEP_TEXT,
   githubStep,
@@ -46,8 +56,6 @@ import {
   type ChangeReview,
   changeLabel,
   changeReviews,
-  firstReviewCandidates,
-  firstReviewPick,
   openChangeCount,
   problems,
 } from "../view-model/select.ts";
@@ -146,12 +154,22 @@ function StepsItem({
 function EngineRow({ engine }: { engine: Engine }) {
   const send = useSend();
   const ready = engine.state === "ready";
+  // A missing AI's next step after the install, the sign-in, on its own line under the service's (#431).
+  const next = engineSetupNext(engine);
   return (
     <div className="engine">
       <StateSquare state={ready ? "done" : engine.signingIn ? "busy" : "idle"} />
       <div>
         <b>{engine.name}</b>
-        <span>{engineSetupText(engine)}</span>
+        <span>
+          {engineSetupText(engine)}
+          {next === null ? null : (
+            <>
+              <br />
+              {next}
+            </>
+          )}
+        </span>
       </div>
       {ready ? null : engine.state === "missing" ? (
         <Button size="sm" onClick={() => send({ type: "engine.check" })}>
@@ -195,10 +213,6 @@ function StepAi() {
         <EngineRow key={e.id} engine={e} />
       ))}
       <p className="t-small">{SETUP_REVIEWERS_TEXT}</p>
-      <Disclosure summary="Neither installed?">
-        Install Claude Code (<code>npm install -g @anthropic-ai/claude-code</code>) or Codex (
-        <code>npm install -g @openai/codex</code>), then sign in. This page checks again by itself.
-      </Disclosure>
       <div className="setup-acts">
         <span className="t-small">{acts.said}</span>
         <SameWidth shown={acts.label} labels={labels} />
@@ -670,14 +684,19 @@ function FirstReviewRunning({ item }: { item: ChangeReview }) {
 function StepFirstReview() {
   const state = useAppState();
   const send = useSend();
-  const candidates = firstReviewCandidates(state);
-  // What is shown picked follows the list: the pick kept while it is listed, else the first (one opened on an empty
-  // list, the next when the picked one closes). Kept once shown, so a pull request opened above it never takes it.
+  // The rows keep the places they were shown in: a review ending moves none (#425).
+  const [shown, setShown] = useState<readonly ChangeId[]>([]);
+  const rows = firstReviewRows(state, shown);
+  const order = rows.map((row) => row.change.id);
+  // What is shown picked follows the list: the pick kept while it is listed and not reviewed, else the first such
+  // (one opened on an empty list, the next when the picked one closes or gets reviewed). Kept once shown, so a pull
+  // request opened above it never takes it.
   const [kept, setKept] = useState<ChangeId | null>(null);
-  const picked = firstReviewPick(state, kept);
-  useEffect(() => {
-    if (picked !== kept) setKept(picked);
-  }, [picked, kept]);
+  const picked = firstReviewPick(rows, kept);
+  // Both kept as soon as they differ, during the render (React's adjusting state to a prop), so the next render has
+  // them.
+  if (order.join(" ") !== shown.join(" ")) setShown(order);
+  if (picked !== kept) setKept(picked);
   const firstReview = (preview: boolean) => {
     if (picked) send({ type: "setup.firstReview", changeId: picked, preview });
   };
@@ -693,21 +712,16 @@ function StepFirstReview() {
         title="Try it on a real pull request."
         small="Pick one. The review is posted on GitHub, exactly like every review after this one."
       />
-      {candidates.length > 0 ? (
+      {rows.length > 0 ? (
         <Card className="checklist">
-          {candidates.map(({ change }) => (
-            <Radio
-              key={change.id}
-              name="first"
-              checked={picked === change.id}
-              onChange={() => setKept(change.id)}
-            >
-              <b>{change.title}</b>
-              <span className="t-small">
-                {change.repoId} #{change.number} · {authorLabel(change)} ·{" "}
-                {agoSentence(state.now, change.openedAt)}
-              </span>
-            </Radio>
+          {rows.map((row) => (
+            <FirstReviewChoice
+              key={row.change.id}
+              row={row}
+              now={state.now}
+              picked={picked === row.change.id}
+              onPick={() => setKept(row.change.id)}
+            />
           ))}
         </Card>
       ) : (
@@ -716,27 +730,74 @@ function StepFirstReview() {
           itself.
         </Card>
       )}
+      {/* Held one line tall under a list, so its last pickable row getting reviewed moves nothing under it. */}
+      {rows.length > 0 ? (
+        <p className="t-small first-none-left">
+          <HeldDetail shown={noneLeft(rows) ? NONE_LEFT : ""} details={[NONE_LEFT]} />
+        </p>
+      ) : null}
       <div className="setup-acts">
         <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "repos" })}>
           Back
         </Button>
-        {candidates.length > 0 ? (
-          <>
-            <Button variant="ghost" onClick={() => firstReview(true)}>
-              Preview here only, post nothing
-            </Button>
-            {/* The label never names the pull request: the bar must not move when the choice changes. */}
-            <Button variant="primary" size="lg" onClick={() => firstReview(false)}>
-              Review this pull request
-            </Button>
-          </>
-        ) : (
-          <Button variant="primary" size="lg" onClick={() => send({ type: "setup.goto", step: "agent" })}>
-            Continue
-          </Button>
-        )}
+        <Button variant="ghost" disabled={picked === null} onClick={() => firstReview(true)}>
+          Preview here only, post nothing
+        </Button>
+        {/* One place as wide as both labels, which never name the pull request: the bar never moves. */}
+        <SameWidth
+          shown={picked === null ? "go-on" : "review"}
+          labels={{
+            review: (
+              <Button variant="primary" size="lg" onClick={() => firstReview(false)}>
+                Review this pull request
+              </Button>
+            ),
+            "go-on": (
+              <Button variant="primary" size="lg" onClick={() => send({ type: "setup.goto", step: "agent" })}>
+                Continue
+              </Button>
+            ),
+          }}
+        />
       </div>
     </>
+  );
+}
+
+/**
+ * One pull request First review offers (design-system.md "First review's list"): its radio, and on its right, held
+ * on every row, the state chip and "Open on GitHub" of one Lookover already reviewed on its head, whose radio is off.
+ */
+function FirstReviewChoice({
+  row,
+  now,
+  picked,
+  onPick,
+}: {
+  row: FirstReviewRow;
+  now: number;
+  picked: boolean;
+  onPick: () => void;
+}) {
+  const { change, reviewed, chip } = row;
+  // Only the chips a reviewed row can show hold the place, so its width never follows a label that isn't shown.
+  const chips: Record<string, ReactNode> = {};
+  for (const { tone, label } of REVIEWED_CHIPS) chips[label] = <Chip tone={tone}>{label}</Chip>;
+  return (
+    <div className={`first-row${reviewed ? " reviewed" : ""}`}>
+      <Radio name="first" checked={picked} disabled={reviewed} onChange={onPick}>
+        <b>{change.title}</b>
+        <span className="t-small">
+          {change.repoId} #{change.number} · {authorLabel(change)} · {agoSentence(now, change.openedAt)}
+        </span>
+      </Radio>
+      <span className="first-row-reviewed" aria-hidden={reviewed ? undefined : true}>
+        <SameWidth shown={reviewed && chip.label in chips ? chip.label : ""} labels={chips} />
+        <GitHubButton change={change} variant="ghost" size="sm">
+          Open on GitHub
+        </GitHubButton>
+      </span>
+    </div>
   );
 }
 

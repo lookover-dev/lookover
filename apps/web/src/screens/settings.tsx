@@ -1,15 +1,14 @@
 // Settings: your defaults, a short list, then more pages one click away.
 // A repository's page shows the same settings; the few that differ from your defaults say so.
 // Every change goes through the page's save stamp: "Saved" once the service took it (ADR 0049).
-import {
-  type Command,
-  type Connection,
-  type DepartedRepository,
-  githubLinks,
-  type Repository,
-  type Rule,
-  type SettingKey,
-  type SettingValue,
+import type {
+  Command,
+  Connection,
+  DepartedRepository,
+  Repository,
+  Rule,
+  SettingKey,
+  SettingValue,
 } from "@lookover/contracts";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -29,6 +28,7 @@ import {
   Notice,
   Row,
   Said,
+  SameWidth,
   SaveState,
   Segmented,
   SetRow,
@@ -56,7 +56,12 @@ import {
   settingValueText,
   WHEN_TEXT,
 } from "../view-model/settings.ts";
-import { GITHUB_SETTINGS_TEXT, type GitHubSettingsView, githubSettings } from "../view-model/sign-in.ts";
+import {
+  GITHUB_SETTINGS_TEXT,
+  type GitHubSettingsView,
+  githubSettings,
+  OWN_APP_LINK,
+} from "../view-model/sign-in.ts";
 import { offersStartThisOne, START_THIS_ONE, startAtLoginHelp } from "../view-model/start-at-login.ts";
 import { AgentRows } from "./coding-agent.tsx";
 import { HeldDetail, Page, Sentence, useSaving } from "./common.tsx";
@@ -185,34 +190,7 @@ export function Settings() {
         {github.way === "shared" ? (
           <SharedGitHub view={github} anchor={row("github")} />
         ) : (
-          <>
-            <Card className="setcard">
-              <div {...row("github")}>
-                <SetRow
-                  title="Your App"
-                  help={github.text}
-                  extra={<AgentAppLine connection={state.connection} />}
-                >
-                  {state.connection.app ? (
-                    <LinkButton
-                      size="sm"
-                      href={githubLinks.app(
-                        state.connection.web,
-                        state.connection.app.account,
-                        state.connection.app.slug,
-                      )}
-                    >
-                      Open on GitHub
-                    </LinkButton>
-                  ) : null}
-                </SetRow>
-              </div>
-            </Card>
-            <Disclosure summary="Use an existing App">
-              <p>{NEW_KEY_TEXT}</p>
-              <UseAppForm appId={state.connection.app?.id ?? null} />
-            </Disclosure>
-          </>
+          <OwnGitHub view={github} anchor={row("github")} />
         )}
       </Group>
       <Group title="Your coding agent">
@@ -236,6 +214,57 @@ export function Settings() {
         </div>
       </Group>
     </Page>
+  );
+}
+
+/**
+ * Settings › GitHub on your own App: its line and its page on GitHub; a refused or lost key's fix in one place (ADR
+ * 0070): the problem said in the row, "Add a new key" in "Open on GitHub"'s place and width, the row holding every
+ * text it can say, and "Use an existing App" open when Settings opens on it. `anchor`, the row Settings' links point at.
+ */
+function OwnGitHub({
+  view,
+  anchor,
+}: {
+  view: Extract<GitHubSettingsView, { way: "own" }>;
+  anchor: { id: string; "data-target": true | undefined };
+}) {
+  const state = useAppState();
+  const { link } = view;
+  return (
+    <>
+      <Card className="setcard">
+        <div {...anchor}>
+          <SetRow
+            title="Your App"
+            help={<HeldDetail shown={view.text} details={view.held} />}
+            extra={<AgentAppLine connection={state.connection} />}
+          >
+            {link ? (
+              <SameWidth
+                shown={link.shown}
+                labels={{
+                  open: (
+                    <LinkButton size="sm" href={link.href}>
+                      {OWN_APP_LINK.open}
+                    </LinkButton>
+                  ),
+                  newKey: (
+                    <LinkButton size="sm" href={link.href}>
+                      {OWN_APP_LINK.newKey}
+                    </LinkButton>
+                  ),
+                }}
+              />
+            ) : null}
+          </SetRow>
+        </div>
+      </Card>
+      <Disclosure summary="Use an existing App" defaultOpen={view.newKey}>
+        <p>{NEW_KEY_TEXT}</p>
+        <UseAppForm appId={state.connection.app?.id ?? null} />
+      </Disclosure>
+    </>
   );
 }
 

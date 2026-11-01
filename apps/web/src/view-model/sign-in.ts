@@ -8,8 +8,15 @@
 // GitHub on the shared App (`githubSettings`) says who is signed in, with Sign in again and its code in place, also
 // while connected, and the same accounts list. Every link is built on `Connection.web`, so demo mode stays on
 // GitHub's fake.
-import type { Connection, DeviceCode, SignInStartRefusal, State } from "@lookover/contracts";
+import {
+  type Connection,
+  type DeviceCode,
+  githubLinks,
+  type SignInStartRefusal,
+  type State,
+} from "@lookover/contracts";
 import { type AccountsList, accountRows } from "./accounts.ts";
+import { keyProblem } from "./app-key.ts";
 import { until, type WithCommand } from "./format.ts";
 import { appText } from "./onboarding.ts";
 
@@ -267,18 +274,52 @@ interface SettingsSignInView {
   code: DeviceCode | null;
 }
 
+/** Settings › GitHub's "Your App" button, by what it is for: one place, as wide as both (ADR 0070). */
+export const OWN_APP_LINK = { open: "Open on GitHub", newKey: "Add a new key" } as const;
+
+/**
+ * Settings › GitHub on your own App, or before either way: the App's line, or while a new key fixes its connection
+ * (ADR 0070) the problem and how to get a new key (`text`), every text it can say (`held`); the App's page on GitHub,
+ * as "Open on GitHub" or "Add a new key" (`link`, none with no App); and whether "Use an existing App" starts open
+ * (`newKey`).
+ */
+interface OwnGitHubSettingsView {
+  way: "own";
+  text: string;
+  held: string[];
+  link: { href: string; shown: keyof typeof OWN_APP_LINK } | null;
+  newKey: boolean;
+}
+
 /**
  * Settings › GitHub (ADR 0067): on the shared App, who is signed in (or signed out), with Sign in again and its code in
- * place, also while connected, to change person, and the accounts list; else the App's line, as before.
+ * place, also while connected, to change person, and the accounts list; else your own App's (ADR 0070).
  */
 export type GitHubSettingsView =
   | { way: "shared"; signIn: SettingsSignInView; list: AccountsList }
-  | { way: "own"; text: string };
+  | OwnGitHubSettingsView;
+
+/** Settings › GitHub on your own App: a refused or lost key's fix there, the band's "Open Settings" (ADR 0070). */
+function ownSettings(connection: Connection): OwnGitHubSettingsView {
+  const { app, web } = connection;
+  const line = appText(connection);
+  const key = keyProblem(connection);
+  return {
+    way: "own",
+    text: key.text ?? line,
+    held: [line, ...key.held],
+    link: app && {
+      href: githubLinks.app(web, app.account, app.slug),
+      shown: key.text === null ? "open" : "newKey",
+    },
+    newKey: key.text !== null,
+  };
+}
 
 /** Settings › GitHub at the state the service says; `timeZone`, the zone times are said in (the browser's by default). */
 export function githubSettings(state: State, o: { timeZone?: string } = {}): GitHubSettingsView {
   const { connection } = state;
-  if (connection.way !== "shared") return { way: "own", text: appText(connection) };
+  if (connection.way !== "shared") return ownSettings(connection);
   const who = signedOut(connection) ? SIGNED_OUT_ROW : signedInText(connection);
   const { text, held } = codeTexts(state, o.timeZone, who, [signedInText(connection), SIGNED_OUT_ROW]);
   return {

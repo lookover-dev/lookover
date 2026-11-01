@@ -84,13 +84,19 @@ pre {
 .nowrap {
   white-space: nowrap;
 }
-/* a running time (ADR 0058): tabular figures in a box that fits the longest time `elapsed()` writes, "9:59:59"
-   (7ch is a hair short of seven mono figures), so ticking moves nothing beside it; the step list's column sets it
-   right, a run line's end keeps it where it starts */
+/* a running time (ADR 0058, 0070): a duration in tabular figures, laid in one cell over the longest ones `duration()`
+   writes, "59 min 59 s" and "99 h 59 min", hidden, so the box holds the wider in its own face and ticking moves
+   nothing beside it; the step list's column sets it right, a run line's end keeps it where it starts */
 .time-running {
-  display: inline-block;
+  display: inline-grid;
   font-variant-numeric: tabular-nums;
-  min-width: 8ch;
+  white-space: nowrap;
+}
+.time-running > span {
+  grid-area: 1 / 1;
+}
+.time-running > [aria-hidden="true"] {
+  visibility: hidden;
 }
 
 /* ============ 4. COMPONENTS ============ */
@@ -853,6 +859,11 @@ select.input {
   background: var(--warn);
   animation: pulse 2s var(--e-io) infinite;
 }
+/* something needs the person: the band's pink (ADR 0070) */
+.pill i.need {
+  background: var(--acc);
+  animation: pulse 2s var(--e-io) infinite;
+}
 /* floating layers */
 .layer {
   position: absolute;
@@ -914,7 +925,7 @@ select.input {
 }
 .menu hr {
   border: 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-overlay);
   margin: 4px 0;
 }
 .menu .h {
@@ -944,6 +955,9 @@ select.input {
 }
 .menu .st i.warn {
   background: var(--warn);
+}
+.menu .st i.need {
+  background: var(--acc);
 }
 .pop {
   padding: var(--s-4);
@@ -1360,7 +1374,7 @@ dialog.dlg::backdrop {
 }
 .cmdk .search .input {
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-overlay);
   border-radius: 0;
   height: 48px;
   font-size: var(--t-16);
@@ -1646,7 +1660,10 @@ dialog.dlg::backdrop {
 .session code,
 .said code,
 .copyline code,
-.finding .why code {
+.finding .why code,
+.finding h5 code,
+.finding > p code,
+.rowi .ti code {
   padding: 0 var(--s-1);
   border-radius: var(--r-1);
   background: var(--code-bg);

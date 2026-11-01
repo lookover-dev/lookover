@@ -2,6 +2,25 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.5.0](https://github.com/lookover-dev/lookover/compare/v0.4.0...v0.5.0) (2026-11-01)
+
+### Features
+
+- **app:** when Claude or Codex isn't installed, Lookover gives the command that installs it on this computer.
+- **app:** a finding's `inline code` shows as code, as it does on GitHub.
+
+### Bug Fixes
+
+- **setup:** First review shows a pull request Lookover already reviewed as reviewed, with its link on GitHub, instead of offering to review it again.
+- **review:** Lookover never reviews the same commit twice when a review of it is already on GitHub.
+- **app:** the status pill, its menu and the band agree: pink when something needs you, amber when Lookover is only waiting.
+- **app:** GitHub out of reach is a wait, not a button: Lookover tries again every minute by itself.
+- **app:** a refused or lost key of your own App is fixed in one place, Settings › GitHub, which says what happened next to **Add a new key**.
+- **app:** All reviews dims the filters that hold nothing, instead of moving the bar.
+- **app:** elapsed times read as durations ("12 min 40 s"), never as a time of day, and hold their width while they tick.
+- **app:** separator lines show on menus and dialogs in the dark theme.
+- **app:** an unexpected error in the service's log always says its message.
+
 ## [0.4.0](https://github.com/lookover-dev/lookover/compare/v0.3.0...v0.4.0) (2026-10-31)
 
 ### Features

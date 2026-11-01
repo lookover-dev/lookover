@@ -42,6 +42,7 @@ import type { DemoRoom, InjectRefusal } from "./demo/driver.ts";
 
 import type { LogReader } from "./log-sink.ts";
 import type { Room, SettingsAnswer } from "./room.ts";
+import { described } from "./said.ts";
 import type { Timers } from "./timers.ts";
 import { useApp } from "./use-app.ts";
 import { serveWebFiles, type WebFiles } from "./web-files.ts";
@@ -462,10 +463,6 @@ function lastSeen(value: string | undefined): number | null | undefined {
   if (value === undefined) return undefined;
   return /^\d+$/.test(value) ? Number(value) : null;
 }
-
-/** An error as a log line: its stack, which starts with its message, when it has one. */
-export const described = (error: unknown): string =>
-  error instanceof Error ? (error.stack ?? error.message) : String(error);
 
 export function createApi(deps: ApiDeps) {
   const { origin, session, room, demo, loader } = deps;

@@ -202,6 +202,89 @@ test("a first review of a pull request already being reviewed on its head commit
   expect(state.reviews[ONE]).toMatchObject({ job: { state: "done" }, rounds: [{ n: 1 }] });
 });
 
+test("a first review of a pull request whose round on its head commit ended follows that round: one run, one review (#425)", async () => {
+  // The live case of #425: the poll reviewed the owner's new pull request by itself, and the owner picks it in the
+  // setup after its round was posted (a list a tick behind, or a tab left open).
+  const time = new DemoClock({ at: T0 });
+  const engines = fakeEngines({ reviews: 2, tookMs: 60_000, time });
+  const { service, host } = await start({ changes: [], engines, time });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  host.open(pr1);
+  await time.advance(60_000);
+  await until(stream, "run.started");
+  await time.advance(2 * 60_000);
+  await until(stream, "round.finished");
+  await time.advance(0);
+
+  const asked = await post(service, cookie, { type: "setup.firstReview", changeId: ONE, preview: false });
+  expect(asked.status).toBe(200);
+  await time.advance(5 * 60_000);
+  await time.advance(0);
+  expect(engines.runs).toHaveLength(1);
+  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  const state = await snapshot(service, cookie);
+  expect(state.setup.firstReviewChange).toBe(ONE);
+  expect(state.reviews[ONE]).toMatchObject({ job: { trigger: "opened", state: "done" }, rounds: [{ n: 1 }] });
+});
+
+test("Review now or /lookover review on a head whose round ended still asks: a second run, a second review (#425)", async () => {
+  // Only the setup's first review follows a round already posted; the owner asking by hand means another look.
+  const time = new DemoClock({ at: T0 });
+  const engines = fakeEngines({ reviews: 3, tookMs: 60_000, time });
+  const { service, host } = await start({ changes: [], engines, time });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  host.open(pr1);
+  await time.advance(60_000);
+  await until(stream, "run.started");
+  await time.advance(2 * 60_000);
+  await until(stream, "round.finished");
+  await time.advance(0);
+  const reviews = () => host.posts.filter((p) => p.kind === "review");
+  expect(reviews()).toHaveLength(1);
+
+  expect((await post(service, cookie, { type: "review.request", changeId: ONE })).status).toBe(200);
+  await time.advance(2 * 60_000);
+  expect((await until(stream, "round.finished")).at(-1)).toMatchObject({
+    job: { trigger: "manual", sha: SHA1 },
+    round: { n: 2 },
+  });
+  await time.advance(0);
+  expect(engines.runs).toHaveLength(2);
+  expect(reviews()).toHaveLength(2);
+
+  host.seedComment(ref, { author: OWNER, body: "/lookover review" });
+  await time.advance(60_000);
+  await time.advance(2 * 60_000);
+  expect((await until(stream, "round.finished")).at(-1)).toMatchObject({
+    job: { trigger: "comment", sha: SHA1 },
+    round: { n: 3 },
+  });
+  await time.advance(0);
+  expect(engines.runs).toHaveLength(3);
+  expect(reviews()).toHaveLength(3);
+});
+
+test("a first review of a pull request whose round on its head was a preview runs its own round, which posts", async () => {
+  const time = new DemoClock({ at: T0 });
+  const engines = fakeEngines({ reviews: 2, tookMs: 60_000, time });
+  const { service, host } = await start({ changes: [pr1], engines, time });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  await post(service, cookie, { type: "setup.firstReview", changeId: ONE, preview: true });
+  await time.advance(2 * 60_000);
+  await until(stream, "round.finished");
+  await time.advance(0);
+
+  await post(service, cookie, { type: "setup.firstReview", changeId: ONE, preview: false });
+  await time.advance(2 * 60_000);
+  await until(stream, "round.finished");
+  await time.advance(0);
+  expect(engines.runs).toHaveLength(2);
+  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+});
+
 test("a first review of a pull request the poll saw opened, asked while that review runs, follows it: one round, one review, one check", async () => {
   // The live race of #201: the poll sees the owner's new pull request and reviews it, unasked; the owner picks it
   // in the setup while that review runs.

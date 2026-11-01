@@ -6,6 +6,7 @@ import { Fragment } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { reviewPath, useAppState } from "../store.tsx";
 import { BrandIcon } from "../ui/basics.tsx";
+import { InlineCode } from "../ui/inline-code.tsx";
 import { severityLabel } from "../view-model/confirm.ts";
 import { placeText } from "../view-model/findings.ts";
 import { agoSentence, clock } from "../view-model/format.ts";
@@ -52,7 +53,8 @@ function Inline({ change, finding, bot }: { change: Change; finding: Finding; bo
           <b>{bot}</b> <span className="gh-muted">bot</span>
           <p>
             {INLINE_OPENING}
-            <b>{severityLabel(finding)}:</b> {finding.title}. {finding.body}
+            <b>{severityLabel(finding)}:</b> <InlineCode text={finding.title} />.{" "}
+            <InlineCode text={finding.body} />
           </p>
         </div>
       </div>
@@ -61,7 +63,9 @@ function Inline({ change, finding, bot }: { change: Change; finding: Finding; bo
           <Avatar />
           <div>
             <b>{finding.claim.by}</b>
-            <p>{finding.claim.text}</p>
+            <p>
+              <InlineCode text={finding.claim.text} />
+            </p>
           </div>
         </div>
       ) : null}
@@ -151,7 +155,8 @@ export function GitHubMock() {
                   <ul>
                     {open.map((f) => (
                       <li key={f.id}>
-                        <b>{severityLabel(f)}:</b> {f.title} <code>{f.file}</code> {placeText(f)}
+                        <b>{severityLabel(f)}:</b> <InlineCode text={f.title} /> <code>{f.file}</code>{" "}
+                        {placeText(f)}
                       </li>
                     ))}
                   </ul>

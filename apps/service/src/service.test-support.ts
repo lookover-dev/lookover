@@ -52,6 +52,7 @@ import {
 } from "@lookover/testkit";
 import {
   appStore,
+  type BackgroundPorts,
   buildRoom,
   DAY_MS,
   type GitHubSide,
@@ -524,8 +525,13 @@ export interface StartOptions {
   webFiles?: WebFiles;
   /** Where the server's lines go, and the room's when `log` isn't given (ADR 0054); the console by default. */
   logSink?: LogSink & LogReader;
-  /** Start at login's registration (ADR 0054): a fake of the room's own unless given. */
+  /**
+   * Start at login's registration (ADR 0054): when given, a working one, the machine's kind (as demo mode's fake is);
+   * else the room's own stand-in, which registers nothing (ADR 0070).
+   */
   loginItem?: LoginItem;
+  /** The machine the commands the app gives are for (an AI's install, ADR 0070): Linux unless given, never this one. */
+  platform?: NodeJS.Platform;
   /** Your coding agent's ports and facts (ADR 0058): the room's fakes and defaults unless given. */
   agent?: RoomOptions["agent"];
   /** The person's own `gh` (ADR 0059): none unless given, as a room without one reads it: not installed. */
@@ -537,6 +543,11 @@ function logOf(options: StartOptions, logged: string[]): { log?: (line: string) 
   if (options.log !== undefined) return { log: options.log };
   return options.logSink === undefined ? { log: (line) => logged.push(line) } : {};
 }
+
+/** The machine the room's commands are for (ADR 0070): the test's, else Linux, never the one running the test. */
+const machineOf = (options: StartOptions): { platform: NodeJS.Platform } => ({
+  platform: options.platform ?? "linux",
+});
 
 /** The room's options for a test's start, its fakes and its data folder. */
 function roomOf(options: StartOptions) {
@@ -568,9 +579,10 @@ function roomOf(options: StartOptions) {
     ...logOf(options, logged),
     ...(options.loginItem === undefined
       ? {}
-      : { loginItem: { item: options.loginItem, kind: "memory" as const } }),
+      : { loginItem: { item: options.loginItem, kind: "os" as const } }),
     ...(options.agent === undefined ? {} : { agent: options.agent }),
     ...(options.gh === undefined ? {} : { gh: options.gh }),
+    ...machineOf(options),
   } satisfies RoomOptions;
   return { room, host, retrieval, time, logged };
 }
@@ -951,3 +963,20 @@ export function slowHealth(engines: Engines) {
     },
   };
 }
+
+/** The background verbs, for a `lookover serve` run in this process: it never reaches them. */
+export const NO_BACKGROUND: BackgroundPorts = {
+  startServe: async () => ({ started: false, reason: "serve starts nothing in the background" }),
+  openBrowser: async () => false,
+  kill: () => {
+    throw new Error("serve kills nothing");
+  },
+  webBuild: () => "missing",
+  time: { now: () => Date.now(), sleep: (ms) => Bun.sleep(ms) },
+  loginItem: () => {
+    throw new Error("serve asks no start at login");
+  },
+  commandPath: () => {
+    throw new Error("serve reads no PATH");
+  },
+};

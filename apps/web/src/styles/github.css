@@ -129,6 +129,13 @@
 .gh-comment p {
   margin: 0;
 }
+/* inline code in a comment, as GitHub renders a comment's markdown (ADR 0070): its code background, small corners */
+.gh-body code,
+.gh-comment p code {
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: var(--gh-code-bg);
+}
 .gh-body ul {
   margin: 0;
   padding-left: 20px;

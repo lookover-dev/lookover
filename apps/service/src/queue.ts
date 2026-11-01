@@ -8,8 +8,9 @@
 //   request with trigger "first-review", asked as a preview when the owner said "preview here only": its run posts
 //   nothing (the run's header), and the preview sticks to the job it joins (the store's). One that posts, asked
 //   while a review of its head commit runs that posts (the poll's, a request's, a first review's: not a preview's,
-//   whatever its trigger), follows that run: no follow-up. A preview, or a review of an older commit, still asks its
-//   own.
+//   whatever its trigger), follows that run: no follow-up; asked once that commit's round was posted (the change's
+//   latest job done on it, not a preview's), it follows that round: no run (#425). A preview, or a review of an older
+//   commit, still asks its own; so do "Review now" and the owner's `/lookover review` on a reviewed commit (below).
 // - What the poll sees (ADR 0043, the poller's header): a change opened or a draft marked ready asks, trigger
 //   "opened", as `core.intake` says with the repository's switches: a review (joining the waiting job, as a request
 //   does), a job skipped with its reason from the start (another author's or a fork's: its check says why, ADR 0016,
@@ -116,6 +117,7 @@ import {
   type Engines,
   type EngineUnusable,
   type EventBody,
+  engineDetailText,
   engineName,
   type IdGen,
   type JobId,
@@ -158,7 +160,7 @@ import type { Reactions } from "./reactions.ts";
 import type { ResumeRun, Running, StartRun } from "./run.ts";
 import { said } from "./said.ts";
 import { type Gate, RAN_INTO_MS, type RanInto } from "./self-tests.ts";
-import { type ChangeFacts, engineDetailOf, engineStateOf, type SettingsInForce } from "./snapshot.ts";
+import { type ChangeFacts, engineStateOf, type SettingsInForce } from "./snapshot.ts";
 import type { Timers } from "./timers.ts";
 
 /** How often the take looks again while a job waits on an engine (ADR 0043). */
@@ -169,6 +171,8 @@ export interface QueueDeps {
   clock: Clock;
   ids: IdGen;
   engines: Engines;
+  /** The machine the engines' install commands are for (ADR 0070), as Node names it. */
+  platform: NodeJS.Platform;
   /**
    * The engines' self-tests (ADR 0044): the state a ready engine shows once its program has been self-tested, and
    * the engines busy testing, which the take treats as reviewing.
@@ -471,7 +475,7 @@ export function createQueue(d: QueueDeps): Queue {
       kind: "state",
       state,
       version: answer.version,
-      detail: engineDetailOf(engine, answer),
+      detail: engineDetailText(engine, answer, d.platform),
       unusable: answer.why ?? null,
     };
   };
@@ -819,15 +823,16 @@ export function createQueue(d: QueueDeps): Queue {
   }
 
   /**
-   * Whether the change's review of `sha` runs now and posts: the setup's first review that posts follows it rather
-   * than asking a second round of the same commit, which would post again with nothing new. A run that posts nothing
-   * is a preview's, whatever its job's trigger (a preview joins an opened or manual job that waits), and is not followed.
+   * Whether the change's review of `sha` runs now and posts, or posted that commit's round (its latest job done on
+   * it, #425): the setup's first review that posts follows it rather than asking a second round of the same commit,
+   * which would post again with nothing new. A run that posts nothing is a preview's, whatever its job's trigger (a
+   * preview joins an opened or manual job that waits), and is not followed.
    */
   function reviewsHead(changeId: ChangeId, sha: ReviewJob["sha"], asking: Asking): boolean {
     const job = d.store.jobs.latest(changeId)?.job;
     return (
       asking.preview !== true &&
-      job?.state === "running" &&
+      (job?.state === "running" || job?.state === "done") &&
       job.sha === sha &&
       !d.store.jobs.previewOf(job.id)
     );

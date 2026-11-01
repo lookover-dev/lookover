@@ -25,6 +25,7 @@ import {
   appText,
   chosenRepos,
   departedNotice,
+  engineSetupNext,
   engineSetupText,
   GITHUB_STEP_TEXT,
   githubStep,
@@ -577,6 +578,10 @@ test("each AI's line in the setup says its state; one that can't be used says wh
   expect(engineSetupText({ ...codex, state: "missing", version: null })).toBe(
     "codex was not found on this computer",
   );
+  // Not installed: the service's line, with this machine's command (ADR 0070).
+  const install =
+    "The codex program was not found on this computer. Install it, then check again: npm install -g @openai/codex";
+  expect(engineSetupText({ ...codex, state: "missing", version: null, detail: install })).toBe(install);
   const tooOld =
     "gpt-6.1-sol needs Codex 0.162.0 or later; this one is 0.154.0. Update it, then check again: npm install -g @openai/codex@latest";
   expect(
@@ -592,6 +597,24 @@ test("each AI's line in the setup says its state; one that can't be used says wh
   expect(engineSetupText({ ...codex, state: "signed-out", signingIn: true })).toBe(
     "A terminal is open. Sign in there; this page checks every few seconds.",
   );
+});
+
+test("a missing AI's row says what comes after the install, the sign-in, under the service's line", () => {
+  const codex = engine("codex", "Codex");
+  const install =
+    "The codex program was not found on this computer. Install it, then check again: npm install -g @openai/codex";
+  // The service's line stays as the band says it; the row adds the step after it on its own line.
+  expect(engineSetupNext({ ...codex, state: "missing", version: null, detail: install })).toBe(
+    "Once it's found, sign in here if it asks.",
+  );
+  expect(engineSetupNext({ ...codex, state: "missing", version: null })).toBe(
+    "Once it's found, sign in here if it asks.",
+  );
+  // Found but unusable, signed out or ready: its own line says all there is.
+  const tooOld = { kind: "too-old", version: "0.154.0", model: "gpt-6.1-sol", needs: "0.162.0" } as const;
+  expect(engineSetupNext({ ...codex, state: "missing", version: "0.154.0", unusable: tooOld })).toBeNull();
+  expect(engineSetupNext({ ...codex, state: "signed-out" })).toBeNull();
+  expect(engineSetupNext(codex)).toBeNull();
 });
 
 test("an AI's line joins only the parts it has: no stray comma, no doubled separator, in any state (#256)", () => {

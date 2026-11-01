@@ -1,13 +1,14 @@
 // What the status menu says about the AIs, GitHub and the service, and about each health check. The snapshot
 // carries states and facts; these are the only words for them.
 import { expect, test } from "bun:test";
-import type {
-  CheckItem,
-  ConnectionCause,
-  Engine,
-  EngineId,
-  EngineState,
-  HostAccount,
+import {
+  type CheckItem,
+  type ConnectionCause,
+  type Engine,
+  type EngineId,
+  type EngineState,
+  engineDetailText,
+  type HostAccount,
 } from "@lookover/contracts";
 import { checkLine, connectionText, engineStateText, serviceStatus } from "./health.ts";
 
@@ -80,7 +81,7 @@ test("GitHub and the service in a few words", () => {
     ok: true,
     text: "running, another Lookover starts at login",
   });
-  expect(serviceStatus({ startAtLogin: true, atLogin: "this", loginItem: "memory" })).toEqual({
+  expect(serviceStatus({ startAtLogin: true, atLogin: "none", loginItem: "stand-in" })).toEqual({
     ok: true,
     text: "running, start at login isn't set up in development",
   });
@@ -100,7 +101,7 @@ test("GitHub disconnected says its cause in a few words (ADR 0053)", () => {
 });
 
 test("the service's check says whether Lookover starts at login for real, warning when it isn't as chosen (ADR 0054)", () => {
-  const line = (startAtLogin: boolean, startsAtLogin: boolean, loginItem: "os" | "memory" = "os") =>
+  const line = (startAtLogin: boolean, startsAtLogin: boolean, loginItem: "os" | "stand-in" = "os") =>
     checkLine(ENGINES, {
       check: "service",
       state: "running",
@@ -125,7 +126,7 @@ test("the service's check says whether Lookover starts at login for real, warnin
     detail: "running, still starts at login",
   });
   // In development (live mode, a guarded program) the registration is the fake's: never said to start.
-  expect(line(true, true, "memory")).toEqual({
+  expect(line(true, true, "stand-in")).toEqual({
     label: "Service",
     ok: true,
     detail: "running, start at login isn't set up in development",
@@ -135,7 +136,15 @@ test("the service's check says whether Lookover starts at login for real, warnin
 test("each health check says what it checked, whether it is fine, and the detail", () => {
   const cases: [CheckItem, { label: string; ok: boolean | null; detail: string }][] = [
     [
-      { check: "engine", engine: "claude", state: "ready", cli: "claude", version: "2.4.1", unusable: null },
+      {
+        check: "engine",
+        engine: "claude",
+        state: "ready",
+        cli: "claude",
+        version: "2.4.1",
+        unusable: null,
+        detail: "",
+      },
       { label: "Claude", ok: true, detail: "signed in · claude 2.4.1" },
     ],
     [
@@ -146,6 +155,7 @@ test("each health check says what it checked, whether it is fine, and the detail
         cli: "codex",
         version: "0.162.1",
         unusable: null,
+        detail: "",
       },
       { label: "Codex", ok: false, detail: "signed out" },
     ],
@@ -157,12 +167,32 @@ test("each health check says what it checked, whether it is fine, and the detail
         cli: "codex",
         version: "0.154.0",
         unusable: TOO_OLD,
+        detail:
+          "gpt-6.1-sol needs Codex 0.162.0 or later; this one is 0.154.0. Update it, then check again: npm install -g @openai/codex@latest",
       },
       {
         label: "Codex",
         ok: false,
         detail:
           "gpt-6.1-sol needs Codex 0.162.0 or later; this one is 0.154.0. Update it, then check again: npm install -g @openai/codex@latest",
+      },
+    ],
+    // The service's words, written on its platform: a Mac's command, never Windows' the web would guess.
+    [
+      {
+        check: "engine",
+        engine: "claude",
+        state: "missing",
+        cli: "claude",
+        version: null,
+        unusable: { kind: "npm-launcher" },
+        detail: engineDetailText("claude", { installed: true, why: { kind: "npm-launcher" } }, "darwin"),
+      },
+      {
+        label: "Claude",
+        ok: false,
+        detail:
+          "Only npm's claude launcher was found, and it runs Claude through Node. Install the native claude program, then check again: curl -fsSL https://claude.ai/install.sh | bash",
       },
     ],
     [

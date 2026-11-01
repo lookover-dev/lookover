@@ -196,5 +196,6 @@ export function nextEventLine(clock: DemoClock, now: number): string {
   if (clock.nextIn === null) return "Nothing is scheduled. Use the app, or make something happen below.";
   const left = clock.now + clock.nextIn - now;
   if (left <= 0) return "The next event is due now.";
-  return `The next event is in ${duration(left)}.`;
+  // A countdown rounds up to the second, where `duration` floors: half a second left is "1 s", never "0 s".
+  return `The next event is in ${duration(Math.ceil(left / 1000) * 1000)}.`;
 }

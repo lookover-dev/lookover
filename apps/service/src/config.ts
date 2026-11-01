@@ -32,6 +32,8 @@ interface Common {
   announce: string | undefined;
   /** `--events-kept=<n>`: how many events a reconnecting UI can have replayed (ADR 0038); the service's default otherwise. */
   eventsKept: number | undefined;
+  /** The machine it runs on, as Node names it: what the commands the app gives are for (an AI's install, ADR 0070). */
+  platform: NodeJS.Platform;
   /** The whole environment, for the programs the service runs (git, the engines). */
   env: Record<string, string>;
   /** The git program, by absolute path, from the PATH. */
@@ -394,6 +396,7 @@ export function readConfig(argv: string[], system: System, self: Self): Config {
     origin: option("origin"),
     announce: option("announce"),
     eventsKept,
+    platform: system.platform,
     ...programs(system),
   };
   if (mode === "demo") return { ...common, mode, frozen, scenario: scenario ?? "S10" };

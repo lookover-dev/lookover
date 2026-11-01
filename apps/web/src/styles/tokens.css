@@ -15,6 +15,7 @@
   --faint: #6b665d;
   --line: #2f2b23;
   --line-2: #3e382d;
+  --line-overlay: #3e382d;
   --acc: #ff5c9a;
   --acc-ink: #17150f;
   --acc-soft: #3a1e2b;
@@ -93,6 +94,7 @@
   --faint: #a39e95;
   --line: #e3dfd6;
   --line-2: #cfc9bd;
+  --line-overlay: #e3dfd6;
   --acc: #e5347b;
   --acc-ink: #ffffff;
   --acc-soft: #fbe4ee;

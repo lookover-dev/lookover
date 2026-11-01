@@ -6,7 +6,7 @@ import { reviewPath, useAppState, useSend } from "../store.tsx";
 import { useTickingNow } from "../ticking.tsx";
 import { Button, Chip, Eyes, Icon, Row, Said } from "../ui/basics.tsx";
 import { Tip } from "../ui/layers.tsx";
-import { duration, type WithCommand } from "../view-model/format.ts";
+import { duration, LONGEST_RUNNING_TIMES, type WithCommand } from "../view-model/format.ts";
 import {
   confirmerOf,
   confirmSkipped,
@@ -94,12 +94,30 @@ export function ReviewRow({ item, fresh }: { item: ChangeReview; fresh?: boolean
   );
 }
 
-/** "reading the code · 1:12", its time a running time (design system), so ticking moves nothing after it. */
+/** "reading the code · 1 min 12 s", its time a running time (design system), so ticking moves nothing after it. */
 export function RunLine({ parts }: { parts: RunLineParts }) {
   return (
     <>
-      {parts.doing} · <span className="time-running">{parts.time}</span>
+      {parts.doing} · <RunningTime time={parts.time} />
     </>
+  );
+}
+
+/**
+ * A running time (design system): the time, laid in one cell over a hidden "59 min 59 s" and "99 h 59 min", the
+ * longest it writes, so the box is as wide as the wider of them in whatever face it is set and ticking moves nothing
+ * beside it, past ten hours too.
+ */
+function RunningTime({ time }: { time: string }) {
+  return (
+    <span className="time-running">
+      <span>{time}</span>
+      {LONGEST_RUNNING_TIMES.map((sizer) => (
+        <span key={sizer} aria-hidden="true">
+          {sizer}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -147,7 +165,8 @@ function StepItem({ step, name, review, now }: { step: RunStep; name: string; re
     );
   }
   const active = !done && run?.step === step;
-  const time = <code className={active ? "time-running" : undefined}>{stepTime(review, step, now)}</code>;
+  const stepAt = stepTime(review, step, now);
+  const time = <code>{active ? <RunningTime time={stepAt} /> : stepAt}</code>;
   if (done) {
     return (
       <li className="done">

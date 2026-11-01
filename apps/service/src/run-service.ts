@@ -30,7 +30,7 @@ import { type LiveConfig, WATCH_IGNORED } from "./live-config.ts";
 import { acquireLiveLock, LiveLockHeld } from "./live-lock.ts";
 import { type FileLogSink, openLogSink } from "./log-sink.ts";
 import { type LoginItem, osLoginItem } from "./login-item.ts";
-import { said } from "./said.ts";
+import { described, said } from "./said.ts";
 import { type RunningService, startDemoService, startService } from "./service.ts";
 import {
   DEV_SKILL_NAME,
@@ -142,9 +142,7 @@ export async function runService(config: Config, given: ProgramDeps): Promise<Ru
     },
   };
   const uncaught = (error: unknown) => {
-    sink.write(
-      `Lookover stopped on an error nothing caught: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
-    );
+    sink.write(`Lookover stopped on an error nothing caught: ${described(error)}`);
     deps.process.exit(1);
   };
   deps.process.on("uncaughtException", uncaught);
@@ -256,6 +254,9 @@ function startLine(config: Config, service: RunningService, command: string): st
   return `\n  Lookover service (${mode}) · ${service.origin}\n${opening(service)}`;
 }
 
+/** Does nothing: demo rooms' files sit in the data folder the program already made user-only. */
+const alreadyUserOnly = async (_path: string): Promise<void> => {};
+
 /** This clone's built web app's folder. */
 const CLONE_DIST = join(import.meta.dir, "..", "..", "web", "dist");
 
@@ -304,7 +305,8 @@ async function start(
   ): Promise<RunningService> => {
     const program = atLogin !== null;
     // Start at login on the machine for the program alone, and only unguarded (ADR 0054): the loop's runs, guarded by
-    // their live config, never register anything on the owner's machine (ADR 0045). Every other wiring: the room's fake.
+    // their live config, never register anything on the owner's machine (ADR 0045). Every other wiring: the room's
+    // stand-in, which registers nothing (ADR 0070).
     const loginItem =
       atLogin !== null && liveConfig === undefined
         ? (deps.loginItem ?? ((command) => osLoginItem(command, realSystem())))(atLogin)
@@ -333,6 +335,7 @@ async function start(
       ...(loginItem === undefined ? {} : { loginItem: { item: loginItem, kind: "os" as const } }),
       // One data folder for every repository (ADR 0053): the store at its root, the settings files in it (ADR 0049).
       home,
+      platform: config.platform,
       clock: deps.clock,
       version: VERSION,
     });
@@ -341,10 +344,13 @@ async function start(
   if (config.mode === "program") return await real(config.live, config.processes, config.atLogin);
   // Demo mode (ADR 0046): the scenario's seed is played on the demo clock before the first request is answered;
   // then the clock flows with the real time, or with `--frozen` (`bun run proof`) stands still at that instant,
-  // so two runs serve the same facts. The developer drawer's verbs move the clock and the fake world.
+  // so two runs serve the same facts. The developer drawer's verbs move the clock and the fake world. Each room's
+  // App store and sign-in store sit in the data folder the log made user-only, and a file made in it is the user's
+  // alone already (`makeUserOnly`): none runs `icacls` of its own, which cost S10's start a program per file.
   return await startDemoService({
     ...server,
     home,
+    userOnly: alreadyUserOnly,
     scenario: scenarioOf(config.scenario),
     ...(config.frozen === undefined ? {} : { frozen: config.frozen }),
     ...(deps.webFiles === undefined ? {} : { webFiles: deps.webFiles }),

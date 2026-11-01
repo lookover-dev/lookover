@@ -828,15 +828,39 @@ export const SHOTS: Shot[] = [
       await p.getByText("Saving…", { exact: true }).waitFor();
     },
   },
-  // The key refused: Settings' GitHub group, its App and the slug line, "Use an existing App" open for the new key.
+  // Settings' GitHub group on your own App: its App, Open on GitHub and the slug line, "Use an existing App" closed.
   {
     name: "settings-github",
     scenario: "S10",
     path: "/settings",
+    act: async (p) => {
+      await link(p, "Open on GitHub").scrollIntoViewIfNeeded();
+    },
+  },
+  // The key refused (ADR 0070): the band's Open Settings lands here, where the App's row says the problem, with Add a
+  // new key in Open on GitHub's place, and "Use an existing App" is open for the new key; the band has no button here.
+  {
+    name: "settings-github-key-refused",
+    scenario: "S10",
+    path: "/settings",
     inject: ["key-refused"],
     act: async (p) => {
-      await p.getByText("Use an existing App", { exact: true }).click();
+      await link(p, "Add a new key").waitFor();
       await p.getByLabel("App id").scrollIntoViewIfNeeded();
+    },
+  },
+  // The key refused while Settings is open: the row says it in place, and the disclosure stays as it was, closed.
+  {
+    name: "settings-github-key-refused-later",
+    scenario: "S10",
+    path: "/settings",
+    alone: true,
+    act: async (p, demo) => {
+      await link(p, "Open on GitHub").waitFor();
+      await demo.inject("key-refused");
+      await link(p, "Add a new key").scrollIntoViewIfNeeded();
+      const open = await button(p, "Use an existing App").getAttribute("aria-expanded");
+      if (open !== "false") throw new Error("“Use an existing App” opened when the key was refused later");
     },
   },
   // Settings › GitHub on the shared App (ADR 0067): signed in, the accounts list setup shows, Use your own App.
@@ -976,6 +1000,8 @@ export const SHOTS: Shot[] = [
   },
   // The first run
   { name: "setup-1-ai", scenario: "S1", screen: ".setup" },
+  // Neither AI installed: each row gives this machine's command to install it (ADR 0070).
+  { name: "setup-1-ai-missing", scenario: "S1", inject: ["engines-missing"], screen: ".setup" },
   // Both AIs ready: the step says so and waits for Continue; nothing moves by itself (ADR 0058).
   { name: "setup-1-ai-ready", scenario: "S1", screen: ".setup", alone: true, act: setupUntilBothReady },
   {
@@ -1435,6 +1461,45 @@ export const SHOTS: Shot[] = [
         .getByRole("radio", { name: /Add rate limiting to \/v1\/invoices/ })
         .and(p.locator(":checked"))
         .waitFor();
+    },
+  },
+  // #152, opened while First review is on screen, is reviewed by itself (#425): its row stays, its radio off, with
+  // its state chip and "Open on GitHub"; #148 still picked, nothing moved.
+  {
+    name: "setup-4-first-review-reviewed",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilRepositories(p, demo);
+      await button(p, "Continue").click();
+      await button(p, "Review this pull request").waitFor();
+      await demo.inject("agent-opens-change");
+      await p.getByText("Cache exchange rates for an hour").waitFor();
+      await demo.advance(5 * MIN);
+      await p
+        .getByRole("radio", { name: /Cache exchange rates for an hour/ })
+        .and(p.locator(":disabled"))
+        .waitFor();
+      await button(p, "Open on GitHub").waitFor();
+      await p
+        .getByRole("radio", { name: /Add rate limiting to \/v1\/invoices/ })
+        .and(p.locator(":checked"))
+        .waitFor();
+    },
+  },
+  // ledger-api unticked: no pull request open in the repositories kept. The empty card, then the bar, no blank line
+  // held between them (the "none left" line is held only under a list).
+  {
+    name: "setup-4-first-review-empty",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilRepositories(p, demo);
+      await p.getByLabel("sasensi/ledger-api").uncheck();
+      await button(p, "Continue").click();
+      await p.getByText("No open pull request in the repositories you picked.", { exact: false }).waitFor();
     },
   },
   {

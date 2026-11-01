@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, test } from "bun:test";
 import {
   copyFileSync,
   mkdtempSync,
@@ -29,6 +29,7 @@ import {
   type Setup,
   type Turn,
 } from "@lookover/contracts";
+import { templateFolder } from "@lookover/testkit";
 import { z } from "zod";
 import { type Asked, openStore, type ReadRule, type RunEnd, type Store, type WaitingJob } from "./index.ts";
 
@@ -45,6 +46,22 @@ const stores: Store[] = [];
 function home(): string {
   const dir = mkdtempSync(join(realpathSync.native(tmpdir()), "lookover-store-"));
   homes.push(dir);
+  return dir;
+}
+
+/**
+ * A data folder whose database every migration already brought up to date, migrated once for the file and copied:
+ * what each test that isn't about the migrations stands on (a migration from nothing costs about 10 ms more than a
+ * copy). Each copy is its own; the template is removed with the file's last test.
+ */
+const TEMPLATE = templateFolder("lookover-store-migrated-", (home) =>
+  openStore({ home, durable: false }).close(),
+);
+afterAll(() => TEMPLATE.remove());
+
+function migrated(): string {
+  const dir = home();
+  TEMPLATE.copy(dir);
   return dir;
 }
 
@@ -89,7 +106,7 @@ const T1 = Date.UTC(2026, 9, 6, 9, 0);
 const T2 = Date.UTC(2026, 9, 6, 9, 30);
 
 test("the inbox says what a listing added, opened or pushed, each change with when the host says it was opened", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.inbox.replace(REPO, [pr1])).toEqual({
     repositoryAdded: true,
@@ -125,7 +142,7 @@ test("the inbox says what a listing added, opened or pushed, each change with wh
 });
 
 test("a change whose opened time the host gives otherwise is kept so, and said as written, once (ADR 0068)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   store.inbox.replace(REPO, [pr1, pr2]);
   // As a data folder from before ADR 0068 kept it: the opened time the listing saw, not the host's.
@@ -144,7 +161,7 @@ test("a change whose opened time the host gives otherwise is kept so, and said a
 });
 
 test("a draft listed ready for review is said once; listed a draft again, nothing is said", () => {
-  const store = open(home());
+  const store = open(migrated());
   store.inbox.replace(REPO, [pr1, pr2]);
   const ready = { ...pr2, draft: false };
   const pushedReady = {
@@ -161,7 +178,7 @@ test("a draft listed ready for review is said once; listed a draft again, nothin
 });
 
 test("a change the host no longer lists leaves the inbox, said once, and is new again if it comes back", () => {
-  const store = open(home());
+  const store = open(migrated());
   store.inbox.replace(REPO, [pr1, pr2]);
   expect(store.inbox.replace(REPO, [pr2]).closed).toEqual([1]);
   expect(store.inbox.replace(REPO, [pr2]).closed).toEqual([]);
@@ -171,7 +188,7 @@ test("a change the host no longer lists leaves the inbox, said once, and is new 
 });
 
 test("the inbox gives a repository's open changes as last listed: head, draft, author", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.inbox.open(REPO)).toEqual([]);
   store.inbox.replace(REPO, [pr1, pr2]);
@@ -199,7 +216,7 @@ test("the inbox gives a repository's open changes as last listed: head, draft, a
 });
 
 test("the inbox keeps whether each change is a fork's, across a restart, as the last listing says", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const fromFork = { ...pr2, fork: true };
   store.inbox.replace(REPO, [pr1, fromFork]);
@@ -226,7 +243,7 @@ test("the inbox keeps whether each change is a fork's, across a restart, as the 
 });
 
 test("the inbox keeps who wrote each change and the commit it was read through; a new writer is said once", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const claude = { by: "claude", through: pr1.head.sha } as const;
   // Read for #1; #2 not read yet: unknown, through no commit.
@@ -277,7 +294,7 @@ test("the inbox keeps who wrote each change and the commit it was read through; 
 });
 
 test("a repository's switch is on until the owner turns it off, kept across a restart, set before or after its first listing (ADR 0047)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const other = { owner: "lookover-dev", name: "lookover-private" };
   // Never listed, never switched: on.
@@ -303,7 +320,7 @@ test("a repository's switch is on until the owner turns it off, kept across a re
 });
 
 test("events are numbered one more than the last, kept in order, and numbered on after a restart", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.events.last()).toBe(0);
   const first: EventBody = { type: "clock", at: T1 };
@@ -322,7 +339,7 @@ test("events are numbered one more than the last, kept in order, and numbered on
 });
 
 test("a store for data thrown away and a durable one on the same folder read each other's writes", () => {
-  const dir = home();
+  const dir = migrated();
   const quick = openStore({ home: dir, durable: false });
   stores.push(quick);
   quick.events.append({ type: "clock", at: T1 });
@@ -357,7 +374,7 @@ test("a new store opened from a given number numbers its events after it, across
 });
 
 test("the setup says whether it was ever written: not before the first write, then across a restart (ADR 0047)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.setup.kept()).toBe(false);
   store.close();
@@ -372,7 +389,7 @@ test("the setup says whether it was ever written: not before the first write, th
 });
 
 test("the setup starts at its first step, keeps each write across a restart, and never loses the furthest step reached (ADR 0047)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const start: Setup = {
     done: false,
@@ -429,7 +446,7 @@ test("the setup starts at its first step, keeps each write across a restart, and
 });
 
 test("the setup's table refuses a GitHub step or a refusal the contracts don't name (ADR 0053)", () => {
-  const dir = home();
+  const dir = migrated();
   open(dir).setup.write({ step: "github" });
   const db = new Database(join(dir, DATABASE), { strict: true });
   expect(() => db.run("UPDATE setup SET github = 'bot-created'")).toThrow("CHECK");
@@ -442,7 +459,7 @@ test("the setup's table refuses a GitHub step or a refusal the contracts don't n
 });
 
 test("start at login is on until the owner turns it off, kept across a restart, and never makes the setup kept (ADR 0054)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.setup.startAtLogin()).toBe(true);
   store.setup.keepStartAtLogin(false);
@@ -460,7 +477,7 @@ test("start at login is on until the owner turns it off, kept across a restart, 
 });
 
 test("the pause is kept across a restart, a later pause replaces it, and a resume clears it (ADR 0040)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.pause.current()).toBeNull();
   store.pause.paused({ since: T1, until: null });
@@ -475,7 +492,7 @@ test("the pause is kept across a restart, a later pause replaces it, and a resum
 });
 
 test("a self-test's result is kept per engine, program and version, across a restart, the last one winning (ADR 0044)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const claude = { engine: "claude", program: "C:\\bin\\claude.exe", version: "2.1.283" } as const;
   expect(store.selfTests.result(claude)).toBeNull();
@@ -557,7 +574,7 @@ function started(store: Store, id: JobId, r: Run): ReviewJob | undefined {
 }
 
 test("the take offers the waiting jobs oldest first, records each change it decides and the first start, and stops there", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.jobs.latest(CHANGE)).toBeNull();
   const second: ReviewJob = { ...job, id: jobId("j2"), sha: pr2.head.sha };
@@ -623,7 +640,7 @@ test("the take offers the waiting jobs oldest first, records each change it deci
 });
 
 test("a review asked for as a preview is offered to the take as one, joined or restarted, and the join keeps the first ask's", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const first: ReviewJob = { ...job, trigger: "first-review" };
   store.jobs.asked(CHANGE, { sha: first.sha, trigger: first.trigger, id: () => first.id, preview: true });
@@ -647,7 +664,7 @@ test("a review asked for as a preview is offered to the take as one, joined or r
 });
 
 test("a job an ordinary ask made and a preview joined is a preview, its trigger kept", () => {
-  const store = open(home());
+  const store = open(migrated());
   asked(store, CHANGE, job);
   expect(store.jobs.previewOf(job.id)).toBe(false);
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "first-review", id: () => jobId("j9"), preview: true });
@@ -656,7 +673,7 @@ test("a job an ordinary ask made and a preview joined is a preview, its trigger 
 });
 
 test("a review asked for in full is offered and started so, joined or restarted, and a full ask makes the job it joins full", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   // Asked without saying: no full round.
   asked(store, CHANGE, job);
@@ -682,7 +699,7 @@ test("a review asked for in full is offered and started so, joined or restarted,
 });
 
 test("an ordinary waiting job joined by a preview ask is a preview from then on: the owner was told nothing is posted", () => {
-  const store = open(home());
+  const store = open(migrated());
   // Opened after the first listing: its job is queued when the owner picks it at the first-review step.
   const opened: ReviewJob = { ...job, trigger: "opened" };
   asked(store, CHANGE, opened);
@@ -701,7 +718,7 @@ test("an ordinary waiting job joined by a preview ask is a preview from then on:
 });
 
 test("a preview has no check: completed from the start, joined as one too, unless the host already shows one", () => {
-  const store = open(home());
+  const store = open(migrated());
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "first-review", id: () => job.id, preview: true });
   expect(store.jobs.checkOf(job.id)).toEqual({ ref: null, completed: true });
   // An ordinary job, its check not created yet, joined by a preview ask.
@@ -719,7 +736,7 @@ test("a preview has no check: completed from the start, joined as one too, unles
 });
 
 test("a check the host made after a preview joined its job is followed: the preview owes its end once done", () => {
-  const store = open(home());
+  const store = open(migrated());
   // An ordinary job whose check is being created when a preview joins it: no check kept yet, so none owed.
   asked(store, CHANGE, job);
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "first-review", id: () => jobId("j2"), preview: true });
@@ -737,7 +754,7 @@ test("a check the host made after a preview joined its job is followed: the prev
 });
 
 test("a preview's job moved to a newer commit lets its check go and makes none: nothing more is owed", () => {
-  const store = open(home());
+  const store = open(migrated());
   asked(store, CHANGE, job);
   store.jobs.checked(job.id, { id: "c1", sha: job.sha });
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "first-review", id: () => jobId("j2"), preview: true });
@@ -752,7 +769,7 @@ test("a preview's job moved to a newer commit lets its check go and makes none: 
 });
 
 test("a preview done whose check the host shows owes that check's end until it is completed, after a restart too", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   store.jobs.checked(job.id, { id: "c1", sha: job.sha });
@@ -773,7 +790,7 @@ test("a preview done whose check the host shows owes that check's end until it i
 });
 
 test("a waiting job sent to the other engine keeps it until the job ends: offered with it, through a run that defers, not past its end (ADR 0047)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   store.jobs.take(() => ({ kind: "defer", deferral: SIGNED_OUT }));
@@ -809,7 +826,7 @@ test("a waiting job sent to the other engine keeps it until the job ends: offere
 });
 
 test("a job's reroute is cleared when the job ends, by the take's skip, cancel and fail or by its run's end", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const second: ReviewJob = { ...job, id: jobId("j2") };
   const third: ReviewJob = { ...job, id: jobId("j3") };
@@ -848,7 +865,7 @@ test("a job's reroute is cleared when the job ends, by the take's skip, cancel a
 });
 
 test("a job held on an engine found but not usable keeps why, and a new why is a change", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   const tooOld = { kind: "too-old", version: "0.161.0", model: "gpt-6.1-sol", needs: "0.162.0" } as const;
@@ -869,7 +886,7 @@ test("a job held on an engine found but not usable keeps why, and a new why is a
 });
 
 test("the take writes only what changes: an unchanged deferral or a queued job left queued is no write", () => {
-  const store = open(home());
+  const store = open(migrated());
   const second: ReviewJob = { ...job, id: jobId("j2"), sha: pr2.head.sha };
   asked(store, CHANGE, job);
   asked(store, OTHER, second);
@@ -930,7 +947,7 @@ test("the take writes only what changes: an unchanged deferral or a queued job l
 });
 
 test("a queued job's turn is kept across a restart and goes when it leaves the queue: deferred, joined from deferred, started (ADR 0055)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   store.jobs.take(() => ({ kind: "queue", holds: [], turn: BEHIND }));
@@ -949,7 +966,7 @@ test("a queued job's turn is kept across a restart and goes when it leaves the q
 });
 
 test("the take skips a waiting job with its reason: it waits no more, its check's end is owed, its request gets no 🚀", () => {
-  const store = open(home());
+  const store = open(migrated());
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
   store.jobs.take(() => ({ kind: "defer", deferral: SIGNED_OUT }));
   const skipped: ReviewJob = { ...job, trigger: "comment", state: "skipped", skip: "codex-not-yours" };
@@ -967,7 +984,7 @@ test("the take skips a waiting job with its reason: it waits no more, its check'
 });
 
 test("a push moves the change's waiting job to the new head as the same job, as it waits, and makes none (ADR 0040)", () => {
-  const store = open(home());
+  const store = open(migrated());
   const newest = commitSha("c3d4e5f60718293a4b5c6d7e8f9012345678a1b2");
   // No waiting job: nothing to move, and no job is made.
   expect(store.jobs.pushed(CHANGE, newest)).toEqual([]);
@@ -994,7 +1011,7 @@ test("a push moves the change's waiting job to the new head as the same job, as 
 });
 
 test("a fork pushed ends its waiting job cancelled `pushed` on the commit it was asked for: nobody asked for the new head (ADR 0048)", () => {
-  const store = open(home());
+  const store = open(migrated());
   const newest = commitSha("c3d4e5f60718293a4b5c6d7e8f9012345678a1b2");
   expect(store.jobs.forkPushed(CHANGE, newest)).toEqual([]);
 
@@ -1022,7 +1039,7 @@ test("a fork pushed ends its waiting job cancelled `pushed` on the commit it was
 const NEWEST = commitSha("c3d4e5f60718293a4b5c6d7e8f9012345678a1b2");
 
 test("a review asked for a change whose job waits joins it: the same job, on the commit asked for, back in the queue", () => {
-  const store = open(home());
+  const store = open(migrated());
   expect(asked(store, CHANGE, job)).toEqual({ job, changed: true, followUp: false });
   // Asked again, as it is: nothing changes.
   expect(asked(store, CHANGE, { ...job, id: jobId("j2") })).toEqual({
@@ -1042,7 +1059,7 @@ test("a review asked for a change whose job waits joins it: the same job, on the
 });
 
 test("the database itself refuses a second waiting job for a change, queued or deferred; other jobs are let in", () => {
-  const dir = home();
+  const dir = migrated();
   asked(open(dir), CHANGE, job);
   const db = new Database(join(dir, DATABASE), { strict: true });
   const insert = (id: string, change: ChangeId, state: string) =>
@@ -1063,7 +1080,7 @@ test("the database itself refuses a second waiting job for a change, queued or d
 });
 
 test("a review asked for while the change's job runs is a follow-up for the commit asked for, and later asks join it", () => {
-  const store = open(home());
+  const store = open(migrated());
   asked(store, CHANGE, job);
   started(store, job.id, run);
   const followUp: ReviewJob = { ...job, id: jobId("j2"), sha: NEWEST };
@@ -1088,7 +1105,7 @@ test("a review asked for while the change's job runs is a follow-up for the comm
 const at = (newest: number, keepFrom = newest) => ({ newest, keepFrom });
 
 test("the poll's place in a repository's comments: none at first, its first kept as the floor, the newest only forward, across a restart (ADR 0043)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.requests.place(REPO)).toBeNull();
   store.requests.seen(REPO, [], at(T1));
@@ -1102,7 +1119,7 @@ test("the poll's place in a repository's comments: none at first, its first kept
 });
 
 test("a comment the poll handled is never handled again, after a restart too; forgotten once the poll lists only after it", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   store.requests.seen(REPO, [{ id: "c1", createdAt: T1 }], at(T1));
   expect(store.requests.handled(REPO, ["c1", "c2"])).toEqual(new Set(["c1"]));
@@ -1127,7 +1144,7 @@ const request = (id: string, at = T1) => ({
 });
 
 test("the requests a job answers are given by their global ids, for its round to minimize (ADR 0052)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.requests.of(job.id)).toEqual([]);
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
@@ -1144,7 +1161,7 @@ test("the requests a job answers are given by their global ids, for its round to
 });
 
 test("a request is handled with the job it led to: 👀 waits once recorded, 🚀 once its job's round is posted", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
   // A second request while the job waits joins it: the same job answers both.
@@ -1181,7 +1198,7 @@ test("a request is handled with the job it led to: 👀 waits once recorded, �
 });
 
 test("a request skipped is handled and waits for 👀, never 🚀; a failed or cancelled job's never gets 🚀", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   store.jobs.skipped(OTHER, {
     sha: pr2.head.sha,
@@ -1218,7 +1235,7 @@ test("a request skipped is handled and waits for 👀, never 🚀; a failed or c
 });
 
 test("a request whose round was posted gets its 🚀 when the run's end is recorded only as a failure", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
   store.requests.reacted(REPO, "c1", "eyes");
@@ -1234,7 +1251,7 @@ test("a request whose round was posted gets its 🚀 when the run's end is recor
 });
 
 test("a request whose job yields to the follow-up behind it is answered by the follow-up's round (ADR 0043)", () => {
-  const store = open(home());
+  const store = open(migrated());
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
   started(store, job.id, run);
   const followUp: ReviewJob = { ...job, id: jobId("j2"), sha: NEWEST };
@@ -1257,7 +1274,7 @@ test("a request whose job yields to the follow-up behind it is answered by the f
 });
 
 test("a request beside a waiting preview is held by a review of its own, behind it: 👀 at once, 🚀 when its round posts", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   // The owner's preview waits; an agent's request comes.
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "first-review", id: () => job.id, preview: true });
@@ -1311,7 +1328,7 @@ test("a request beside a waiting preview is held by a review of its own, behind 
 });
 
 test("a waiting review that holds a request is no preview: the owner's preview is a job of its own, and a push moves both", () => {
-  const store = open(home());
+  const store = open(migrated());
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
   const preview = store.jobs.asked(CHANGE, {
     sha: job.sha,
@@ -1334,7 +1351,7 @@ test("a waiting review that holds a request is no preview: the owner's preview i
 });
 
 test("a preview's run ends as a preview, done like a round once its round is saved: it owes no reaction", () => {
-  const store = open(home());
+  const store = open(migrated());
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "first-review", id: () => job.id, preview: true });
   started(store, job.id, { ...run, preview: true });
   expect(() => store.jobs.runEnded(run.id, { kind: "preview" }, T2)).toThrow(
@@ -1349,7 +1366,7 @@ test("a preview's run ends as a preview, done like a round once its round is sav
 });
 
 test("two takes on one database, from two connections, never start the same job", () => {
-  const dir = home();
+  const dir = migrated();
   const first = open(dir);
   const second = open(dir);
   asked(first, CHANGE, job);
@@ -1382,7 +1399,7 @@ const taker = (dir: string, tag: string) => `
 `;
 
 test("two processes taking from one database start every job once, waiting on each other's takes", async () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const ids = Array.from({ length: 40 }, (_, i) => jobId(`j${i}`));
   for (const id of ids) asked(store, changeId(`sasensi/lookover-sandbox#${id}`), { ...job, id });
@@ -1407,7 +1424,7 @@ test("two processes taking from one database start every job once, waiting on ea
 });
 
 test("a job waiting on an engine that failed its self-test is read back with that engine (ADR 0044)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   const failed = { reason: "engine-failed-self-test", engine: "codex" } as const;
@@ -1417,7 +1434,7 @@ test("a job waiting on an engine that failed its self-test is read back with tha
 });
 
 test("a job row that doesn't parse throws: an engine's deferral without its engine is not read as Claude's", () => {
-  const dir = home();
+  const dir = migrated();
   asked(open(dir), CHANGE, job);
   const db = new Database(join(dir, DATABASE), { strict: true });
   db.run("UPDATE jobs SET state = 'deferred', deferral_reason = 'engine-signed-out', deferral_engine = NULL");
@@ -1457,7 +1474,7 @@ const finding: Finding = {
 };
 
 test("a run is kept with its steps and how it ended", () => {
-  const store = open(home());
+  const store = open(migrated());
   asked(store, CHANGE, job);
   // The run starts: its job runs, and is no longer waiting its turn.
   const running: ReviewJob = { ...job, state: "running" };
@@ -1487,7 +1504,7 @@ test("a run is kept with its steps and how it ended", () => {
 });
 
 test("a repository's rules are kept as last read, each counted from every change's last round: raised citing it, acted verified fixed (ADR 0048)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const SANDBOX = repositoryId("sasensi/lookover-sandbox");
   const OTHER_REPO = repositoryId("sasensi/ledger-api");
@@ -1556,7 +1573,7 @@ test("a repository's rules are kept as last read, each counted from every change
 });
 
 test("a rule read twice is kept once, where it was first read (ADR 0048)", () => {
-  const store = open(home());
+  const store = open(migrated());
   const SANDBOX = repositoryId("sasensi/lookover-sandbox");
   const expire: ReadRule = {
     id: "a1",
@@ -1580,7 +1597,7 @@ test("a rule read twice is kept once, where it was first read (ADR 0048)", () =>
 });
 
 test("a change's job is pending while it waits or runs; ended, skipped or on another change, it isn't", () => {
-  const store = open(home());
+  const store = open(migrated());
   expect(store.jobs.pending(CHANGE)).toBe(false);
   asked(store, CHANGE, job);
   expect(store.jobs.pending(CHANGE)).toBe(true);
@@ -1594,7 +1611,7 @@ test("a change's job is pending while it waits or runs; ended, skipped or on ano
 });
 
 test("\"Too noisy?\"'s counts: the repository's 30 most recently reviewed changes, each by its last round (ADR 0049)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const SANDBOX_REPO = repositoryId("sasensi/lookover-sandbox");
   expect(store.rounds.noise(SANDBOX_REPO, "sasensi/lookover-sandbox#")).toEqual({
@@ -1659,7 +1676,7 @@ test("\"Too noisy?\"'s counts: the repository's 30 most recently reviewed change
 });
 
 test("the rounds of a change are kept in order, and the ledger is what the last one left", () => {
-  const store = open(home());
+  const store = open(migrated());
   expect(store.rounds.ledger(CHANGE)).toEqual([]);
   expect(store.rounds.of(CHANGE)).toEqual([]);
   asked(store, CHANGE, job);
@@ -1681,7 +1698,7 @@ test("the rounds of a change are kept in order, and the ledger is what the last 
 });
 
 test("when a repository's last round was posted: none before its first, another repository's not counted (ADR 0043's hot window)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.rounds.lastPostedAt("sasensi/lookover-sandbox#")).toBeNull();
   asked(store, CHANGE, job);
@@ -1705,7 +1722,7 @@ test("when a repository's last round was posted: none before its first, another 
 });
 
 test("a repository is asked while a job of one of its changes waits or runs; another repository's doesn't count", () => {
-  const store = open(home());
+  const store = open(migrated());
   expect(store.jobs.pendingIn("sasensi/lookover-sandbox#")).toBe(false);
   asked(store, CHANGE, job);
   expect(store.jobs.pendingIn("sasensi/lookover-sandbox#")).toBe(true);
@@ -1718,7 +1735,7 @@ test("a repository is asked while a job of one of its changes waits or runs; ano
 });
 
 test("a job skipped is recorded with its reason, never waits, and lets a review be asked beside it", () => {
-  const store = open(home());
+  const store = open(migrated());
   const skipped = store.jobs.skipped(OTHER, {
     sha: pr2.head.sha,
     trigger: "opened",
@@ -1744,7 +1761,7 @@ test("a job skipped is recorded with its reason, never waits, and lets a review 
 });
 
 test("a run cut short leaves its job deferred with the reason, or failed with why, and no round", () => {
-  const store = open(home());
+  const store = open(migrated());
   asked(store, CHANGE, job);
   started(store, job.id, run);
   // Claude signed out during the find pass: the job waits (ADR 0029).
@@ -1772,7 +1789,7 @@ test("a run cut short leaves its job deferred with the reason, or failed with wh
 });
 
 test("the jobs a stopped service left running are listed with their run, and failing the run fails them", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -1797,7 +1814,7 @@ test("the jobs a stopped service left running are listed with their run, and fai
 });
 
 test("a run's age, for its folder (ADR 0056): unknown, open while it or its job runs, else when it ended", () => {
-  const store = open(home());
+  const store = open(migrated());
   expect(store.jobs.runAge("r9")).toEqual({ kind: "unknown" });
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -1814,7 +1831,7 @@ test("a run's age, for its folder (ADR 0056): unknown, open while it or its job 
 });
 
 test("a run a restart interrupted puts its job back in the queue, counted, and its next run is left with the step it reached", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -1841,7 +1858,7 @@ test("a run a restart interrupted puts its job back in the queue, counted, and i
 });
 
 test("a job whose run ends deferred or interrupted while its change has a follow-up yields to it: cancelled", () => {
-  const store = open(home());
+  const store = open(migrated());
   const ends: RunEnd[] = [{ kind: "deferred", deferral: SIGNED_OUT }, { kind: "interrupted" }];
   for (const [i, end] of ends.entries()) {
     const ran: ReviewJob = { ...job, id: jobId(`ran-${i}`) };
@@ -1859,7 +1876,7 @@ test("a job whose run ends deferred or interrupted while its change has a follow
 });
 
 test("a full round that yields to an ordinary follow-up hands it the full ask: its round is a full one", () => {
-  const store = open(home());
+  const store = open(migrated());
   const ends: RunEnd[] = [{ kind: "deferred", deferral: SIGNED_OUT }, { kind: "interrupted" }];
   for (const [i, end] of ends.entries()) {
     const ran: ReviewJob = { ...job, id: jobId(`ran-${i}`) };
@@ -1878,7 +1895,7 @@ test("a full round that yields to an ordinary follow-up hands it the full ask: i
 });
 
 test("an interrupted review that posts, beside a waiting preview, goes back to the queue: one waiting job of each kind", () => {
-  const store = open(home());
+  const store = open(migrated());
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
   started(store, job.id, run);
   // The owner's preview, asked for while the review runs, is a job of its own.
@@ -1899,7 +1916,7 @@ test("an interrupted review that posts, beside a waiting preview, goes back to t
 });
 
 test("an interrupted preview, beside a waiting review that posts, goes back to the queue: one waiting job of each kind", () => {
-  const store = open(home());
+  const store = open(migrated());
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "first-review", id: () => job.id, preview: true });
   started(store, job.id, { ...run, preview: true });
   // A review asked for while the preview runs is a job of its own.
@@ -1920,7 +1937,7 @@ test("an interrupted preview, beside a waiting review that posts, goes back to t
 });
 
 test("a job keeps the check that follows it, the commit it is on, across a restart, until another replaces it", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   const none = { ref: null, completed: false };
@@ -1941,7 +1958,7 @@ test("a job keeps the check that follows it, the commit it is on, across a resta
 });
 
 test("a job that ended without a round owes its check's end, across a restart, until the check is completed", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   const other: ReviewJob = { ...job, id: jobId("j2") };
@@ -1985,7 +2002,7 @@ test("a job that ended without a round owes its check's end, across a restart, u
 });
 
 test("a job that isn't waiting isn't offered to the take, and an ended run can't step or end", () => {
-  const store = open(home());
+  const store = open(migrated());
   asked(store, CHANGE, job);
   started(store, job.id, run);
   // Running: it isn't waiting any more.
@@ -2013,7 +2030,7 @@ const PLAN = { round: 1, change: { number: 1 } };
 const POSTS = ["check", "review", "summary", "completed"] as const;
 
 test("a run that reaches publishing saves its round, the ledger held until its review lands, and its posts, owed", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -2053,7 +2070,7 @@ test("a run that reaches publishing saves its round, the ledger held until its r
 });
 
 test("each post sent is kept with the host's id: the check is the job's, the review lands the ledger, the end completes the check", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -2091,7 +2108,7 @@ test("each post sent is kept with the host's id: the check is the job's, the rev
 });
 
 test("a round's replies and the comments it minimizes are posts of their own, each kept with the host's id (ADR 0052)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -2116,7 +2133,7 @@ test("a round's replies and the comments it minimizes are posts of their own, ea
 });
 
 test("a round whose review send began and was never marked sent is one the host may hold", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -2132,7 +2149,7 @@ test("a round whose review send began and was never marked sent is one the host 
 });
 
 test("the findings a round held off the pull request are withheld until its review lands", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -2154,7 +2171,7 @@ test("the findings a round held off the pull request are withheld until its revi
 });
 
 test("the findings a preview held off the pull request are withheld: its empty outbox never lands them", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -2167,7 +2184,7 @@ test("the findings a preview held off the pull request are withheld: its empty o
 });
 
 test("a round whose review goes with its findings in the summary is kept so, after a restart too", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -2181,7 +2198,7 @@ test("a round whose review goes with its findings in the summary is kept so, aft
 });
 
 test("a run posting its round frees its engine, and its change stays busy for the take until the run ends", () => {
-  const store = open(home());
+  const store = open(migrated());
   asked(store, CHANGE, job);
   started(store, job.id, run);
   const followUp: ReviewJob = { ...job, id: jobId("j2"), sha: NEWEST };
@@ -2213,7 +2230,7 @@ test("a run posting its round frees its engine, and its change stays busy for th
 });
 
 test("a run confirming on the other engine holds both engines until its round is saved (ADR 0044)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   const other: ReviewJob = { ...job, id: jobId("j2"), sha: pr2.head.sha };
@@ -2236,7 +2253,7 @@ test("a run confirming on the other engine holds both engines until its round is
 });
 
 test("a job waiting its turn holds the engines it waits for: a younger job needing one of them waits behind it", () => {
-  const store = open(home());
+  const store = open(migrated());
   // Claude reviews the first change; the second waits for Claude and Codex; the third needs only Codex.
   asked(store, CHANGE, job);
   started(store, job.id, run);
@@ -2277,7 +2294,7 @@ const codexRunOf = (s: { job: ReviewJob }): Run => ({
 });
 
 test("a run's end as a round needs a round saved for it", () => {
-  const store = open(home());
+  const store = open(migrated());
   asked(store, CHANGE, job);
   started(store, job.id, run);
   expect(() => store.jobs.runEnded(run.id, { kind: "round" }, T2)).toThrow(
@@ -2447,7 +2464,7 @@ function postedRound(store: Store, ledger: Finding[]): void {
 }
 
 test("the replies Lookover kept for a change are its rounds' and its dismissals', each by the host's id (ADR 0066)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   expect(store.posts.replies(CHANGE)).toEqual([]);
   asked(store, CHANGE, job);
@@ -2487,7 +2504,7 @@ test("the replies Lookover kept for a change are its rounds' and its dismissals'
 });
 
 test("the change's latest round that posted is given with its plan and its check; a preview after it is passed over", () => {
-  const store = open(home());
+  const store = open(migrated());
   expect(store.posts.latest(CHANGE)).toBeNull();
   postedRound(store, [finding]);
   const preview: ReviewJob = { ...job, id: jobId("j2") };
@@ -2498,7 +2515,7 @@ test("the change's latest round that posted is given with its plan and its check
 });
 
 test("a dismissal is saved in one write with the ledger it leaves and its posts owed, and refused while a run of the change goes", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   postedRound(store, [finding]);
   const saved = store.dismissals.saved({
@@ -2560,7 +2577,7 @@ test("a dismissal is saved in one write with the ledger it leaves and its posts 
 });
 
 test("a dismissal's ledger reaches the round whose review hasn't landed: a late landing never undoes it", () => {
-  const store = open(home());
+  const store = open(migrated());
   asked(store, CHANGE, job);
   started(store, job.id, run);
   const held: Finding = { ...finding, posted: false };
@@ -2595,7 +2612,7 @@ test("a dismissal's ledger reaches the round whose review hasn't landed: a late 
 });
 
 test("a dismissal owing posts keeps its change busy for the take until it ends", () => {
-  const store = open(home());
+  const store = open(migrated());
   postedRound(store, [finding]);
   const next: ReviewJob = { ...job, id: jobId("j2"), sha: NEWEST };
   asked(store, CHANGE, next);
@@ -2623,7 +2640,7 @@ test("a dismissal owing posts keeps its change busy for the take until it ends",
 });
 
 test("a repository gone from the installation: its jobs cancelled, what it owes dropped, its listing forgotten, its history kept (ADR 0053)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const ledger = { owner: "sasensi", name: "ledger-api" };
   const ledgerChange = changeId("sasensi/ledger-api#1");
@@ -2672,7 +2689,7 @@ test("a repository gone from the installation: its jobs cancelled, what it owes 
 });
 
 test("a manifest flow is kept by its state's hash across a restart until used up; those opened before a moment are forgotten (ADR 0053)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = openStore({ home: dir, durable: false });
   expect(store.appFlows.flow("a1")).toBeNull();
   store.appFlows.opened("a1", 1_000, null);
@@ -2690,7 +2707,7 @@ test("a manifest flow is kept by its state's hash across a restart until used up
 });
 
 test("where the App is made is chosen once and kept across a restart, and each flow keeps the place it was opened for (ADR 0059)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = openStore({ home: dir, durable: false });
   const acme = { organisation: { id: 9000, login: "acme" }, person: { id: 42, login: "sam" } };
   // Your own account until an organisation is chosen.
@@ -2722,7 +2739,7 @@ test("where the App is made is chosen once and kept across a restart, and each f
 const OWNER_IDS_MIGRATION = "20261030090000-change-ids-with-owner";
 
 test("a data folder from before ADR 0066 names its changes by owner and name: its jobs, rounds, plans, dismissals and first review follow, its events not", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const ledgerApi = { owner: "ledger-dev", name: "ledger-api" };
   // Both repositories listed: the store keeps them, each of one name in this data folder.
@@ -2783,7 +2800,7 @@ test("a data folder from before ADR 0066 names its changes by owner and name: it
 });
 
 test("an ask to install on an account is kept per person across a restart, the last one winning, by its id, until reached or another signs in (ADR 0067)", () => {
-  const dir = home();
+  const dir = migrated();
   const store = open(dir);
   const sam = 1234;
   const bob = 5678;

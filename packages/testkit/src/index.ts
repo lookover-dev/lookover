@@ -47,10 +47,11 @@
 // push.
 // `DemoClock` (ADR 0046) is the service's `Clock` and `Timers` in one: standing still, time moves only by
 // `advance` and `step`, which fire the due timers in their due order and let the work each started settle before
-// the next; flowing (`set`), it follows the real time at a speed, one timer per real tick. `ScriptedRetrieval`
-// (ADR 0046) is `retrieval`'s port without git: a worktree path and a diff per scripted commit of a change
-// (`script`, `worktreeOf`: `<root>/<change>/<sha>`, nothing written there), and a repository's rules files given
-// with each of its prepares (`scriptRules`). `ScriptedEngines` (ADR 0046) is
+// the next, and `jump`, which fires each one at most once (one re-armed on the way, where the jump lands); flowing
+// (`set`), it follows the real time at a speed, one timer per real tick. `ScriptedRetrieval` (ADR 0046) is
+// `retrieval`'s port without git: a worktree path and a diff per scripted commit of a change (`script`,
+// `worktreeOf`: `<root>/<change>/<sha>`, nothing written there), and a repository's rules files given with each of
+// its prepares (`scriptRules`). `ScriptedEngines` (ADR 0046) is
 // the `Engines` port, and `engines`' `SelfTests` by shape, from a script: one answer per worktree
 // and pass (`scriptFind`, `scriptConfirm`, the pass read from the marker `review`'s prompts carry), written as
 // data and rendered into the text `review` reads, kept rather than consumed; a duration on the timers given,
@@ -73,6 +74,11 @@
 // that follows, a check that fails (any error, or those its `isFailure` names) reading false and any other error going
 // up; `lagging` (`Lagging`) wraps a fake's port to answer stale after a write, as GitHub does, so a suite on it proves
 // its waits in `bun run check`.
+// What a test builds from some content and then only reads (a compiled fake program, a repository) is kept by the
+// content's hash in this clone's `node_modules/.cache` (`cachedByContent`, ADR 0071): built once per content, put in
+// place whole, a failed build leaving nothing, and two builds of one content at once ending on the one folder.
+// A folder made once per test file and copied for each test (`templateFolder`: a migrated store), and the tests' one
+// deadline loop in real time (`waitUntil`: a child's file, an exit, a state read again, bounded by time, not looks).
 // Invariants: a fake never calls the network, `claude` or `codex` (AGENTS.md rule 1); a fake with nothing
 // scripted fails rather than answering a default, with one exception: `ScriptedRetrieval` gives a commit nothing
 // is scripted for its default diff (`diff`, empty unless set) at a path of the job's, since the service's tests
@@ -90,6 +96,7 @@
 // the last two's folder holds no planted sandbox: a broken machine or a programming error, never a host's refusal.
 // It must never know: Lookover's rules (`core`), the service, the UI, or how the real adapters are built.
 
+export { type CachedContent, cachedByContent } from "./content-cache.ts";
 export { DemoClock, type DemoClockOptions, type Wall } from "./demo-clock.ts";
 export {
   type AgentHostFixture,
@@ -195,3 +202,5 @@ export {
   ScriptedRetrieval,
   type ScriptedRetrievalOptions,
 } from "./scripted-retrieval.ts";
+export { type TemplateFolder, templateFolder } from "./template-folder.ts";
+export { waitUntil } from "./waits.ts";

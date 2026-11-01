@@ -337,6 +337,8 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     ...(o.log === undefined ? {} : { log: o.log }),
     ...(o.secretsRemoved === undefined ? {} : { secretsRemoved: o.secretsRemoved }),
     gh,
+    // Demo mode and `bun run proof` follow the machine they run on: the install commands are this machine's.
+    platform: process.platform,
   });
   let own = roomClock(clock);
   let room = await buildRoom(

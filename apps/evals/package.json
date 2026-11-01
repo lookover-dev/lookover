@@ -26,7 +26,7 @@
       "@lookover/retrieval": "a case is prepared through retrieval's `prepare`, as the service prepares a change",
       "@lookover/review": "a session's failure is review's `ReviewFailure`; the runner runs each session through `createReview` and `createConfirm`, and a setup reads each stored answer through them",
       "@lookover/settings": "a setup keeps what the round would post at Lookover's default strictness, as settings resolves it",
-      "@lookover/testkit": "its tests only: the runner's sessions run on `FakeEngines`"
+      "@lookover/testkit": "its tests only: the runner's sessions run on `FakeEngines`, and the corpus test keeps each case's built repository in `cachedByContent`"
     }
   }
 }

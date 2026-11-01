@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { asWritten } from "./brand.test-support.ts";
 import {
   COLOURS,
   driftedCopies,
@@ -94,13 +95,15 @@ test("a sheet that lost a region is refused, naming it and the region", () => {
   expect(() => sheet(lost)).toThrow(`${SHEET} has lost the region of the numbers \`bun run brand\` writes`);
 });
 
-test("a hand edit of a number in a region fails the check, naming the sheet", () => {
+test("a hand edit of a number in a region fails the check, naming the sheet", async () => {
   const root = checkout();
-  writeCopies(root);
-  expect(driftedCopies(root)).toEqual([]);
+  await writeCopies(root, { format: asWritten });
+  expect(await driftedCopies(root, { format: asWritten })).toEqual([]);
   const file = join(root, SHEET);
   writeFileSync(file, readFileSync(file, "utf8").replace("<td>disc r 9.4</td>", "<td>disc r 9.5</td>"));
-  expect(driftedCopies(root)).toEqual([`${SHEET} is not what the source draws: run \`bun run brand\`.`]);
+  expect(await driftedCopies(root, { format: asWritten })).toEqual([
+    `${SHEET} is not what the source draws: run \`bun run brand\`.`,
+  ]);
 });
 
 /** Every number in `value` that is not a whole number, walked through its objects and arrays. */

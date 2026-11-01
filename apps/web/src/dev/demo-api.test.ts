@@ -106,6 +106,9 @@ test("the next event is said from the service's time, and nothing when none is a
   // The tab's time moved on since the listing was read: the line follows it.
   expect(nextEventLine(clock, T0 + 60_000)).toBe("The next event is in 30 s.");
   expect(nextEventLine(clock, T0 + 120_000)).toBe("The next event is due now.");
+  // A countdown rounds up: half a second left is still a second, never "0 s".
+  expect(nextEventLine(clock, T0 + 89_500)).toBe("The next event is in 1 s.");
+  expect(nextEventLine(clock, T0 + 29_500)).toBe("The next event is in 1 min 1 s.");
   // A pause until tomorrow is said in hours.
   expect(nextEventLine({ ...clock, nextIn: 26 * 3_600_000 + 5 * 60_000 }, T0)).toBe(
     "The next event is in 26 h 5 min.",

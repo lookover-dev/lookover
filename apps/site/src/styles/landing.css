@@ -303,7 +303,7 @@ section.lined {
   overflow: hidden;
 }
 .pr code {
-  background: var(--gh-surface);
+  background: var(--gh-code-bg);
   color: var(--gh-text);
   font-size: var(--t-12);
   padding: 1px var(--s-1);

@@ -49,6 +49,18 @@ export function engineSetupText(e: Engine): string {
   return `Not signed in · ${program} found`;
 }
 
+/**
+ * What comes after the install, on its own line under a missing AI's row in setup (#431): the service's line says how
+ * to install it and to check again, as the alert band and the status menu say it; only the setup row adds the sign-in
+ * that follows. Null when its program was found (too old, only npm's launcher: its line says what to do) or there is
+ * nothing to install.
+ */
+export function engineSetupNext(e: Engine): string | null {
+  return e.state === "missing" && e.version === null && e.unusable === null
+    ? "Once it's found, sign in here if it asks."
+    : null;
+}
+
 /** The AI step's last row: what it says beside Continue, and Continue's label and whether it is enabled. */
 export interface AiStepActs {
   said: string;

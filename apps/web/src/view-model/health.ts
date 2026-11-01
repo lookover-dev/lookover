@@ -7,7 +7,6 @@ import {
   type ConnectionCause,
   type Engine,
   type EngineState,
-  engineHealthText,
   FAILED_SAFETY_CHECK,
   type KeyProtection,
   type Service,
@@ -138,12 +137,13 @@ export function checkLine(
       return {
         label: engines[item.engine].name,
         ok: item.state === "ready",
-        // One that can't be used says why, as the status menu does: the command that fixes it included.
+        // One that can't be used says why, as the status menu does: the service's words, with this machine's
+        // command that fixes it.
         detail:
           item.state === "ready"
             ? `signed in · ${item.cli} ${item.version}`
             : item.unusable
-              ? engineHealthText(item.unusable, item.engine)
+              ? item.detail
               : engineStateText(item),
       };
     case "connection":

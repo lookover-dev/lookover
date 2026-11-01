@@ -57,15 +57,17 @@
 // process id). Start at login (ADR 0054, ADR 0068) is a port, `LoginItem` (`held`: this install, none, or another
 // install with the command it holds; `register`, which leaves another install's unless asked to take it over;
 // `unregister`, this install's only):
-// the program without a live config registers `config.atLogin` (`loginCommand`: `lookover start --no-open` as `lookover` runs, `selfCommand`, by absolute
-// paths, `--home=` unless the profile's folder) on the machine (`osLoginItem`: the `HKCU` `Run` value `Lookover` through
-// `reg.exe`, a LaunchAgent, an XDG autostart entry), which refuses to be built under `bun test` but for `bun run live`'s
-// `lookover-dev-` values (`windowsLoginItem`, `runValues`); every other wiring the room's fake (`memoryLoginItem`). The
-// choice is on until the owner turns it off; once the setup is done the room makes the registration match it, at start,
-// at the setup's finish and on each `service.startAtLogin` (refused with the machine's reason, the choice kept), never
-// taking another install's over but on `service.startAtLogin { takeOver }`, and the snapshot's `service.atLogin` says
-// who the machine says holds it, `service.loginItem` whose port it is (`os` for the real one and demo mode, which plays
-// the program; `memory` for live mode and a guarded program). `lookover status` says it too, naming another install.
+// the program without a live config registers `config.atLogin` (`loginCommand`: `lookover start --no-open` as
+// `lookover` runs, `selfCommand`, by absolute paths, `--home=` unless the profile's folder) on the machine
+// (`osLoginItem`: the `HKCU` `Run` value `Lookover` through `reg.exe`, a LaunchAgent, an XDG autostart entry), which
+// refuses to be built under `bun test` but for `bun run live`'s `lookover-dev-` values (`windowsLoginItem`,
+// `runValues`); demo mode a fake in memory (`memoryLoginItem`); live mode and a guarded program the room's stand-in,
+// which registers nothing (`nowhereLoginItem`, ADR 0070). The choice is on until the owner turns it off; once the
+// setup is done the room makes the registration match it, at start, at the setup's finish and on each
+// `service.startAtLogin` (refused with the machine's reason, the choice kept), never taking another install's over but
+// on `service.startAtLogin { takeOver }`, and the snapshot's `service.atLogin` says who the machine says holds it,
+// `service.loginItem` whose port it is (`os` for the real one and demo mode, which plays the program; `memory` for
+// live mode and a guarded program, always "none"). `lookover status` says it too, naming another install.
 // Your coding agent (ADR 0058) is two ports beside it, `CommandPath` (reachable, add, remove: `lookover` on the PATH
 // through a folder of Lookover's own) and `SkillFolders` (read, install, remove: the `lookover-review-loop` skill in
 // Claude Code's and Codex's folders), each with a memory fake (`memoryCommandPath`, `memorySkillFolders`, with
@@ -353,6 +355,7 @@ export {
   type LoginItem,
   launchAgentLoginItem,
   memoryLoginItem,
+  nowhereLoginItem,
   osLoginItem,
   type RegAnswer,
   runValues,

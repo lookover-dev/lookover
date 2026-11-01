@@ -11,11 +11,12 @@ import { checkLine, engineStateText, serviceStatus } from "./view-model/health.t
 import { type Refusal, refusalText } from "./view-model/refusal.ts";
 import {
   authorLabel,
+  bandOn,
   changeLabel,
   changeReviews,
   chip,
-  fixOn,
   githubStatus,
+  type Problem,
   pill,
   problems,
   REVIEW_KEY,
@@ -74,19 +75,24 @@ export function TabBar() {
   );
 }
 
-/** One status line: the dot says fine, warn, or nothing judged (`ok` null: the fact alone), then the words. */
+/**
+ * One status line: the dot says fine, or nothing judged (`ok` null: the fact alone), or not fine in its problem's
+ * tone, pink when it needs the person and amber when it waits, as the band says it (ADR 0070); amber with none.
+ */
 function StatusLine({
   ok,
+  tone,
   children,
   action,
 }: {
   ok: boolean | null;
+  tone?: Problem["tone"] | null | undefined;
   children: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <span>
-      <i className={ok === null ? "mute" : ok ? "" : "warn"} />
+      <i className={ok === null ? "mute" : ok ? "" : (tone ?? "warn")} />
       <span className="st-text">{children}</span>
       {action}
     </span>
@@ -103,6 +109,7 @@ function EngineStatus({ engine }: { engine: Engine }) {
     <div className="st-block">
       <StatusLine
         ok={engine.state === "ready"}
+        tone={problem?.tone}
         // The view model's fix, the one the band offers too.
         action={problem ? <FixButton problem={problem} busyLabel="Waiting…" /> : null}
       >
@@ -143,6 +150,7 @@ function HostAndServiceStatus() {
       <div className="st-block">
         <StatusLine
           ok={github.ok}
+          tone={github.tone}
           action={connectionProblem ? <FixButton problem={connectionProblem} busyLabel="Waiting…" /> : null}
         >
           GitHub: {github.text}
@@ -157,7 +165,9 @@ function HostAndServiceStatus() {
           line and its detail, so the title isn't squeezed beside it. */}
       {accountProblems.map((p) => (
         <div key={p.id} className="st-block">
-          <StatusLine ok={false}>{p.title}</StatusLine>
+          <StatusLine ok={false} tone={p.tone}>
+            {p.title}
+          </StatusLine>
           <small className="code-whole">
             <Said words={p.detail} />
           </small>
@@ -169,6 +179,7 @@ function HostAndServiceStatus() {
       <div className="st-block">
         <StatusLine
           ok={service.ok}
+          tone={login?.tone}
           action={login ? <FixButton problem={login} busyLabel="Waiting…" /> : null}
         >
           Service: {service.text}
@@ -293,7 +304,7 @@ function StatusMenu({ close }: { close: () => void }) {
 function StatusPill() {
   const state = useAppState();
   const p = pill(state);
-  const dot = p.tone === "warn" ? "warn" : p.tone === "mute" ? "mute" : "";
+  const dot = p.tone === "ok" ? "" : p.tone;
   return (
     <Layer
       align="right"
@@ -347,7 +358,7 @@ export function Alerts() {
   const { store } = useApp();
   const { refusal } = useStoreStatus(store);
   const { pathname } = useLocation();
-  const list = problems(state).map((p) => ({ ...p, fix: fixOn(p, pathname) }));
+  const list = problems(state).map((p) => bandOn(p, pathname));
   if (list.length === 0 && !refusal) return null;
   return (
     <section className="alerts" aria-label="Needs you">

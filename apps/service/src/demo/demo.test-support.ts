@@ -2,7 +2,8 @@
 // its clock standing still at `T0` once the seed is played, driven only as the drawer and the app drive it:
 // `GET /api/v1/snapshot`, `GET /api/v1/demo`, `POST /api/v1/commands`, the event stream. The one read past the
 // door is the room's whole event log (`logOf`), which no tab can replay from a number before the start (ADR 0038).
-// Each test file starts its own services and stops them after each test (`stopAll`).
+// Each test file starts its own services and stops them when its tests are done with them (`stopAll`, after each
+// test or, where a file shares one service between its tests, after them all).
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -83,7 +84,7 @@ export async function startScenario(
   return { service, cookie, home, logged };
 }
 
-/** After each test: stops the services it started, then removes their data folders. */
+/** Stops every service started so far, then removes their data folders: after each test, or after a file's tests. */
 export async function stopAll(): Promise<void> {
   for (const s of running.splice(0)) await s.stop();
   for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true });

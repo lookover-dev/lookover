@@ -1,7 +1,9 @@
 // `lookover start`, `open`, `status` and `stop` (ADR 0054, "Links, stop and the background"): the service started
 // in the background, reused while it runs, a link minted and the browser opened on it, said running or stopped, and
-// stopped through its API. The spawner keeps `serve` as this test's child (killed in cleanup, whatever happened), the
-// browser is a fake; the real detached start was made by hand on Windows (the ticket's note). The kill after 30 s
+// stopped through its API. The protocol's tests run the production `serve` in this process (`standInServe`: the same
+// command and program, the lock, `instance.json`, `API.link` and `API.stop`, on the quickest scenario); two keep it
+// whole, as this test's child (killed in cleanup, whatever happened): one end to end, and #313's crash. The browser is a
+// fake; the real detached start was made by hand on Windows (the ticket's note). The kill after 30 s
 // without an answer is checked at its seam: a lock held in this process, a clock that jumps.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -17,8 +19,11 @@ import {
   lookoverCommand,
   memoryCommandPath,
   memoryLoginItem,
+  type ProgramProcess,
   probeInstance,
+  type RunningService,
   realSystem,
+  runService,
   type Self,
   type ServeStarted,
   selfCommand,
@@ -26,6 +31,7 @@ import {
   VERSION,
   type WebBuild,
 } from "./index.ts";
+import { NO_BACKGROUND } from "./service.test-support.ts";
 
 const MAIN = join(import.meta.dir, "main.ts");
 /** This clone, as `main.ts` runs it. */
@@ -46,12 +52,16 @@ function folder(): string {
 
 /**
  * `lookover serve <args>` as this test's child, in `where`'s folder (this test's by default) with its environment, its output
- * dropped as the real start's is; killed in cleanup.
+ * dropped as the real start's is; killed in cleanup. The real program, for the tests that need it whole: a start that
+ * polls while a separate process boots (#313's crash test), and one start, reuse, open and stop end to end. A demo
+ * start plays S1, as the stand-in's does.
  */
 async function childServe(args: string[], where: Where): Promise<ServeStarted> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(where.env)) if (value !== undefined) env[name] = value;
-  const child = Bun.spawn([process.execPath, MAIN, "serve", ...args], {
+  // The quickest scenario: what these tests check is the verbs' protocol between two processes, not a scenario's seed.
+  const quickest = args.includes("--demo") ? [QUICKEST] : [];
+  const child = Bun.spawn([process.execPath, MAIN, "serve", ...args, ...quickest], {
     ...(where.cwd === undefined ? {} : { cwd: where.cwd }),
     env,
     stdin: "ignore",
@@ -65,6 +75,62 @@ async function childServe(args: string[], where: Where): Promise<ServeStarted> {
   return { started: true, pid: child.pid, inTerminalJob: false, running: () => child.exitCode === null };
 }
 
+/** The demo scenario the stand-in plays: S1, the first run, with nothing on GitHub yet, the quickest to start. */
+const QUICKEST = "--scenario=S1";
+
+/**
+ * The stand-in for the background service (ADR 0071): the production `lookover serve <args>` (the command reading its
+ * arguments, then `runService`: the log opened, the instance lock taken and a crash's `instance.json` removed with it,
+ * `instance.json` announced, `API.link` and `API.stop` served with the data folder's session, the lock let go at the
+ * stop), run in this process on `where`'s environment and in its folder, rather than as a child that loads the whole
+ * program again. Two differences, which the verbs never see: a demo start plays S1, the quickest scenario, and the
+ * data folder isn't made user-only (no `icacls`). Its `API.stop` ends it as it ends the process, by its exit; the
+ * test's cleanup stops one still running. Started whole before it returns: the start that polls while the service
+ * boots is the real child's (`childServe`) and the booting service's below.
+ */
+async function standInServe(args: string[], where: Where): Promise<ServeStarted> {
+  let exited = false;
+  let running: RunningService | undefined;
+  const program: ProgramProcess = {
+    on: () => {},
+    exit: () => {
+      exited = true;
+    },
+    pid: process.pid,
+  };
+  const was = process.cwd();
+  if (where.cwd !== undefined) process.chdir(where.cwd);
+  try {
+    const code = await lookover(["serve", ...args, ...(args.includes("--demo") ? [QUICKEST] : [])], {
+      print: { out: () => {}, err: () => {} },
+      system: { ...realSystem(), env: where.env },
+      self: SELF,
+      agent: async () => {
+        throw new Error("serve runs no agent verb");
+      },
+      serve: async (config, print) => {
+        running = await runService(config, {
+          clock: { now: () => Date.now() },
+          print,
+          process: program,
+          userOnly: async () => {},
+        });
+        cleanups.push(() => running?.stop());
+      },
+      background: NO_BACKGROUND,
+    });
+    // Refused its arguments, as the program exits then.
+    if (code !== null) exited = true;
+  } catch (error) {
+    // A start that failed: the program would have exited; the test hears why.
+    exited = true;
+    throw error;
+  } finally {
+    process.chdir(was);
+  }
+  return { started: true, pid: process.pid, inTerminalJob: false, running: () => !exited };
+}
+
 const REAL_TIME = { now: () => Date.now(), sleep: (ms: number) => Bun.sleep(ms) };
 
 /** Where the background service runs: its folder and its environment, as the real start hands them on. */
@@ -74,12 +140,19 @@ interface Where {
 }
 
 /**
- * The command on this machine with `ports` (the child spawner, a fake browser, no kill), and what it printed; `env`
- * adds to this machine's environment, for the command and its service, which runs in `cwd`.
+ * The command on this machine with `ports` (the stand-in service, or with `child` the real program as a child; a fake
+ * browser, no kill), and what it printed; `env` adds to this machine's environment, for the command and its service,
+ * which runs in `cwd`.
  */
 function command(
   ports: Partial<BackgroundPorts> = {},
-  given: { env?: Record<string, string>; cwd?: string; self?: Self; platform?: NodeJS.Platform } = {},
+  given: {
+    env?: Record<string, string>;
+    cwd?: string;
+    self?: Self;
+    platform?: NodeJS.Platform;
+    child?: boolean;
+  } = {},
 ) {
   const machine = realSystem();
   const system = {
@@ -97,7 +170,7 @@ function command(
   const background: BackgroundPorts = {
     startServe: async (args) => {
       spawned.push(args);
-      return await childServe(args, {
+      return await (given.child ? childServe : standInServe)(args, {
         env: system.env,
         ...(given.cwd === undefined ? {} : { cwd: given.cwd }),
       });
@@ -151,7 +224,8 @@ const linkIn = (printed: string[]): string | undefined =>
 
 test("start runs the service in the background, start again reuses it; status, open and stop reach it, then status says stopped", async () => {
   const home = folder();
-  const c = command();
+  // End to end: the real program, a process of its own.
+  const c = command({}, { child: true });
   expect(await c.run("start", "--demo", `--home=${home}`, "--no-open")).toBe(0);
   // `serve` with the same arguments, told it runs in the background, so it prints nothing.
   expect(c.spawned).toEqual([["--demo", `--home=${home}`, "--background"]]);
@@ -378,7 +452,8 @@ test("an instance.json a crash left behind is never taken for the service just s
   const home = folder();
   const crashed = { pid: 1, port: 1, address: "http://127.0.0.1:1", version: "0.1.0", since: 0 };
   writeFileSync(join(home, "instance.json"), JSON.stringify(crashed));
-  const c = command();
+  // The real program (#313): `start` polls while another process takes the lock, then removes the crash's file.
+  const c = command({}, { child: true });
   expect(await c.run("start", "--demo", `--home=${home}`, "--no-open")).toBe(0);
   expect(c.out.join("\n")).not.toContain("http://127.0.0.1:1.");
   expect(linkIn(c.out)).toBeDefined();
@@ -426,7 +501,7 @@ test("a start Windows refuses says why; one left in the terminal's job says clos
 
   const inJob = command({
     startServe: async (args) => ({
-      ...(await childServe(args, { env: realSystem().env })),
+      ...(await standInServe(args, { env: realSystem().env })),
       inTerminalJob: true,
     }),
   });

@@ -12,9 +12,9 @@
 //   person it works for, are kept apart (ADR 0059): on a personal account they are one. The bot is `<slug>[bot]`.
 // - The repository ports (`ports`) follow the App: `connect`'s for the App kept; `live.json`'s not described yet
 //   describes it first; with a lost key, every call refused with the cause the connection shows (`key-lost`, or
-//   `unreachable` when the keychain didn't answer: its fix, "Reconnect", reads the App store again, which is what can
-//   help, where "Add a new key" would replace a key still there; contracts have no cause naming the keychain); with
-//   none, refused too (nothing should ask: nothing is polled).
+//   `unreachable` when the keychain didn't answer: a wait (ADR 0070), the minute's retry reading the App store again,
+//   which is what can help, where "Add a new key" would replace a key still there; contracts have no cause naming the
+//   keychain); with none, refused too (nothing should ask: nothing is polled).
 // - Starting while GitHub refuses (ADR 0053): what `open` was refused (the App, its installation, its repositories:
 //   GitHub down, the key refused, the App not installed any more) is logged and never thrown; `down` gives the cause
 //   the connection shows at start, the room keeps what it listed last, and the installation is listed again a minute
@@ -755,10 +755,11 @@ export function createInstallation(d: InstallationDeps): Installation {
   };
 
   /**
-   * The next discovery, `ms` on (5 minutes unless said): what it throws is logged, and the one after comes a minute
-   * on while GitHub refuses it, so a service that started while GitHub refused it comes back by itself.
+   * The next discovery, `ms` on (5 minutes unless said, a minute while the keychain didn't answer): what it throws is
+   * logged, and the one after comes a minute on while GitHub refuses it, so a service that started while GitHub or the
+   * keychain didn't answer comes back by itself within a minute of their answering (ADR 0070).
    */
-  const armDiscovery = (ms = DISCOVERY_MS): void =>
+  const armDiscovery = (ms = keyUnread() ? DISCOVERY_RETRY_MS : DISCOVERY_MS): void =>
     arm(ms, () => {
       timer = null;
       discover().then(
@@ -918,6 +919,9 @@ export function createInstallation(d: InstallationDeps): Installation {
       return false;
     }
   };
+
+  /** The App's key not read because the keychain didn't answer: a wait, read again every minute (ADR 0070). */
+  const keyUnread = (): boolean => held.state === "lost" && held.cause.kind === "unreachable";
 
   const down = (): ConnectionCause | null =>
     held.state === "lost" || held.state === "unread" ? held.cause : (notAMemberCause(held) ?? refusedAtStart);

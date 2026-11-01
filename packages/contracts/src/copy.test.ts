@@ -7,6 +7,8 @@ import {
   confirmFailureText,
   createAppRefusalText,
   deferralText,
+  engineDetailText,
+  engineHealthText,
   engineName,
   failureText,
   findersText,
@@ -87,6 +89,42 @@ test("what makes a program found but unusable usable: the app says it to you of 
     "the native codex program is installed",
   ]);
   expect([tooOld, apiKey, npm, null].map(unusableStateText)).toEqual(["too old", null, null, null]);
+});
+
+test("an AI not installed gives this machine's command to install it: Claude's own installer, npm for Codex", () => {
+  const missing = { installed: false } as const;
+  expect(engineDetailText("claude", missing, "win32")).toBe(
+    "The claude program was not found on this computer. Install it in PowerShell, then check again: irm https://claude.ai/install.ps1 | iex",
+  );
+  for (const platform of ["darwin", "linux"]) {
+    expect(engineDetailText("claude", missing, platform)).toBe(
+      "The claude program was not found on this computer. Install it, then check again: curl -fsSL https://claude.ai/install.sh | bash",
+    );
+  }
+  for (const platform of ["win32", "darwin", "linux"]) {
+    expect(engineDetailText("codex", missing, platform)).toBe(
+      "The codex program was not found on this computer. Install it, then check again: npm install -g @openai/codex",
+    );
+  }
+});
+
+test("npm's launcher alone gives the native program's command; Windows' in the status menu, where it is looked for", () => {
+  const npm = { installed: false, why: { kind: "npm-launcher" } } as const;
+  const windows =
+    "Only npm's claude launcher was found, and it runs Claude through Node. Install the native claude program in PowerShell, then check again: irm https://claude.ai/install.ps1 | iex";
+  expect(engineDetailText("claude", npm, "win32")).toBe(windows);
+  expect(engineDetailText("claude", npm, "linux")).toBe(
+    "Only npm's claude launcher was found, and it runs Claude through Node. Install the native claude program, then check again: curl -fsSL https://claude.ai/install.sh | bash",
+  );
+  expect(engineHealthText({ kind: "npm-launcher" }, "claude")).toBe(windows);
+});
+
+test("an AI found and usable has no detail; one found but unusable says why, whatever the machine", () => {
+  expect(engineDetailText("claude", { installed: true }, "win32")).toBe("");
+  const tooOld = { kind: "too-old", version: "0.161.0", model: "gpt-6.1-sol", needs: "0.162.0" } as const;
+  expect(engineDetailText("codex", { installed: false, why: tooOld }, "linux")).toBe(
+    "gpt-6.1-sol needs Codex 0.162.0 or later; this one is 0.161.0. Update it, then check again: npm install -g @openai/codex@latest",
+  );
 });
 
 test("why a review did not run names the engine that gave no review, or says the reviewer", () => {

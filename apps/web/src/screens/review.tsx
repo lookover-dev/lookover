@@ -21,6 +21,7 @@ import {
   Tabs,
   Tag,
 } from "../ui/basics.tsx";
+import { InlineCode } from "../ui/inline-code.tsx";
 import { Layer, MenuItem, Tip, useToast } from "../ui/layers.tsx";
 import { liveLog } from "../view-model/activity.ts";
 import {
@@ -203,12 +204,16 @@ function FindingCard({ it, finding }: { it: ChangeReview; finding: Finding }) {
           {finding.posted ? "" : " · not posted on GitHub"}
         </span>
       </div>
-      <h5>{finding.title}</h5>
+      <h5>
+        <InlineCode text={finding.title} />
+      </h5>
       <div className="t">
         <Tag>{finding.file}</Tag>
         <span>{placeText(finding)}</span>
       </div>
-      <p>{finding.body}</p>
+      <p>
+        <InlineCode text={finding.body} />
+      </p>
       {finding.snippet ? (
         <Code start={finding.snippet.start} lines={finding.snippet.lines} mark={finding.snippet.mark} />
       ) : null}
@@ -271,7 +276,9 @@ function ClosedRow({ finding }: { finding: Finding }) {
         {severityLabel(finding)}
       </span>
       <div className="rowi-main">
-        <div className="ti">{finding.title}</div>
+        <div className="ti">
+          <InlineCode text={finding.title} />
+        </div>
         <div className="me">
           {line.kind === "verified" ? (
             <>

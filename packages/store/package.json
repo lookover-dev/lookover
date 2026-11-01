@@ -11,6 +11,9 @@
     "@lookover/contracts": "workspace:*",
     "zod": "^4.6.5"
   },
+  "devDependencies": {
+    "@lookover/testkit": "workspace:*"
+  },
   "lookover": {
     "imports": {},
     "entries": {

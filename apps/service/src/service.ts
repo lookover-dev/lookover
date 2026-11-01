@@ -11,13 +11,13 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:f
 import { join } from "node:path";
 import { API } from "@lookover/contracts";
 import { openStore } from "@lookover/store";
-import { type ApiDeps, createApi, described, type Loaded, type Loader, randomToken } from "./api.ts";
+import { type ApiDeps, createApi, type Loaded, type Loader, randomToken } from "./api.ts";
 import { buildDemoRoom, type DemoRoomOptions } from "./demo/driver.ts";
 import type { Scenario } from "./demo/scenario.ts";
 import { SCENARIOS } from "./demo/scenarios.ts";
 import type { LogReader, LogSink } from "./log-sink.ts";
 import { buildRoom, type RoomOptions } from "./room.ts";
-import { said } from "./said.ts";
+import { described, said } from "./said.ts";
 import { REAL_TIMERS, type Timers } from "./timers.ts";
 import type { WebFiles } from "./web-files.ts";
 import { writeWhole } from "./whole-file.ts";

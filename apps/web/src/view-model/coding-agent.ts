@@ -12,9 +12,9 @@ import {
   type Review,
   type State,
 } from "@lookover/contracts";
+import { firstReviewCandidates } from "./first-review.ts";
 import type { WithCommand } from "./format.ts";
 import { AGENT_REFUSED, type Refusal, refusalLine } from "./refusal.ts";
-import { firstReviewCandidates } from "./select.ts";
 
 /** What a row's click sends, with its label. */
 export interface AgentAction {
