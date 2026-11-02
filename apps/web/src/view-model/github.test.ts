@@ -150,6 +150,59 @@ test("a finished round's check sits on the commit it reviewed", () => {
   });
 });
 
+test("a finished preview made no check, and the agent reads that nothing was posted (ADR 0072)", () => {
+  const cases = [
+    ["findings open", [finding("key-in-log", "open")]],
+    ["a finding escalated", [finding("key-in-log", "escalated")]],
+    ["nothing left open", [finding("key-in-log", "verified_fixed")]],
+    ["nothing found", []],
+  ] as const;
+  for (const [name, findings] of cases) {
+    const preview = item([...findings], {}, { preview: true });
+    expect([name, checkOf(preview), agentLine(preview)]).toEqual([
+      name,
+      null,
+      "No review on GitHub: the owner's preview posted nothing.",
+    ]);
+  }
+});
+
+test("a preview that failed made no check either: keyed on the preview, whatever its status (ADR 0072)", () => {
+  const job: Review["job"] = {
+    id: jobId("job-1"),
+    sha: ROUND_SHA,
+    trigger: "opened",
+    state: "failed",
+    deferral: null,
+    stepIn: null,
+    skip: null,
+    cancel: null,
+    failure: null,
+    turn: null,
+  };
+  const failed = item([], {}, { preview: true, loop: null, rounds: [], job });
+  expect(checkOf(failed)).toBeNull();
+  // The same failure on a review that posts has its check.
+  expect(checkOf(item([], {}, { loop: null, rounds: [], job }))?.title).toBe("Failed");
+});
+
+test("a review asked after a preview has its check while it waits: the preview was the last run, not this job", () => {
+  const job: Review["job"] = {
+    id: jobId("job-2"),
+    sha: ROUND_SHA,
+    trigger: "manual",
+    state: "queued",
+    deferral: null,
+    stepIn: null,
+    skip: null,
+    cancel: null,
+    failure: null,
+    turn: null,
+  };
+  const after = item([finding("key-in-log", "open")], {}, { preview: true, job });
+  expect(checkOf(after)?.title).toBe("Queued");
+});
+
 test("commits pushed after the last round have no check until a review is asked for", () => {
   const pushed = item([finding("key-in-log", "open")], {
     headSha: commitSha("2f6d9e3"),

@@ -714,6 +714,40 @@ export const SHOTS: Shot[] = [
     act: (p) => p.getByText("Why wasn't it reviewed?").click(),
   },
   { name: "all-reviews", scenario: "S12", path: "/reviews" },
+  // After setup's first review was a preview of #148 (ADR 0072): its findings are the owner's to read, so Home
+  // counts it ("1 preview to read.") and All reviews files it under Needs you. Each opens on the setup.
+  {
+    name: "home-after-preview",
+    scenario: "S1",
+    screen: '.setup, [data-screen="home"]',
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilRepositories(p, demo);
+      await button(p, "Continue").click();
+      await button(p, "Preview here only, post nothing").click();
+      await demo.advance(5 * MIN);
+      await button(p, "Continue").click();
+      await button(p, "Go to my reviews").click();
+      await p.getByText("1 preview to read.").waitFor();
+    },
+  },
+  {
+    name: "all-reviews-after-preview",
+    scenario: "S1",
+    screen: '.setup, [data-screen="reviews"]',
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilRepositories(p, demo);
+      await button(p, "Continue").click();
+      await button(p, "Preview here only, post nothing").click();
+      await demo.advance(5 * MIN);
+      await button(p, "Continue").click();
+      await button(p, "Go to my reviews").click();
+      await p.getByRole("link", { name: /All reviews/ }).click();
+      await button(p, "Needs you").click();
+      await p.getByText("found · nothing posted").waitFor();
+    },
+  },
   // GitHub, as the fake host holds it
   // The agent's reply under the escalated finding's comment; the summary says the owner settles it.
   {
@@ -1464,7 +1498,9 @@ export const SHOTS: Shot[] = [
     },
   },
   // #152, opened while First review is on screen, is reviewed by itself (#425): its row stays, its radio off, with
-  // its state chip and "Open on GitHub"; #148 still picked, nothing moved.
+  // its state chip and "Open on GitHub"; #148 still picked. A review by itself is a first review (ADR 0072): Continue
+  // is the primary, the line names #152, and Review this pull request is still there as a secondary. The bar and the
+  // line hold their places and sizes, at the desktop width and at 375 px.
   {
     name: "setup-4-first-review-reviewed",
     scenario: "S1",
@@ -1476,6 +1512,26 @@ export const SHOTS: Shot[] = [
       await button(p, "Review this pull request").waitFor();
       await demo.inject("agent-opens-change");
       await p.getByText("Cache exchange rates for an hour").waitFor();
+      // Before the review lands, one Review this pull request a person can reach: the primary.
+      const reviews = await p.getByRole("button", { name: "Review this pull request" }).count();
+      if (reviews !== 1)
+        throw new Error(`First review offers ${reviews} Review this pull request buttons, not 1`);
+      // The boxes of the bar, each of its places and the line, at the desktop width and at 375 px.
+      const desktop = p.viewportSize();
+      if (desktop === null) throw new Error("The page has no viewport size");
+      const places = p.locator(".first-review-acts, .first-review-acts > *, .first-reviewed-line");
+      const boxes = async () => {
+        const at: string[] = [];
+        for (const width of [desktop.width, 375]) {
+          await p.setViewportSize({ width, height: desktop.height });
+          at.push(
+            JSON.stringify(await places.evaluateAll((all) => all.map((e) => e.getBoundingClientRect()))),
+          );
+        }
+        await p.setViewportSize(desktop);
+        return at;
+      };
+      const before = await boxes();
       await demo.advance(5 * MIN);
       await p
         .getByRole("radio", { name: /Cache exchange rates for an hour/ })
@@ -1485,6 +1541,55 @@ export const SHOTS: Shot[] = [
       await p
         .getByRole("radio", { name: /Add rate limiting to \/v1\/invoices/ })
         .and(p.locator(":checked"))
+        .waitFor();
+      await p.getByText("Lookover already reviewed sasensi/ledger-api #152 by itself: Clean.").waitFor();
+      // Continue is the primary, and the middle place offers Review this pull request instead of the preview.
+      const bar = p.locator(".first-review-acts");
+      await bar.locator(".btn-primary").getByText("Continue").waitFor();
+      await bar.locator(".btn-secondary").getByText("Review this pull request").waitFor();
+      const previews = await p.getByRole("button", { name: "Preview here only, post nothing" }).count();
+      if (previews !== 0) throw new Error("First review still offers a preview once a review is posted");
+      // Once it lands, still one Review this pull request a person can reach: the middle place's.
+      const reviewsAfter = await p.getByRole("button", { name: "Review this pull request" }).count();
+      if (reviewsAfter !== 1)
+        throw new Error(
+          `First review offers ${reviewsAfter} Review this pull request buttons once reviewed, not 1`,
+        );
+      const after = await boxes();
+      if (before.join() !== after.join())
+        throw new Error(`First review's bar or line moved: from ${before.join(" ")} to ${after.join(" ")}`);
+      // At the desktop width, the bar's three places on one line.
+      const middles = await p
+        .locator(".first-review-acts > *")
+        .evaluateAll((all) => all.map((e) => e.getBoundingClientRect()).map((r) => r.top + r.height / 2));
+      if (new Set(middles).size !== 1) throw new Error(`First review's bar wraps: ${middles.join(", ")}`);
+    },
+  },
+  // The owner's path (#458): the agent opens #152 while Repositories is on screen, reviewed by itself five minutes
+  // on; First review then offers Continue, its line naming #152, and Continue on through Your coding agent lands on
+  // Home with #152's Clean row.
+  {
+    name: "setup-4-first-review-reviewed-on-repos",
+    scenario: "S1",
+    // It opens on setup and ends on Home, which its act waits for.
+    screen: '.setup, [data-screen="home"]',
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilRepositories(p, demo);
+      await demo.inject("agent-opens-change");
+      await p.getByText("3 open pull requests").waitFor();
+      await demo.advance(5 * MIN);
+      await button(p, "Continue").click();
+      await p.getByText("Lookover already reviewed sasensi/ledger-api #152 by itself: Clean.").waitFor();
+      await p.locator(".first-review-acts .btn-primary").getByText("Continue").click();
+      await p.getByText("Let your coding agent run the loop.").waitFor();
+      await button(p, "Go to my reviews").click();
+      await p.locator('[data-screen="home"]').waitFor();
+      await p.getByText("Nothing needs you.").waitFor();
+      await p
+        .locator(".rowi")
+        .filter({ hasText: "Cache exchange rates for an hour" })
+        .getByText("Clean", { exact: true })
         .waitFor();
     },
   },
@@ -1754,6 +1859,26 @@ export const SHOTS: Shot[] = [
       await demo.advance(5 * MIN);
       await button(p, "Continue").click();
       await p.getByText("Your first review was a preview").waitFor();
+    },
+  },
+  // #148 previewed as the first review, then #152, opened while it runs, reviewed by itself and posted clean (once a
+  // review is posted, First review offers no preview, ADR 0072): Try it names #152 and says `wait` reports a pass
+  // (#459), not that the first review was a preview.
+  {
+    name: "setup-5-agent-after-preview-posted",
+    scenario: "S1",
+    screen: ".setup",
+    fullPage: true,
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilRepositories(p, demo);
+      await button(p, "Continue").click();
+      await button(p, "Preview here only, post nothing").click();
+      await demo.inject("agent-opens-change");
+      await demo.advance(5 * MIN);
+      await button(p, "Continue").click();
+      await p.getByText("Get pull request #152 of sasensi/ledger-api through Lookover's review.").waitFor();
+      await p.getByText("Lookover found nothing to fix there").waitFor();
     },
   },
   // Settings › Your coding agent (ADR 0058): the setup step's rows, read again when shown. Fresh (the binary off the

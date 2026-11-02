@@ -22,10 +22,14 @@ import {
 import {
   firstReviewCandidates,
   firstReviewPick,
+  firstReviewPrimary,
   firstReviewRows,
+  firstReviewSecondary,
   NONE_LEFT,
   noneLeft,
   REVIEWED_CHIPS,
+  reviewedLine,
+  reviewedLines,
 } from "./first-review.ts";
 
 const NOW = Date.UTC(2026, 9, 31, 21, 42, 0);
@@ -350,4 +354,146 @@ test("when every pull request listed is reviewed, none is picked and the step sa
   expect(NONE_LEFT).toBe(
     "Lookover already reviewed these by itself. Open one on GitHub to see its review, or go on.",
   );
+});
+
+test("a pull request reviewed by itself during setup makes Continue the primary, the old one still picked (#458)", () => {
+  const state = world([
+    [152, "posted"],
+    [131, "none"],
+  ]);
+  state.changes[id(131)] = { ...change(131), openedAt: NOW - 19 * 24 * 60 * MIN };
+  const rows = firstReviewRows(state);
+  const picked = firstReviewPick(rows, null);
+  expect(picked).toBe(id(131));
+  expect(firstReviewPrimary(rows, picked)).toBe("go-on");
+  expect(reviewedLine(rows)).toBe("Lookover already reviewed sasensi/ledger-api #152 by itself: Clean.");
+});
+
+test("several reviewed by itself and one left: Continue, and the line counts them", () => {
+  const rows = firstReviewRows(
+    world([
+      [152, "posted"],
+      [153, "postedToFix"],
+      [131, "none"],
+    ]),
+  );
+  const picked = firstReviewPick(rows, null);
+  expect(picked).toBe(id(131));
+  expect(firstReviewPrimary(rows, picked)).toBe("go-on");
+  expect(reviewedLine(rows)).toBe("Lookover already reviewed 2 of your pull requests by itself.");
+});
+
+test("nothing reviewed by itself: Review this pull request is the primary, and no line", () => {
+  for (const how of ["none", "running", "pushed", "failed"] as const) {
+    const rows = firstReviewRows(
+      world([
+        [1, how],
+        [2, "none"],
+      ]),
+    );
+    expect(firstReviewPrimary(rows, firstReviewPick(rows, null))).toBe("review");
+    expect(reviewedLine(rows)).toBe("");
+  }
+});
+
+test("a preview never counts as reviewed: the primary stays Review this pull request, and no line", () => {
+  const rows = firstReviewRows(
+    world([
+      [1, "preview"],
+      [2, "none"],
+    ]),
+  );
+  expect(firstReviewPrimary(rows, firstReviewPick(rows, null))).toBe("review");
+  expect(reviewedLine(rows)).toBe("");
+});
+
+test("every row reviewed: Continue, and the line says none is left", () => {
+  const rows = firstReviewRows(
+    world([
+      [152, "posted"],
+      [148, "posted"],
+    ]),
+  );
+  const picked = firstReviewPick(rows, null);
+  expect(picked).toBeNull();
+  expect(firstReviewPrimary(rows, picked)).toBe("go-on");
+  expect(reviewedLine(rows)).toBe(NONE_LEFT);
+});
+
+test("nothing listed: Continue, and no line", () => {
+  const rows = firstReviewRows(world([]));
+  expect(firstReviewPrimary(rows, firstReviewPick(rows, null))).toBe("go-on");
+  expect(reviewedLine(rows)).toBe("");
+});
+
+test("the line says a reviewed row's chip word: To fix, Needs you", () => {
+  const toFix = firstReviewRows(
+    world([
+      [152, "postedToFix"],
+      [131, "none"],
+    ]),
+  );
+  expect(reviewedLine(toFix)).toBe("Lookover already reviewed sasensi/ledger-api #152 by itself: To fix.");
+  const needsYou = firstReviewRows(
+    world([
+      [152, "postedNeedsYou"],
+      [131, "none"],
+    ]),
+  );
+  expect(reviewedLine(needsYou)).toBe(
+    "Lookover already reviewed sasensi/ledger-api #152 by itself: Needs you.",
+  );
+});
+
+test("the lines held are the one shown and every one the step could show, so a review landing grows nothing", () => {
+  const held = [
+    ...[152, 131].flatMap((n) =>
+      REVIEWED_CHIPS.map((c) => `Lookover already reviewed sasensi/ledger-api #${n} by itself: ${c.label}.`),
+    ),
+    "Lookover already reviewed 2 of your pull requests by itself.",
+    NONE_LEFT,
+  ];
+  const before = firstReviewRows(
+    world([
+      [152, "none"],
+      [131, "none"],
+    ]),
+  );
+  expect(reviewedLines(before)).toEqual(["", ...held]);
+  for (const how of ["posted", "postedToFix", "postedNeedsYou"] as const) {
+    const after = firstReviewRows(
+      world([
+        [152, how],
+        [131, "none"],
+      ]),
+    );
+    expect(reviewedLines(after)[0]).toBe(reviewedLine(after));
+    for (const line of held) expect(reviewedLines(after)).toContain(line);
+  }
+});
+
+test("the bar's middle place: the preview until a review was posted, then Review this pull request while one is left", () => {
+  const fresh = firstReviewRows(
+    world([
+      [152, "none"],
+      [131, "none"],
+    ]),
+  );
+  expect(firstReviewSecondary(fresh, firstReviewPick(fresh, null))).toBe("preview");
+  const one = firstReviewRows(
+    world([
+      [152, "posted"],
+      [131, "none"],
+    ]),
+  );
+  expect(firstReviewSecondary(one, firstReviewPick(one, null))).toBe("review");
+  const all = firstReviewRows(
+    world([
+      [152, "posted"],
+      [131, "posted"],
+    ]),
+  );
+  expect(firstReviewSecondary(all, firstReviewPick(all, null))).toBe("preview");
+  const none = firstReviewRows(world([]));
+  expect(firstReviewSecondary(none, firstReviewPick(none, null))).toBe("preview");
 });

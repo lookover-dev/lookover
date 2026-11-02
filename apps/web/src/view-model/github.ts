@@ -18,7 +18,7 @@ import {
 import { placeText, roundOnHead } from "./findings.ts";
 import { itOrThem, plural } from "./format.ts";
 import { stepNow } from "./run.ts";
-import { type ChangeReview, inAgentLoop, keptFindings, status, waitText } from "./select.ts";
+import { type ChangeReview, inAgentLoop, keptFindings, openCounts, status, waitText } from "./select.ts";
 import { cancelSentence, failureSentence } from "./status.ts";
 
 export type Check = { tone: "pending" | "fail" | "ok" | "neutral"; title: string; text: string } | null;
@@ -57,14 +57,17 @@ function finishedCheck(it: ChangeReview): Check {
   return { tone: "ok", title: "Passed", text: kept ? `Nothing to fix. ${kept}` : "No open findings" };
 }
 
-/** Lookover's check on the head commit, or `null` when that commit has none. */
+/**
+ * Lookover's check on the head commit, or `null` when that commit has none. A preview makes none, whatever its status,
+ * failed included (ADR 0072). `Review.preview` says what the last run was: a job asked since, still waiting or
+ * skipped, has had no run yet, and it has its own check.
+ */
 export function checkOf(it: ChangeReview): Check {
   const s = status(it);
+  if (it.review.preview && s.kind !== "waiting" && s.kind !== "skipped") return null;
   switch (s.kind) {
     case "running":
-      return it.review.preview
-        ? null
-        : { tone: "pending", title: "In progress", text: `Round ${s.round}: ${stepNow(s.step)}` };
+      return { tone: "pending", title: "In progress", text: `Round ${s.round}: ${stepNow(s.step)}` };
     case "waiting":
       // ADR 0029: a deferred review says why it waits, and that nothing failed.
       return { tone: "pending", title: "Queued", text: `Waiting: ${waitText(s.deferral)}` };
@@ -72,11 +75,12 @@ export function checkOf(it: ChangeReview): Check {
       return { tone: "neutral", title: "Skipped", text: `Not reviewed: ${skipText(s.reason)}` };
     case "failed":
       return { tone: "neutral", title: "Failed", text: failureSentence(s.failure).slice(0, -1) };
-    case "needs-you":
     case "to-fix":
+    case "needs-you":
     case "settled":
     case "cancelled":
       return finishedCheck(it);
+    case "preview":
     case "not-asked":
       return null;
   }
@@ -174,11 +178,13 @@ export function summaryFooter(review: Review): string {
   return `Round ${review.rounds.length}${soFar} · one comment, updated after every round`;
 }
 
+/** What the agent reads after a preview, whatever it found: nothing reached GitHub (ADR 0072). */
+const PREVIEW_LINE = "No review on GitHub: the owner's preview posted nothing.";
+
 /** The last line `lookover wait` prints for the agent. */
 export function agentLine(it: ChangeReview): string {
   const { review } = it;
-  const open = openOnGitHub(review);
-  const blocking = open.filter((f) => f.severity === "blocking").length;
+  const { open, blocking } = openCounts(openOnGitHub(review));
   const n = review.rounds.length;
   const s = status(it);
   switch (s.kind) {
@@ -189,12 +195,16 @@ export function agentLine(it: ChangeReview): string {
       return s.deferral?.reason === "paused"
         ? `Waiting: ${waitText(s.deferral)}. The review starts when they resume…`
         : `Waiting: ${waitText(s.deferral)}. The review starts by itself…`;
+    case "preview":
+      return PREVIEW_LINE;
     case "to-fix":
-      return `Round ${n} done: ${plural(open.length, "finding")}${blocking > 0 ? ` (${blocking} blocking)` : ""}. Run \`lookover feedback\` to read ${itOrThem(open.length)}.`;
+      return `Round ${n} done: ${plural(open, "finding")}${blocking > 0 ? ` (${blocking} blocking)` : ""}. Run \`lookover feedback\` to read ${itOrThem(open)}.`;
     case "needs-you":
-      return `Round ${n} done: the owner has to decide on a finding. Stop and hand over.`;
+      return review.preview
+        ? PREVIEW_LINE
+        : `Round ${n} done: the owner has to decide on a finding. Stop and hand over.`;
     case "settled":
-      return `Round ${n} done: nothing left to fix.`;
+      return review.preview ? PREVIEW_LINE : `Round ${n} done: nothing left to fix.`;
     case "failed":
       return failureSentence(s.failure);
     case "cancelled":

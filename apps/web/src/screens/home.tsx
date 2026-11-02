@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useApp, useAppState } from "../store.tsx";
 import { Button, Empty, Group, Icon, Search, Segmented } from "../ui/basics.tsx";
-import { allReviews, type Filter, matchesSearch } from "../view-model/filters.ts";
+import { allReviews, matchesSearch } from "../view-model/filters.ts";
 import { plural } from "../view-model/format.ts";
 import {
   type ChangeReview,
@@ -14,6 +14,7 @@ import {
   status,
   statusLine,
 } from "../view-model/select.ts";
+import type { Filter } from "../view-model/status.ts";
 import { Page, ReviewRow, Sentence } from "./common.tsx";
 
 /** Rows that arrived after the page was opened rise in. */

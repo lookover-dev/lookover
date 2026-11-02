@@ -27,11 +27,33 @@ export type DisplayStatus =
   /** A finding is escalated: only the owner can settle it. */
   | { kind: "needs-you" }
   | { kind: "to-fix" }
+  /** The last run was a preview and left findings open: nothing was posted, so they are the owner's to read (ADR 0072). */
+  | { kind: "preview" }
   | { kind: "settled"; clean: boolean }
   /** Cancelled before any round, and why (null for a job cancelled before the service said why). */
   | { kind: "cancelled"; reason: CancelReason | null }
   /** The job failed before any round; why, when the service said. */
   | { kind: "failed"; failure: JobFailure | null };
+
+/** All reviews' outcome filters (`filters.ts`). */
+export type Filter = "all" | "needs" | "open" | "done" | "skipped";
+
+/**
+ * The one filter besides All that holds each status; waiting and running reviews are only in All. A preview is the
+ * owner's to read, so it needs you (ADR 0072). Home's Needs you group is the same.
+ */
+export const FILTER_OF = {
+  "needs-you": "needs",
+  failed: "needs",
+  preview: "needs",
+  "to-fix": "open",
+  settled: "done",
+  skipped: "skipped",
+  "not-asked": "skipped",
+  cancelled: "skipped",
+  waiting: "all",
+  running: "all",
+} as const satisfies Record<DisplayStatus["kind"], Filter>;
 
 /** Why the review was cancelled, as a sentence after "This review was cancelled.", or nothing. */
 export function cancelSentence(reason: CancelReason | null): string {
@@ -52,7 +74,7 @@ function fromLoop(review: Review, none: DisplayStatus): DisplayStatus {
     case "needs_owner":
       return { kind: "needs-you" };
     case "open":
-      return { kind: "to-fix" };
+      return review.preview ? { kind: "preview" } : { kind: "to-fix" };
     case "settled":
       return { kind: "settled", clean: review.findings.length === 0 };
     case null:

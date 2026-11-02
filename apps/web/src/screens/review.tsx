@@ -57,6 +57,7 @@ import {
   differences,
   lookedOver,
   nextStep,
+  openVerdict,
   REVIEW_BUTTON,
   reviewAgainNote,
   reviewButton,
@@ -395,7 +396,8 @@ function Verdict({ it, state }: { it: ChangeReview; state: State }) {
     case "settled":
       return <SettledVerdict it={it} state={state} clean={s.clean} />;
     case "to-fix":
-      return <ToFixVerdict it={it} />;
+    case "preview":
+      return <OpenVerdict it={it} />;
   }
 }
 
@@ -425,16 +427,12 @@ function SettledVerdict({ it, state, clean }: { it: ChangeReview; state: State; 
   );
 }
 
-function ToFixVerdict({ it }: { it: ChangeReview }) {
-  const open = unsettledFindings(it.review);
-  const blocking = open.filter((f) => f.severity === "blocking").length;
+/** Findings left open: to fix once posted, found after a preview (ADR 0072). */
+function OpenVerdict({ it }: { it: ChangeReview }) {
   return (
     <Card className="verdict">
       <span>
-        <b>
-          Looked over {lookedOver(it)}. {open.length === 1 ? "One thing" : `${open.length} things`} to fix
-          {blocking > 0 ? `, ${blocking} blocking` : ""}.
-        </b>
+        <b>{openVerdict(it)}</b>
         <span className="t-small"> {nextStep(it)}</span>
       </span>
     </Card>

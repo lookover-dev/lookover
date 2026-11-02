@@ -2,7 +2,8 @@
 // show, from `Service.agent`'s facts. `lookover` in your terminal (whether the PATH finds this Lookover, and the one
 // click that makes it so, for the binary only), one row per agent Lookover found (the review loop's skill in its
 // folder: Install, Replace, or done), then Try it: the sentence to give the agent, naming one of the user's pull
-// requests with a finding posted on GitHub, since the agent reads the findings there.
+// requests with a finding posted on GitHub, since the agent reads the findings there, else one whose posted review
+// found nothing to fix, its check on the head, so the agent's `wait` reports a pass.
 import {
   type AgentSkill,
   type CodingAgent,
@@ -12,7 +13,7 @@ import {
   type Review,
   type State,
 } from "@lookover/contracts";
-import { firstReviewCandidates } from "./first-review.ts";
+import { firstReviewCandidates, reviewedOnHead } from "./first-review.ts";
 import type { WithCommand } from "./format.ts";
 import { AGENT_REFUSED, type Refusal, refusalLine } from "./refusal.ts";
 
@@ -271,8 +272,9 @@ export const AGENT_INTRO =
   "After each push, your agent can ask Lookover for a review, fix what it found and push again.";
 
 /**
- * Try it: the sentence to give the agent, naming one of the user's own pull requests with a finding posted on GitHub
- * (the setup's first review when it is one, else the latest), or none, with why; then what happens next.
+ * Try it: the sentence to give the agent, naming one of the user's own pull requests with a finding posted on GitHub,
+ * else one whose posted review found nothing to fix, its check on the head (in each, the setup's first review when it
+ * is one, else the latest), or none, with why; then what happens next.
  */
 export interface TryIt {
   sentence: string | null;
@@ -286,6 +288,12 @@ const next = (command: string): WithCommand => ({
   command: `${command} wait`,
   after: "asks Lookover for round 2. Each finding it fixed has its thread resolved.",
 });
+/** What happens once the agent has a pull request whose posted review found nothing to fix. */
+const clean = (command: string): WithCommand => ({
+  before: "Lookover found nothing to fix there, so",
+  command: `${command} wait`,
+  after: "reports a pass. After your agent's next push, it asks for round 2.",
+});
 const PREVIEW_ONLY =
   "Your first review was a preview, so nothing is on GitHub for your agent to read. Post a review on one of your pull requests first.";
 const NONE = "None of your pull requests has a finding on GitHub yet. Post a review on one first.";
@@ -298,18 +306,28 @@ const wasPosted = (review: Review): boolean =>
 export function tryIt(state: State): TryIt {
   const yours = firstReviewCandidates(state);
   const first = state.setup.firstReviewChange;
-  const toFix = yours.filter((it) => it.review.findings.some(isCounted));
-  const pick = toFix.find((it) => it.change.id === first) ?? toFix[0] ?? null;
-  if (pick !== null) {
-    const { change } = pick;
+  const pickOf = (tier: typeof yours) => tier.find((it) => it.change.id === first) ?? tier[0] ?? null;
+  const toFix = pickOf(yours.filter((it) => it.review.findings.some(isCounted)));
+  if (toFix !== null) {
+    const { change } = toFix;
     return {
       sentence: `Get pull request #${change.number} of ${change.repoId} through Lookover's review: fix what it found and push.`,
       line: next(state.service.command),
     };
   }
-  // The setup's first review was a preview; else a posted review left nothing to fix; else nothing was posted.
-  if (first !== null && state.reviews[first]?.preview) return { sentence: null, line: PREVIEW_ONLY };
+  // A posted review found nothing to fix, its check on the head: `wait` there reports a pass.
+  const passed = pickOf(yours.filter(reviewedOnHead));
+  if (passed !== null) {
+    const { change } = passed;
+    return {
+      sentence: `Get pull request #${change.number} of ${change.repoId} through Lookover's review.`,
+      line: clean(state.service.command),
+    };
+  }
+  // Nothing posted and the setup's first review was a preview; else a posted review left nothing to fix; else none.
   const posted = yours.some((it) => wasPosted(it.review));
+  if (!posted && first !== null && state.reviews[first]?.preview)
+    return { sentence: null, line: PREVIEW_ONLY };
   return { sentence: null, line: posted ? NOTHING_LEFT : NONE };
 }
 

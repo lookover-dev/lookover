@@ -35,10 +35,12 @@ import { AGENT_INTRO } from "../view-model/coding-agent.ts";
 import {
   type FirstReviewRow,
   firstReviewPick,
+  firstReviewPrimary,
   firstReviewRows,
-  NONE_LEFT,
-  noneLeft,
+  firstReviewSecondary,
   REVIEWED_CHIPS,
+  reviewedLine,
+  reviewedLines,
 } from "../view-model/first-review.ts";
 import { agoSentence, plural } from "../view-model/format.ts";
 import {
@@ -700,6 +702,16 @@ function StepFirstReview() {
   const firstReview = (preview: boolean) => {
     if (picked) send({ type: "setup.firstReview", changeId: picked, preview });
   };
+  /** The one "Review this pull request": the secondary beside Continue, else the step's primary. */
+  const reviewThis = (primary: boolean) => (
+    <Button
+      variant={primary ? "primary" : "secondary"}
+      size={primary ? "lg" : "md"}
+      onClick={() => firstReview(false)}
+    >
+      Review this pull request
+    </Button>
+  );
   const running = state.setup.firstReviewChange
     ? changeReviews(state).find((i) => i.change.id === state.setup.firstReviewChange)
     : null;
@@ -730,28 +742,34 @@ function StepFirstReview() {
           itself.
         </Card>
       )}
-      {/* Held one line tall under a list, so its last pickable row getting reviewed moves nothing under it. */}
+      {/* Held as tall as every line it can show under a list, so a row getting reviewed moves nothing under it. */}
       {rows.length > 0 ? (
-        <p className="t-small first-none-left">
-          <HeldDetail shown={noneLeft(rows) ? NONE_LEFT : ""} details={[NONE_LEFT]} />
+        <p className="t-small first-reviewed-line">
+          <HeldDetail shown={reviewedLine(rows)} details={reviewedLines(rows)} />
         </p>
       ) : null}
-      <div className="setup-acts">
+      <div className="setup-acts first-review-acts">
         <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "repos" })}>
           Back
         </Button>
-        <Button variant="ghost" disabled={picked === null} onClick={() => firstReview(true)}>
-          Preview here only, post nothing
-        </Button>
-        {/* One place as wide as both labels, which never name the pull request: the bar never moves. */}
+        {/* One place for the preview and, once a review by itself made Continue the primary, reviewing another
+            (ADR 0072): previewing is no longer offered once a review was posted, and the bar never moves. */}
         <SameWidth
-          shown={picked === null ? "go-on" : "review"}
+          shown={firstReviewSecondary(rows, picked)}
           labels={{
-            review: (
-              <Button variant="primary" size="lg" onClick={() => firstReview(false)}>
-                Review this pull request
+            preview: (
+              <Button variant="ghost" disabled={picked === null} onClick={() => firstReview(true)}>
+                Preview here only, post nothing
               </Button>
             ),
+            review: reviewThis(false),
+          }}
+        />
+        {/* One place as wide as both labels, which never name the pull request: the bar never moves. */}
+        <SameWidth
+          shown={firstReviewPrimary(rows, picked)}
+          labels={{
+            review: reviewThis(true),
             "go-on": (
               <Button variant="primary" size="lg" onClick={() => send({ type: "setup.goto", step: "agent" })}>
                 Continue

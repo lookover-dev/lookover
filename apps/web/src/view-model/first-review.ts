@@ -46,7 +46,11 @@ export function noneLeft(rows: readonly FirstReviewRow[]): boolean {
   return rows.length > 0 && rows.every((row) => row.reviewed);
 }
 
-const reviewedOnHead = (it: ChangeReview): boolean =>
+/**
+ * Whether Lookover's last job on the change is done and a round sits on its head commit: setup's reviewed row, and
+ * Try it's clean posted review, whose check is on the head.
+ */
+export const reviewedOnHead = (it: ChangeReview): boolean =>
   it.review.job?.state === "done" && roundOnHead(it.review, it.change);
 
 /**
@@ -73,4 +77,59 @@ export function firstReviewRows(state: State, shown: readonly ChangeId[] = []): 
 export function firstReviewPick(rows: readonly FirstReviewRow[], picked: ChangeId | null): ChangeId | null {
   const pickable = rows.filter((it) => !it.reviewed);
   return (pickable.find((it) => it.change.id === picked) ?? pickable[0])?.change.id ?? null;
+}
+
+/**
+ * The bar's primary (ADR 0072): Continue ("go-on") when nothing can be picked or as soon as a listed row is
+ * reviewed, since a review Lookover posted by itself is a first review; else "Review this pull request".
+ */
+export function firstReviewPrimary(
+  rows: readonly FirstReviewRow[],
+  picked: ChangeId | null,
+): "review" | "go-on" {
+  return picked === null || rows.some((row) => row.reviewed) ? "go-on" : "review";
+}
+
+const namedLine = (row: FirstReviewRow, word: string): string =>
+  `Lookover already reviewed ${row.change.repoId} #${row.change.number} by itself: ${word}.`;
+
+const countedLine = (n: number): string => `Lookover already reviewed ${n} of your pull requests by itself.`;
+
+/**
+ * The line above the bar once a row is reviewed (ADR 0072): the one reviewed, named with its chip's word; a count
+ * when several are; `NONE_LEFT` when every one is; "" while none is.
+ */
+export function reviewedLine(rows: readonly FirstReviewRow[]): string {
+  const reviewed = rows.filter((row) => row.reviewed);
+  const [only] = reviewed;
+  if (only === undefined) return "";
+  if (noneLeft(rows)) return NONE_LEFT;
+  return reviewed.length === 1 ? namedLine(only, only.chip.label) : countedLine(reviewed.length);
+}
+
+/**
+ * The bar's middle place (ADR 0072): the secondary "Review this pull request" ("review") while Continue is the
+ * primary because a row is reviewed and one can still be picked; else "Preview here only, post nothing"
+ * ("preview", disabled when nothing can be picked). Once a review was posted, previewing is no longer offered.
+ */
+export function firstReviewSecondary(
+  rows: readonly FirstReviewRow[],
+  picked: ChangeId | null,
+): "preview" | "review" {
+  return picked !== null && firstReviewPrimary(rows, picked) === "go-on" ? "review" : "preview";
+}
+
+/**
+ * The lines laid in one place (`HeldDetail`) so the line never grows when a review lands: the one shown, and every
+ * one the step could show for these rows (each row named with each chip word a reviewed row can show, the count as
+ * large as it can be, `NONE_LEFT`).
+ */
+export function reviewedLines(rows: readonly FirstReviewRow[]): string[] {
+  const lines = [
+    reviewedLine(rows),
+    ...rows.flatMap((row) => REVIEWED_CHIPS.map((c) => namedLine(row, c.label))),
+    countedLine(Math.max(2, rows.length)),
+    NONE_LEFT,
+  ];
+  return [...new Set(lines)];
 }

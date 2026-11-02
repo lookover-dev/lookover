@@ -41,6 +41,7 @@ import {
   homeGroups,
   lookedOver,
   nextStep,
+  openVerdict,
   type Problem,
   pill,
   problems,
@@ -49,6 +50,7 @@ import {
   reviewAgainNote,
   reviewButton,
   reviewLabel,
+  rowAction,
   sendElsewhere,
   sentence,
   settledVerdict,
@@ -1292,6 +1294,83 @@ test("a preview posted nothing, so no agent is said to be working on its finding
   expect(nextOf(withChange(calm(), 1, "to-fix", MIN, { findings: open, preview: true }))).toBe(
     "This was a preview: nothing was posted on GitHub. Review again to post it.",
   );
+});
+
+// ---- a preview: the owner's to read (ADR 0072) ----
+
+/** The change `sam/app#n` previewed: its findings open, nothing posted. */
+function withPreview(state: State, n: number, findings: Finding[], newCommits = 0): State {
+  const st = withChange(state, n, "to-fix", MIN, { findings, preview: true });
+  const id = changeId(`sam/app#${n}`);
+  const change = st.changes[id];
+  if (!change) throw new Error("No change");
+  return { ...st, changes: { ...st.changes, [id]: { ...change, newCommits } } };
+}
+
+const firstOf = (state: State) => {
+  const [first] = changeReviews(state);
+  if (!first) throw new Error("No review");
+  return first;
+};
+
+test("a preview with one blocking finding and nothing else is the owner's to read", () => {
+  const st = withPreview(calm(), 148, [finding("a", "blocking", "open")]);
+  expect(sentence(st).title).toBe("1 preview to read.");
+  expect(chip(firstOf(st))).toEqual({ tone: "need", label: "Preview" });
+  expect(statusLine(st, firstOf(st))).toBe("1 blocking finding found · nothing posted");
+  const g = homeGroups(st);
+  expect(g.needs.map((i) => String(i.change.id))).toEqual(["sam/app#148"]);
+  expect(g.earlier).toEqual([]);
+});
+
+test("two previews are counted as previews; their line counts what they found", () => {
+  const open = [finding("a", "should_fix", "open"), finding("b", "consider", "open")];
+  const st = withPreview(withPreview(calm(), 1, [finding("a", "blocking", "open")]), 2, open);
+  expect(sentence(st).title).toBe("2 previews to read.");
+  expect(statusLine(st, firstOf(withPreview(calm(), 2, open)))).toBe("2 findings found · nothing posted");
+  const blocking = [finding("a", "blocking", "open"), finding("b", "blocking", "open")];
+  const two = withPreview(calm(), 1, blocking);
+  expect(statusLine(two, firstOf(two))).toBe("2 blocking findings found · nothing posted");
+});
+
+test("a preview is counted with the rest of what needs you", () => {
+  const open = [finding("a", "blocking", "open")];
+  expect(sentence(withChange(withPreview(calm(), 1, open), 2, "needs-you")).title).toBe(
+    "2 pull requests need you.",
+  );
+  expect(sentence(withPreview(signedOut(calm(), "claude"), 1, open)).title).toBe("2 things need you.");
+});
+
+test("the same round posted stays To fix, the author's, under “Nothing needs you.”", () => {
+  const st = withChange(calm(), 1, "to-fix", MIN, {
+    findings: [finding("a", "blocking", "open")],
+    preview: false,
+  });
+  expect(sentence(st).title).toBe("Nothing needs you.");
+  expect(chip(firstOf(st))).toEqual({ tone: "warn", label: "To fix" });
+  expect(statusLine(st, firstOf(st))).toBe("1 blocking finding open");
+});
+
+test("the review page's verdict says a preview's findings were found, a posted round's are to fix", () => {
+  const open = [finding("a", "blocking", "open")];
+  expect(openVerdict(firstOf(withPreview(calm(), 1, open)))).toBe(
+    "Looked over a1f9c2e. One thing found, 1 blocking.",
+  );
+  expect(openVerdict(firstOf(withChange(calm(), 1, "to-fix", MIN, { findings: open })))).toBe(
+    "Looked over a1f9c2e. One thing to fix, 1 blocking.",
+  );
+  const two = [finding("a", "should_fix", "open"), finding("b", "consider", "open")];
+  expect(openVerdict(firstOf(withPreview(calm(), 1, two)))).toBe("Looked over a1f9c2e. 2 things found.");
+});
+
+test("a preview with new commits says so and keeps Review again, as To fix does", () => {
+  const st = withPreview(calm(), 1, [finding("a", "blocking", "open")], 2);
+  expect(statusLine(st, firstOf(st))).toBe("1 blocking finding found · nothing posted · 2 new commits");
+  expect(rowAction(firstOf(st))).toEqual({
+    label: REVIEW_BUTTON.again,
+    command: { type: "review.request", changeId: changeId("sam/app#1") },
+  });
+  expect(rowAction(firstOf(withPreview(calm(), 1, [finding("a", "blocking", "open")])))).toBeNull();
 });
 
 test("a review that needs you says how many findings wait for your decision", () => {

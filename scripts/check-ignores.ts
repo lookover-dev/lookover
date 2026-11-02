@@ -1,6 +1,9 @@
 // Every ignore comment gives a reason (ADR 0036). Biome already refuses a `biome-ignore` without one,
 // and `noTsIgnore` bans the ignore directive; this covers the TypeScript directives Biome lets through.
 // Run by `bun run check`. Exits 1 and lists each comment without a reason.
+// Reads synchronously: under load each awaited read waits about a timer tick on Windows, 30 to 60 s for the
+// tree's files instead of under 1 s (ADR 0071).
+import { readFileSync } from "node:fs";
 import { Glob } from "bun";
 
 const ROOTS = ["apps", "packages", "scripts"];
@@ -10,10 +13,10 @@ const BARE = /(?:\/\/|\/\*)\s*@ts-(?:expect-error|ignore|nocheck)\s*[:-]?\s*(?:\
 
 const bare: string[] = [];
 for (const root of ROOTS) {
-  for await (const path of FILES.scan({ cwd: root })) {
+  for (const path of FILES.scanSync({ cwd: root })) {
     if (path.includes("node_modules")) continue;
     const file = `${root}/${path.replaceAll("\\", "/")}`;
-    const lines = (await Bun.file(file).text()).split("\n");
+    const lines = readFileSync(file, "utf8").split("\n");
     lines.forEach((line, i) => {
       if (BARE.test(line)) bare.push(`${file}:${i + 1}`);
     });

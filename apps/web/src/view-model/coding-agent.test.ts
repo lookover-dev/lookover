@@ -12,6 +12,8 @@ import {
   type Finding,
   findingId,
   GITHUB_WEB,
+  type JobState,
+  jobId,
   type ResolvedSettings,
   type Review,
   type Round,
@@ -421,6 +423,12 @@ function world(
     preview?: boolean;
     ago?: number;
     rounds?: Round[];
+    /** The pull request's head, the rounds' commit by default. */
+    head?: string;
+    /** The latest job's state: done once a round is in, none before. */
+    job?: JobState;
+    /** The latest job's commit, the head by default. */
+    jobOn?: string;
   }[],
   firstReview: number | null = null,
 ): State {
@@ -437,14 +445,30 @@ function world(
       openedBy: "sasensi",
       author: pr.author ?? "you",
       writtenBy: null,
-      headSha: commitSha("a1f9c2e"),
+      headSha: commitSha(pr.head ?? "a1f9c2e"),
       openedAt: NOW - 60 * MIN,
       draft: false,
       fork: false,
       newCommits: 0,
     };
+    const job = pr.job ?? (pr.rounds?.length ? "done" : null);
     const review: Review = {
       ...emptyReview(id, NOW - (pr.ago ?? 0)),
+      job:
+        job === null
+          ? null
+          : {
+              id: jobId(`job-${pr.n}`),
+              sha: commitSha(pr.jobOn ?? pr.head ?? "a1f9c2e"),
+              trigger: "opened",
+              state: job,
+              deferral: null,
+              stepIn: null,
+              skip: null,
+              cancel: null,
+              failure: null,
+              turn: null,
+            },
       findings: pr.findings,
       rounds: pr.rounds ?? [],
       preview: pr.preview ?? false,
@@ -563,15 +587,83 @@ const ROUND: Round = {
   sessions: [],
 };
 
-test("a posted review left nothing to fix: none to fix yet, without asking for a review", () => {
-  const nothing = "None of your pull requests has a finding to fix on GitHub yet.";
+const CLEAN = {
+  before: "Lookover found nothing to fix there, so",
+  command: "lookover wait",
+  after: "reports a pass. After your agent's next push, it asks for round 2.",
+};
+const cleanSentence = (n: number) =>
+  `Get pull request #${n} of sasensi/ledger-api through Lookover's review.`;
+
+test("a posted review left nothing to fix: Try it names it, and says wait reports a pass", () => {
   // The setup's first review, posted, found nothing.
   const clean = world([{ n: 148, findings: [], rounds: [ROUND] }], 148);
-  expect(tryIt(clean)).toEqual({ sentence: null, line: nothing });
+  expect(tryIt(clean)).toEqual({ sentence: cleanSentence(148), line: CLEAN });
   // Posted, then fixed: the same.
-  expect(tryIt(world([{ n: 1, findings: [finding(true, "verified_fixed")], rounds: [ROUND] }])).line).toBe(
-    nothing,
+  expect(tryIt(world([{ n: 1, findings: [finding(true, "verified_fixed")], rounds: [ROUND] }]))).toEqual({
+    sentence: cleanSentence(1),
+    line: CLEAN,
+  });
+});
+
+test("the setup's first review was a preview, another posted clean: Try it names the posted one, no preview line", () => {
+  const state = world(
+    [
+      { n: 148, findings: [finding(false)], preview: true, rounds: [ROUND] },
+      { n: 150, findings: [], rounds: [ROUND], ago: 10 * MIN },
+    ],
+    148,
   );
+  expect(tryIt(state)).toEqual({ sentence: cleanSentence(150), line: CLEAN });
+});
+
+test("a posted finding to fix beats a clean posted review, the latest or the first", () => {
+  const state = world(
+    [
+      { n: 150, findings: [], rounds: [ROUND], ago: 0 },
+      { n: 148, findings: [finding(true)], rounds: [ROUND], ago: 10 * MIN },
+    ],
+    150,
+  );
+  expect(tryIt(state)).toEqual({
+    sentence:
+      "Get pull request #148 of sasensi/ledger-api through Lookover's review: fix what it found and push.",
+    line: NEXT,
+  });
+});
+
+test("a posted finding that escalated on the head is still to fix, never called clean", () => {
+  // It needs the owner, but it is on GitHub unsettled: the to-fix tier counts it, so `wait` never reports a pass.
+  const state = world([{ n: 148, findings: [finding(true, "escalated")], rounds: [ROUND] }], 148);
+  expect(tryIt(state)).toEqual({
+    sentence:
+      "Get pull request #148 of sasensi/ledger-api through Lookover's review: fix what it found and push.",
+    line: NEXT,
+  });
+});
+
+test("of clean posted reviews, the setup's first review, else the latest", () => {
+  const prs = [
+    { n: 150, findings: [], rounds: [ROUND], ago: 0 },
+    { n: 151, findings: [], rounds: [ROUND], ago: 10 * MIN },
+    { n: 149, findings: [], rounds: [ROUND], ago: 20 * MIN },
+  ];
+  expect(tryIt(world(prs, 149)).sentence).toBe(cleanSentence(149));
+  expect(tryIt(world(prs)).sentence).toBe(cleanSentence(150));
+});
+
+test("a posted review whose check isn't on the head, or whose new round runs: none to fix yet", () => {
+  const nothing = "None of your pull requests has a finding to fix on GitHub yet.";
+  // Pushed since, and the new head's review is running: its check there isn't in yet.
+  expect(
+    tryIt(world([{ n: 148, findings: [], rounds: [ROUND], head: "b7d0e41", job: "running" }], 148)),
+  ).toEqual({ sentence: null, line: nothing });
+  // Pushed since, nobody asked for a review of the new head: the last job and its round stay on the old commit.
+  expect(
+    tryIt(world([{ n: 148, findings: [], rounds: [ROUND], head: "b7d0e41", jobOn: "a1f9c2e" }], 148)),
+  ).toEqual({ sentence: null, line: nothing });
+  // Its next review of the same commit is running.
+  expect(tryIt(world([{ n: 148, findings: [], rounds: [ROUND], job: "running" }])).line).toBe(nothing);
 });
 
 test("nothing posted, or only on someone else's pull request: none, and post a review first", () => {

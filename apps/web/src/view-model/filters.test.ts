@@ -15,8 +15,9 @@ import {
   type ReviewJob,
   repositoryId,
 } from "@lookover/contracts";
-import { allReviews, type Filter } from "./filters.ts";
+import { allReviews } from "./filters.ts";
 import type { ChangeReview } from "./select.ts";
+import type { Filter } from "./status.ts";
 
 const NOW = Date.UTC(2026, 10, 1, 9, 0, 0);
 const HEAD = commitSha("a1f9c2e");
@@ -57,6 +58,7 @@ const HOW = {
   "needs-you": done("needs_owner"),
   failed: { job: job("failed") },
   "to-fix": done("open"),
+  preview: { ...done("open"), preview: true },
   settled: done("settled"),
   skipped: { job: job("skipped") },
   "not-asked": {},
@@ -112,6 +114,13 @@ test("each filter holds its statuses; waiting and running are only in All", () =
   expect(numbers(EVERY, "open")).toEqual([3]);
   expect(numbers(EVERY, "done")).toEqual([4]);
   expect(numbers(EVERY, "skipped")).toEqual([5, 6, 7]);
+});
+
+test("a preview is the owner's to read: in Needs you, not Findings open (ADR 0072)", () => {
+  const items = [item(1, "preview"), item(2, "to-fix")];
+  expect(numbers(items, "needs")).toEqual([1]);
+  expect(numbers(items, "open")).toEqual([2]);
+  expect(dimmed([item(1, "preview")], "all")).toEqual(["open", "done", "skipped"]);
 });
 
 test("the options keep their order and words whatever they hold", () => {

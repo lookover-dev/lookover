@@ -39,7 +39,7 @@ import { accountText, causeText, connectionText, engineStateText } from "./healt
 import { runLine } from "./run.ts";
 import { FINISHING, SIGN_IN_TEXT, waitingText } from "./sign-in.ts";
 import { atLoginMismatch } from "./start-at-login.ts";
-import { type DisplayStatus, displayStatus, failureText } from "./status.ts";
+import { type DisplayStatus, displayStatus, FILTER_OF, failureText } from "./status.ts";
 
 /** A change with its review and the repository it belongs to: one row on Home, one review page. */
 export interface ChangeReview {
@@ -144,6 +144,22 @@ export function settledVerdict(review: Review): { closed: string; rest: string }
     : { closed: `${closed}, all closed in ${rounds}.`, rest: "The rest can go." };
 }
 
+/**
+ * The verdict of a review that left findings open: to fix once posted, found after a preview, which posted nothing
+ * (ADR 0072).
+ */
+export function openVerdict(it: ChangeReview): string {
+  const { open, blocking } = openCounts(unsettledFindings(it.review));
+  const things = open === 1 ? "One thing" : `${open} things`;
+  const how = it.review.preview ? "found" : "to fix";
+  return `Looked over ${lookedOver(it)}. ${things} ${how}${blocking > 0 ? `, ${blocking} blocking` : ""}.`;
+}
+
+/** How many findings are open, of those given, and how many of them are blocking. */
+export function openCounts(open: readonly Finding[]): { open: number; blocking: number } {
+  return { open: open.length, blocking: open.filter((f) => f.severity === "blocking").length };
+}
+
 /** The AI reviewing now, or the one that reviewed last. */
 export function reviewerOf(review: Review): EngineId | null {
   return review.run?.reviewer ?? review.rounds.at(-1)?.reviewer ?? null;
@@ -171,6 +187,8 @@ export const CHIPS = {
   settled: { tone: "ok", label: "Settled" },
   // Findings open: the ball is with the author.
   "to-fix": { tone: "warn", label: "To fix" },
+  // Findings open, nothing posted: the owner's to read (ADR 0072).
+  preview: { tone: "need", label: "Preview" },
   skipped: { tone: "mute", label: "Skipped" },
   cancelled: { tone: "mute", label: "Cancelled" },
 } as const satisfies Record<Exclude<DisplayStatus["kind"], "running" | "not-asked"> | "clean", StateChip>;
@@ -186,6 +204,7 @@ export function chip(it: ChangeReview): StateChip {
     case "failed":
     case "waiting":
     case "to-fix":
+    case "preview":
     case "skipped":
     case "cancelled":
       return CHIPS[s.kind];
@@ -401,12 +420,16 @@ function findingCount(n: number, kind: string): string {
   return `${n} ${kind} ${n === 1 ? "finding" : "findings"}`;
 }
 
-function openLine(it: ChangeReview): string {
-  const open = unsettledFindings(it.review);
-  const blocking = open.filter((f) => f.severity === "blocking").length;
-  const kind = blocking > 0 ? findingCount(blocking, "blocking") : plural(open.length, "finding");
+/** What an open review's line says of its findings: open on the pull request, or found by a preview (ADR 0072). */
+const OPEN_HOW = { "to-fix": "open", preview: "found · nothing posted" } as const;
+
+/** The findings left open, the blocking ones or else all, then where they are (`OPEN_HOW`). */
+function openLine(it: ChangeReview, kind: keyof typeof OPEN_HOW): string {
+  const { open, blocking } = openCounts(unsettledFindings(it.review));
+  const what = blocking > 0 ? findingCount(blocking, "blocking") : plural(open, "finding");
+  const line = `${what} ${OPEN_HOW[kind]}`;
   const commits = it.change.newCommits;
-  return commits > 0 ? `${kind} open · ${plural(commits, "new commit")}` : `${kind} open`;
+  return commits > 0 ? `${line} · ${plural(commits, "new commit")}` : line;
 }
 
 /**
@@ -437,7 +460,9 @@ export function statusLine(state: State, it: ChangeReview, now = state.now): str
         : `${closed}, all closed in ${rounds}`;
     }
     case "to-fix":
-      return openLine(it);
+      return openLine(it, "to-fix");
+    case "preview":
+      return openLine(it, "preview");
     case "skipped":
       return skipText(s.reason);
     case "cancelled":
@@ -484,7 +509,8 @@ export interface RowAction {
 
 /** At most one action per row, and never one that only opens the row: the row itself does that. */
 export function rowAction(it: ChangeReview): RowAction | null {
-  if (status(it).kind === "to-fix" && it.change.newCommits > 0) {
+  const kind = status(it).kind;
+  if ((kind === "to-fix" || kind === "preview") && it.change.newCommits > 0) {
     return { label: REVIEW_BUTTON.again, command: { type: "review.request", changeId: it.change.id } };
   }
   return null;
@@ -503,7 +529,8 @@ export function homeGroups(state: State): HomeGroups {
   const all = changeReviews(state);
   const kind = (i: ChangeReview) => status(i).kind;
   return {
-    needs: all.filter((i) => kind(i) === "needs-you" || kind(i) === "failed"),
+    // The Needs you filter's statuses: a preview's findings are on no pull request, only the owner reads them (ADR 0072).
+    needs: all.filter((i) => FILTER_OF[kind(i)] === "needs"),
     running: all.filter((i) => kind(i) === "running"),
     // A review that waits runs by itself once the reason clears: it never looks broken (ADR 0029).
     waiting: all.filter((i) => kind(i) === "waiting"),
@@ -956,6 +983,10 @@ export function sentence(state: State): { title: string; small: string } {
   // A review waiting because of a listed problem is that problem's effect, not one more thing to do.
   const blocking = list.filter((p) => p.tone === "need");
   const own = g.needs;
+  if (own.length > 0 && blocking.length === 0 && own.every((i) => status(i).kind === "preview")) {
+    const n = own.length;
+    return { title: `${plural(n, "preview")} to read.`, small };
+  }
   if (own.length > 0 && blocking.length === 0) {
     const n = own.length;
     return { title: `${n} pull ${n === 1 ? "request needs" : "requests need"} you.`, small };

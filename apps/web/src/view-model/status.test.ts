@@ -209,3 +209,26 @@ test("why a review was cancelled is said as its check says it", () => {
   expect(cancelSentence("replaced")).toBe("A newer review took its place.");
   expect(cancelSentence(null)).toBe("");
 });
+
+test("a preview with findings open is the owner's to read; its other states read as before (ADR 0072)", () => {
+  const preview = (r: Review): Review => ({ ...r, preview: true });
+  const cases: [string, Review, DisplayStatus][] = [
+    ["a preview, findings open", preview(review("done", { loop: "open", rounds: 1 })), { kind: "preview" }],
+    [
+      "a preview, a finding escalated",
+      preview(review("done", { loop: "needs_owner", rounds: 1 })),
+      { kind: "needs-you" },
+    ],
+    [
+      "a preview, nothing found",
+      preview(review("done", { loop: "settled", rounds: 1 })),
+      { kind: "settled", clean: true },
+    ],
+    [
+      "a preview running",
+      preview(review("running", { step: "preparing" })),
+      { kind: "running", round: 1, step: "preparing" },
+    ],
+  ];
+  for (const [name, r, status] of cases) expect([name, displayStatus(r)]).toEqual([name, status]);
+});

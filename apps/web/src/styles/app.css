@@ -746,7 +746,7 @@ button {
 .first-row:not(.reviewed) .first-row-reviewed {
   visibility: hidden;
 }
-.first-none-left {
+.first-reviewed-line {
   margin: 0;
 }
 @media (max-width: 640px) {

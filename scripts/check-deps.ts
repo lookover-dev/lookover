@@ -19,6 +19,8 @@
 // - a second entry opens with a header comment too, is imported by its path (`@lookover/<package>/<name>`),
 //   and never reaches `bun:test`: its audience runs outside a test.
 // Exits 1 and prints one line per violation, each naming the allowed seam and the ADR.
+// Reads synchronously: under load each awaited read waits about a timer tick on Windows, 30 to 60 s for the
+// packages' files instead of under 1 s (ADR 0071).
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { dirname, relative, resolve, sep } from "node:path";
@@ -103,11 +105,11 @@ function declarationOf(json: Manifest): Declaration | undefined {
   return { imports: Object.keys(field.imports), pure: field.pure === true, entries: Object.keys(entries) };
 }
 
-async function loadPackages(): Promise<Pkg[]> {
+function loadPackages(): Pkg[] {
   const pkgs: Pkg[] = [];
-  for await (const p of new Bun.Glob("{packages,apps}/*/package.json").scan(root)) {
+  for (const p of new Bun.Glob("{packages,apps}/*/package.json").scanSync(root)) {
     const manifest = resolve(root, p);
-    const json: Manifest = await Bun.file(manifest).json();
+    const json: Manifest = JSON.parse(readFileSync(manifest, "utf8"));
     const name = typeof json.name === "string" ? json.name : p;
     const entry = resolve(dirname(manifest), "src", "index.ts");
     const pkg = { name, dir: dirname(manifest), manifest, json, declared: declarationOf(json) };
@@ -295,15 +297,15 @@ function checkImport(pkg: Pkg, pkgs: Pkg[], file: string, s: Spec): string | und
 const HEADER = /^\s*(?:\/\/(?!\/)(?!\s*biome-ignore)|\/\*(?!\s*biome-ignore))/;
 
 /** Each entry opens with the module's header: an agent working elsewhere reads it instead of the code. */
-async function checkHeader(pkg: Pkg) {
-  if (pkg.entry && !HEADER.test(await Bun.file(pkg.entry).text())) {
+function checkHeader(pkg: Pkg) {
+  if (pkg.entry && !HEADER.test(readFileSync(pkg.entry, "utf8"))) {
     errors.push(
       `${at(pkg.entry, 1)}: src/index.ts has no header comment. Open it with the decision ${pkg.name} hides, its interface with invariants and error modes, and what it must never know ${ADR}.`,
     );
   }
   for (const entry of entriesOf(pkg.name)) {
     const file = entryFile(pkg.dir, entry);
-    if (!existsSync(file) || !HEADER.test(await Bun.file(file).text())) {
+    if (!existsSync(file) || !HEADER.test(readFileSync(file, "utf8"))) {
       errors.push(
         `${at(file, 1)}: the second entry "${entry}" has no header comment. Open it with the audience it serves and what it gives them ${ADR}.`,
       );
@@ -344,12 +346,12 @@ function checkEntriesReach(pkg: Pkg, sources: Sources) {
   }
 }
 
-async function checkSources(pkg: Pkg, pkgs: Pkg[]): Promise<Sources> {
+function checkSources(pkg: Pkg, pkgs: Pkg[]): Sources {
   const graph = new Map<string, string[]>();
   const testRunner = new Set<string>();
-  for await (const f of new Bun.Glob("src/**/*.{ts,tsx}").scan(pkg.dir)) {
+  for (const f of new Bun.Glob("src/**/*.{ts,tsx}").scanSync(pkg.dir)) {
     const file = resolve(pkg.dir, f);
-    const specs = importsOf(file, await Bun.file(file).text());
+    const specs = importsOf(file, readFileSync(file, "utf8"));
     if (specs.some((s) => s.path === "bun:test" && !s.typeOnly)) testRunner.add(file);
     graph.set(
       file,
@@ -382,13 +384,13 @@ function checkCycles(graph: Map<string, string[]>) {
   for (const file of graph.keys()) visit(file, []);
 }
 
-const pkgs = await loadPackages();
+const pkgs = loadPackages();
 const pureGlobs = biomePureGlobs();
 for (const pkg of pkgs) {
   checkManifest(pkg);
   checkBiomeOverride(pkg, pureGlobs);
-  await checkHeader(pkg);
-  const sources = await checkSources(pkg, pkgs);
+  checkHeader(pkg);
+  const sources = checkSources(pkg, pkgs);
   checkCycles(sources.graph);
   checkEntriesReach(pkg, sources);
 }

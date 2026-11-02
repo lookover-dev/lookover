@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/knip/schema.json",
+  "bun": { "entry": ["{packages,apps,scripts}/**/*.{test,spec}.{ts,tsx}"] },
   "workspaces": {
     ".": { "entry": ["scripts/*.ts"], "project": ["scripts/**/*.ts"] },
     "packages/*": { "project": ["src/**/*.ts"] },

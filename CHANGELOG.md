@@ -2,6 +2,17 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.6.0](https://github.com/lookover-dev/lookover/compare/v0.5.0...v0.6.0) (2026-11-02)
+
+### Features
+
+- **setup:** once Lookover has reviewed one of your pull requests by itself, First review says so and offers **Continue**; reviewing another pull request stays possible, not required.
+- **setup:** "Try it" points your coding agent at a review Lookover posted, whichever step posted it, and says when `lookover wait` will report a pass.
+
+### Bug Fixes
+
+- **app:** a preview with findings open shows as **Preview** under Needs you ("1 preview to read."), never under "Nothing needs you." above a finding to fix.
+
 ## [0.5.0](https://github.com/lookover-dev/lookover/compare/v0.4.0...v0.5.0) (2026-11-01)
 
 ### Features
