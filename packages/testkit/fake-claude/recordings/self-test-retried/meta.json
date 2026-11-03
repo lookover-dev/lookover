@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from self-test-refused (#522): the same refusal, after an API call retried (`api_retry`, its error unknown, as 2.1.283 names every retry's). Planted project settings may have sent the run where nothing listens, so the run is not let off: the self-test fails, unreadable.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 1,
+    "hang": false
+  }
+}

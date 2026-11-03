@@ -216,13 +216,21 @@ export class HeldSelfTests implements SelfTests {
 
   /**
    * Ends the oldest self-test of `engine` still running: `passed`, `failed` (on the wall), `signed-out` (an
-   * inconclusive run: the program said it is signed out), `untried` (inconclusive: the run never tried the wall), or
-   * at the plan's limit (inconclusive), resetting at `limitUntil` or saying `limitSaid` (ADR 0055). Throws when none
-   * runs.
+   * inconclusive run: the program said it is signed out), `untried` (inconclusive: the run never tried the wall),
+   * `not-run` (inconclusive: the run couldn't be made, outcome null), `did-nothing` (inconclusive: the run ended
+   * before the engine did anything, its outcome kept, crashed; #522), or at the plan's limit (inconclusive), resetting
+   * at `limitUntil` or saying `limitSaid` (ADR 0055). Throws when none runs.
    */
   end(
     engine: EngineId,
-    how: "passed" | "failed" | "signed-out" | "untried" | Pick<SelfTestReport, "limitUntil" | "limitSaid">,
+    how:
+      | "passed"
+      | "failed"
+      | "signed-out"
+      | "untried"
+      | "not-run"
+      | "did-nothing"
+      | Pick<SelfTestReport, "limitUntil" | "limitSaid">,
   ): void {
     const at = this.waiting.findIndex((w) => w.engine === engine);
     const [one] = at < 0 ? [] : this.waiting.splice(at, 1);
@@ -236,6 +244,8 @@ export class HeldSelfTests implements SelfTests {
       failed: reportOf("failed", "ok"),
       "signed-out": reportOf("inconclusive", "auth_required"),
       untried: reportOf("inconclusive", "ok"),
+      "not-run": reportOf("inconclusive", null),
+      "did-nothing": reportOf("inconclusive", "crashed"),
     } as const;
     one.resolve(reports[how]);
   }

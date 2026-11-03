@@ -1436,6 +1436,16 @@ test("a job waiting on an engine that failed its self-test is read back with tha
   expect(open(dir).jobs.latest(CHANGE)?.job).toEqual({ ...job, state: "deferred", deferral: failed });
 });
 
+test("a job waiting on an engine whose self-test couldn't finish is read back with that engine (ADR 0075)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  asked(store, CHANGE, job);
+  const unfinished = { reason: "engine-self-test-unfinished", engine: "claude" } as const;
+  store.jobs.take(() => ({ kind: "defer", deferral: unfinished }));
+  store.close();
+  expect(open(dir).jobs.latest(CHANGE)?.job).toEqual({ ...job, state: "deferred", deferral: unfinished });
+});
+
 test("a job row that doesn't parse throws: an engine's deferral without its engine is not read as Claude's", () => {
   const dir = migrated();
   asked(open(dir), CHANGE, job);

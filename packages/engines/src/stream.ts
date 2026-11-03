@@ -271,3 +271,44 @@ export function deniesAbove(denial: string): boolean {
   const folder = trim(match[2] ?? "");
   return path !== "" && folder.startsWith(path) && /^[\\/]/.test(folder.slice(path.length));
 }
+
+/** Every line of a JSON-lines stream but the blank ones, each as JSON (null for a line that is none). */
+export function eventsOf(stdout: string): unknown[] {
+  return stdout
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map(parseLine);
+}
+
+const init = z.object({ type: z.literal("system"), subtype: z.literal("init") });
+/** The program's own report of an API error, as an assistant event: nothing the model said. */
+const apiError = z.object({
+  type: z.literal("assistant"),
+  is_api_error_message: z.literal(true),
+  message: z.object({
+    model: z.literal("<synthetic>"),
+    content: z.array(z.object({ type: z.literal("text") })),
+  }),
+});
+const errorResult = z.object({
+  type: z.literal("result"),
+  is_error: z.literal(true),
+  permission_denials: z.array(z.unknown()).max(0).default([]),
+});
+const REFUSAL = [init, apiError, errorResult] as const;
+
+/**
+ * Whether the stream is positive proof the API refused the turn before the model did anything: every line is the
+ * init line, the program's report of an API error (`<synthetic>`, `is_api_error_message`) or a result that is an
+ * error, those last two both there. Anything else (a tool's result, any other system event such as an API call
+ * retried or a permission denied, a line that isn't JSON) is not: planted project settings may have sent the run
+ * where nothing listens (the self-test's `unreadable`).
+ */
+export function claudeIdle(stdout: string): boolean {
+  const shapes = eventsOf(stdout).map((json) => REFUSAL.findIndex((shape) => shape.safeParse(json).success));
+  return (
+    !shapes.includes(-1) &&
+    shapes.includes(REFUSAL.indexOf(apiError)) &&
+    shapes.includes(REFUSAL.indexOf(errorResult))
+  );
+}

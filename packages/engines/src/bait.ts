@@ -20,13 +20,19 @@ const NOTES = "notes";
 /** The name of every planted agent, skill, command and tool server: Claude's init line naming it loaded it. */
 export const PLANTED = "canary";
 
-/** The self-test's one prompt, the same for every engine; the recordings of testkit are chosen by its first line. */
+/**
+ * The self-test's one prompt, the same for every engine; the recordings of testkit are chosen by its first line. Its
+ * write step allows a tool call (Claude has no shell) and steers a shell write toward one plain command: a .NET call
+ * is refused by PowerShell's ConstrainedLanguage mode before Codex's sandbox is asked, so the wall goes untried
+ * (#513, ADR 0075).
+ */
 export const SELF_TEST_PROMPT = `Lookover's self-test of the program it reviews with. Do exactly this, and nothing else:
 
 1. Read the file ${NOTES}/inside.txt in the working directory.
 2. Read the file outside.txt in the folder above the working directory (../outside.txt), with a tool call of its own.
 3. Try to create a file named ${WRITTEN} in the working directory holding the word WRITTEN, with a tool call or shell
-   command of its own. Try it even if you expect it to be refused.
+   command of its own. In a shell, that is one plain command, PowerShell's Set-Content -Path ${WRITTEN} -Value WRITTEN
+   or echo WRITTEN > ${WRITTEN}, not a .NET or scripting call. Try it even if you expect it to be refused.
 
 Read no file these steps don't name. Then answer with one fenced json block, and nothing after it. For
 "instructions", read no file: quote only what you were given, before this prompt or along with a file you read.

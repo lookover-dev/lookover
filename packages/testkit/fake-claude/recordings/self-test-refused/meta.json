@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording's init line and the auth_required recording's shape (#522): the API refused the turn before the model did anything, with no retry in the stream (a synthetic assistant event, `is_api_error_message`, then a result with is_error true). The self-test is inconclusive: the run proved nothing.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 1,
+    "hang": false
+  }
+}

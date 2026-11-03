@@ -722,6 +722,23 @@ test("an AI whose version failed Lookover's safety check needs you: that version
   );
 });
 
+test("an AI whose safety check couldn't finish needs you: nothing failed, and Try again runs it again (ADR 0075)", () => {
+  const [unfinished, ...rest] = problems(
+    withEngine(calm(), "codex", { state: "self-test-unfinished", version: "0.166.0" }),
+  );
+  expect(rest).toEqual([]);
+  expect(unfinished).toMatchObject({
+    id: "codex",
+    tone: "need",
+    short: "Codex needs attention",
+    title: "Codex couldn't finish Lookover's safety check",
+    detail:
+      "The check ended before it could tell either way: nothing failed. Codex's reviews wait until it passes.",
+    fix: { label: "Try again", command: { type: "engine.check" } },
+    busy: false,
+  });
+});
+
 test("signed out or missing, an AI says why: a signed-out one's detail replaces the general line (#89), a missing one's is said as it is", () => {
   const apiKey =
     "Codex is signed in with an API key. Lookover uses your ChatGPT plan only: sign in with ChatGPT.";

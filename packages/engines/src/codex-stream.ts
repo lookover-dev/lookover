@@ -6,7 +6,7 @@
 import type { EngineRunOutcome, EngineRunResult, EngineUsage, ProcessResult } from "@lookover/contracts";
 import { z } from "zod";
 import { codexReset, limitLine, limitOf } from "./limit.ts";
-import { parseLine } from "./stream.ts";
+import { eventsOf, parseLine } from "./stream.ts";
 
 const message = z.object({
   type: z.literal("item.completed"),
@@ -214,4 +214,28 @@ export function codexSaidOf(stdout: string): string[] {
     return change.success ? [JSON.stringify(change.data.item.changes ?? null)] : [];
   });
   return [...done, ...codexCommandsOf(stdout)];
+}
+
+const threadStarted = z.object({ type: z.literal("thread.started") });
+const turnStarted = z.object({ type: z.literal("turn.started") });
+/** A reconnect's notice: the connection broke, which says nothing of the server refusing the turn. */
+const RECONNECT = /^\s*Reconnecting\b/i;
+
+/**
+ * Whether the stream is positive proof the server refused the turn before the engine did anything (#522: "Selected
+ * model is at capacity"): it is exactly `thread.started`, `turn.started`, at most one `error` saying what the failure
+ * says, and `turn.failed` with a message that is no reconnect's. Anything else (an item, another error, a line that
+ * isn't JSON, nothing at all) is not.
+ */
+export function codexIdle(stdout: string): boolean {
+  const [thread, turn, ...rest] = eventsOf(stdout);
+  const end = failed.safeParse(rest.pop());
+  if (!threadStarted.safeParse(thread).success || !turnStarted.safeParse(turn).success || !end.success)
+    return false;
+  const said = end.data.error.message;
+  if (said.trim() === "" || RECONNECT.test(said) || rest.length > 1) return false;
+  return rest.every((e) => {
+    const parsed = error.safeParse(e);
+    return parsed.success && parsed.data.message === said;
+  });
 }

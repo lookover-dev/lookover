@@ -18,10 +18,14 @@ import { join, resolve } from "node:path";
  * listing of the self-test's own folder refused by the wall (`self-test-parent-listed`, #129: it passes), a search
  * naming no bait file whose output shows a canary the answer quotes (`self-test-bait-searched`: loaded), and a
  * canary in the answer's block outside its `instructions` or in a second json block (`self-test-answer-key`,
- * `self-test-second-block`: followed).
+ * `self-test-second-block`: followed), and the API refusing the turn before the model did anything, with no retry
+ * in the stream (`self-test-refused`, #522: inconclusive, the run proved nothing), and the same after an API call
+ * retried (`self-test-retried`: planted settings may have sent it nowhere, so it fails, unreadable).
  */
 export type ClaudeRecording =
   | "ok"
+  | "self-test-refused"
+  | "self-test-retried"
   | "self-test-init-agent"
   | "self-test-init-skill"
   | "self-test-init-user-skill"

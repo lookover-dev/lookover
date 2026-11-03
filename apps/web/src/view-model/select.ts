@@ -38,7 +38,13 @@ import {
 } from "./accounts.ts";
 import { deferralText, waitingNotice } from "./deferral.ts";
 import { ago, agoSentence, clock, isToday, itOrThem, plural, until, type WithCommand } from "./format.ts";
-import { causeText, connectionText, engineStateText } from "./health.ts";
+import {
+  causeText,
+  connectionText,
+  ENGINE_CHECK_AGAIN,
+  ENGINE_TRY_AGAIN,
+  engineStateText,
+} from "./health.ts";
 import { runLine } from "./run.ts";
 import { FINISHING, SIGN_IN_TEXT, waitingText } from "./sign-in.ts";
 import { atLoginMismatch } from "./start-at-login.ts";
@@ -742,7 +748,6 @@ function connectionProblems(state: State): Problem[] {
  * found) replaces the general line when it said one.
  */
 function engineProblem(e: Engine, now: number): Problem | null {
-  const checkAgain = { label: "Check again", command: { type: "engine.check" } } as const;
   switch (e.state) {
     case "ready":
       return null;
@@ -764,7 +769,7 @@ function engineProblem(e: Engine, now: number): Problem | null {
         title: `${e.name} is ${engineStateText(e)}`,
         // The service says why, with the command that installs it on this machine (ADR 0070).
         detail: e.detail,
-        fix: checkAgain,
+        fix: ENGINE_CHECK_AGAIN,
         busy: false,
       };
     case "failed-self-test":
@@ -774,7 +779,18 @@ function engineProblem(e: Engine, now: number): Problem | null {
         short: `${e.name} needs attention`,
         title: deferralText({ reason: "engine-failed-self-test", engine: e.id }),
         detail: `${e.version ? `${e.cli} ${e.version}` : `This version of ${e.cli}`} changed something Lookover relies on, so its reviews wait. Update or downgrade it, then check again.`,
-        fix: checkAgain,
+        fix: ENGINE_CHECK_AGAIN,
+        busy: false,
+      };
+    case "self-test-unfinished":
+      return {
+        id: e.id,
+        tone: "need",
+        short: `${e.name} needs attention`,
+        title: deferralText({ reason: "engine-self-test-unfinished", engine: e.id }),
+        detail: `The check ended before it could tell either way: nothing failed. ${e.name}'s reviews wait until it passes.`,
+        // The same command: it tests at once every engine whose program hasn't passed (ADR 0075).
+        fix: ENGINE_TRY_AGAIN,
         busy: false,
       };
     case "signed-out":

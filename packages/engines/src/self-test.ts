@@ -27,7 +27,8 @@ import { ask, type Program } from "./run.ts";
 
 /**
  * Which rule a self-test broke. `flags`: a flag Lookover passes is not in the program's help (the run is then not
- * made). `unreadable`: no answer in the shape asked (the run failed, or its answer holds no such json block); a
+ * made). `unreadable`: no answer in the shape asked (the run failed, or its answer holds no such json block), from
+ * any run but one its engine's server refused, the stream holding nothing else (inconclusive, #522); a
  * Claude run that broke so, or timed out, retrying its API calls (`api_retry` in the stream), may mean the planted
  * project settings were applied: their `env` sends the run to an address where nothing listens, and the stream
  * never names it (2.1.283: each retry's error is "unknown").
@@ -57,8 +58,10 @@ export interface SelfTestReport {
   /**
    * `passed`: every rule held, the wall tried and holding. `failed`: a rule broke (`failures`). `inconclusive`: it
    * couldn't say, and nothing is to be kept: no program, the help not answering (a slow first launch), the bait not
-   * planted (`outcome` null); the run signed out, at its limit or cancelled (`outcome`); or the run broke no rule
-   * but never tried the wall's step (`outcome` ok): a wall not tested hasn't held.
+   * planted (`outcome` null); the run signed out, at its limit or cancelled (`outcome`); the stream positive proof
+   * the engine's server refused the turn, holding nothing else, its only failure that it gave no answer (`outcome`
+   * kept: crashed or invalid_output, never timeout; #522: "model at capacity"); or the run broke no rule but never
+   * tried the wall's step (`outcome` ok): a wall not tested hasn't held.
    */
   verdict: "passed" | "failed" | "inconclusive";
   failures: SelfTestFailure[];
@@ -114,6 +117,12 @@ export interface SelfTestSetup {
    * naming the file to write, failed, the sandbox's refusal in its output): whether it held is judged apart.
    */
   tried(stdout: string): boolean;
+  /**
+   * Whether the stream is positive proof the engine's server refused the turn, holding nothing else (Codex: the
+   * thread and turn started, then the failure and at most its one error; Claude: the init line, the program's report
+   * of the API error and its error result). Such a run proves nothing: an answer missing from it is no failure.
+   */
+  idle(stdout: string): boolean;
   /** The engine's wall: reads confined to the folder (Claude), or writes refused (Codex). */
   wall: "read" | "write";
 }
@@ -127,6 +136,12 @@ const INCONCLUSIVE: ReadonlySet<EngineRunOutcome> = new Set([
   "quota_exhausted",
   "cancelled",
 ]);
+
+/**
+ * The failure a run its server refused can't help showing: no answer. Anything else (a file not given back, which
+ * needs an answer read; a denial; a planted file loaded or followed; the wall crossed) always fails.
+ */
+const UNANSWERED: ReadonlySet<SelfTestFailure> = new Set(["unreadable"]);
 
 /** The answer the self-test asks for: its fenced json block. */
 const answer = z.object({
@@ -223,6 +238,15 @@ export async function selfTest(
     left: leftBehind(cwd),
     wall: setup.wall,
   });
+  // A run its engine's server refused, the stream holding nothing else, and that showed nothing but its missing
+  // answer, proved nothing (#522). A timeout is never such proof: the run may have been sent where nothing listens.
+  if (
+    failures.length > 0 &&
+    failures.every((f) => UNANSWERED.has(f)) &&
+    result.outcome !== "timeout" &&
+    setup.idle(stdout)
+  )
+    return report({ ...ran, verdict: "inconclusive", failures: [] });
   if (failures.length > 0) return report({ ...ran, verdict: "failed", failures });
   return report({ ...ran, verdict: setup.tried(stdout) ? "passed" : "inconclusive", failures });
 }

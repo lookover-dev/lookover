@@ -5,6 +5,7 @@ import { WRITTEN } from "./bait.ts";
 import {
   codexCallsOf,
   codexDenialsOf,
+  codexIdle,
   codexLimitOf,
   codexOutcomeOf,
   codexSaidOf,
@@ -183,6 +184,7 @@ export function codex(options: CodexOptions): Engine {
           // Codex's stream says nothing of what it loaded: the instructions probe is all there is.
           customised: () => [],
           tried: (stdout) => codexWriteRefused(stdout, WRITTEN),
+          idle: codexIdle,
           wall: "write",
         },
         dir,

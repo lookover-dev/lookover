@@ -1,0 +1,13 @@
+{
+  "source": "The stream of a real self-test run of codex 0.166.0 on win32, 2026-11-03 (#522), copied by hand: the server refused the turn (\"Selected model is at capacity\") before the model did anything, so no item started. The self-test is inconclusive: the run proved nothing. The exit code is assumed (the live run's was not kept).",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 1,
+    "hang": false
+  }
+}

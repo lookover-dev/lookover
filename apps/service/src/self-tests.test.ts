@@ -2,7 +2,8 @@
 // tested is tested at start, before its first review, and the engine is busy meanwhile; a version that failed
 // shows it and holds its jobs with that reason, is not tested again by itself, and "Check again" tests it again,
 // or a new version, so the held job starts once one passes; a result is kept across a restart; a run that couldn't
-// say keeps nothing.
+// say keeps nothing; a run that couldn't finish is run again at once, and twice unfinished is its own state, which
+// a known failure outweighs (ADR 0075).
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { join } from "node:path";
 import type { Engines } from "@lookover/contracts";
@@ -10,6 +11,7 @@ import {
   fakeEngines,
   HeldSelfTests,
   home,
+  lastEvent,
   onFakeClaude,
   openApp,
   PassingSelfTests,
@@ -183,19 +185,301 @@ test("signed out in the self-test's run while its health says signed in, Claude 
   expect(engines.runs).toHaveLength(1);
 });
 
-test("a self-test that never tried the wall keeps nothing: Claude shows it didn't pass, and 'Check again' tests at once", async () => {
+/** The lines a self-test's runs and the states they lead to write in the log. */
+const selfTestLines = (logged: string[]) =>
+  logged.filter((line) => line.startsWith("self-test of") || line.startsWith("Claude "));
+
+test("a self-test that never tried the wall is run again at once, nothing shown between; passed, the job starts (ADR 0075)", async () => {
+  const { service, time, engines, selfTests, logged, cookie, state } = await started();
+  expect((await review(service, cookie)).status).toBe(200);
+  await time.advance(0);
+  selfTests.end("claude", "untried");
+  await time.advance(0);
+  // The retry runs: Claude still shows ready, the job still waits its turn, and nothing reviews meanwhile.
+  expect(selfTests.ran).toHaveLength(2);
+  expect((await state()).engines.claude.state).toBe("ready");
+  expect((await state()).reviews[PLANTED]?.job).toMatchObject({ state: "queued", deferral: null });
+  expect(engines.runs).toHaveLength(0);
+  selfTests.end("claude", "passed");
+  await time.advance(0);
+  expect(engines.runs).toHaveLength(1);
+  expect(selfTestLines(logged)).toEqual([
+    "self-test of claude 2.4.1: inconclusive (the wall not tried), 0 ms",
+    "self-test of claude 2.4.1: passed, 0 ms",
+  ]);
+});
+
+test("a self-test that couldn't finish twice shows it, holds the job with that reason, keeps nothing; a tick doesn't test again, 'Try again' does", async () => {
+  const dir = home();
+  const first = await started({ home: dir });
+  expect((await review(first.service, first.cookie)).status).toBe(200);
+  first.selfTests.end("claude", "untried");
+  await first.time.advance(0);
+  first.selfTests.end("claude", "untried");
+  await first.time.advance(0);
+  expect((await first.state()).engines.claude).toMatchObject({
+    state: "self-test-unfinished",
+    version: "2.4.1",
+  });
+  expect((await first.state()).reviews[PLANTED]?.job).toMatchObject({
+    state: "deferred",
+    deferral: { reason: "engine-self-test-unfinished", engine: "claude" },
+  });
+  // One line per run, then the state's.
+  expect(selfTestLines(first.logged)).toEqual([
+    "self-test of claude 2.4.1: inconclusive (the wall not tried), 0 ms",
+    "self-test of claude 2.4.1: inconclusive (the wall not tried), 0 ms",
+    "Claude couldn't finish Lookover's safety check",
+  ]);
+  await first.time.advance(60_000);
+  expect(first.selfTests.ran).toHaveLength(2);
+  // "Try again" sends `engine.check`: a fresh pair. While it runs, Claude still shows the unfinished state.
+  expect((await post(first.service, first.cookie, { type: "engine.check" })).status).toBe(200);
+  await first.time.advance(0);
+  expect(first.selfTests.ran).toHaveLength(3);
+  expect((await first.state()).engines.claude.state).toBe("self-test-unfinished");
+  first.selfTests.end("claude", "untried");
+  await first.time.advance(0);
+  expect(first.selfTests.ran).toHaveLength(4);
+  expect((await first.state()).engines.claude.state).toBe("self-test-unfinished");
+  await first.service.stop();
+
+  // Nothing was kept: the next start tests again.
+  const again = await started({ home: dir });
+  expect(again.selfTests.ran).toHaveLength(1);
+});
+
+test("a run that couldn't be made, twice, shows the unfinished state too", async () => {
+  const { time, selfTests, state } = await started();
+  selfTests.end("claude", "not-run");
+  await time.advance(0);
+  expect(selfTests.ran).toHaveLength(2);
+  selfTests.end("claude", "not-run");
+  await time.advance(0);
+  expect((await state()).engines.claude.state).toBe("self-test-unfinished");
+});
+
+test("a run that ended before the engine did anything, twice, is unfinished: retried, said plainly, never kept (#522)", async () => {
+  const dir = home();
+  const first = await started({ home: dir });
+  first.selfTests.end("claude", "did-nothing");
+  await first.time.advance(0);
+  expect(first.selfTests.ran).toHaveLength(2);
+  expect((await first.state()).engines.claude.state).toBe("ready");
+  first.selfTests.end("claude", "did-nothing");
+  await first.time.advance(0);
+  expect((await first.state()).engines.claude.state).toBe("self-test-unfinished");
+  expect(selfTestLines(first.logged)).toEqual([
+    "self-test of claude 2.4.1: inconclusive (the run did nothing: crashed), 0 ms",
+    "self-test of claude 2.4.1: inconclusive (the run did nothing: crashed), 0 ms",
+    "Claude couldn't finish Lookover's safety check",
+  ]);
+  await first.service.stop();
+
+  const again = await started({ home: dir });
+  expect(again.selfTests.ran).toHaveLength(1);
+});
+
+test("unfinished, then failed on the retry: a failure, kept across a restart", async () => {
   const dir = home();
   const first = await started({ home: dir });
   first.selfTests.end("claude", "untried");
   await first.time.advance(0);
+  first.selfTests.end("claude", "failed");
+  await first.time.advance(0);
   expect((await first.state()).engines.claude.state).toBe("failed-self-test");
-  // A take meanwhile doesn't test it again; "Check again" does.
-  await first.time.advance(60_000);
-  expect(first.selfTests.ran).toHaveLength(1);
+  await first.service.stop();
+
+  const again = await started({ home: dir });
+  expect(again.selfTests.ran).toEqual([]);
+  expect((await again.state()).engines.claude.state).toBe("failed-self-test");
+});
+
+test("unfinished, then signed out or at its limit on the retry: those states, as a first run's", async () => {
+  const signedOut = await started();
+  signedOut.selfTests.end("claude", "untried");
+  await signedOut.time.advance(0);
+  signedOut.selfTests.end("claude", "signed-out");
+  await signedOut.time.advance(0);
+  expect((await signedOut.state()).engines.claude.state).toBe("signed-out");
+
+  const limited = await started();
+  const reset = limited.time.now() + 3 * 3_600_000;
+  limited.selfTests.end("claude", "untried");
+  await limited.time.advance(0);
+  limited.selfTests.end("claude", { limitUntil: reset });
+  await limited.time.advance(0);
+  expect((await limited.state()).engines.claude).toMatchObject({ state: "limit", limitUntil: reset });
+});
+
+test("a known failure wins over an unfinished pair: 'Check again' on a failed version shows it failed still, and keeps the failure", async () => {
+  const dir = home();
+  const first = await started({ home: dir });
+  first.selfTests.end("claude", "failed");
+  await first.time.advance(0);
   expect((await post(first.service, first.cookie, { type: "engine.check" })).status).toBe(200);
   await first.time.advance(0);
-  expect(first.selfTests.ran).toHaveLength(2);
+  first.selfTests.end("claude", "untried");
+  await first.time.advance(0);
+  first.selfTests.end("claude", "untried");
+  await first.time.advance(0);
+  expect((await first.state()).engines.claude.state).toBe("failed-self-test");
+  expect((await review(first.service, first.cookie)).status).toBe(200);
+  await first.time.advance(0);
+  expect((await first.state()).reviews[PLANTED]?.job).toMatchObject({ state: "deferred", deferral: FAILED });
   await first.service.stop();
+
+  const again = await started({ home: dir });
+  expect(again.selfTests.ran).toEqual([]);
+  expect((await again.state()).engines.claude.state).toBe("failed-self-test");
+});
+
+test("a known failure of a program that printed no version wins too: held, never expired by the pair", async () => {
+  const { service, time, selfTests, cookie, state } = await started({ version: null });
+  selfTests.end("claude", "failed");
+  await time.advance(0);
+  expect((await post(service, cookie, { type: "engine.check" })).status).toBe(200);
+  await time.advance(0);
+  selfTests.end("claude", "untried");
+  await time.advance(0);
+  selfTests.end("claude", "untried");
+  await time.advance(0);
+  expect((await state()).engines.claude.state).toBe("failed-self-test");
+  // Past the unfinished state's hold, the failure still holds: nothing tests it again by itself.
+  expect((await review(service, cookie)).status).toBe(200);
+  await time.advance(20 * 60_000);
+  expect(selfTests.ran).toHaveLength(3);
+  expect((await state()).engines.claude.state).toBe("failed-self-test");
+});
+
+test("a known failure of a program that printed no version outlasts a pair ending signed out: told, never expired", async () => {
+  const { service, time, selfTests, cookie, state } = await started({ version: null });
+  selfTests.end("claude", "failed");
+  await time.advance(0);
+  expect((await post(service, cookie, { type: "engine.check" })).status).toBe(200);
+  await time.advance(0);
+  selfTests.end("claude", "untried");
+  await time.advance(0);
+  selfTests.end("claude", "signed-out");
+  await time.advance(0);
+  expect((await state()).engines.claude.state).toBe("signed-out");
+  // Past the signed-out state's hold and the unfinished one's, the failure still holds: no self-test by itself.
+  expect((await review(service, cookie)).status).toBe(200);
+  await time.advance(20 * 60_000);
+  expect(selfTests.ran).toHaveLength(3);
+  expect((await state()).engines.claude.state).toBe("failed-self-test");
+});
+
+for (const [kind, version] of [
+  ["printed no version", null],
+  ["kept", undefined],
+] as const) {
+  test(`a known failure (${kind}) and 'Check again' ending signed out, a review waiting: signed out at once and for its hold, then the failure`, async () => {
+    const { service, time, selfTests, cookie, state } = await started(version === null ? { version } : {});
+    selfTests.end("claude", "failed");
+    await time.advance(0);
+    expect((await review(service, cookie)).status).toBe(200);
+    await time.advance(0);
+    expect((await post(service, cookie, { type: "engine.check" })).status).toBe(200);
+    await time.advance(0);
+    selfTests.end("claude", "untried");
+    await time.advance(0);
+    selfTests.end("claude", "signed-out");
+    await time.advance(0);
+    expect((await state()).engines.claude.state).toBe("signed-out");
+    // The waiting job's look at the engine doesn't flip it back while the hold lasts.
+    await time.advance(30_000);
+    expect((await state()).engines.claude.state).toBe("signed-out");
+    await time.advance(60_000);
+    expect((await state()).engines.claude.state).toBe("failed-self-test");
+    expect((await state()).reviews[PLANTED]?.job).toMatchObject({ state: "deferred", deferral: FAILED });
+    await time.advance(20 * 60_000);
+    expect(selfTests.ran).toHaveLength(3);
+    expect((await state()).engines.claude.state).toBe("failed-self-test");
+  });
+}
+
+test("a kept failure and 'Check again' ending at the limit, a review waiting: at its limit until the reset, then the failure", async () => {
+  const { service, time, selfTests, cookie, state } = await started();
+  selfTests.end("claude", "failed");
+  await time.advance(0);
+  expect((await review(service, cookie)).status).toBe(200);
+  await time.advance(0);
+  expect((await post(service, cookie, { type: "engine.check" })).status).toBe(200);
+  await time.advance(0);
+  const reset = time.now() + 3 * 3_600_000;
+  selfTests.end("claude", { limitUntil: reset });
+  await time.advance(0);
+  expect((await state()).engines.claude).toMatchObject({ state: "limit", limitUntil: reset });
+  await time.advance(2 * 3_600_000);
+  expect((await state()).engines.claude.state).toBe("limit");
+  await time.advance(3_600_000 + 60_000);
+  expect((await state()).engines.claude.state).toBe("failed-self-test");
+  expect(selfTests.ran).toHaveLength(2);
+});
+
+test("a kept failure, 'Check again' at the limit, then 'Check again' unfinished twice before the reset, a review waiting: the failure at once and after", async () => {
+  const { service, time, selfTests, cookie, state } = await started();
+  selfTests.end("claude", "failed");
+  await time.advance(0);
+  expect((await review(service, cookie)).status).toBe(200);
+  await time.advance(0);
+  expect((await post(service, cookie, { type: "engine.check" })).status).toBe(200);
+  await time.advance(0);
+  selfTests.end("claude", { limitUntil: time.now() + 3 * 3_600_000 });
+  await time.advance(0);
+  expect((await state()).engines.claude.state).toBe("limit");
+  expect((await post(service, cookie, { type: "engine.check" })).status).toBe(200);
+  await time.advance(0);
+  selfTests.end("claude", "untried");
+  await time.advance(0);
+  selfTests.end("claude", "untried");
+  await time.advance(0);
+  expect((await state()).engines.claude).toMatchObject({ state: "failed-self-test", limitUntil: null });
+  // The waiting job's look at the engine doesn't bring the old limit back.
+  await time.advance(30_000);
+  expect((await state()).engines.claude.state).toBe("failed-self-test");
+  await time.advance(3_600_000);
+  expect((await state()).engines.claude.state).toBe("failed-self-test");
+  expect((await state()).reviews[PLANTED]?.job).toMatchObject({ state: "deferred", deferral: FAILED });
+  expect(selfTests.ran).toHaveLength(4);
+});
+
+test("a kept failure, 'Check again' signed out, then 'Check again' passing within the minute, a review waiting: ready at once and after", async () => {
+  const { service, time, selfTests, cookie, state } = await started();
+  selfTests.end("claude", "failed");
+  await time.advance(0);
+  expect((await review(service, cookie)).status).toBe(200);
+  await time.advance(0);
+  expect((await post(service, cookie, { type: "engine.check" })).status).toBe(200);
+  await time.advance(0);
+  selfTests.end("claude", "signed-out");
+  await time.advance(0);
+  expect((await state()).engines.claude.state).toBe("signed-out");
+  expect((await post(service, cookie, { type: "engine.check" })).status).toBe(200);
+  await time.advance(0);
+  selfTests.end("claude", "passed");
+  await time.advance(0);
+  expect((await state()).engines.claude.state).toBe("ready");
+  await time.advance(30_000);
+  expect((await state()).engines.claude.state).toBe("ready");
+  expect(selfTests.ran).toHaveLength(3);
+});
+
+test("stopping during the retry keeps and says nothing, and the next start tests again", async () => {
+  const dir = home();
+  const first = await started({ home: dir });
+  first.selfTests.end("claude", "untried");
+  await first.time.advance(0);
+  expect(first.selfTests.ran).toHaveLength(2);
+  const before = await first.state();
+  await first.service.stop();
+  expect(selfTestLines(first.logged)).toEqual([
+    "self-test of claude 2.4.1: inconclusive (the wall not tried), 0 ms",
+  ]);
+  // The cancelled retry sent no event: Claude's state stays as it was shown.
+  expect(before.engines.claude.state).toBe("ready");
+  expect(lastEvent(dir)).toBe(before.seq);
 
   const again = await started({ home: dir });
   expect(again.selfTests.ran).toHaveLength(1);

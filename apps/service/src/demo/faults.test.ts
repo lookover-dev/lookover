@@ -107,6 +107,24 @@ test("codex-failed-self-test, then codex-updated: a newer Codex fails Lookover's
   expect((await snapshotOf(door)).engines.codex).toMatchObject({ state: "ready", version: "0.164.0" });
 });
 
+test("codex-self-test-unfinished, then Try again: a newer Codex can't finish Lookover's safety check twice, the third run passes", async () => {
+  const door = await morning();
+  const events = await stream(door, BRIEF_SEEDED);
+  expect(await inject(door, "codex-self-test-unfinished")).toBe(200);
+  await untilEngine(events, "self-test-unfinished");
+  const codex = (await snapshotOf(door)).engines.codex;
+  expect(codex).toMatchObject({ state: "self-test-unfinished", version: "0.163.0" });
+  // Each run the scripted engines answer is one line of the gate's: the pair, then Try again's.
+  const runs = () =>
+    door.logged.filter((line) => line.startsWith(`self-test of codex ${codex.version}:`)).length;
+  expect(runs()).toBe(2);
+  // Try again: the third run finishes and passes.
+  expect((await send(door, { type: "engine.check" })).status).toBe(200);
+  await untilEngine(events, "ready");
+  expect((await snapshotOf(door)).engines.codex).toMatchObject({ state: "ready", version: codex.version });
+  expect(runs()).toBe(3);
+});
+
 test("codex-too-old, then codex-updated: a Codex too old for its model can't be used and says why; updated, it is ready", async () => {
   const door = await morning();
   const events = await stream(door, BRIEF_SEEDED);

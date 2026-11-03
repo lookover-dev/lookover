@@ -388,6 +388,46 @@ describe("ScriptedEngines: self-tests", () => {
     expect(await engines.selfTest("claude", "/tmp/b", go())).toMatchObject({ verdict: "passed" });
   });
 
+  test("a version told it can't finish for 2 runs: those two never try the wall, the third passes", async () => {
+    const { engines } = still();
+    engines.unfinishedSelfTest("claude", "2.1.290", 2);
+    const unfinished = { verdict: "inconclusive", failures: [], outcome: "ok" };
+    expect(await engines.selfTest("claude", "/tmp/a", go())).toMatchObject(unfinished);
+    engines.setHealth("claude", { ...READY, version: "2.1.291" });
+    expect(await engines.selfTest("claude", "/tmp/b", go())).toMatchObject({ verdict: "passed" });
+    engines.setHealth("claude", READY);
+    expect(await engines.selfTest("claude", "/tmp/c", go())).toMatchObject(unfinished);
+    expect(await engines.selfTest("claude", "/tmp/d", go())).toMatchObject({ verdict: "passed" });
+  });
+
+  test("a version told both: it can't finish for 2 runs, then fails on the wall", async () => {
+    const { engines } = still();
+    engines.unfinishedSelfTest("claude", "2.1.290", 2);
+    engines.failSelfTest("claude", "2.1.290");
+    const unfinished = { verdict: "inconclusive", failures: [], outcome: "ok" };
+    expect(await engines.selfTest("claude", "/tmp/a", go())).toMatchObject(unfinished);
+    expect(await engines.selfTest("claude", "/tmp/b", go())).toMatchObject(unfinished);
+    const failed = { verdict: "failed", failures: ["wall"], outcome: "ok" };
+    expect(await engines.selfTest("claude", "/tmp/c", go())).toMatchObject(failed);
+    expect(await engines.selfTest("claude", "/tmp/d", go())).toMatchObject(failed);
+  });
+
+  test("a run signed out uses up none of the runs that can't finish", async () => {
+    const { engines } = still();
+    engines.unfinishedSelfTest("claude", "2.1.290", 1);
+    engines.setHealth("claude", { ...READY, signedIn: false });
+    expect(await engines.selfTest("claude", "/tmp/a", go())).toMatchObject({
+      verdict: "inconclusive",
+      outcome: "auth_required",
+    });
+    engines.setHealth("claude", READY);
+    expect(await engines.selfTest("claude", "/tmp/b", go())).toMatchObject({
+      verdict: "inconclusive",
+      outcome: "ok",
+    });
+    expect(await engines.selfTest("claude", "/tmp/c", go())).toMatchObject({ verdict: "passed" });
+  });
+
   test("not installed, signed out or cancelled, a self-test is inconclusive", async () => {
     const { engines } = still(null);
     expect(await engines.selfTest("claude", "/tmp/a", go())).toMatchObject({

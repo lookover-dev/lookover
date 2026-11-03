@@ -9,6 +9,7 @@ import { ask, type Engine, type Program, runProgram } from "./run.ts";
 import { selfTest } from "./self-test.ts";
 import {
   callsOf,
+  claudeIdle,
   claudeLimitOf,
   customisedOf,
   denialsOf,
@@ -133,6 +134,7 @@ export function claude(options: ClaudeOptions): Engine {
           calls: callsOf,
           customised: (stdout) => customisedOf(stdout, PLANTED),
           tried: (stdout) => denialsOf(stdout).some((denial) => denial.includes(OUTSIDE_FILE)),
+          idle: claudeIdle,
           wall: "read",
         },
         dir,

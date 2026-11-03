@@ -2,18 +2,20 @@
 // too. Every screen that says why a review waits (the row, the review page, the history, the simulated GitHub page)
 // says it with these words.
 import type { Deferral, Engine, EngineId, Service, State } from "@lookover/contracts";
-import { asSentence, deferralText, unusableFixedText } from "@lookover/contracts";
+import { asSentence, deferralText, startsOnceText, unusableFixedText } from "@lookover/contracts";
 import { clock, startsAt } from "./format.ts";
 
 export { deferralText };
 
-const STARTS: Record<Deferral["reason"], string> = {
+/** When each deferred review starts, in the app's words; null: as the check says it, since it names the engine. */
+const STARTS: Record<Deferral["reason"], string | null> = {
   paused: "This one starts when you resume.",
   connection: "This review starts when it is back.",
   "engine-signed-out": "This review starts by itself once you sign in.",
   "engine-missing": "This review starts by itself once it is.",
   "engine-limit": "This review starts when the limit resets.",
   "engine-failed-self-test": "This review starts by itself once a version passes it.",
+  "engine-self-test-unfinished": null,
 };
 
 /** What a deferred review's notice reads beside its deferral: the service's clock, the pause, each AI's limit. */
@@ -40,6 +42,7 @@ export function waitingNotice(deferral: Deferral, around: Around): string {
 
 /** When a deferred review starts, beside its deferral: a program found but not usable says what fixes it. */
 function startsWhen(deferral: Deferral): string {
-  if (deferral.reason !== "engine-missing" || deferral.unusable === null) return STARTS[deferral.reason];
-  return `This review starts by itself once ${unusableFixedText(deferral.unusable, deferral.engine, "you")}.`;
+  if (deferral.reason === "engine-missing" && deferral.unusable !== null)
+    return `This review starts by itself once ${unusableFixedText(deferral.unusable, deferral.engine, "you")}.`;
+  return STARTS[deferral.reason] ?? `This review starts ${startsOnceText(deferral)}.`;
 }

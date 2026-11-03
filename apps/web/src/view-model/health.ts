@@ -11,6 +11,7 @@ import {
   type SettingsFileError,
   type SettingsFileProblem,
   type State,
+  UNFINISHED_SAFETY_CHECK,
   unusableStateText,
 } from "@lookover/contracts";
 import { type SignedOutCause, saidSignedOut } from "./accounts.ts";
@@ -22,12 +23,21 @@ const ENGINE_STATE_TEXT: Record<EngineState, string> = {
   missing: "not installed",
   limit: "at its limit",
   "failed-self-test": FAILED_SAFETY_CHECK,
+  "self-test-unfinished": UNFINISHED_SAFETY_CHECK,
 };
 
 /** "signed out"; "too old" for a program found too old for its model, which counts as not installed. */
 export function engineStateText({ state, unusable }: Pick<Engine, "state" | "unusable">): string {
   return unusableStateText(unusable) ?? ENGINE_STATE_TEXT[state];
 }
+
+/**
+ * An engine's fixes that read the engines again (`engine.check`, which tests at once every engine whose program hasn't
+ * passed), as setup's AI row, the status menu and the alert band offer them: **Check again**, and **Try again** for a
+ * safety check that couldn't finish (ADR 0075).
+ */
+export const ENGINE_CHECK_AGAIN = { label: "Check again", command: { type: "engine.check" } } as const;
+export const ENGINE_TRY_AGAIN = { label: "Try again", command: { type: "engine.check" } } as const;
 
 /**
  * Why GitHub can't be used, in a few words (ADR 0053): "App uninstalled", which a problem says after "GitHub".

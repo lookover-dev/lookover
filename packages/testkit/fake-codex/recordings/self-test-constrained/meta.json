@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from the self-test recording (codex 0.162.1's run, its version kept): notes/inside.txt read, then the write item follows #513, codex 0.166.0's ConstrainedLanguage refusal (that run's stream was gone before it could be copied): the write tried as a .NET call ([System.IO.File]::WriteAllText) in pwsh, which PowerShell's ConstrainedLanguage mode refuses before the sandbox is asked (\"Method invocation is supported only on core types in this language mode.\"). Nothing was denied, so the self-test is inconclusive: the wall wasn't tested.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 0,
+    "hang": false
+  }
+}

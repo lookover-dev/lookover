@@ -102,6 +102,7 @@ const demoInject = z.object({
     "codex-signed-out",
     "codex-limit",
     "codex-failed-self-test",
+    "codex-self-test-unfinished",
     "codex-too-old",
     "engines-missing",
     "sign-in-entered",

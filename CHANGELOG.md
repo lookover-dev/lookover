@@ -2,6 +2,19 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.8.0](https://github.com/lookover-dev/lookover/compare/v0.7.0...v0.8.0) (2026-11-03)
+
+### Features
+
+- **setup:** an AI whose safety check couldn't finish says so in plain words, with **Try again** in setup, the status menu and the alert band; it offers a sign-in only when that AI is signed out.
+- **setup:** an AI at its limit offers **Check again**, and says when the limit resets.
+
+### Bug Fixes
+
+- **engines:** a safety check that couldn't finish is run again at once, and no longer reads as a failed one; a known failure still wins.
+- **engines:** a safety check the AI's server turned away before starting ("model at capacity") counts as unfinished, not failed.
+- **engines:** Codex's safety check is asked to write its test file with one plain command, so Windows' PowerShell stops it before the check far less often.
+
 ## [0.7.0](https://github.com/lookover-dev/lookover/compare/v0.6.0...v0.7.0) (2026-11-03)
 
 ### Breaking changes

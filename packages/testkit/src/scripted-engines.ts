@@ -189,8 +189,8 @@ interface Scripted {
 
 /**
  * Engines whose every run answers from the script: one answer per worktree and pass, health per engine set by
- * hand, failures told one run ahead, self-tests that pass unless a version is told to fail. It keeps every run
- * asked for and every self-test, in order.
+ * hand, failures told one run ahead, self-tests that pass unless a version is told to fail or not to finish. It
+ * keeps every run asked for and every self-test, in order.
  */
 export class ScriptedEngines extends EngineDouble implements Engines {
   /** Every self-test asked for, in order: the engine and the folder it was given. */
@@ -199,6 +199,11 @@ export class ScriptedEngines extends EngineDouble implements Engines {
   private readonly nextFailure: Partial<Record<EngineId, { failure: ScriptedFailure; limitUntil?: number }>> =
     {};
   private readonly failingVersions: Record<EngineId, Set<string>> = { claude: new Set(), codex: new Set() };
+  /** By engine and version, how many of its next self-tests can't finish. */
+  private readonly unfinishedRuns: Record<EngineId, Map<string, number>> = {
+    claude: new Map(),
+    codex: new Map(),
+  };
 
   constructor(options: ScriptedEnginesOptions) {
     super(options.timers);
@@ -250,6 +255,14 @@ export class ScriptedEngines extends EngineDouble implements Engines {
     this.failingVersions[engine].add(version);
   }
 
+  /**
+   * The next `runs` self-tests of `engine` at `version` can't finish: their run ends `ok` but never tries the wall
+   * (inconclusive, ADR 0075); the ones after pass (or fail, when the version is told to).
+   */
+  unfinishedSelfTest(engine: EngineId, version: string, runs: number): void {
+    this.unfinishedRuns[engine].set(version, runs);
+  }
+
   async run(spec: EngineRunSpec, signal: AbortSignal): Promise<EngineRunResult> {
     this.runs.push(spec);
     // A run that ends before its scripted time says it took none: the fake keeps no clock of its own.
@@ -299,9 +312,9 @@ export class ScriptedEngines extends EngineDouble implements Engines {
   }
 
   /**
-   * `engines`' `SelfTests`: at once, passed, unless the version was told to fail (failed, on the wall); not
-   * installed or already cancelled, inconclusive with no outcome (no run made), signed out, inconclusive with the
-   * run's `auth_required`, as the real one.
+   * `engines`' `SelfTests`: at once, passed, unless the version was told not to finish (inconclusive, its run `ok`,
+   * one fewer to go) or to fail (failed, on the wall); not installed or already cancelled, inconclusive with no
+   * outcome (no run made), signed out, inconclusive with the run's `auth_required`, as the real one.
    */
   selfTest(engine: EngineId, dir: string, signal: AbortSignal): Promise<ScriptedSelfTestReport> {
     this.selfTests.push({ engine, dir });
@@ -312,8 +325,16 @@ export class ScriptedEngines extends EngineDouble implements Engines {
     ) => Promise.resolve({ ...none, ...r });
     if (!health.installed || signal.aborted) return report({ verdict: "inconclusive", outcome: null });
     if (!health.signedIn) return report({ verdict: "inconclusive", outcome: "auth_required" });
-    if (health.version !== null && this.failingVersions[engine].has(health.version))
-      return report({ verdict: "failed", failures: ["wall"], outcome: "ok" });
+    const { version } = health;
+    if (version !== null) {
+      const left = this.unfinishedRuns[engine].get(version) ?? 0;
+      if (left > 0) {
+        this.unfinishedRuns[engine].set(version, left - 1);
+        return report({ verdict: "inconclusive", outcome: "ok" });
+      }
+      if (this.failingVersions[engine].has(version))
+        return report({ verdict: "failed", failures: ["wall"], outcome: "ok" });
+    }
     return report({ verdict: "passed", outcome: "ok" });
   }
 }

@@ -1,0 +1,13 @@
+{
+  "source": "Derived by hand from self-test-capacity (#522): the turn failed after a reconnect, its error the reconnect's own notice. A reconnect says the connection broke, not that the server refused the turn (the run may have been sent somewhere else), so the self-test still fails: unreadable.",
+  "version": {
+    "exitCode": 0
+  },
+  "auth": {
+    "exitCode": 0
+  },
+  "run": {
+    "exitCode": 1,
+    "hang": false
+  }
+}

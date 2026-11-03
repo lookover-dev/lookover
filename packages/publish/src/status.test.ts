@@ -299,6 +299,9 @@ describe("why a review waits, in the machine's time", () => {
     expect(waiting({ reason: "engine-failed-self-test", engine: "claude" })).toBe(
       "Claude didn't pass Lookover's safety check. The review starts by itself once a version of Claude passes it.",
     );
+    expect(waiting({ reason: "engine-self-test-unfinished", engine: "codex" })).toBe(
+      "Codex couldn't finish Lookover's safety check. The review starts by itself once Codex passes it.",
+    );
     expect(waiting(null)).toBe("The review starts once the reviews before it are done.");
   });
 });

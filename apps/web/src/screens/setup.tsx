@@ -45,6 +45,8 @@ import {
   aiStepActs,
   aiStepLabels,
   chosenRepos,
+  ENGINE_SETUP_LABELS,
+  engineSetupAction,
   engineSetupNext,
   engineSetupText,
 } from "../view-model/onboarding.ts";
@@ -141,8 +143,7 @@ function StepsItem({
   );
 }
 
-function EngineRow({ engine }: { engine: Engine }) {
-  const send = useSend();
+function EngineRow({ engine, now }: { engine: Engine; now: number }) {
   const ready = engine.state === "ready";
   // A missing AI's next step after the install, the sign-in, on its own line under the service's (#431).
   const next = engineSetupNext(engine);
@@ -152,7 +153,7 @@ function EngineRow({ engine }: { engine: Engine }) {
       <div>
         <b>{engine.name}</b>
         <span>
-          {engineSetupText(engine)}
+          {engineSetupText(engine, now)}
           {next === null ? null : (
             <>
               <br />
@@ -161,21 +162,30 @@ function EngineRow({ engine }: { engine: Engine }) {
           )}
         </span>
       </div>
-      {ready ? null : engine.state === "missing" ? (
-        <Button size="sm" onClick={() => send({ type: "engine.check" })}>
-          Check again
-        </Button>
-      ) : (
-        <Button
-          size="sm"
-          disabled={engine.signingIn}
-          onClick={() => send({ type: "engine.signIn", id: engine.id })}
-        >
-          {engine.signingIn ? "Waiting…" : "Sign in in a terminal"}
-        </Button>
-      )}
+      <EngineAction engine={engine} />
     </div>
   );
+}
+
+/**
+ * The row's one action, in a place as wide as every label it can take, kept, empty, when there is none: the line
+ * beside it wraps the same in every state (design-system.md, "Setup's AI row action").
+ */
+function EngineAction({ engine }: { engine: Engine }) {
+  const send = useSend();
+  const action = engineSetupAction(engine);
+  const labels: Record<string, ReactNode> = { "": null };
+  for (const label of ENGINE_SETUP_LABELS)
+    labels[label] = (
+      <Button
+        size="sm"
+        disabled={action?.label !== label || !action.enabled}
+        onClick={() => action !== null && send(action.command)}
+      >
+        {label}
+      </Button>
+    );
+  return <SameWidth shown={action?.label ?? ""} labels={labels} />;
 }
 
 function StepAi() {
@@ -200,7 +210,7 @@ function StepAi() {
         small="Lookover runs the official Claude and Codex programs on this computer, on your Claude and ChatGPT plans. It never sees your logins."
       />
       {engines.map((e) => (
-        <EngineRow key={e.id} engine={e} />
+        <EngineRow key={e.id} engine={e} now={state.now} />
       ))}
       <p className="t-small">{SETUP_REVIEWERS_TEXT}</p>
       <div className="setup-acts">

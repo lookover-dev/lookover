@@ -11,12 +11,15 @@ import {
   type ResolvedSettings,
   repositoryId,
 } from "@lookover/contracts";
+import { clock } from "./format.ts";
 import {
   addRepositoryLink,
   aiStepActs,
   aiStepLabels,
   chosenRepos,
   departedNotice,
+  ENGINE_SETUP_LABELS,
+  engineSetupAction,
   engineSetupNext,
   engineSetupText,
   pullRequestLink,
@@ -24,6 +27,9 @@ import {
 } from "./onboarding.ts";
 
 const NOW = Date.UTC(2026, 9, 10, 10, 0, 0);
+
+/** An AI's line in setup, now. */
+const setupText = (e: Engine) => engineSetupText(e, NOW);
 
 const DEFAULTS: ResolvedSettings = {
   strictness: { value: "recommended", origin: "lookover-default", overrode: null },
@@ -47,6 +53,16 @@ function engine(id: EngineId, name: string): Engine {
     signingIn: false,
   };
 }
+
+/** Every state an engine can be in. */
+const STATES: Engine["state"][] = [
+  "ready",
+  "signed-out",
+  "missing",
+  "limit",
+  "failed-self-test",
+  "self-test-unfinished",
+];
 
 /** sam, signed in. */
 const SAM = { id: 7, login: "sam" };
@@ -205,20 +221,20 @@ test("the AI step waits for Continue (ADR 0058): both ready says so and offers C
 
 test("each AI's line in the setup says its state; one that can't be used says why, the command included", () => {
   const codex = engine("codex", "Codex");
-  expect(engineSetupText({ ...codex, detail: "ChatGPT Plus plan" })).toBe(
+  expect(setupText({ ...codex, detail: "ChatGPT Plus plan" })).toBe(
     "Ready · signed in, ChatGPT Plus plan · codex 1.0.0",
   );
-  expect(engineSetupText({ ...codex, state: "missing", version: null })).toBe(
+  expect(setupText({ ...codex, state: "missing", version: null })).toBe(
     "codex was not found on this computer",
   );
   // Not installed: the service's line, with this machine's command (ADR 0070).
   const install =
     "The codex program was not found on this computer. Install it, then check again: npm install -g @openai/codex";
-  expect(engineSetupText({ ...codex, state: "missing", version: null, detail: install })).toBe(install);
+  expect(setupText({ ...codex, state: "missing", version: null, detail: install })).toBe(install);
   const tooOld =
     "gpt-6.1-sol needs Codex 0.162.0 or later; this one is 0.154.0. Update it, then check again: npm install -g @openai/codex@latest";
   expect(
-    engineSetupText({
+    setupText({
       ...codex,
       state: "missing",
       version: "0.154.0",
@@ -226,8 +242,8 @@ test("each AI's line in the setup says its state; one that can't be used says wh
       unusable: { kind: "too-old", version: "0.154.0", model: "gpt-6.1-sol", needs: "0.162.0" },
     }),
   ).toBe(tooOld);
-  expect(engineSetupText({ ...codex, state: "signed-out" })).toBe("Not signed in · codex 1.0.0 found");
-  expect(engineSetupText({ ...codex, state: "signed-out", signingIn: true })).toBe(
+  expect(setupText({ ...codex, state: "signed-out" })).toBe("Not signed in · codex 1.0.0 found");
+  expect(setupText({ ...codex, state: "signed-out", signingIn: true })).toBe(
     "A terminal is open. Sign in there; this page checks every few seconds.",
   );
 });
@@ -253,23 +269,22 @@ test("a missing AI's row says what comes after the install, the sign-in, under t
 test("an AI's line joins only the parts it has: no stray comma, no doubled separator, in any state (#256)", () => {
   const claude = engine("claude", "Claude");
   // Claude ready with no plan said: the detail is left out, not printed empty.
-  expect(engineSetupText({ ...claude, version: "2.4.1" })).toBe("Ready · signed in · claude 2.4.1");
-  expect(engineSetupText({ ...claude, version: "2.4.1", detail: "Claude Max plan" })).toBe(
+  expect(setupText({ ...claude, version: "2.4.1" })).toBe("Ready · signed in · claude 2.4.1");
+  expect(setupText({ ...claude, version: "2.4.1", detail: "Claude Max plan" })).toBe(
     "Ready · signed in, Claude Max plan · claude 2.4.1",
   );
   // At its limit or failing the safety check, it is signed in: the line says the state as the status menu does.
-  expect(engineSetupText({ ...claude, version: "2.4.1", state: "limit" })).toBe(
+  expect(setupText({ ...claude, version: "2.4.1", state: "limit" })).toBe(
     "At its limit · signed in · claude 2.4.1",
   );
   expect(
-    engineSetupText({ ...claude, version: "2.4.1", state: "failed-self-test", detail: "Claude Max plan" }),
+    setupText({ ...claude, version: "2.4.1", state: "failed-self-test", detail: "Claude Max plan" }),
   ).toBe("Didn't pass Lookover's safety check · signed in, Claude Max plan · claude 2.4.1");
-  const states: Engine["state"][] = ["ready", "signed-out", "missing", "limit", "failed-self-test"];
-  for (const state of states) {
+  for (const state of STATES) {
     for (const detail of ["", "Claude Max plan"]) {
       for (const version of [null, "2.4.1"]) {
         for (const signingIn of [false, true]) {
-          const line = engineSetupText({ ...claude, state, detail, version, signingIn });
+          const line = setupText({ ...claude, state, detail, version, signingIn });
           expect(line).not.toMatch(/,\s*(·|$)|·\s*·|,\s*,|^\s*·|·\s*$|null|undefined|\s{2}/);
           expect(line.trim()).toBe(line);
           expect(line).not.toBe("");
@@ -277,4 +292,121 @@ test("an AI's line joins only the parts it has: no stray comma, no doubled separ
       }
     }
   }
+});
+
+test("each AI's row offers the one action its state needs: a sign-in only to one signed out, Try again to one whose check couldn't finish", () => {
+  const claude = { ...engine("claude", "Claude"), version: "2.4.1" };
+  const check = { type: "engine.check" } as const;
+  expect(engineSetupAction({ ...claude, state: "signed-out" })).toEqual({
+    label: "Sign in in a terminal",
+    command: { type: "engine.signIn", id: "claude" },
+    enabled: true,
+  });
+  expect(engineSetupAction({ ...claude, state: "signed-out", signingIn: true })).toEqual({
+    label: "Waiting…",
+    command: { type: "engine.signIn", id: "claude" },
+    enabled: false,
+  });
+  // Try again runs the check again (`engine.check`), never a sign-in, whose look leaves the hold in place.
+  expect(engineSetupAction({ ...claude, state: "self-test-unfinished" })).toEqual({
+    label: "Try again",
+    command: check,
+    enabled: true,
+  });
+  expect(engineSetupAction({ ...claude, state: "missing", version: null })).toEqual({
+    label: "Check again",
+    command: check,
+    enabled: true,
+  });
+  expect(engineSetupAction({ ...claude, state: "failed-self-test" })).toEqual({
+    label: "Check again",
+    command: check,
+    enabled: true,
+  });
+  // At its limit, Check again: during setup no job waits, so nothing else would look once it resets (F2 on #522).
+  expect(engineSetupAction({ ...claude, state: "limit", limitUntil: NOW + 5 * 60_000 })).toEqual({
+    label: "Check again",
+    command: check,
+    enabled: true,
+  });
+  // Ready, nothing to do.
+  expect(engineSetupAction(claude)).toBeNull();
+  // The action's place keeps its widest label's width: every label it can show is laid out.
+  for (const state of STATES)
+    for (const signingIn of [false, true]) {
+      const action = engineSetupAction({ ...claude, state, signingIn });
+      if (action !== null) expect(ENGINE_SETUP_LABELS).toContain(action.label);
+    }
+});
+
+test("each AI's line in setup, in the five states not ready, says the state in the status menu's words", () => {
+  const codex = { ...engine("codex", "Codex"), version: "0.163.0", detail: "ChatGPT Plus plan" };
+  expect(setupText({ ...codex, state: "signed-out" })).toBe("Not signed in · codex 0.163.0 found");
+  expect(setupText({ ...codex, state: "self-test-unfinished" })).toBe(
+    "Couldn't finish Lookover's safety check · signed in, ChatGPT Plus plan · codex 0.163.0",
+  );
+  expect(setupText({ ...codex, state: "missing", detail: "", version: null })).toBe(
+    "codex was not found on this computer",
+  );
+  expect(setupText({ ...codex, state: "failed-self-test" })).toBe(
+    "Didn't pass Lookover's safety check · signed in, ChatGPT Plus plan · codex 0.163.0",
+  );
+  expect(setupText({ ...codex, state: "limit" })).toBe(
+    "At its limit · signed in, ChatGPT Plus plan · codex 0.163.0",
+  );
+});
+
+test("an AI at its limit in setup says when it resets, and Check again finds it back after the reset", () => {
+  const reset = NOW + 5 * 60_000;
+  const claude = {
+    ...engine("claude", "Claude"),
+    version: "2.4.1",
+    state: "limit",
+    limitUntil: reset,
+  } as const;
+  const codex = { ...claude, id: "codex", name: "Codex", cli: "codex" } as const;
+  expect(setupText(claude)).toBe(`At its limit until ${clock(reset)} · signed in · claude 2.4.1`);
+  // Its reset gone by with nothing checked since, the line names no time already past.
+  expect(engineSetupText(claude, reset + 60_000)).toBe("At its limit · signed in · claude 2.4.1");
+  // Both at their limit: no job waits during setup, so each row offers Check again, which reads the engines again.
+  const check = { label: "Check again", command: { type: "engine.check" }, enabled: true } as const;
+  expect([claude, codex].map(engineSetupAction)).toEqual([check, check]);
+  expect(aiStepActs([claude, codex])).toEqual({ said: "", label: "Continue", enabled: false });
+  // Once the check finds Claude ready after its reset, Continue goes on with it.
+  expect(aiStepActs([{ ...claude, state: "ready", limitUntil: null }, codex])).toEqual({
+    said: "Claude is ready.",
+    label: "Continue with Claude only",
+    enabled: true,
+  });
+});
+
+test("with no AI ready, Continue asks for a sign-in only when one is signed out; otherwise it is Continue, disabled", () => {
+  const claude = engine("claude", "Claude");
+  const codex = engine("codex", "Codex");
+  const unfinished = { ...codex, state: "self-test-unfinished" } as const;
+  const atLimit = { ...claude, state: "limit" } as const;
+  expect(aiStepActs([atLimit, unfinished])).toEqual({ said: "", label: "Continue", enabled: false });
+  expect(
+    aiStepActs([
+      { ...claude, state: "failed-self-test" },
+      { ...codex, state: "missing" },
+    ]),
+  ).toEqual({
+    said: "",
+    label: "Continue",
+    enabled: false,
+  });
+  expect(aiStepActs([atLimit, { ...codex, state: "signed-out" }])).toEqual({
+    said: "",
+    label: "Sign in to continue",
+    enabled: false,
+  });
+  // One ready: Continue with it only, whatever the other's state.
+  expect(aiStepActs([claude, unfinished])).toEqual({
+    said: "Claude is ready.",
+    label: "Continue with Claude only",
+    enabled: true,
+  });
+  // Every label it shows is among those laid out, so Continue keeps one width.
+  expect(aiStepLabels([atLimit, unfinished])).toContain(aiStepActs([atLimit, unfinished]).label);
 });

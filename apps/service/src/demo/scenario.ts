@@ -176,7 +176,7 @@ export type Move =
   | { kind: "installed"; engine: EngineId; version: string }
   | { kind: "too-old"; engine: EngineId; version: string }
   | { kind: "refuse"; failure: Refusal; forMs: number }
-  | { kind: "update"; engine: EngineId; version: string; selfTest: "passes" | "fails" }
+  | { kind: "update"; engine: EngineId; version: string; selfTest: "passes" | "fails" | "unfinished" }
   | { kind: "command"; command: OwnerCommand };
 
 export interface TimedMove {

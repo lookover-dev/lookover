@@ -28,17 +28,19 @@
 // The second look (ADR 0044): who found each finding and what the confirm pass said of it, and the finder,
 // confirmer, fallback and failure a run and a round record (the shapes in `confirm.ts`); a candidate's verdict
 // and what a refuted one leaves in its round (`round.ts`); the repository's `Depth`; the engine state of a
-// version that failed the self-test, and the deferral that waits on it; the skip of another author's change when
-// only Codex may review it; a candidate's `Anchoring` and the placement of one whose line's text is not in the
-// diff; the commits' messages a push brought. Posting safely (ADR 0044, #67): `HostWriter.findReview` and the
-// job's id on a check, `REVIEW_MARKER` in `frozen.ts`, and `COMMENT_MAX_BYTES` and `REVIEW_MAX_COMMENTS` beside
-// `CHECK_OUTPUT_MAX_BYTES` in `host.ts`, with `utf8Bytes`, a text measured as GitHub counts them.
+// version that failed the self-test, and of one whose self-test couldn't finish (ADR 0075), and the deferral that
+// waits on each; the skip of another author's change when only Codex may review it; a candidate's `Anchoring` and
+// the placement of one whose line's text is not in the diff; the commits' messages a push brought. Posting safely
+// (ADR 0044, #67): `HostWriter.findReview` and the job's id on a check, `REVIEW_MARKER` in `frozen.ts`, and
+// `COMMENT_MAX_BYTES` and `REVIEW_MAX_COMMENTS` beside `CHECK_OUTPUT_MAX_BYTES` in `host.ts`, with `utf8Bytes`, a
+// text measured as GitHub counts them.
 // The one exception to "never a sentence": `copy.ts`, the phrases the app, GitHub and the service's log file share
-// (`engineName`, `deferralText`, `failureText`, `cancelText` and `cancelPhrase`, `skipText`, `confirmFailureText`,
-// `findersText`, `foundAndCheckedText`, `keptText`, `ruleText`, `CODEX_REVIEWS`, `postWaitText`; the status block's
-// headings `NEEDS_YOUR_LOOK`, `thingsText`, `lookingOverHead`, `waitingHead` and `failedHead`, its lines
-// `roundLine` (with `roundCountsText`), `stoppedText`, `TRY_AGAIN`, `waitingText` and `startsOnceText`, its notes
-// `notInDiffText` and `escalationText`; a thread reply's `replyKind`), and the ways of writing they share
+// (`engineName`, `deferralText`, the safety check's states `FAILED_SAFETY_CHECK` and `UNFINISHED_SAFETY_CHECK`,
+// `failureText`, `cancelText` and `cancelPhrase`, `skipText`, `confirmFailureText`, `findersText`,
+// `foundAndCheckedText`, `keptText`, `ruleText`, `CODEX_REVIEWS`, `postWaitText`; the status block's headings
+// `NEEDS_YOUR_LOOK`, `thingsText`, `lookingOverHead`, `waitingHead` and `failedHead`, its lines `roundLine` (with
+// `roundCountsText`), `stoppedText`, `TRY_AGAIN`, `waitingText` and `startsOnceText`, its notes `notInDiffText`
+// and `escalationText`; a thread reply's `replyKind`), and the ways of writing they share
 // (`asSentence`, `shortSha`, `dayText`, `twoDigits`), written once here because the web may import only this package
 // and `publish` words the pull request: everything else either says stays in its own module. `findingPermalink`
 // (`status-block.ts`): where a finding with no line comment shows its lines, for the block and the simulated page.
@@ -194,6 +196,7 @@ export {
   TRY_AGAIN,
   thingsText,
   twoDigits,
+  UNFINISHED_SAFETY_CHECK,
   unusableFixedText,
   unusableStateText,
   upperFirst,

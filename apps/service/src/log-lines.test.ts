@@ -402,6 +402,9 @@ test("an engine's state says what it is, until when for a limit, and nothing whe
   expect(logLineOf(engine({ state: "failed-self-test" }), before())).toBe(
     "Codex didn't pass Lookover's safety check",
   );
+  expect(logLineOf(engine({ state: "self-test-unfinished" }), before())).toBe(
+    "Codex couldn't finish Lookover's safety check",
+  );
   expect(logLineOf(engine({ state: "ready" }), before())).toBeNull();
   const limited = before();
   limited.engines.codex = { ...limited.engines.codex, state: "limit" };

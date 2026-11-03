@@ -269,6 +269,8 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
     },
     update: (move, room) => {
       if (move.selfTest === "fails") engines.failSelfTest(move.engine, move.version);
+      // Its first pair can't finish (ADR 0075); the run after, from "Try again", passes.
+      if (move.selfTest === "unfinished") engines.unfinishedSelfTest(move.engine, move.version, 2);
       engines.setHealth(move.engine, { installed: true, version: move.version, signedIn: true });
       return room.checkEngines();
     },

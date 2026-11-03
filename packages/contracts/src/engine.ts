@@ -5,9 +5,17 @@ import type { EngineUnusable } from "./engines-port.ts";
 export type EngineId = "claude" | "codex";
 /**
  * `failed-self-test`: the installed version failed Lookover's self-test (ADR 0044): the engine isn't used until a
- * version passes. While the self-test runs, the engine counts as busy, not as another state.
+ * version passes. `self-test-unfinished`: its self-test couldn't finish twice running (the wall not tried, or the
+ * run not made), neither signed out nor at its limit (ADR 0075): not a failure, but the engine isn't used until a
+ * run passes. While the self-test runs, the engine counts as busy, not as another state.
  */
-export type EngineState = "ready" | "signed-out" | "missing" | "limit" | "failed-self-test";
+export type EngineState =
+  | "ready"
+  | "signed-out"
+  | "missing"
+  | "limit"
+  | "failed-self-test"
+  | "self-test-unfinished";
 
 export interface Engine {
   id: EngineId;

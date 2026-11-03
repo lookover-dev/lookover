@@ -35,6 +35,7 @@ test("an AI's state in a few words", () => {
     ["missing", "not installed"],
     ["limit", "at its limit"],
     ["failed-self-test", "didn't pass Lookover's safety check"],
+    ["self-test-unfinished", "couldn't finish Lookover's safety check"],
   ];
   for (const [state, text] of cases)
     expect([state, engineStateText({ state, unusable: null })]).toEqual([state, text]);

@@ -62,6 +62,9 @@ export function asSentence(phrase: string): string {
 /** An engine whose version failed the self-test (ADR 0044), as a phrase after its name, or as its state. */
 export const FAILED_SAFETY_CHECK = "didn't pass Lookover's safety check";
 
+/** An engine whose self-test couldn't finish (ADR 0075), as a phrase after its name, or as its state. */
+export const UNFINISHED_SAFETY_CHECK = "couldn't finish Lookover's safety check";
+
 /**
  * A severity as the app and the pull request say it, given as `label` ("Should fix"): lowered because the confirm
  * pass didn't confirm it (ADR 0044), it says so.
@@ -174,6 +177,8 @@ export function deferralText(deferral: Deferral): string {
       return `${ENGINE[deferral.engine]} reached its limit`;
     case "engine-failed-self-test":
       return `${ENGINE[deferral.engine]} ${FAILED_SAFETY_CHECK}`;
+    case "engine-self-test-unfinished":
+      return `${ENGINE[deferral.engine]} ${UNFINISHED_SAFETY_CHECK}`;
   }
 }
 
@@ -364,6 +369,8 @@ export function startsOnceText(deferral: Deferral): string {
       return "once the limit resets";
     case "engine-failed-self-test":
       return `by itself once a version of ${ENGINE[deferral.engine]} passes it`;
+    case "engine-self-test-unfinished":
+      return `by itself once ${ENGINE[deferral.engine]} passes it`;
   }
 }
 

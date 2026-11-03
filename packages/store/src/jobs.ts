@@ -367,6 +367,7 @@ const DEFERRAL = enumOf<Deferral["reason"]>()([
   "engine-missing",
   "engine-limit",
   "engine-failed-self-test",
+  "engine-self-test-unfinished",
 ]);
 const ENGINE = enumOf<EngineId>()(["claude", "codex"]);
 const SKIP = enumOf<SkipReason>()([
@@ -455,6 +456,7 @@ export function jobOf(r: z.infer<typeof jobRow>): StoredJob {
       case "engine-missing":
       case "engine-limit":
       case "engine-failed-self-test":
+      case "engine-self-test-unfinished":
         // Written with its engine: a row without one doesn't parse, and is never read as some engine's.
         if (r.deferral_engine === null)
           throw new Error(`job ${r.id}: deferral_engine is null for a deferral "${r.deferral_reason}"`);

@@ -429,6 +429,13 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
         version: bumped(world.engines.healthOf("codex").version),
         selfTest: "fails",
       }),
+    "codex-self-test-unfinished": () =>
+      played({
+        kind: "update",
+        engine: "codex",
+        version: bumped(world.engines.healthOf("codex").version),
+        selfTest: "unfinished",
+      }),
     // A version just under the one Codex's model needs: "Codex is updated" then installs the first that serves it.
     "codex-too-old": () => played({ kind: "too-old", engine: "codex", version: "0.161.0" }),
     "engines-missing": async () => {

@@ -6,6 +6,7 @@ import {
   cancelText,
   confirmFailureText,
   deferralText,
+  engineDeferral,
   engineDetailText,
   engineHealthText,
   engineName,
@@ -25,11 +26,14 @@ import {
   roundLine,
   shortSha,
   skipText,
+  startsOnceText,
   twoDigits,
+  UNFINISHED_SAFETY_CHECK,
   unusableFixedText,
   unusableStateText,
   upperFirst,
   waitingHead,
+  waitingText,
 } from "./index.ts";
 
 test("an engine is named after its program", () => {
@@ -58,6 +62,22 @@ test("why a review waits names the engine it waits for", () => {
   expect(deferralText({ reason: "engine-failed-self-test", engine: "codex" })).toBe(
     "Codex didn't pass Lookover's safety check",
   );
+  expect(deferralText({ reason: "engine-self-test-unfinished", engine: "codex" })).toBe(
+    "Codex couldn't finish Lookover's safety check",
+  );
+});
+
+test("a self-test that couldn't finish (ADR 0075): its state's words, and when the review it holds starts", () => {
+  expect(UNFINISHED_SAFETY_CHECK).toBe("couldn't finish Lookover's safety check");
+  const unfinished = { reason: "engine-self-test-unfinished", engine: "codex" } as const;
+  expect(startsOnceText(unfinished)).toBe("by itself once Codex passes it");
+  expect(waitingText(unfinished, null)).toBe(
+    "Codex couldn't finish Lookover's safety check. The review starts by itself once Codex passes it.",
+  );
+  expect(engineDeferral("claude", "self-test-unfinished")).toEqual({
+    reason: "engine-self-test-unfinished",
+    engine: "claude",
+  });
 });
 
 test("what makes a program found but unusable usable: the app says it to you of the engine it just named", () => {

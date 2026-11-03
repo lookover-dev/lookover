@@ -15,11 +15,20 @@ import type { FakeProgram, SelfTestRecording } from "./fake-claude.ts";
  * the commit and the confirm pass their prompt names; `confirm-mixed` is derived from `confirm` (its second
  * candidate unsure, its third refuted): what demo mode replays when Codex confirms Claude's round 1.
  * `self-test-named` is derived from `self-test-untried`: a command only names the file to write (`Test-Path`), no
- * write is tried, so the wall isn't tested.
+ * write is tried, so the wall isn't tested. `self-test-constrained` is derived from `self-test` as #513's run of codex
+ * 0.166.0 showed it: the write tried as a .NET call (`[System.IO.File]::WriteAllText`), which PowerShell's
+ * ConstrainedLanguage mode refuses before the sandbox is asked, so the wall isn't tested either.
+ * `self-test-capacity` is a real self-test run's stream of codex 0.166.0, copied by hand (#522): the server refused
+ * the turn ("Selected model is at capacity") before any item started, so the run proved nothing.
+ * `self-test-reconnect` is derived from it: the turn failed on a reconnect's notice ("Reconnecting... 1/5"), no proof
+ * the server refused it, so the run still fails.
  */
 export type CodexRecording =
   | "ok"
   | "self-test-named"
+  | "self-test-constrained"
+  | "self-test-capacity"
+  | "self-test-reconnect"
   | "input_too_large"
   | "review"
   | "confirm"

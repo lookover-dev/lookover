@@ -6,7 +6,17 @@ import { expect, test } from "bun:test";
 import type { Change, ConfirmFallback, Depth, EngineId, EngineState, Reviewers } from "@lookover/contracts";
 import { type ReviewPlan, type RoundPlan, roundPlan } from "./index.ts";
 
-const STATES: EngineState[] = ["ready", "missing", "signed-out", "limit", "failed-self-test"];
+/** Every engine state: a new one fails to compile here until it is listed. */
+const EVERY_STATE = {
+  ready: true,
+  missing: true,
+  "signed-out": true,
+  limit: true,
+  "failed-self-test": true,
+  "self-test-unfinished": true,
+} satisfies Record<EngineState, true>;
+// The filter drops nothing (every key is in EVERY_STATE): it only narrows `Object.keys`'s strings to the states.
+const STATES = Object.keys(EVERY_STATE).filter((k): k is EngineState => k in EVERY_STATE);
 const SKIPPED: RoundPlan = { kind: "skipped", reason: "codex-not-yours" };
 const by = (
   finder: EngineId,

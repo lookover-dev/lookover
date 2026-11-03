@@ -331,6 +331,15 @@ export const SHOTS: Shot[] = [
     inject: ["codex-failed-self-test"],
     act: (p) => button(p, "Codex needs attention").click(),
   },
+  // A newer Codex whose safety check couldn't finish twice (ADR 0075): the need line with Try again, in the band,
+  // then the status menu.
+  { name: "home-self-test-unfinished", scenario: "S10", inject: ["codex-self-test-unfinished"] },
+  {
+    name: "status-pill-self-test-unfinished",
+    scenario: "S10",
+    inject: ["codex-self-test-unfinished"],
+    act: (p) => button(p, "Codex needs attention").click(),
+  },
   // A Codex too old for its model: the status menu says so, with the command that updates it, and "Check again".
   {
     name: "status-pill-codex-too-old",
@@ -884,6 +893,20 @@ export const SHOTS: Shot[] = [
   { name: "setup-1-ai-missing", scenario: "S1", inject: ["engines-missing"], screen: ".setup" },
   // Both AIs ready: the step says so and waits for Continue; nothing moves by itself (ADR 0058).
   { name: "setup-1-ai-ready", scenario: "S1", screen: ".setup", alone: true, act: setupUntilBothReady },
+  // Codex signed in, its safety check couldn't finish twice (ADR 0075): its row says so and offers Try again, never
+  // a sign-in; Continue goes on with Claude only.
+  {
+    name: "setup-1-ai-self-test-unfinished",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilBothReady(p, demo);
+      await demo.inject("codex-self-test-unfinished");
+      await p.getByText("Couldn't finish Lookover's safety check", { exact: false }).waitFor();
+      await button(p, "Try again").waitFor();
+    },
+  },
   // Sign in with GitHub, the one way in (ADR 0066, ADR 0073): the step's start; the code GitHub gave, with Copy code
   // and open GitHub and Cancel; a code that ran out; one GitHub didn't sign in (cancelled on its page); then who you
   // are and the accounts reached. GitHub's fake device page, where the code is entered.

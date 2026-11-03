@@ -67,6 +67,11 @@ const DEFERRALS: [Deferral, string, string][] = [
     "Claude didn't pass Lookover's safety check",
     "Claude didn't pass Lookover's safety check. This review starts by itself once a version passes it.",
   ],
+  [
+    { reason: "engine-self-test-unfinished", engine: "codex" },
+    "Codex couldn't finish Lookover's safety check",
+    "Codex couldn't finish Lookover's safety check. This review starts by itself once Codex passes it.",
+  ],
 ];
 
 test("a deferral is said one way: what the review waits for, then when it starts", () => {

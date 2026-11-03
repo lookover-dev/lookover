@@ -31,13 +31,21 @@ export type CancelReason = "closed" | "replaced" | "pushed";
 
 /**
  * Why a deferred job waits. An engine reason names the engine it waits for, one per engine state but `ready`;
- * `engine-failed-self-test`: its version failed Lookover's self-test (ADR 0044). `engine-missing`'s `unusable`: a
- * program was found but can't be used, and why, null when none was found (a Codex too old for its model). No reason names the service: one
- * that answers is running (ADR 0046).
+ * `engine-failed-self-test`: its version failed Lookover's self-test (ADR 0044); `engine-self-test-unfinished`:
+ * its self-test couldn't finish (ADR 0075). `engine-missing`'s `unusable`: a program was found but can't be used,
+ * and why, null when none was found (a Codex too old for its model). No reason names the service: one that
+ * answers is running (ADR 0046).
  */
 export type Deferral =
   | { reason: "paused" | "connection" }
-  | { reason: "engine-signed-out" | "engine-limit" | "engine-failed-self-test"; engine: EngineId }
+  | {
+      reason:
+        | "engine-signed-out"
+        | "engine-limit"
+        | "engine-failed-self-test"
+        | "engine-self-test-unfinished";
+      engine: EngineId;
+    }
   | { reason: "engine-missing"; engine: EngineId; unusable: EngineUnusable | null };
 
 /** The engine a deferral waits for; null for no deferral, or a reason that names none. */
@@ -54,6 +62,7 @@ const ENGINE_WAITS: Record<
   "signed-out": "engine-signed-out",
   limit: "engine-limit",
   "failed-self-test": "engine-failed-self-test",
+  "self-test-unfinished": "engine-self-test-unfinished",
 };
 
 /**
