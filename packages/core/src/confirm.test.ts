@@ -57,6 +57,7 @@ function inLedger(n: number, c: CandidateFinding): Finding {
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: null,
     status: "open",
     posted: true,
     commented: false,

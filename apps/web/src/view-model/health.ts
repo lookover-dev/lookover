@@ -3,18 +3,17 @@
 import {
   type CheckItem,
   type Connection,
-  type ConnectionApp,
   type ConnectionCause,
   type Engine,
   type EngineState,
   FAILED_SAFETY_CHECK,
-  type KeyProtection,
   type Service,
   type SettingsFileError,
   type SettingsFileProblem,
   type State,
   unusableStateText,
 } from "@lookover/contracts";
+import { type SignedOutCause, saidSignedOut } from "./accounts.ts";
 import { atLoginStatus } from "./start-at-login.ts";
 
 const ENGINE_STATE_TEXT: Record<EngineState, string> = {
@@ -30,61 +29,34 @@ export function engineStateText({ state, unusable }: Pick<Engine, "state" | "unu
   return unusableStateText(unusable) ?? ENGINE_STATE_TEXT[state];
 }
 
-/** Why GitHub can't be used, in a few words (ADR 0053): "App uninstalled", which a problem says after "GitHub". */
-export function causeText(cause: ConnectionCause): string {
-  switch (cause.kind) {
-    case "unreachable":
-      return "unreachable";
-    case "uninstalled":
-      return cause.suspended ? "App suspended" : "App uninstalled";
-    case "key-refused":
-      return "key refused";
-    case "key-lost":
-      return "key lost";
-    case "not-a-member":
-      return "membership lost";
-    case "signed-out":
-      return "signed out";
-    case "sso":
-      return "SSO needed";
-  }
-}
-
 /**
- * Where the App is (ADR 0059): "the ledger-dev organisation", or "your GitHub account" when the account is the
- * person's own.
+ * Why GitHub can't be used, in a few words (ADR 0053): "App uninstalled", which a problem says after "GitHub".
  */
-export function accountText({ account, person }: Pick<ConnectionApp, "account" | "person">): string {
-  if (account.type === "Organization") return `the ${account.login} organisation`;
-  return account.id === person.id ? "your GitHub account" : `${account.login}'s GitHub account`;
+export function causeText(cause: ConnectionCause): string {
+  if (saidSignedOut(cause)) return "signed out";
+  if (cause.kind === "uninstalled") return cause.suspended ? "App suspended" : "App uninstalled";
+  return CAUSE_TEXT[cause.kind];
 }
 
+/** The words of each cause said neither as signed out nor as the App's. */
+const CAUSE_TEXT: Record<Exclude<ConnectionCause["kind"], SignedOutCause["kind"] | "uninstalled">, string> = {
+  unreachable: "unreachable",
+  sso: "SSO needed",
+};
+
 /**
- * "connected as sam-reviewer[bot]", "App uninstalled"; with the App, the status menu names its account: "connected as
- * sam-reviewer[bot], on the ledger-dev organisation". Run checks' line has no App (`app` null). Signed in to the shared
- * App (ADR 0066), no bot: "connected as sam", the person who posts, or "connected" when the line doesn't know them.
+ * "connected as sam", the person signed in, who posts (ADR 0066), or "connected" when the line doesn't know them (Run
+ * checks'); "App uninstalled".
  */
 export function connectionText({
   state,
   cause,
-  bot,
-  app,
   person,
-}: Pick<Connection, "state" | "cause" | "bot" | "app"> & { person?: Connection["person"] }): string {
-  if (state === "connected") {
-    const who = bot ?? person?.login ?? null;
-    if (who === null) return "connected";
-    return app ? `connected as ${who}, on ${accountText(app)}` : `connected as ${who}`;
-  }
+}: Pick<Connection, "state" | "cause"> & { person?: Connection["person"] }): string {
+  if (state === "connected") return person ? `connected as ${person.login}` : "connected";
   if (state === "not-connected") return "not connected";
   return cause ? causeText(cause) : "disconnected";
 }
-
-/** How the App's key is kept (ADR 0053), as Run checks says it beside the connection. */
-const KEY_TEXT: Record<KeyProtection, string> = {
-  keychain: "key in the keychain",
-  "user-file": "key unencrypted in a user-only file: no keychain",
-};
 
 /**
  * "running, starts at login": a service that answers is running (ADR 0046), then whether the machine has it
@@ -150,9 +122,7 @@ export function checkLine(
       return {
         label: "GitHub",
         ok: item.state === "connected",
-        detail: item.key
-          ? `${connectionText({ ...item, app: null })} · ${KEY_TEXT[item.key]}`
-          : connectionText({ ...item, app: null }),
+        detail: connectionText({ state: item.state, cause: item.cause }),
       };
     case "service": {
       const { ok, text } = serviceStatus(item);

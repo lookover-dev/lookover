@@ -1,9 +1,9 @@
-// The App, its installation and the repositories it lists (ADR 0053), through the service's door on the held demo
-// clock and the fake GitHub, which owns the App and its installation: the install waited for every 4 s while the setup
+// The shared App's installations and the repositories they list (ADR 0053, ADR 0066), through the service's door on
+// the held demo clock and the fake GitHub, the owner signed in: the install waited for every 4 s while the setup
 // waits for it, "nothing granted" until it lists a repository; the installation's repositories followed every 5
 // minutes, one added arriving switched on, one removed leaving with its waiting and running jobs cancelled and its
-// unsent posts dropped, and back again with no waiting job; the allow-list cutting what is listed; the App kept in the
-// data folder giving the owner, the bot and the key's protection, and a key that no longer opens shown at once.
+// unsent posts dropped, and back again with no waiting job; the allow-list cutting what is listed; nobody signed in
+// showing the setup, and a restart's setup following the sign-in kept (ADR 0073).
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -20,27 +20,22 @@ import {
 } from "@lookover/contracts";
 import { openStore } from "@lookover/store";
 import { DemoClock, type FakeChange, FakeGitHost } from "@lookover/testkit";
-import { appStore, memoryKeychain, type Room } from "./index.ts";
 import {
-  ACME,
-  ACME_WEB,
   api,
-  BOT,
   fakeEngines,
   HeldReviews,
   home,
   messages,
+  ONE_FINDING,
   OWNER,
-  onAcmeWeb,
-  onFakeGitHub,
-  onOrganisationApp,
+  onTheDiff,
   openApp,
-  organisationHost,
-  personalApp,
   post,
   pr1,
-  pr2,
   SANDBOX,
+  SHARED_BOT,
+  signedInOn,
+  signedOutOn,
   snapshot,
   start,
   startRoom,
@@ -58,13 +53,15 @@ const LEDGER: RepositoryRef = { owner: SANDBOX.owner, name: "ledger-api" };
 const WEB: RepositoryRef = { owner: SANDBOX.owner, name: "ledger-web" };
 const idOf = (repo: RepositoryRef) => repositoryId(`${repo.owner}/${repo.name}`);
 
-/** The owner on the GitHub step, their App made and given, its install waited for. */
+/** A pass that answers nothing. */
+const NOTHING = { outcome: "ok", text: '```json\n{"findings": []}\n```' } as const;
+
+/** The owner on the GitHub step, signed in, the shared App's install waited for. */
 const WAITING: Setup = {
   done: false,
   step: "github",
   reached: "github",
   github: "waiting-for-install",
-  githubRefused: null,
   firstReviewChange: null,
 };
 
@@ -89,9 +86,9 @@ class Counting extends FakeGitHost {
     this.lists.set(repo.name, (this.lists.get(repo.name) ?? 0) + 1);
     return super.listOpenChanges(repo);
   }
-  override installation(...args: Parameters<FakeGitHost["installation"]>) {
+  override accounts(...args: Parameters<FakeGitHost["accounts"]>) {
     this.reads++;
-    return super.installation(...args);
+    return super.accounts(...args);
   }
 }
 
@@ -153,8 +150,19 @@ function heard(events: { subscribe(listener: (event: Event) => void): () => void
 
 test("the App installed after the start: the install read every 4 s, nothing granted, then a repository granted marks the step done and the reads stop", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new Counting({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time, installed: false });
-  const { service } = await start({ host, time, setup: WAITING });
+  const host = new Counting({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+    installed: false,
+  });
+  const { service } = await start({
+    host,
+    time,
+    setup: WAITING,
+  });
   const cookie = await openApp(service);
   const before = await snapshot(service, cookie);
   expect(before.setup.github).toBe("waiting-for-install");
@@ -192,8 +200,19 @@ test("the App installed after the start: the install read every 4 s, nothing gra
 
 test("uninstalled and installed again while nothing is granted: the new installation is shown at once, and kept once a repository is granted", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time, installed: false });
-  const { service } = await start({ host, time, setup: WAITING });
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+    installed: false,
+  });
+  const { service } = await start({
+    host,
+    time,
+    setup: WAITING,
+  });
   const cookie = await openApp(service);
   const first = host.install([]);
   await time.advance(4_000);
@@ -223,13 +242,18 @@ test("a repository added to the installation and one removed appear and leave wi
   const host = new HeldReviews({
     repo: SANDBOX,
     repositories: [LEDGER],
-    bot: BOT,
+    bot: SHARED_BOT,
+    person: OWNER,
     changes: [],
     clock: time,
   });
   const store = openStore({ home: home(), durable: false });
-  const engines = fakeEngines({ reviews: 2, time });
-  const { service } = await start({ host, time, store, repos: [SANDBOX, LEDGER, WEB], engines });
+  // Each round finds a line of the diff, so it owes a review (ADR 0074), the one GitHub holds; its confirm pass
+  // answers nothing more.
+  const engines = fakeEngines({ time });
+  for (const _ of [1, 2]) engines.answer({ outcome: "ok", text: ONE_FINDING }, NOTHING);
+  const retrieval = onTheDiff();
+  const { service } = await start({ host, time, store, repos: [SANDBOX, LEDGER, WEB], engines, retrieval });
   const cookie = await openApp(service);
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   expect((await snapshot(service, cookie)).repos.map((r: Repository) => r.id)).toEqual([
@@ -293,7 +317,14 @@ test("a repository added to the installation and one removed appear and leave wi
 
 test("with an allow-list, a repository the installation lists outside it never appears and is never polled", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new Counting({ repo: SANDBOX, repositories: [LEDGER], bot: BOT, changes: [pr1], clock: time });
+  const host = new Counting({
+    repo: SANDBOX,
+    repositories: [LEDGER],
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+  });
   const { service } = await start({ host, time, repos: [SANDBOX] });
   const cookie = await openApp(service);
   host.addRepository(WEB);
@@ -305,118 +336,29 @@ test("with an allow-list, a repository the installation lists outside it never a
   expect(host.lists.get(WEB.name)).toBeUndefined();
 });
 
-test("the App kept in the data folder: its owner and bot, its installation's repositories, its key's protection in Run checks", async () => {
+test("with nobody signed in, the setup shows and nothing is listed", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
+  const host = new Counting({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1], clock: time });
   const dir = home();
-  const apps = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
-  const { key } = host.credentials();
-  const app = personalApp(1, "lookover-spike-sasensi");
-  await apps.write(app, key);
-  const { given: _, ...side } = onFakeGitHub(host);
-  const { service } = await start({ home: dir, host, time, github: { ...side, apps } });
-  const cookie = await openApp(service);
-  const state = await snapshot(service, cookie);
-  expect(state.connection).toMatchObject({
-    state: "connected",
-    bot: BOT.login,
-    app: personalApp(1, "lookover-spike-sasensi"),
-    accounts: [{ installationId: 60_000_001 }],
-  });
-  expect(state.changes[changeId("sasensi/lookover-sandbox#1")]).toMatchObject({ author: "you" });
-  expect((await post(service, cookie, { type: "service.runChecks" })).status).toBe(200);
-  const checked = await snapshot(service, cookie);
-  expect(checked.service.checks?.items).toContainEqual(
-    expect.objectContaining({ check: "connection", key: "keychain" }),
-  );
-});
-
-test("an organisation's App kept: its account shown apart from the person, whose changes and requests alone are theirs", async () => {
-  const time = new DemoClock({ at: T0 });
-  // ACME's `web`: #1 is the owner's, #2 a teammate's (octocat's).
-  const host = organisationHost(time, [onAcmeWeb(pr1), onAcmeWeb(pr2)]);
-  const dir = home();
-  const { service } = await start({
-    home: dir,
-    host,
-    time,
-    github: await onOrganisationApp(host, dir),
-    engines: fakeEngines({ reviews: 1 }),
-  });
-  const cookie = await openApp(service);
-  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
-  const state = await snapshot(service, cookie);
-  expect(state.connection.app).toEqual({
-    id: 1,
-    slug: "lookover-spike-sasensi",
-    account: ACME,
-    person: OWNER,
-  });
-  expect(state.changes[changeId("acme/web#1")]).toMatchObject({ author: "you" });
-  expect(state.changes[changeId("acme/web#2")]).toMatchObject({ author: "other" });
-
-  await time.advance(5_000);
-  host.seedComment({ repo: ACME_WEB, number: 2 }, { author: OWNER, body: "/lookover review" });
-  await time.advance(MIN);
-  const finished = (await until(stream, "round.finished")).find((e) => e.type === "round.finished");
-  expect(finished).toMatchObject({ changeId: changeId("acme/web#2") });
-});
-
-test("live.json naming an organisation's App: the start refuses it, never keeping the organisation as the person", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  const side = onFakeGitHub(host);
-  const github = {
-    ...side,
-    installations: {
-      ...side.installations,
-      app: async (credentials: Parameters<typeof side.installations.app>[0]) => ({
-        ...(await side.installations.app(credentials)),
-        owner: ACME,
-      }),
-    },
-  };
-  // The test's own store: the start refused never ran, so nothing else closes it.
-  const dir = home();
-  const store = openStore({ home: dir, durable: false });
-  await expect(startRoom({ home: dir, host, time, github, store })).rejects.toThrow("acme");
-  store.close();
-});
-
-test("the App kept with a key that no longer opens: shown disconnected at start, its cause the key lost; nothing listed", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new Counting({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  const dir = home();
-  const keychain = memoryKeychain();
-  const apps = appStore({ home: dir, keychain, userOnly: async () => {} });
-  await apps.write(personalApp(1, "lookover-spike-sasensi"), host.credentials().key);
-  for (const name of keychain.names()) await keychain.delete(name);
-  const { given: _, ...side } = onFakeGitHub(host);
-  const { service } = await start({ home: dir, host, time, github: { ...side, apps } });
-  const cookie = await openApp(service);
-  const state = await snapshot(service, cookie);
-  expect(state.connection).toMatchObject({ state: "disconnected", cause: { kind: "key-lost" } });
-  expect(host.lists.size).toBe(0);
-});
-
-test("with no App at all, the setup shows and nothing is listed", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new Counting({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  const dir = home();
-  const apps = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
-  const { given: _, ...side } = onFakeGitHub(host);
-  const { service } = await start({ home: dir, host, time, github: { ...side, apps } });
+  const { service } = await start({ home: dir, host, time, github: signedOutOn(host, dir) });
   const cookie = await openApp(service);
   await time.advance(10 * MIN);
   const state = await snapshot(service, cookie);
   expect(state.setup).toMatchObject({ done: false, github: "start" });
-  expect(state.connection).toMatchObject({ state: "not-connected", bot: null, app: null });
+  expect(state.connection).toMatchObject({ state: "not-connected", person: null });
   expect(host.lists.size).toBe(0);
 });
 
 test("a repository removed from the installation while its listing is under way stays gone: the listing's answer adds nothing", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new HeldListing({ repo: SANDBOX, repositories: [LEDGER], bot: BOT, changes: [], clock: time });
+  const host = new HeldListing({
+    repo: SANDBOX,
+    repositories: [LEDGER],
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [],
+    clock: time,
+  });
   const store = openStore({ home: home(), durable: false });
   const lines: string[] = [];
   const { room } = await startRoom({
@@ -449,164 +391,75 @@ test("a repository removed from the installation while its listing is under way 
   expect(lines).toEqual([]);
 });
 
-test("a key lost while the setup waits for the install: the App store read again at each check, and a key back goes on with the install", async () => {
+test("restarted with live mode's sign-in on an unfinished setup: the setup set up at once is sent, not the one the events last said", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time, installed: false });
-  const dir = home();
-  const keychain = memoryKeychain();
-  const apps = appStore({ home: dir, keychain, userOnly: async () => {} });
-  await apps.write(personalApp(1, "lookover-spike-sasensi"), host.credentials().key);
-  const kept = await Promise.all(
-    keychain.names().map(async (name) => [name, await keychain.get(name)] as const),
-  );
-  for (const [name] of kept) await keychain.delete(name);
-  const { given: _, ...side } = onFakeGitHub(host);
-  const { room } = await startRoom({ home: dir, host, time, setup: WAITING, github: { ...side, apps } });
-
-  // The key back in the keychain, the App installed on GitHub: the next check finds both (the App store's reads
-  // are the disk's, not the clock's).
-  for (const [name, value] of kept) if (value !== null) await keychain.set(name, value);
-  host.install();
-  const events = heard(room.events);
-  await time.advance(4_000);
-  await events.first("setup.changed");
-  events.stop();
-  expect(room.snapshot().setup).toMatchObject({ github: "done", step: "github", reached: "repos" });
-  expect(room.snapshot().connection).toMatchObject({ state: "connected" });
-});
-
-/** The App the fake made, as GitHub describes it and Lookover keeps it. */
-const describedApp = async (room: Room, host: FakeGitHost) => {
-  const { id, slug, owner } = await room.github.installations.app(host.credentials());
-  return personalApp(id, slug, { id: owner.id, login: owner.login });
-};
-
-test("an App adopted while the setup waits for it: kept, its bot shown once, then its install waited for every 4 s", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time, installed: false });
-  const dir = home();
-  const apps = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
-  const { given: _, ...side } = onFakeGitHub(host);
-  const { room } = await startRoom({ home: dir, host, time, github: { ...side, apps } });
-  expect(room.snapshot().setup).toMatchObject({ github: "start" });
-  const app = await describedApp(room, host);
-
-  const events = heard(room.events);
-  await room.github.adopt(app, host.credentials().key);
-  expect(await apps.read()).toMatchObject({ state: "kept", app });
-  expect(room.github.app()).toEqual(app);
-  expect(room.snapshot().setup).toMatchObject({ github: "waiting-for-install", githubRefused: null });
-  expect(room.snapshot().connection).toMatchObject({
-    state: "not-connected",
-    bot: BOT.login,
-    app: { id: app.id },
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
   });
-  expect(events.sent.filter((e) => e.type === "connection.changed")).toHaveLength(1);
-
-  host.install();
-  await time.advance(4_000);
-  events.stop();
-  // The room started set up: the step stays where the owner is, the furthest reached is kept (ADR 0058).
-  expect(room.snapshot().setup).toMatchObject({ github: "done", step: "github", reached: "background" });
-  expect(room.snapshot().connection).toMatchObject({ state: "connected" });
-  expect(room.snapshot().changes[changeId("sasensi/lookover-sandbox#1")]).toBeDefined();
-});
-
-test("a new key adopted for the App kept, installed already, whose key was lost: reconnected and listed", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
   const dir = home();
-  const keychain = memoryKeychain();
-  const apps = appStore({ home: dir, keychain, userOnly: async () => {} });
-  await apps.write(personalApp(1, "lookover-spike-sasensi"), host.credentials().key);
-  for (const name of keychain.names()) await keychain.delete(name);
-  const { given: _, ...side } = onFakeGitHub(host);
-  const { room } = await startRoom({ home: dir, host, time, github: { ...side, apps } });
-  expect(room.snapshot().connection).toMatchObject({ state: "disconnected", cause: { kind: "key-lost" } });
-
-  const key = host.generateKey();
-  await room.github.adopt(await describedApp(room, host), key);
-  expect(await apps.read()).toMatchObject({ state: "kept", privateKey: key });
-  expect(room.snapshot().connection).toMatchObject({ state: "connected", cause: null });
-  expect(room.snapshot().changes[changeId("sasensi/lookover-sandbox#1")]).toMatchObject({ author: "you" });
-});
-
-test("another App adopted while live.json names one: refused, and nothing changes", async () => {
-  const time = new DemoClock({ at: T0 });
-  const { room } = await startRoom({ time });
-  const before = room.snapshot();
-  const events = heard(room.events);
-  const other = personalApp(99, "another-app");
-  await expect(room.github.adopt(other, "-----BEGIN RSA PRIVATE KEY-----")).rejects.toThrow("live.json");
-  await time.advance(MIN);
-  events.stop();
-  expect(events.sent.filter((e) => e.type !== "clock")).toEqual([]);
-  expect(room.github.app()).not.toEqual(other);
-  expect(room.snapshot().connection).toEqual(before.connection);
-  expect(room.snapshot().setup).toEqual(before.setup);
-});
-
-/** A first start on `dir` with the App store and no App: the App adopted, so the event log says its install is waited for. */
-const waitedFor = async (dir: string, host: FakeGitHost, time: DemoClock) => {
-  const apps = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
-  const { given: _, ...side } = onFakeGitHub(host);
-  const { room } = await startRoom({ home: dir, host, time, github: { ...side, apps } });
-  await room.github.adopt(await describedApp(room, host), host.credentials().key);
-  expect(room.snapshot().setup).toMatchObject({ done: false, github: "waiting-for-install" });
-  await room.stop();
-  return side;
-};
-
-test("restarted with live.json's App on an unfinished setup: the setup set up at once is sent, not the one the events last said", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time, installed: false });
-  const dir = home();
-  await waitedFor(dir, host, time);
-  host.install();
+  const first = await startRoom({ home: dir, host, time, setup: WAITING, log: () => {} });
+  expect(first.room.snapshot().setup).toMatchObject({ done: false });
+  await first.room.stop();
 
   const { room } = await startRoom({ home: dir, host, time, idsFrom: 100, setUpAtOnce: true, log: () => {} });
   expect(room.snapshot().setup).toMatchObject({ done: true });
 });
 
-for (const github of ["start", "waiting-for-app"] as const) {
-  test(`stopped once the App was kept and before the setup moved on (${github}): the restart waits for its install`, async () => {
-    const time = new DemoClock({ at: T0 });
-    const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time, installed: false });
-    const dir = home();
-    const apps = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
-    const { given: _, ...side } = onFakeGitHub(host);
-    const setup: Setup = { ...WAITING, github };
-    const first = await startRoom({ home: dir, host, time, setup, github: { ...side, apps } });
-    const app = await describedApp(first.room, host);
-    await first.room.stop();
-    // "Create it on GitHub" or "Use an existing App" wrote the App store, and the service stopped before the setup.
-    await apps.write(app, host.credentials().key);
-
-    const { room } = await startRoom({ home: dir, host, time, idsFrom: 100, github: { ...side, apps } });
-    expect(room.snapshot().setup).toMatchObject({ github: "waiting-for-install", githubRefused: null });
-    host.install();
-    await time.advance(4_000);
-    expect(room.snapshot().setup).toMatchObject({ github: "done", step: "github", reached: "repos" });
-    expect(room.snapshot().connection).toMatchObject({ state: "connected", app: { id: app.id } });
-    expect(room.snapshot().changes[changeId("sasensi/lookover-sandbox#1")]).toBeDefined();
-  });
-}
-
-test("restarted with the App gone from the data folder:the setup shows again, whatever the events last said", async () => {
+test("stopped once a sign-in was kept and before the setup moved on: the restart waits for its install", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time, installed: false });
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+    installed: false,
+  });
   const dir = home();
-  const side = await waitedFor(dir, host, time);
-  rmSync(join(dir, "github", "app.json"));
+  const setup: Setup = { ...WAITING, github: "start" };
+  const first = await startRoom({ home: dir, host, time, setup, github: signedOutOn(host, dir) });
+  expect(first.room.snapshot().setup).toMatchObject({ github: "start" });
+  await first.room.stop();
+  // The sign-in kept, and the service stopped before the setup heard of it.
+  const github = await signedInOn(host, dir);
 
-  const apps = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
+  const { room } = await startRoom({ home: dir, host, time, idsFrom: 100, github });
+  expect(room.snapshot().setup).toMatchObject({ github: "waiting-for-install" });
+  host.install();
+  await time.advance(4_000);
+  expect(room.snapshot().setup).toMatchObject({ github: "done", step: "github", reached: "repos" });
+  expect(room.snapshot().connection).toMatchObject({ state: "connected", person: OWNER });
+  expect(room.snapshot().changes[changeId("sasensi/lookover-sandbox#1")]).toBeDefined();
+});
+
+test("restarted with the sign-in gone from the data folder: the setup shows again, whatever the events last said", async () => {
+  const time = new DemoClock({ at: T0 });
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+    installed: false,
+  });
+  const dir = home();
+  const first = await startRoom({ home: dir, host, time, setup: WAITING, log: () => {} });
+  expect(first.room.snapshot().setup).toMatchObject({ github: "waiting-for-install" });
+  await first.room.stop();
+  rmSync(join(dir, "github", "sign-in.json"));
+
   const { room } = await startRoom({
     home: dir,
     host,
     time,
     idsFrom: 100,
-    github: { ...side, apps },
+    github: signedOutOn(host, dir),
     log: () => {},
   });
   expect(room.snapshot().setup).toMatchObject({ done: false, step: "github", github: "start" });
+  expect(room.snapshot().connection.person).toBeNull();
 });

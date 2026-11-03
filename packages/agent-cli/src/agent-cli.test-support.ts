@@ -30,18 +30,6 @@ export const newer = commitSha("6eaa25d0a1b2c3d4e5f60718293a4b5c6d7e8f9a");
 export const owner = { id: 1234567, login: "sasensi" };
 /** Another person, signed in to the shared App on their own machine: their Lookover posts as them. */
 export const colleague = { id: 7654321, login: "dana" };
-const bot = { id: 338297044, login: "lookover-spike-sasensi[bot]" };
-/** The App's slug, as `--app` or `LOOKOVER_APP` name it. */
-export const APP = "lookover-spike-sasensi";
-
-/**
- * The two ways Lookover posts (ADR 0066): as its own App's bot, named by `LOOKOVER_APP`; or as the person signed in
- * to the shared App, the agent's own account, with nothing naming the App.
- */
-export const MODES = [
-  { mode: "the own App", shared: false },
-  { mode: "the shared App, as the agent's person", shared: true },
-] as const;
 export const BRANCH = "feature/unpaid";
 const START = Date.parse("2026-10-07T12:00:00Z");
 /** `ms` past the start, as the result block writes a time. */
@@ -112,33 +100,26 @@ export function result(overrides: {
 const textOf = (r: ReviewResult) => `Round 1.\n\n${RESULT_MARKER}${JSON.stringify(r)} -->`;
 
 /**
- * The command's world on a fake host holding change #7; `shared`: Lookover posts as the agent's own account,
- * signed in to the shared App, and nothing names the App (`MODES`); `fork`: #7 comes from a fork; `mayResolve:
+ * The command's world on a fake host holding change #7, Lookover posting under the shared App as the agent's own
+ * account, signed in to it (ADR 0066, 0073); `fork`: #7 comes from a fork; `mayResolve:
  * false`: the agent's token may not resolve a thread; `refuse`: GitHub refuses to read the threads, or to resolve
  * one, in these words.
  */
 export function world(
-  options: {
-    shared?: boolean;
-    env?: Record<string, string | undefined>;
-    fork?: boolean;
-    mayResolve?: boolean;
-    refuse?: { threads?: string; resolve?: string };
-  } = {},
+  options: { fork?: boolean; mayResolve?: boolean; refuse?: { threads?: string; resolve?: string } } = {},
 ) {
   let now = START;
   const clock = { now: () => now };
-  const shared = options.shared ?? false;
-  /** The App's slug, and who posts as Lookover: its bot, or the agent's own account on the shared App. */
-  const app = shared ? SHARED_APP.slug : APP;
-  const poster = shared ? { ...owner, bot: false } : { ...bot, bot: true };
-  const person = shared ? owner.id : undefined;
+  /** The shared App's slug; Lookover posts as the agent's own account under it. */
+  const app = SHARED_APP.slug;
+  const poster = { ...owner, bot: false };
+  const person = owner.id;
   const fake = new FakeGitHost({
     repo,
-    bot: shared ? { id: 338297045, login: `${SHARED_APP.slug}[bot]` } : bot,
+    bot: { id: 338297045, login: `${SHARED_APP.slug}[bot]` },
     changes: [{ ...change, fork: options.fork ?? false }],
     clock,
-    ...(shared ? { person: owner } : {}),
+    person: owner,
   });
   const local: { head: CommitSha; branch: string | null } = { head: sha, branch: BRANCH };
   const due: { at: number; act: () => Promise<unknown> | unknown }[] = [];
@@ -166,7 +147,6 @@ export function world(
       branch: () => Promise.resolve(local.branch),
       origin: () => Promise.resolve(repo),
     },
-    env: options.env ?? (shared ? {} : { LOOKOVER_APP: APP }),
     clock,
     sleep: async (ms) => {
       const until = now + ms;
@@ -197,7 +177,7 @@ export function world(
     },
     /** How long since the start, in ms. */
     elapsed: () => now - START,
-    /** The App's slug: the shared App's on `shared`. */
+    /** The shared App's slug. */
     app,
     /**
      * The App creates its check on `on` (the commit by default), as `name`, for the person `by` (the agent's own

@@ -14,8 +14,8 @@ import {
   LIVE_CONFIG_HELP,
   LiveLockHeld,
   liveConfigPath,
+  ORGANISATION_IGNORED,
   readLiveConfig,
-  servedLiveConfig,
   terminalSignIn,
   WATCH_IGNORED,
 } from "./index.ts";
@@ -161,204 +161,52 @@ test("a live config may name the owner's fork of the sandbox, never one it also 
   expect(LIVE_CONFIG_HELP).toContain(`"fork": "lookover-forks/lookover-sandbox"`);
 });
 
-test("a live config may name an organisation's App and sandbox, apart from its repositories and its App", () => {
+test("the owner's live.json still naming an organisation is taken: the line is ignored, nothing in it read (ADR 0073)", () => {
   const home = dir();
   const key = join(home, "app.pem");
   writeFileSync(key, "-----BEGIN RSA PRIVATE KEY-----\nnot a key\n-----END RSA PRIVATE KEY-----\n");
   const path = liveConfigPath(home);
-  const write = (config: unknown) => writeFileSync(path, JSON.stringify(config));
   const app = { id: 5202093, keyPath: key };
-  const repositories = ["sasensi/lookover-sandbox"];
-  const orgKey = join(home, "org.pem");
-  const organisation = { app: { id: 6100001, keyPath: orgKey }, sandbox: "lookover-dev/lookover-sandbox" };
-
-  // Its key file may be missing: `bun run live` skips the organisation's path then, saying so.
-  write({ app, repositories, organisation });
-  expect(readLiveConfig(path)).toEqual({
-    app,
-    repositories: [{ owner: "sasensi", name: "lookover-sandbox" }],
-    organisation: {
-      app: { id: 6100001, keyPath: orgKey },
-      sandbox: { owner: "lookover-dev", name: "lookover-sandbox" },
-    },
-  });
-  write({ app, repositories });
-  expect(readLiveConfig(path).organisation).toBeUndefined();
-
-  // Listed, its sandbox would be watched by the personal App.
-  write({
-    app,
-    repositories: ["lookover-dev/lookover-private", "Lookover-Dev/Lookover-Sandbox"],
-    organisation,
-  });
-  expect(() => readLiveConfig(path)).toThrow(
-    `${path}: "organisation.sandbox" names lookover-dev/lookover-sandbox, which "repositories" lists too: the organisation's App watches it, so take it out of "repositories".\nWrite it as:`,
-  );
-  write({ app, repositories, organisation: { ...organisation, app: { ...organisation.app, id: app.id } } });
-  expect(() => readLiveConfig(path)).toThrow(
-    `${path}: "organisation.app" names App 5202093, which "app" names too: the organisation's App is another one.\nWrite it as:`,
-  );
-  for (const wrong of [
-    42,
-    { sandbox: organisation.sandbox },
-    { ...organisation, sandbox: "lookover-sandbox" },
-    { ...organisation, app: { id: "6100001", keyPath: orgKey } },
-    { ...organisation, app: { id: 6100001, keyPath: "" } },
-  ]) {
-    write({ app, repositories, organisation: wrong });
-    expect(() => readLiveConfig(path)).toThrow(
-      `${path}: "organisation", when given, must be { "app": { "id": <its id>, "keyPath": "<its key>" }, "sandbox": "owner/name", "repositories": ["owner/name"] }, its "repositories" optional.`,
-    );
-  }
-  expect(LIVE_CONFIG_HELP).toContain(`"organisation": {`);
-});
-
-/** A data folder with the test App's key and the organisation App's, and a `live.json` to write in it. */
-function withKeys() {
-  const home = dir();
-  const key = join(home, "app.pem");
-  const orgKey = join(home, "org.pem");
-  for (const file of [key, orgKey])
-    writeFileSync(file, "-----BEGIN RSA PRIVATE KEY-----\nnot a key\n-----END RSA PRIVATE KEY-----\n");
-  const path = liveConfigPath(home);
-  const write = (config: unknown) => writeFileSync(path, JSON.stringify(config));
-  return { path, write, app: { id: 5202093, keyPath: key }, orgApp: { id: 5297673, keyPath: orgKey } };
-}
-
-test("the owner's live.json is taken: the test App on the sandbox, and the organisation's App on its sandbox and Lookover's own", () => {
-  const { path, write, app, orgApp } = withKeys();
-  write({
-    app,
-    repositories: ["sasensi/lookover-sandbox"],
-    fork: "lookover-forks/lookover-sandbox",
-    organisation: {
-      app: orgApp,
+  // Whatever it holds, its key file gone or its shape another: nothing runs on an organisation's App any more.
+  for (const organisation of [
+    {
+      app: { id: 5297673, keyPath: join(home, "org-secret-value.pem") },
       sandbox: "lookover-dev/lookover-sandbox",
       repositories: ["lookover-dev/lookover-private"],
     },
-  });
-  // `lookover-sandbox` twice, apart: the personal App is given one, the organisation's the other.
-  expect(readLiveConfig(path)).toEqual({
-    app,
-    repositories: [{ owner: "sasensi", name: "lookover-sandbox" }],
-    fork: { owner: "lookover-forks", name: "lookover-sandbox" },
-    organisation: {
-      app: orgApp,
-      sandbox: { owner: "lookover-dev", name: "lookover-sandbox" },
-      repositories: [{ owner: "lookover-dev", name: "lookover-private" }],
-    },
-  });
-  expect(LIVE_CONFIG_HELP).toContain(`"repositories": ["lookover-dev/lookover-private"]`);
-  // The owner's only repository it names is the sandbox: no other, private or old.
+    42,
+  ]) {
+    writeFileSync(path, JSON.stringify({ app, repositories: ["sasensi/lookover-sandbox"], organisation }));
+    const config = readLiveConfig(path);
+    expect(config).toEqual({
+      app,
+      repositories: [{ owner: "sasensi", name: "lookover-sandbox" }],
+      ignored: ["organisation"],
+    });
+    expect(JSON.stringify(config)).not.toContain("secret-value");
+  }
+  expect(ORGANISATION_IGNORED).toBe(
+    "`organisation` is ignored: bun run live runs on the shared App only, on both sandboxes.",
+  );
+  // Both old lines at once: both named.
+  writeFileSync(
+    path,
+    JSON.stringify({ repositories: ["sasensi/lookover-sandbox"], watch: "x", organisation: 1 }),
+  );
+  expect(readLiveConfig(path).ignored).toEqual(["watch", "organisation"]);
+  // The help says neither.
+  expect(LIVE_CONFIG_HELP).not.toContain("organisation");
+  expect(LIVE_CONFIG_HELP).not.toContain("export-app-key");
   expect(new Set(LIVE_CONFIG_HELP.match(/\bsasensi\/[\w.-]+/g))).toEqual(
     new Set(["sasensi/lookover-sandbox"]),
   );
 });
 
-test("the organisation's repositories are its own, apart from its sandbox and from repositories, each refusal saying what to change", () => {
-  const { path, write, app, orgApp } = withKeys();
-  const repositories = ["sasensi/lookover-sandbox"];
-  const sandbox = "lookover-dev/lookover-sandbox";
-  const refused = (listed: unknown, top = repositories) => {
-    write({ app, repositories: top, organisation: { app: orgApp, sandbox, repositories: listed } });
-    return () => readLiveConfig(path);
-  };
-
-  // Its login ignores case, as GitHub's does.
-  write({
-    app,
-    repositories,
-    organisation: { app: orgApp, sandbox, repositories: ["Lookover-Dev/lookover-private"] },
-  });
-  expect(readLiveConfig(path).organisation?.repositories).toEqual([
-    { owner: "Lookover-Dev", name: "lookover-private" },
-  ]);
-
-  for (const wrong of [
-    [],
-    "lookover-dev/lookover-private",
-    ["lookover-private"],
-    ["lookover-dev/../x"],
-    [42],
-  ])
-    expect(refused(wrong)).toThrow(
-      `${path}: "organisation.repositories", when given, must list the organisation's repositories live mode watches besides its sandbox, each "owner/name".\nWrite it as:`,
-    );
-  expect(refused(["sasensi/lookover-private"])).toThrow(
-    `${path}: "organisation.repositories" names sasensi/lookover-private, which lookover-dev doesn't own: the organisation's App watches the repositories of the organisation that owns "organisation.sandbox", so take it out.\nWrite it as:`,
-  );
-  expect(refused(["Lookover-Dev/Lookover-Sandbox"])).toThrow(
-    `${path}: "organisation.repositories" names Lookover-Dev/Lookover-Sandbox, which is "organisation.sandbox": it is watched already, so take it out of "organisation.repositories".\nWrite it as:`,
-  );
-  expect(
-    refused(["lookover-dev/lookover-private"], [...repositories, "Lookover-Dev/Lookover-Private"]),
-  ).toThrow(
-    `${path}: "organisation.repositories" names lookover-dev/lookover-private, which "repositories" lists too: the two Apps never watch one repository, so take it out of one of them.\nWrite it as:`,
-  );
-  expect(refused(["lookover-dev/lookover-private", "lookover-dev/Lookover-Private"])).toThrow(
-    `${path}: "organisation.repositories" lists lookover-dev/lookover-private twice, the second time as lookover-dev/Lookover-Private: keep one of them.\nWrite it as:`,
-  );
-});
-
-test("live mode serves the organisation's App on its sandbox and repositories when it lists some, and the config as read otherwise", () => {
-  const { path, write, app, orgApp } = withKeys();
-  const organisation = { app: orgApp, sandbox: "lookover-dev/lookover-sandbox" };
-  const personal = {
-    app,
-    repositories: ["sasensi/lookover-sandbox"],
-    fork: "lookover-forks/lookover-sandbox",
-  };
-
-  write({ ...personal, organisation: { ...organisation, repositories: ["lookover-dev/lookover-private"] } });
-  const read = readLiveConfig(path);
-  // No `fork`, no `organisation`: nothing later reads the personal fork on the organisation's App.
-  expect(servedLiveConfig(read, path)).toEqual({
-    live: {
-      app: orgApp,
-      repositories: [
-        { owner: "lookover-dev", name: "lookover-sandbox" },
-        { owner: "lookover-dev", name: "lookover-private" },
-      ],
-    },
-    said: "Runs as lookover-dev's App 5297673 on lookover-dev/lookover-sandbox and lookover-dev/lookover-private.",
-  });
-
-  write({ ...personal, organisation });
-  const asWritten = readLiveConfig(path);
-  expect(servedLiveConfig(asWritten, path)).toEqual({ live: asWritten });
-
-  // Its `watch` is still said to be ignored.
-  write({
-    ...personal,
-    watch: "x",
-    organisation: { ...organisation, repositories: ["lookover-dev/lookover-private"] },
-  });
-  expect(servedLiveConfig(readLiveConfig(path), path).live.ignored).toEqual(["watch"]);
-});
-
-test("live mode on the organisation's repositories needs its App's key file, which bun run live may go without", () => {
-  const { path, write, app, orgApp } = withKeys();
-  const gone = `${orgApp.keyPath}.gone`;
-  write({
-    app,
-    repositories: ["sasensi/lookover-sandbox"],
-    organisation: {
-      app: { ...orgApp, keyPath: gone },
-      sandbox: "lookover-dev/lookover-sandbox",
-      repositories: ["lookover-dev/lookover-private"],
-    },
-  });
-  const read = readLiveConfig(path);
-  expect(() => servedLiveConfig(read, path)).toThrow(
-    `${path}: "organisation.app.keyPath" names no file: ${gone}. Write it with bun run export-app-key, or take "repositories" out of "organisation": with them, a live service runs as the organisation's App.\nWrite it as:`,
-  );
-});
-
-test("live.json's organisation App works for the person gh is signed in as, and is refused, saying why, when gh names nobody", async () => {
+test("the person is the one gh is signed in as, refused, saying why, when gh names nobody", async () => {
   const gh = memoryGh({ as: { id: 11247504, login: "sasensi" } });
   const person = ghPerson(gh);
   expect(await person()).toEqual({ id: 11247504, login: "sasensi" });
-  const refused = "An organisation's App works for the person gh is signed in as, and";
+  const refused = "The person is the one gh is signed in as, and";
   gh.signIn(null);
   await expect(person()).rejects.toThrow(`${refused} gh is signed out (gh auth login).`);
   gh.signIn("missing");

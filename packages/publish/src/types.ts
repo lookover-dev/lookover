@@ -7,6 +7,7 @@ import type {
   ConfirmFailure,
   Deferral,
   EngineId,
+  Finding,
   FindingId,
   HostChange,
   HostIntake,
@@ -48,14 +49,14 @@ export interface RoundToPost {
     engine: EngineId;
     /**
      * Depth Deep's second find pass (ADR 0044): its engine, and why it gave no round when it failed, which the
-     * summary says. Null with one find pass.
+     * check says. Null with one find pass.
      */
     secondFind: SecondFind | null;
     /** The engine that confirmed the round, null when it wasn't confirmed (ADR 0044): the result names it. */
     confirmer: EngineId | null;
     /**
      * Why the round's confirm session gave no verdicts, when it failed (ADR 0044): its findings are posted as found,
-     * and the summary says they were not double-checked. Null when it read, or didn't run.
+     * and the check says they were not double-checked. Null when it read, or didn't run.
      */
     confirmFailure: ConfirmFailure | null;
     /** How many candidates the confirm pass ruled out (ADR 0044): no findings, the result counts them. */
@@ -80,7 +81,7 @@ export interface RoundToPost {
 
 /**
  * The owner's dismissal of a finding ("This finding is wrong", ADR 0052), posted outside any round: said on the
- * finding's thread, then the change's summary and the latest round's check say where the change stands now.
+ * finding's thread, then the change's status block and the latest round's check say where the change stands now.
  */
 export interface DismissalToPost {
   /** The dismissal's own key, apart from any run: what its reply's hidden marker names. */
@@ -88,17 +89,21 @@ export interface DismissalToPost {
   findingId: FindingId;
   /**
    * The change's latest round that posted, as its posts were rendered, with `reconciled` restated over the ledger as
-   * it is when the posts are sent (`core.standing`): what the summary and the check say.
+   * it is when the posts are sent (`core.standing`): what the check says, and the status block without a reader of
+   * the change's status (`PublisherOptions.status`).
    */
   round: PlacedRound;
-  /** That round's review went with every finding in the summary: GitHub refused one of its comments. */
+  /** That round's findings all went in the status block: GitHub refused one of its review's comments. */
   degraded: boolean;
   /** That round's check, rewritten; null leaves it: the change's head moved since the round. */
   checkId: string | null;
 }
 
-/** One of a dismissal's posts: the reply on its thread, the summary, the round's check, its root comment minimized. */
-export type DismissalPostKind = "reply" | "summary" | "completed" | "minimize";
+/**
+ * One of a dismissal's posts: the reply on its thread, the status block in the description, the round's check, its
+ * root comment minimized.
+ */
+export type DismissalPostKind = "reply" | "status" | "completed" | "minimize";
 
 /** One post of a dismissal as its outbox keeps it: sent, with the host's id, or owed; and how often a send began. */
 export interface SavedDismissalPost {
@@ -167,6 +172,53 @@ export interface JobCheck {
   checkId: string | null;
 }
 
+/**
+ * The change's last posted round, as its status block lists it (ADR 0074): its commit, the ledger as it stands now (a
+ * dismissal since included, `core.standing`), where the loop stands, and the threads read on the host.
+ */
+export interface StatusRound {
+  /** Its number and the commit it reviewed. */
+  n: number;
+  sha: CommitSha;
+  /** The merge base: a base-side finding's lines are shown on it. */
+  base: CommitSha | null;
+  /** The commit of each round on the change, this one's included: a finding's lines are on its `anchoredIn`'s. */
+  rounds: Pick<Round, "n" | "sha">[];
+  /** The ledger, filtered as the round's posts are: the block lists what is open on the pull request. */
+  findings: Finding[];
+  /** `core`'s: `needs_owner` heads the block "Needs your look". */
+  loop: LoopState;
+  /** The URL of each finding's thread, as read on the host: its title links there. */
+  threads: { findingId: FindingId; url: string }[];
+}
+
+/**
+ * Where the change's review stands, as its status block says it (ADR 0074): a round running on `sha` (`again`: the
+ * same commit as the last round), the last round posted, or a job waiting (why, until when an engine's limit holds,
+ * and the time the block is written) or failed on `sha`; those two list the last posted round's open findings, if
+ * there is one.
+ */
+export type Status =
+  | { kind: "running"; sha: CommitSha; round: number; again: boolean }
+  | { kind: "posted"; posted: StatusRound }
+  | {
+      kind: "waiting";
+      sha: CommitSha;
+      round: number;
+      deferral: Deferral | null;
+      until: number | null;
+      now: number;
+      posted: StatusRound | null;
+    }
+  | {
+      kind: "failed";
+      sha: CommitSha;
+      round: number;
+      failure: JobFailureKind;
+      engine: EngineId | null;
+      posted: StatusRound | null;
+    };
+
 /** A round as its findings are placed: everything `publish` takes but the job's check. */
 export type PlacedRound = Omit<RoundToPost, "checkId">;
 
@@ -179,8 +231,8 @@ interface FoundReview {
 /** What the host gave back for the round's posts, and the result as posted. */
 export interface Published {
   checkId: string;
-  reviewId: string;
-  summaryId: string;
+  /** Null for a round with no line comment: it posts no review (ADR 0074). */
+  reviewId: string | null;
   result: ReviewResult;
 }
 
@@ -188,16 +240,11 @@ export interface Published {
 export type Created = (checkId: string) => void;
 
 /**
- * One of a round's posts (ADR 0039, ADR 0044, ADR 0052): the check in progress, the review, a reply on a finding's
- * thread (`reply:<finding>`), the summary comment, the check completed, a comment minimized (`minimize:<global id>`).
+ * One of a round's posts (ADR 0039, ADR 0044, ADR 0052, ADR 0074): the check in progress, the review, a reply on a
+ * finding's thread (`reply:<finding>`), the status block in the description, the check completed, a comment minimized
+ * (`minimize:<global id>`).
  */
-export type PostKind =
-  | "check"
-  | "review"
-  | `reply:${string}`
-  | "summary"
-  | "completed"
-  | `minimize:${string}`;
+export type PostKind = "check" | "review" | `reply:${string}` | "status" | "completed" | `minimize:${string}`;
 
 /** One post of a round as the outbox keeps it: sent, with the host's id for it, or owed; and how often a send began. */
 export interface SavedPost {
@@ -217,11 +264,14 @@ export interface Outbox {
   /** The posts as saved; one missing is owed, never begun. */
   readonly posts: readonly SavedPost[];
   /**
-   * The round's review goes with every finding in the summary: GitHub refused one of its comments as off the diff
-   * (ADR 0044). Read once, when `publish` begins.
+   * The round's review goes with every finding in the status block: GitHub refused one of its comments as off the
+   * diff (ADR 0044). Read once, when `publish` begins.
    */
   readonly degraded: boolean;
-  /** GitHub refused a comment of the review: kept before the review is sent again, its findings in the summary. */
+  /**
+   * GitHub refused a comment of the review: its findings go in the status block, and the round owes no review from
+   * then on (ADR 0074). Kept before the status block is sent.
+   */
   degrade(): void;
   /** A send of `kind` begins: kept before the host is asked, so the next send knows to look for it first. */
   sending(kind: PostKind): void;
@@ -243,32 +293,35 @@ export type PostWait = NonNullable<RunPosting["wait"]>;
 
 export interface Publisher {
   /**
-   * Sends the round's owed posts in the fixed order (ADR 0039, ADR 0044): the check in progress (the job's, given
-   * as `checkId`, or created), the review with its inline comments, the summary comment, the check completed.
-   * Each is marked sent in `outbox` with the host's id before the next is begun; one sent before is not sent
+   * Sends the round's owed posts in the fixed order (ADR 0039, ADR 0044, ADR 0074): the check in progress (the job's,
+   * given as `checkId`, or created), the review with its inline comments, the replies on the threads, the status block
+   * in the description (`status`), the check completed. Each is marked sent in `outbox` with the host's id before the next is begun; one sent before is not sent
    * again, and the review once begun is looked for by its marker (`findReview`) before it is posted again. With
    * no outbox, every post is owed. A transient refusal (`unavailable`, `rate_limited`) is tried again on the
    * publisher's `time`, backing off, for about an hour of refusals in a row; a review refused for a comment the host
-   * can't place is sent once more with every finding of the round in the summary (`degrade`). A refusal it doesn't
-   * try again, or the last of the hour, propagates as its `HostError`, and what was sent before it is marked; what
+   * can't place is not sent again: every finding of the round goes in the status block (`degrade`). A round with no
+   * line comment sends no review (ADR 0074): its `reviewId` is null. A status block refused for good (`invalid`: the
+   * person may not edit the description; `too_large`) goes to `log`, and the round goes on. A refusal it doesn't try
+   * again, or the last of the hour, propagates as its `HostError`, and what was sent before it is marked; what
    * the outbox throws propagates too, nothing more sent. `signal` aborted ends a wait at once, rejecting with its
    * reason, nothing more sent.
    */
   publish(round: RoundToPost, outbox?: Outbox, signal?: AbortSignal): Promise<Published>;
   /**
    * The round's review on the host, found by its marker (ADR 0044), with the findings its comments hold as the
-   * round placed them (`degraded`: the outbox's, its findings in the summary), or null when the host holds none:
+   * round placed them (a round that owes a review never went all in the status block), or null when the host holds none:
    * what a caller asks before it takes a review whose send began, and was never marked sent, for one that never
    * landed. A host refusal propagates as its `HostError`.
    */
-  findReview(round: PlacedRound, degraded: boolean): Promise<FoundReview | null>;
+  findReview(round: PlacedRound): Promise<FoundReview | null>;
   /**
    * Posts the owner's dismissal (ADR 0052), its owed posts in order (`dismissalPostsOf`): a reply on the finding's
-   * thread ("Dismissed by the owner."), the summary comment and the round's check (when `checkId` is given) rendered
-   * from the round as restated, then the thread's root comment minimized as `resolved`. The thread is found in one
-   * read of the change's threads, made as the posts begin; a finding with none (in the summary only), or a read
-   * refused for good, sends no reply and minimizes nothing. A reply begun before is looked for by its marker first; a
-   * reply refused for good (`not_found`, `invalid`) and a refused minimize go to `log`. Retries, refusals, the
+   * thread ("Dismissed by the owner."), the status block (`status`) and the round's check (when `checkId` is given)
+   * rendered from the round as restated, then the thread's root comment minimized as `resolved`. The thread is found
+   * in one read of the change's threads, made as the posts begin; a finding with none (in the status block only), or a
+   * read refused for good, sends no reply and minimizes nothing. A reply begun before is looked for by its marker
+   * first; a reply refused for good (`not_found`, `invalid`), a status block refused for good and a refused minimize
+   * go to `log`. Retries, refusals, the
    * outbox and `signal` as for `publish`.
    */
   dismiss(dismissal: DismissalToPost, outbox?: DismissalOutbox, signal?: AbortSignal): Promise<void>;
@@ -280,6 +333,22 @@ export interface Publisher {
    * standing again at its next change, to the check `created` gave.
    */
   check(job: JobCheck, created?: Created): Promise<string>;
+  /**
+   * Writes the change's status block (ADR 0074) outside a round, as the check follower does when a job's standing
+   * changes: rendered as the description is read, from where the change stands then (the options' `status` reader).
+   * The threads are read first (once, untried again) only when the block lists a posted round. Nothing without a
+   * reader, or when it reads null. A refusal that stands (`invalid`, `too_large`) and a block whose heading doesn't
+   * fit go to `log`; any other refusal propagates as its `HostError`, never tried again: the caller writes the
+   * block again at the job's next change.
+   */
+  status(change: ChangeRef): Promise<void>;
+  /**
+   * The change's status block (ADR 0074) for `status`, within `room` characters (`statusRoom`): list items dropped
+   * from the end (the least urgent) while it is over, then the permalinks; null when even its heading and its line
+   * are over. Pure: it writes nothing, and is what `HostWriter.upsertStatus`'s render is given. The engines' and the
+   * people's words in it are filtered (ADR 0056); the wordmark is added after.
+   */
+  statusBlock(change: ChangeRef, status: Status, room: number): string | null;
 }
 
 /** Time as `publish` waits on it between two tries of a refused post: the caller's clock and timers. */
@@ -293,8 +362,8 @@ export interface PostTime {
 export interface PublisherOptions {
   writer: HostWriter;
   /**
-   * The numeric id on the host of the person Lookover posts for (the App's person on the own App, the signed-in
-   * person on the shared one), read at each check created or looked for: their id is in its external id with the
+   * The numeric id on the host of the person Lookover posts for (the person signed in to the shared App), read at
+   * each check created or looked for: their id is in its external id with the
    * job's (`checkExternalId`, ADR 0066), so two people's checks on one commit never mix.
    */
   person: () => number;
@@ -318,6 +387,14 @@ export interface PublisherOptions {
    * service's time with it (ADR 0055). The machine's own by default.
    */
   offset?: (at: number) => number;
+  /**
+   * Where the change's review stands now (ADR 0074), read as its status block is sent (`HostWriter.upsertStatus`'s
+   * render), never from a text saved: so a status sent again or late never puts back an older one. `threads`: the URL
+   * of each finding's thread, as the host was just read (none without a reader, or when the host refused the read).
+   * Null: Lookover writes no block on the change (a pull request it skips). Without it, the block says the round, or
+   * the dismissal's round as restated, being posted.
+   */
+  status?: (change: ChangeRef, threads: StatusRound["threads"]) => Status | null;
   /**
    * Removes the secrets the service knows from a text (ADR 0056: the log sink's filter): every text an engine or a
    * person wrote passes it before it is posted, with the output filter's other steps. Without it, none is removed.

@@ -4,8 +4,8 @@
 // in behind it serves the next request; while a scenario loads, commands answer 409 "loading" and a new stream
 // waits, and once the rooms are swapped every open stream is told to reload. Local security on every request: a
 // one-time token in the opened URL becomes an HTTP-only cookie, Host and Origin must be the app's, there is no
-// CORS, and the content security policy is strict. The manifest flow's pages (`app-flow-pages.ts`, ADR 0053) are
-// mounted here: GitHub's redirects reach two of them with no session and from another site. The built web app's
+// CORS, and the content security policy is strict. In demo mode GitHub's pages are the fake's, under
+// `DEMO_API.github`, behind the same session (ADR 0046). The built web app's
 // files are served on every other path when the service is given them (`web-files.ts`, ADR 0054). Beside the API, the
 // `lookover` commands' two routes (ADR 0054), under the same checks: one mints a link that opens the app once within
 // two minutes, the other answers and then stops the service. The log file (ADR 0055) is read beside the state: its
@@ -17,8 +17,6 @@ import {
   type AgentRefusal,
   API,
   type AskToInstallRefusal,
-  type CreateAppRefusal,
-  createAppRefusalText,
   DEMO_API,
   type Event,
   HostError,
@@ -29,13 +27,11 @@ import {
   type SettingsWriteFailure,
   type SignInStartRefusal,
   SSE,
-  type UseAppRefusal,
 } from "@lookover/contracts";
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { streamSSE } from "hono/streaming";
 import type { z } from "zod";
-import { appFlowPages, OPEN_PAGES } from "./app-flow-pages.ts";
 import type { AgentOutcome } from "./coding-agent.ts";
 import { request } from "./commands.ts";
 import type { DemoRoom, InjectRefusal } from "./demo/driver.ts";
@@ -44,7 +40,6 @@ import type { LogReader } from "./log-sink.ts";
 import type { Room, SettingsAnswer } from "./room.ts";
 import { described } from "./said.ts";
 import type { Timers } from "./timers.ts";
-import { useApp } from "./use-app.ts";
 import { serveWebFiles, type WebFiles } from "./web-files.ts";
 
 const CSP = [
@@ -150,11 +145,9 @@ const NOTHING_TO_INJECT = {
   nothing_to_push: "no reviewed pull request of yours with a commit left to push",
   nothing_to_close: "no pull request open",
   not_installed: "the App isn't installed",
-  no_app_kept: "no App kept yet",
   nothing_to_add: "no repository left to add in this scenario",
   nothing_to_remove: "no repository left on the App's installation",
   nothing_departed: "no repository left the App's installation",
-  no_organisation: "the App lives on no organisation in this scenario",
   no_sign_in: "no sign-in waits for its code",
   not_signed_in: "nobody is signed in to the shared App",
   no_organisation_reached: "no organisation is reached through the shared App",
@@ -172,8 +165,6 @@ type Answer = [
         invalid?: SettingsFileError;
         unwritten?: SettingsWriteFailure;
         refused?: SettingsRefusal;
-        createApp?: CreateAppRefusal;
-        useApp?: UseAppRefusal;
         agent?: AgentRefusal;
       },
   status: 200 | 404 | 409 | 500 | 501 | 502,
@@ -186,7 +177,7 @@ interface Reach {
   room: Room;
   demo: DemoRoom | null;
   load: ((id: string) => Promise<Loaded>) | null;
-  /** Every open stream told to reload: the service restarted under them (the drawer's "key-lost"). */
+  /** Every open stream told to reload: the service restarted under them (the drawer's "npm-install", say). */
   restarted(): void;
   /** Settles once every other command under way has answered: what a restart waits for before the room stops. */
   others(): Promise<void>;
@@ -254,14 +245,12 @@ function settingsAnswer(answer: SettingsAnswer | "no_such_repository"): Answer {
 
 /** Why "Sign in with GitHub" didn't start (ADR 0066), for the console; `signIn` names it for the app. */
 const SIGN_IN_REFUSED = {
-  unavailable: "no shared App is offered here",
-  "own-app": "Lookover runs as your own App here",
   pending: "a sign-in already waits for its code",
 } as const satisfies Record<SignInStartRefusal, string>;
 
 /** Why "Ask to install on <org>" wasn't kept (ADR 0067), for the console; `askToInstall` names it for the app. */
 const ASK_REFUSED = {
-  "not-shared": "Lookover isn't signed in to the shared App here",
+  "signed-out": "nobody is signed in to the shared App here",
   "not-named": "that account isn't one Lookover names as not reached",
   owner: "you own that account: install it there",
 } as const satisfies Record<AskToInstallRefusal, string>;
@@ -281,17 +270,12 @@ const NO_CLOCK: Answer = [{ error: "no demo clock in live mode" }, 501];
  * The setup's steps and the repository's switch are kept (404 for a repository the service doesn't watch); "Start at
  * login" is kept and registered by the program on the machine once the setup is done (ADR 0054,
  * `start-at-login.ts`), refused (500, with the machine's reason) when the machine refuses it; the first review is a
- * request, a preview posting nothing when asked so (404 for a change the service doesn't see); "Create it on GitHub"
- * only says where the App is made and that the setup waits for it (the page it opens makes it, `app-flow-pages.ts`),
- * refused (409, why in `createApp`) once an App is kept or under `live.json` (ADR 0053), or for an organisation the
- * person's `gh` doesn't list as theirs to admin, or can't answer for (ADR 0059); `gh.check` reads that `gh` again.
- * "Use an existing App" (`connection.useApp`, ADR 0053) answers why it refused as `useApp` (409, 502 when GitHub
- * couldn't be reached; `live-config` when `live.json` names the App); its key is in no answer. "Sign in with GitHub"
+ * request, a preview posting nothing when asked so (404 for a change the service doesn't see). "Sign in with GitHub"
  * (`connection.signIn`, ADR 0066) asks GitHub for a device code and shows it on the connection, refused (409, why in
- * `signIn`) while one waits, while Lookover runs as its own App, or with no shared App here; GitHub refusing the code
- * is 502 through `onError`. `connection.cancelSignIn` gives the waiting one up. "Ask to install on <org>"
- * (`connection.askToInstall`, ADR 0067) keeps the ask, refused (409, why in `askToInstall`) off `shared`, for an
- * account Lookover doesn't name as not reached, or for one the person owns.
+ * `signIn`) while one waits; GitHub refusing the code is 502 through `onError`.
+ * `connection.cancelSignIn` gives the waiting one up. "Ask to install on <org>" (`connection.askToInstall`, ADR 0067)
+ * keeps the ask, refused (409, why in `askToInstall`) before a sign-in, for an account Lookover doesn't name as not
+ * reached, or for one the person owns.
  * The developer drawer's fault (ADR 0046) happens on the demo driver: 501 in live mode, where nothing scripted
  * touches a real repository, 409 when the story has nothing left for it. A load is the room swap: 404 for an id the
  * catalogue hasn't, 500 with the fixture's error when the seed fails (the old room still answers).
@@ -413,23 +397,6 @@ const COMMANDS: { [K in Parsed["type"]]?: Row<K> } = {
     room.setup.setEnabled(repoId, enabled) === "ok" ? OK : [{ error: "no such repository" }, 404],
   "repo.dismiss": async ({ room }, { repoId }) =>
     room.dismissDeparted(repoId) === "ok" ? OK : [{ error: "no such departed repository" }, 404],
-  "connection.createApp": async ({ room }, { organisation }) => {
-    const answer = await room.github.flow.createApp(organisation);
-    return answer === "ok" ? OK : [{ error: createAppRefusalText(answer), createApp: answer }, 409];
-  },
-  "gh.check": async ({ room }) => {
-    await room.github.checkGh();
-    // "Check again" of a membership lost too (ADR 0059): a member again, reviews go on.
-    await room.github.checkMembership();
-    return OK;
-  },
-  "connection.useApp": async ({ room }, { appId, key }) => {
-    const answer = await useApp(room.github, appId, key);
-    if (answer === "ok") return OK;
-    const { refused } = answer;
-    const status = refused.kind === "unreachable" ? 502 : 409;
-    return [{ error: `the App was refused: ${refused.kind}`, useApp: refused }, status];
-  },
   "demo.inject": async ({ demo, restarted, others }, { fault }) => {
     if (demo === null) return [{ error: "nothing scripted in live mode" }, 501];
     const before = demo.room;
@@ -541,8 +508,7 @@ export function createApi(deps: ApiDeps) {
   };
 
   app.use(`${API.prefix}/*`, async (c, next) => {
-    // GitHub's redirects to the manifest flow's pages carry no session and come from another site (ADR 0053).
-    if (c.req.path === API.session || OPEN_PAGES.has(c.req.path)) return next();
+    if (c.req.path === API.session) return next();
     const refused = foreign((name) => c.req.header(name), c.req.method);
     if (refused) return c.json({ error: refused }, 403);
     const cookie = getCookie(c, session.cookie);
@@ -649,17 +615,29 @@ export function createApi(deps: ApiDeps) {
     });
   });
 
-  appFlowPages(app, { origin, room, demo });
+  // Demo mode (ADR 0046): GitHub's pages, faked on the demo world's host; nothing in live mode.
+  app.all(`${DEMO_API.github}/*`, async (c) => {
+    const pages = demo()?.github ?? null;
+    const answer = pages === null ? null : await pages(c.req.raw);
+    if (answer === null) return c.json({ error: "no such page" }, 404);
+    // Through the API's context, so they keep its policy and `nosniff`; their forms post back to the service,
+    // which takes a post only from its own origin.
+    c.header("Referrer-Policy", "same-origin");
+    return c.newResponse(answer.body, answer);
+  });
 
   app.post(API.commands, async (c) => {
     const parsed = request.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return c.json({ error: "invalid command", issues: parsed.error.issues }, 400);
     // The one word the app knows for it (ADR 0046): while a scenario loads, or the service restarts (the drawer's
-    // "key-lost"), nothing is done to either room.
+    // "npm-install", say), nothing is done to either room.
     if ((loader?.loading() ?? demo()?.restarting() ?? null) !== null)
       return c.json({ error: "loading" }, 409);
     const command = parsed.data;
-    const work = (async () => {
+    // Declared first: a row may ask `others` before its own first wait, while `work` is still being made (not in
+    // `underWay` yet then, so nothing to leave out).
+    let work: Promise<Response> | undefined;
+    work = (async () => {
       const row = rowOf(command.type);
       if (row === undefined) return c.json({ error: "not available yet" }, 501);
       const others = async () => {

@@ -2,19 +2,24 @@
 // pull requests in `bun run live` (ADR 0039, ADR 0041); the check's whole lifecycle too (ADR 0043: `queued`, its reason
 // changed, `in_progress`, back to `queued`, completed `success`, `neutral` or `skipped`). `setup.open` is called once
 // per case and gives a change nobody has posted on yet, so no case depends on another's posts: the adapter, the change,
-// one line a comment can go on and one it can't, who posts as the host knows them (the App's bot, or a signed-in
-// person, ADR 0066), a way to comment as someone else (and, for a person, as them by hand: `setup.byHand`, its case
-// skipped without it), and `observe`, which reads back what the host shows now as contracts' `HostView` for the
-// change's head commit (the fake's `view`; GitHub's API for the real adapter). `setup.refusing` gives, for each way a
-// host can refuse every call, a fresh adapter in that state, `observe` still reading what the host shows; one the host
+// one line a comment can go on and one it can't, who posts as the host knows them (the person signed in to the shared
+// App, ADR 0066), a way to comment as someone else and as the poster by hand, and `observe`, which reads back what the
+// host shows now as contracts' `HostView` for the change's head commit (the fake's `view`; GitHub's API for the real
+// adapter). `setup.refusing` gives, for each way a host can refuse every call, a fresh adapter in that state, `observe`
+// still reading what the host shows; one the host
 // can't be brought to on demand is left out, and its case is skipped (the real GitHub can't be made to rate-limit). Its
 // threads (ADR 0052): a reply read back through the App's own intake (`intake`), comments minimized by the node ids the
 // intake gives, and a completed check completed again. Every output posted here has a title, a summary and a text:
 // GitHub requires the summary and reads an empty text back as null, so empty strings would fail the live run for
 // reasons that are not the port's. `setup.patience` is how long the host may take to show a write (ADR 0069): each
 // read after a write that expects its effect reads until it shows it, its predicate the `expect`s after it; a read
-// that proves nothing was posted, or nothing changed, stays a single read. Before a review or a summary is sent again,
-// the case waits for the host to show the first, so the writer's own look for it before posting doesn't miss it.
+// that proves nothing was posted, or nothing changed, stays a single read. Before a review is sent again, the case
+// waits for the host to show the first, so the writer's own look for it before posting doesn't miss it.
+// The status block (ADR 0074): the fixture rewrites the description as its author (`editDescription`), and the cases
+// write the block on an empty description, under the author's text, again (the author's text kept byte for byte),
+// after the author's edit (kept, though a lagging host's read still shows the text before it), twice after an opening
+// marker with no end (kept, with its half block), past its room (refused, nothing written) and filling it exactly
+// (GitHub's 65,536 characters).
 import { describe, expect, test } from "bun:test";
 import type {
   ChangeRef,
@@ -32,11 +37,15 @@ import {
   CHECK_NAME,
   CHECK_OUTPUT_MAX_BYTES,
   COMMENT_MAX_BYTES,
+  characterCount,
+  DESCRIPTION_MAX_CHARACTERS,
   FINDING_MARKER,
   findingId,
   REVIEW_MARKER,
   REVIEW_MAX_COMMENTS,
-  SUMMARY_MARKER,
+  STATUS_END_MARKER,
+  STATUS_MARKER,
+  statusOf,
   utf8Bytes,
 } from "@lookover/contracts";
 import type { HostRefusal } from "./fake-git-host.ts";
@@ -56,18 +65,12 @@ export interface HostWriterFixture {
   removed: DiffLocation;
   /** A range of head lines inside one hunk: `line` to `endLine`. */
   range: DiffLocation & { endLine: number };
-  /**
-   * Who posts, as the host knows them: every post of the writer is theirs. The App's bot (`bot: true`), or the person
-   * signed in to the App (ADR 0066), whose posts are their own.
-   */
-  poster: { id: number; login: string; bot: boolean };
+  /** Who posts, as the host knows them: the person signed in to the shared App (ADR 0066), every post theirs. */
+  poster: { id: number; login: string };
   /** Writes a comment on the change's conversation as someone other than the poster. Returns its id. */
   comment(body: string): Promise<string>;
-  /**
-   * Writes a comment on the change's conversation as the poster, by hand, not through the App: only a person can,
-   * so it is given where the poster is one (the setup's `byHand`).
-   */
-  commentByHand?: (body: string) => Promise<string>;
+  /** Writes the change's description as its author would, by hand: the whole text, "" for none. */
+  editDescription(body: string): Promise<void>;
   observe(): Promise<HostView>;
   /** The host read by an intake of the same App: how a reply or a node id is read back. */
   intake: HostIntake;
@@ -82,8 +85,6 @@ export interface HostWriterSetup {
   patience: Patience;
   /** An adapter whose every call the host refuses for that reason, on a change nobody has posted on. */
   refusing: Partial<Record<HostRefusal, () => Promise<HostWriterFixture>>>;
-  /** Every fixture gives `commentByHand` (the poster is a person); without it, the case that needs it is skipped. */
-  byHand?: boolean;
 }
 
 const REFUSALS = {
@@ -104,21 +105,12 @@ const SKIPPED = { title: "A newer commit was pushed", summary: "Not reviewed.", 
 const FAILED = { title: "The review failed", summary: "Not reviewed.", text: "<!-- result -->" };
 /** The review job a check is created for: the host keeps its id with the check (ADR 0044). */
 const JOB = "job-1";
-/** How many comments the host gives on one page of a listing: GitHub's most. */
-const PAGE = 100;
-/** The time limit of a case that writes a page of comments first. */
-const SLOW_MS = 600_000;
-/** A comment nobody reacted to. */
-const NONE = { eyes: 0, rocket: 0 };
-/** An account as a conversation comment names its author. */
-const accountOf = ({ id, login }: { id: number; login: string }) => ({ id, login });
+/** A status block as the description holds it (ADR 0074). */
+const marked = (block: string) => `${STATUS_MARKER}\n${block}\n${STATUS_END_MARKER}`;
 /** A finding's inline comment as `publish` ends it: with the marker naming the finding. */
 const FINDING_F1 = `**Off by one** · Should fix\n\n${FINDING_MARKER}{"v":1,"id":"F1"} -->`;
 
-export function describeHostWriter(
-  name: string,
-  { open: setup, patience, refusing, byHand = false }: HostWriterSetup,
-): void {
+export function describeHostWriter(name: string, { open: setup, patience, refusing }: HostWriterSetup): void {
   /**
    * Reads until `shows` holds of the read, within the setup's patience, and returns the last read: the `expect` after
    * it is unchanged. Only for a read that expects a write's effect (ADR 0069). A wait that runs out ends its case (its
@@ -128,8 +120,8 @@ export function describeHostWriter(
   const shown = <T>(read: () => Promise<T>, shows: (read: T) => boolean, what: string): Promise<T> =>
     readUntil(read, shows, what, patience);
   /**
-   * `shown` where no `expect` follows: what the case goes on from (a review or a summary before it is sent again, what
-   * nothing may change after). Running out throws, so the case ends there as at a failed `expect`.
+   * `shown` where no `expect` follows: what the case goes on from (a review before it is sent again, what nothing may
+   * change after). Running out throws, so the case ends there as at a failed `expect`.
    */
   const mustShow = async <T>(
     read: () => Promise<T>,
@@ -146,14 +138,6 @@ export function describeHostWriter(
   /** The check of that id once the host shows it as `toMatchObject(expected)` takes it. */
   const checkShown = (f: HostWriterFixture, id: string, expected: Record<string, unknown>, what: string) =>
     shown(() => checkOf(f, id), matches(expected), what);
-  /** What the host shows once it lists the bot's comment `id` with that body: a summary, before it is sent again. */
-  const commentShown = (f: HostWriterFixture, id: string, body: string) =>
-    mustShow(
-      f.observe,
-      (seen) => seen.comments.some((c) => c.id === id && c.body === body),
-      `the summary ${id} as last posted`,
-    );
-
   describe(`HostWriter port: ${name}`, () => {
     test("a check created in progress is completed with its conclusion and output", async () => {
       const f = await setup();
@@ -326,7 +310,7 @@ export function describeHostWriter(
       expect(await shown(ids, equals([first]), "the one review")).toEqual([first]);
     });
 
-    test("the bot's review is found by the marker its body holds; a marker no review holds finds none (ADR 0044)", async () => {
+    test("the poster's review is found by the marker its body holds; a marker no review holds finds none (ADR 0044)", async () => {
       const f = await setup();
       const marker = `${REVIEW_MARKER}round-1 -->`;
       const review: ReviewPost = {
@@ -345,7 +329,7 @@ export function describeHostWriter(
       expect(await f.writer.findReview(f.change, `${REVIEW_MARKER}round-2 -->`)).toBeNull();
     });
 
-    test("a review of the most comments, its body and a comment at the byte limit, and a summary at it, are posted whole", async () => {
+    test("a review of the most comments, its body and a comment at the byte limit, are posted whole", async () => {
       const f = await setup();
       // Two-byte characters: a host that counted characters would take twice as many.
       const atLimit = (start: string) => {
@@ -362,19 +346,16 @@ export function describeHostWriter(
         })),
       };
       const id = await f.writer.publishReview(f.change, review);
-      const summary = atLimit(`${SUMMARY_MARKER}\n`);
-      await f.writer.upsertSummary(f.change, summary);
       const whole = (seen: HostView) => {
         const posted = seen.reviews.find((r) => r.id === id);
         expect(utf8Bytes(posted?.body ?? "")).toBe(COMMENT_MAX_BYTES);
         expect(posted?.body).toBe(review.body);
         expect(posted?.comments.map((c) => c.body)).toEqual(review.comments.map((c) => c.body));
-        expect(seen.comments.map((c) => c.body)).toEqual([summary]);
       };
-      whole(await shown(f.observe, holds(whole), "the review and the summary, whole"));
+      whole(await shown(f.observe, holds(whole), "the review, whole"));
     });
 
-    test("a review body, an inline comment or a summary over the byte limit is refused, and nothing is posted", async () => {
+    test("a review body or an inline comment over the byte limit is refused, and nothing is posted", async () => {
       const f = await setup();
       const before = await f.observe();
       const tooBig = "a".repeat(COMMENT_MAX_BYTES + 1);
@@ -390,100 +371,94 @@ export function describeHostWriter(
           comments: [{ ...comment, body: tooBig }],
         }),
       ).rejects.toMatchObject(tooLarge);
-      await expect(f.writer.upsertSummary(f.change, `${SUMMARY_MARKER}\n${tooBig}`)).rejects.toMatchObject(
-        tooLarge,
-      );
       expect(await f.observe()).toEqual(before);
     });
 
-    test("the summary is created once by the bot, then edited in place", async () => {
+    /** The description once the host shows it as `expected`, before the next write builds on it. */
+    const described = (f: HostWriterFixture, expected: string, what: string) =>
+      mustShow(f.observe, (seen) => seen.description === expected, what);
+    /** The description once the host shows it as `expected`, for the `expect` after it. */
+    const descriptionShown = async (f: HostWriterFixture, expected: string, what: string) =>
+      (await shown(f.observe, (seen) => seen.description === expected, what)).description;
+
+    test("the status block on an empty description is the block alone, with the room the host leaves it", async () => {
       const f = await setup();
-      const first = `${SUMMARY_MARKER}\nRound 1: 1 open.`;
-      const second = `${SUMMARY_MARKER}\nRound 2: 0 open, 1 verified fixed.`;
-      const id = await f.writer.upsertSummary(f.change, first);
-      await commentShown(f, id, first);
-      expect(await f.writer.upsertSummary(f.change, second)).toBe(id);
-      expect(await f.writer.upsertSummary(f.change, second)).toBe(id);
-      const edited = [{ id, body: second, author: accountOf(f.poster), reactions: NONE, minimized: null }];
-      const comments = async () => (await f.observe()).comments;
-      expect(await shown(comments, equals(edited), "the summary edited")).toEqual(edited);
-    });
-
-    test(
-      "the summary is found past the host's first 100 comments, and edited in place",
-      async () => {
-        const f = await setup();
-        for (let i = 1; i <= PAGE + 1; i++) await f.comment(`Comment ${i} before the summary.`);
-        const first = `${SUMMARY_MARKER}\nRound 1: 1 open.`;
-        const second = `${SUMMARY_MARKER}\nRound 2: 0 open, 1 verified fixed.`;
-        const id = await f.writer.upsertSummary(f.change, first);
-        await commentShown(f, id, first);
-        expect(await f.writer.upsertSummary(f.change, second)).toBe(id);
-        const edited = (comments: HostView["comments"]) => {
-          expect(comments).toHaveLength(PAGE + 2);
-          expect(comments.filter((c) => c.body.includes(SUMMARY_MARKER))).toEqual([
-            { id, body: second, author: accountOf(f.poster), reactions: NONE, minimized: null },
-          ]);
-        };
-        const comments = async () => (await f.observe()).comments;
-        edited(await shown(comments, holds(edited), "every comment, and the summary edited"));
-      },
-      // A hundred comments written one by one, on GitHub at about a second each.
-      SLOW_MS,
-    );
-
-    test("a comment holding the marker that the bot didn't write is not the summary: the bot posts its own", async () => {
-      const f = await setup();
-      const theirs = `${SUMMARY_MARKER}\nCopied from an earlier round by someone.`;
-      await f.comment(theirs);
-      const ours = `${SUMMARY_MARKER}\nRound 1: 1 open.`;
-      const id = await f.writer.upsertSummary(f.change, ours);
-      const both = (comments: HostView["comments"]) => {
-        expect(comments.map((c) => c.body)).toEqual([theirs, ours]);
-        expect(comments[1]).toEqual({
-          id,
-          body: ours,
-          author: accountOf(f.poster),
-          reactions: NONE,
-          minimized: null,
-        });
-        expect(comments[0]?.author.id).not.toBe(f.poster.id);
-      };
-      const comments = async () => (await f.observe()).comments;
-      both(await shown(comments, holds(both), "their comment and the bot's summary"));
-    });
-
-    test.skipIf(!byHand)(
-      "a comment holding the marker that the person wrote by hand is not the summary: only one the App posted is (ADR 0066)",
-      async () => {
-        const f = await setup();
-        if (!f.commentByHand) throw new Error("The setup says byHand, and its fixture can't comment by hand");
-        const quoted = `${SUMMARY_MARKER}\nQuoted by hand.`;
-        const theirs = await f.commentByHand(quoted);
-        const ours = `${SUMMARY_MARKER}\nRound 1: 1 open.`;
-        const id = await f.writer.upsertSummary(f.change, ours);
-        expect(id).not.toBe(theirs);
-        await commentShown(f, id, ours);
-        expect(await f.writer.upsertSummary(f.change, `${ours}\nEdited.`)).toBe(id);
-        const both = [
-          [theirs, accountOf(f.poster), quoted],
-          [id, accountOf(f.poster), `${ours}\nEdited.`],
-        ];
-        const comments = async () => (await f.observe()).comments.map((c) => [c.id, c.author, c.body]);
-        expect(await shown(comments, equals(both), "the quote and the summary edited")).toEqual(both);
-      },
-    );
-
-    test("a summary without the marker is refused, and nothing is posted", async () => {
-      const f = await setup();
-      const before = await f.observe();
-      await expect(f.writer.upsertSummary(f.change, "Round 1: 1 open.")).rejects.toMatchObject({
-        failure: "missing_marker",
+      await f.editDescription("");
+      await described(f, "", "the description emptied");
+      const rooms: number[] = [];
+      await f.writer.upsertStatus(f.change, (room) => {
+        rooms.push(room);
+        return "Round 1";
       });
-      expect(await f.observe()).toEqual(before);
+      // 65,536 characters less the two markers and their line breaks.
+      expect(rooms).toEqual([65_485]);
+      const expected = marked("Round 1");
+      expect(await descriptionShown(f, expected, "the block alone")).toBe(expected);
     });
 
-    test("a round posted in the port's order shows as one completed check, one review and one summary", async () => {
+    test("the status block goes under the author's text, a rule between", async () => {
+      const f = await setup();
+      await f.editDescription("Fixes the total.\n");
+      await described(f, "Fixes the total.\n", "the author's text");
+      await f.writer.upsertStatus(f.change, () => "Round 1");
+      const expected = `Fixes the total.\n\n---\n\n${marked("Round 1")}`;
+      expect(await descriptionShown(f, expected, "the block under the author's text")).toBe(expected);
+    });
+
+    test("a rewrite replaces only the block, the author's text kept byte for byte", async () => {
+      const f = await setup();
+      const author = "Fixes the total.\r\n\r\n- [ ] tests";
+      await f.editDescription(author);
+      await described(f, author, "the author's text");
+      await f.writer.upsertStatus(f.change, () => "Looking over abc1234");
+      await described(f, `${author}\n\n---\n\n${marked("Looking over abc1234")}`, "the first block");
+      await f.writer.upsertStatus(f.change, () => "One thing to fix");
+      const expected = `${author}\n\n---\n\n${marked("One thing to fix")}`;
+      expect(await descriptionShown(f, expected, "the block rewritten")).toBe(expected);
+    });
+
+    test("the author's edit between two writes is kept, before the block and after it", async () => {
+      const f = await setup();
+      await f.editDescription("First words.");
+      await described(f, "First words.", "the author's text");
+      await f.writer.upsertStatus(f.change, () => "Round 1");
+      await described(f, `First words.\n\n---\n\n${marked("Round 1")}`, "the first block");
+      const edited = `Second words.\n\n---\n\n${marked("Round 1")}\n\nA note under it.`;
+      await f.editDescription(edited);
+      await described(f, edited, "the author's edit");
+      await f.writer.upsertStatus(f.change, () => "Round 2");
+      const expected = `Second words.\n\n---\n\n${marked("Round 2")}\n\nA note under it.`;
+      expect(await descriptionShown(f, expected, "the block rewritten in the edit")).toBe(expected);
+    });
+
+    test("a block with no end is left in the author's text, on every write, and the block written at the end", async () => {
+      const f = await setup();
+      const author = `Intro\n${STATUS_MARKER}\nhalf a block`;
+      await f.editDescription(author);
+      await described(f, author, "the author's text");
+      await f.writer.upsertStatus(f.change, () => "Round 1");
+      await described(f, `${author}\n\n---\n\n${marked("Round 1")}`, "the block at the end");
+      await f.writer.upsertStatus(f.change, () => "Round 2");
+      const expected = `${author}\n\n---\n\n${marked("Round 2")}`;
+      expect(await descriptionShown(f, expected, "the block rewritten, the half block kept")).toBe(expected);
+    });
+
+    test("a block past its room is refused and nothing is written; none is nothing; one filling the room is written", async () => {
+      const f = await setup();
+      await f.editDescription("Intro");
+      const before = await described(f, "Intro", "the author's text");
+      await expect(f.writer.upsertStatus(f.change, (room) => "y".repeat(room + 1))).rejects.toMatchObject({
+        failure: "too_large",
+      });
+      await f.writer.upsertStatus(f.change, () => null);
+      expect(await f.observe()).toEqual(before);
+      await f.writer.upsertStatus(f.change, (room) => "y".repeat(room));
+      const full = (seen: HostView) =>
+        expect(characterCount(seen.description)).toBe(DESCRIPTION_MAX_CHARACTERS);
+      full(await shown(f.observe, holds(full), "the description filled to its limit"));
+    });
+
+    test("a round posted in the port's order shows as one completed check, one review and its status block", async () => {
       const f = await setup();
       const checkId = await f.writer.createCheck(f.change.repo, f.sha, "in_progress", RUNNING, JOB);
       const review = {
@@ -492,8 +467,8 @@ export function describeHostWriter(
         comments: [{ ...f.inDiff, endLine: null, body: "Off by one." }],
       };
       const reviewId = await f.writer.publishReview(f.change, review);
-      const summary = `${SUMMARY_MARKER}\nRound 1: 1 open.`;
-      const summaryId = await f.writer.upsertSummary(f.change, summary);
+      const block = "One thing to fix\n\nRound 1";
+      await f.writer.upsertStatus(f.change, () => block);
       const done = { title: "1 thing to fix", summary: "Round 1: 1 open.", text: "<!-- result -->" };
       await f.writer.completeCheck(f.change.repo, checkId, "neutral", done);
 
@@ -502,14 +477,13 @@ export function describeHostWriter(
           { id: checkId, status: "completed", conclusion: "neutral", output: done },
         ]);
         expect(view.reviews).toMatchObject([{ id: reviewId, ...review }]);
-        expect(view.comments).toEqual([
-          { id: summaryId, body: summary, author: accountOf(f.poster), reactions: NONE, minimized: null },
-        ]);
+        expect(view.comments).toEqual([]);
+        expect(statusOf(view.description)).toBe(block);
       };
-      round(await shown(f.observe, holds(round), "the round's check, review and summary"));
+      round(await shown(f.observe, holds(round), "the round's check, review and status block"));
     });
 
-    test("the bot reacts to a comment; the same reaction again stays one", async () => {
+    test("the poster reacts to a comment; the same reaction again stays one", async () => {
       const f = await setup();
       const id = await f.comment("/lookover review");
       await f.writer.react(f.change.repo, id, "eyes");
@@ -517,7 +491,7 @@ export function describeHostWriter(
       await f.writer.react(f.change.repo, id, "rocket");
       const reactions = async () => (await f.observe()).comments.find((c) => c.id === id)?.reactions;
       const both = { eyes: 1, rocket: 1 };
-      expect(await shown(reactions, equals(both), "the bot's two reactions")).toEqual(both);
+      expect(await shown(reactions, equals(both), "the poster's two reactions")).toEqual(both);
     });
 
     test("a reaction on a comment the host doesn't have is not found", async () => {
@@ -556,7 +530,7 @@ export function describeHostWriter(
       return { reviewId, root: Number(root), marker };
     };
 
-    test("the bot's reply is read back in its thread, by the bot; the round's review is still found by its marker", async () => {
+    test("the poster's reply is read back in its thread, by them; the round's review is still found by its marker", async () => {
       const f = await setup();
       const { reviewId, root, marker } = await postFinding(f);
       const body = "Kept: the guard is still missing on line 12.";
@@ -568,13 +542,15 @@ export function describeHostWriter(
           {
             commentId: Number(replyId),
             nodeId: expect.any(String),
-            author: f.poster,
+            author: { ...f.poster, bot: false },
             body,
             at: expect.any(String),
           },
         ]);
       };
-      replied(await shown(() => f.intake.threads(f.change), holds(replied), "the bot's reply in its thread"));
+      replied(
+        await shown(() => f.intake.threads(f.change), holds(replied), "the poster's reply in its thread"),
+      );
       // The host files the reply as a review of its own, with an empty body: never the round's (spike 03, step 11).
       const filed = [
         [false, [FINDING_F1]],
@@ -707,9 +683,7 @@ export function describeHostWriter(
             fails,
           );
           await expect(f.writer.findCheck(f.change.repo, f.sha, JOB)).rejects.toMatchObject(fails);
-          await expect(f.writer.upsertSummary(f.change, `${SUMMARY_MARKER}\nRound 1.`)).rejects.toMatchObject(
-            fails,
-          );
+          await expect(f.writer.upsertStatus(f.change, () => "Round 1")).rejects.toMatchObject(fails);
           await expect(f.writer.react(f.change.repo, request, "eyes")).rejects.toMatchObject(fails);
           await expect(f.writer.reply(f.change, 1, "Kept.")).rejects.toMatchObject(fails);
           // Refused before the host looks the id up.

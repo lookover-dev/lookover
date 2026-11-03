@@ -71,12 +71,6 @@ const membershipOf = (organisation: HostLogin, role: string, state = "active") =
   organization: { login: organisation.login, id: organisation.id, description: null },
   user,
 });
-const notFound = {
-  message: "Not Found",
-  documentation_url:
-    "https://docs.github.com/rest/orgs/members#get-an-organization-membership-for-the-authenticated-user",
-  status: "404",
-};
 
 /** The path of the person's active memberships, first page. */
 const LIST = "user/memberships/orgs?state=active&per_page=100";
@@ -90,18 +84,6 @@ const SIGNED_IN: Record<string, Answer> = {
       membershipOf(lookoverDev, "admin"),
       membershipOf(orbit, "admin"),
     ]),
-  },
-  "user/memberships/orgs/lookover-dev": { out: http("200 OK", SCOPES, membershipOf(lookoverDev, "admin")) },
-  "user/memberships/orgs/LOOKOVER-DEV": { out: http("200 OK", SCOPES, membershipOf(lookoverDev, "admin")) },
-  "user/memberships/orgs/orbit": { out: http("200 OK", SCOPES, membershipOf(orbit, "admin")) },
-  "user/memberships/orgs/harbor": { out: http("200 OK", SCOPES, membershipOf(harbor, "member")) },
-  "user/memberships/orgs/acme-labs": {
-    out: http("200 OK", SCOPES, membershipOf({ id: 412000, login: "acme-labs" }, "member", "pending")),
-  },
-  "user/memberships/orgs/github": {
-    out: http("404 Not Found", { ...SCOPES, ...ACCEPTS }, notFound),
-    err: 'gh: Not Found (HTTP 404)\ngh: This API operation needs the "admin:org" scope.',
-    code: 1,
   },
 };
 
@@ -198,7 +180,6 @@ describeGh("ghCli on a scripted gh", {
     admin: [lookoverDev, orbit],
     member: [harbor],
     pending: { id: 412000, login: "acme-labs" },
-    absent: "github",
   }),
   signedOut: async () => ghOn(SIGNED_OUT),
   missing: async () =>
@@ -222,17 +203,9 @@ describe("the real adapter", () => {
       homedir: scratch,
       command,
     });
-    await gh.membership("lookover-dev");
+    await gh.person();
     const seen = JSON.parse(readFileSync(ran, "utf8"));
-    expect(seen.args).toEqual([
-      "api",
-      "--hostname",
-      "github.com",
-      "--method",
-      "GET",
-      "--include",
-      "user/memberships/orgs/lookover-dev",
-    ]);
+    expect(seen.args).toEqual(["api", "--hostname", "github.com", "--method", "GET", "--include", "user"]);
     expect(seen.stdin).toBe("");
   });
 
@@ -283,7 +256,7 @@ describe("the real adapter", () => {
       out: http("503 Service Unavailable", {}, { message: "Service Unavailable" }),
       code: 1,
     });
-    expect(await ghOn(down).membership("lookover-dev")).toEqual({
+    expect(await ghOn(down).memberships()).toEqual({
       kind: "unanswered",
       why: "failed",
       detail: "Service Unavailable (HTTP 503)",

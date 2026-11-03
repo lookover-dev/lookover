@@ -4,7 +4,7 @@
 // older than 30 days removed at start and when the day changes; `<home>` and `logs/` made user-only once, a marker in
 // `logs/` saying it was done, so a start that failed at it is retried at the next. Every line passes one filter first,
 // which removes the secrets the service registered as it learned them (the session secret, the one-time link's token,
-// installation tokens, the App's key and the JWTs it signs) and anything shaped like one (GitHub tokens, private key
+// the sign-in's device code, token and refresh token) and anything shaped like one (GitHub tokens, private key
 // blocks, JWTs, `Authorization` values, `token=` in a URL, a password in a URL). What the filter leaves is what the
 // file keeps and what `write` prints. The one line printed whole is the program's own to the owner (`keep`: the URL to
 // open, its token the owner's to use), which the file keeps filtered too. Every write is a synchronous append, so lines

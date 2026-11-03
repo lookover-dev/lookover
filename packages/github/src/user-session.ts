@@ -92,7 +92,7 @@ export class UserSession implements Session {
     this.share = shareOf(keeper);
   }
 
-  /** Runs `call` with the person's token, whatever the repository or the scope: a user token can't be narrowed. */
+  /** Runs `call` with the person's token, whatever the repository: a user token can't be narrowed. */
   async withToken<T>(repo: RepositoryRef, call: (token: string) => Promise<T>): Promise<T> {
     try {
       return await this.asPerson(call);
@@ -125,7 +125,7 @@ export class UserSession implements Session {
   /** Who posts: the signed-in person, as the sign-in names them (`GET /user` when they signed in). */
   async poster(): Promise<Poster> {
     const { signIn } = await this.current();
-    return { id: signIn.person.id, login: signIn.person.login, bot: false };
+    return { id: signIn.person.id, login: signIn.person.login };
   }
 
   /** The sign-in to use now: one renewed but unkept written first, renewed when its token expires within the margin. */

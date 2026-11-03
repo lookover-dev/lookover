@@ -396,29 +396,32 @@ test("the setup starts at its first step, keeps each write across a restart, and
     step: "ai",
     reached: "ai",
     github: "start",
-    githubRefused: null,
     firstReviewChange: null,
   };
   expect(store.setup.read()).toEqual(start);
   // Each write gives the setup as it now is; a step gone on to is the furthest reached.
   expect(store.setup.write({ step: "github" })).toEqual({ ...start, step: "github", reached: "github" });
-  expect(store.setup.write({ github: "waiting-for-app", githubRefused: "unreachable" })).toEqual({
+  expect(store.setup.write({ github: "waiting-for-install" })).toEqual({
     ...start,
     step: "github",
     reached: "github",
-    github: "waiting-for-app",
-    githubRefused: "unreachable",
+    github: "waiting-for-install",
   });
   // Going back never loses the way forward.
-  expect(store.setup.write({ step: "ai", githubRefused: null })).toEqual({
+  expect(store.setup.write({ step: "ai" })).toEqual({
     ...start,
     step: "ai",
     reached: "github",
-    github: "waiting-for-app",
+    github: "waiting-for-install",
   });
   store.close();
   const again = open(dir);
-  expect(again.setup.read()).toEqual({ ...start, step: "ai", reached: "github", github: "waiting-for-app" });
+  expect(again.setup.read()).toEqual({
+    ...start,
+    step: "ai",
+    reached: "github",
+    github: "waiting-for-install",
+  });
   expect(again.setup.write({ github: "nothing-granted" }).github).toBe("nothing-granted");
   expect(
     again.setup.write({
@@ -431,7 +434,6 @@ test("the setup starts at its first step, keeps each write across a restart, and
     step: "first-review",
     reached: "first-review",
     github: "done",
-    githubRefused: null,
     firstReviewChange: changeId("sasensi/lookover-sandbox#1"),
   });
   // Set up at once, as live mode writes it at the first start of a data folder.
@@ -440,21 +442,22 @@ test("the setup starts at its first step, keeps each write across a restart, and
     step: "background",
     reached: "background",
     github: "done",
-    githubRefused: null,
     firstReviewChange: changeId("sasensi/lookover-sandbox#1"),
   });
 });
 
-test("the setup's table refuses a GitHub step or a refusal the contracts don't name (ADR 0053)", () => {
+test("the setup's table refuses a GitHub step the contracts don't name, the wait for an own App among them (ADR 0073)", () => {
   const dir = migrated();
   open(dir).setup.write({ step: "github" });
   const db = new Database(join(dir, DATABASE), { strict: true });
   expect(() => db.run("UPDATE setup SET github = 'bot-created'")).toThrow("CHECK");
-  expect(() => db.run("UPDATE setup SET github_refused = 'timeout'")).toThrow("CHECK");
-  for (const github of ["start", "waiting-for-app", "waiting-for-install", "nothing-granted", "done"])
+  expect(() => db.run("UPDATE setup SET github = 'waiting-for-app'")).toThrow("CHECK");
+  for (const github of ["start", "waiting-for-install", "nothing-granted", "done"])
     db.run("UPDATE setup SET github = ?", [github]);
-  for (const refused of ["unreachable", "expired", "refused", "elsewhere", null])
-    db.run("UPDATE setup SET github_refused = ?", [refused]);
+  // The manifest flows' tables and the flow's refusal are gone.
+  expect(() => db.run("SELECT github_refused FROM setup")).toThrow("no such column");
+  expect(() => db.run("SELECT * FROM app_flows")).toThrow("no such table");
+  expect(() => db.run("SELECT * FROM app_place")).toThrow("no such table");
   db.close();
 });
 
@@ -1461,6 +1464,7 @@ const finding: Finding = {
   rule: null,
   snippet: null,
   fix: null,
+  suggestion: null,
   status: "open",
   posted: true,
   commented: false,
@@ -1695,6 +1699,9 @@ test("the rounds of a change are kept in order, and the ledger is what the last 
   ]);
   expect(store.rounds.ledger(CHANGE)).toEqual([fixed]);
   expect(store.rounds.ledger(changeId("sasensi/lookover-sandbox#2"))).toEqual([]);
+  // As a round left it: round 1's, before round 2 verified the fix; none for a round never kept.
+  expect(store.rounds.ledger(CHANGE, 1)).toEqual([finding]);
+  expect(store.rounds.ledger(CHANGE, 3)).toEqual([]);
 });
 
 test("when a repository's last round was posted: none before its first, another repository's not counted (ADR 0043's hot window)", () => {
@@ -2027,7 +2034,7 @@ test("a job that isn't waiting isn't offered to the take, and an ended run can't
 
 /** What a round's posts are rendered from, as the service gives it: kept as given. */
 const PLAN = { round: 1, change: { number: 1 } };
-const POSTS = ["check", "review", "summary", "completed"] as const;
+const POSTS = ["check", "review", "status", "completed"] as const;
 
 test("a run that reaches publishing saves its round, the ledger held until its review lands, and its posts, owed", () => {
   const dir = migrated();
@@ -2085,18 +2092,18 @@ test("each post sent is kept with the host's id: the check is the job's, the rev
   // The review holds a comment on the finding: the ledger says so as it lands (#67).
   store.posts.sent(run.id, "review", "3301", [finding.id]);
   expect(store.rounds.ledger(CHANGE)).toEqual([{ ...finding, commented: true }]);
-  store.posts.sending(run.id, "summary");
+  store.posts.sending(run.id, "status");
   store.close();
 
   const again = open(dir);
   expect(again.posts.of(run.id)?.posts).toEqual([
     { kind: "check", hostId: "111954805720", tries: 1 },
     { kind: "review", hostId: "3301", tries: 1 },
-    { kind: "summary", hostId: null, tries: 1 },
+    { kind: "status", hostId: null, tries: 1 },
     { kind: "completed", hostId: null, tries: 0 },
   ]);
-  again.posts.sending(run.id, "summary");
-  again.posts.sent(run.id, "summary", "9001");
+  again.posts.sending(run.id, "status");
+  again.posts.sent(run.id, "status", "9001");
   again.posts.sending(run.id, "completed");
   again.posts.sent(run.id, "completed", "111954805720");
   expect(again.jobs.checkOf(job.id).completed).toBe(true);
@@ -2112,7 +2119,7 @@ test("a round's replies and the comments it minimizes are posts of their own, ea
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
-  const posts = ["check", "review", "reply:F1", "summary", "completed", "minimize:IC_c1"] as const;
+  const posts = ["check", "review", "reply:F1", "status", "completed", "minimize:IC_c1"] as const;
   store.posts.saved(run.id, { n: 1, held: [], ledger: [], plan: PLAN, posts }, T2);
   store.posts.sending(run.id, "reply:F1");
   store.posts.sent(run.id, "reply:F1", "100004");
@@ -2123,7 +2130,7 @@ test("a round's replies and the comments it minimizes are posts of their own, ea
     { kind: "check", hostId: null, tries: 0 },
     { kind: "review", hostId: null, tries: 0 },
     { kind: "reply:F1", hostId: "100004", tries: 1 },
-    { kind: "summary", hostId: null, tries: 0 },
+    { kind: "status", hostId: null, tries: 0 },
     { kind: "completed", hostId: null, tries: 0 },
     { kind: "minimize:IC_c1", hostId: null, tries: 1 },
   ]);
@@ -2143,7 +2150,7 @@ test("a round whose review send began and was never marked sent is one the host 
   store.posts.sending(run.id, "review");
   store.close();
   const again = open(dir);
-  expect(again.posts.unsure(CHANGE)).toEqual([{ runId: run.id, plan: PLAN, degraded: false }]);
+  expect(again.posts.unsure(CHANGE)).toEqual([{ runId: run.id, plan: PLAN }]);
   again.posts.sent(run.id, "review", "3301");
   expect(again.posts.unsure(CHANGE)).toEqual([]);
 });
@@ -2183,18 +2190,57 @@ test("the findings a preview held off the pull request are withheld: its empty o
   expect(again.posts.withheld(OTHER)).toEqual([]);
 });
 
-test("a round whose review goes with its findings in the summary is kept so, after a restart too", () => {
+test("a round whose review goes with its findings in the status block is kept so, owing no review, after a restart too", () => {
   const dir = migrated();
   const store = open(dir);
   asked(store, CHANGE, job);
   started(store, job.id, run);
-  store.posts.saved(run.id, { n: 1, held: [], ledger: [], plan: PLAN, posts: POSTS }, T2);
+  const held: Finding = { ...finding, posted: false };
+  store.posts.saved(run.id, { n: 1, held: [held], ledger: [finding], plan: PLAN, posts: POSTS }, T2);
   store.posts.sending(run.id, "review");
   store.posts.degrade(run.id);
   store.close();
   const again = open(dir);
-  expect(again.posts.of(run.id)?.degraded).toBe(true);
+  expect(again.posts.of(run.id)).toMatchObject({
+    degraded: true,
+    posts: [
+      { kind: "check", hostId: null, tries: 0 },
+      { kind: "status", hostId: null, tries: 0 },
+      { kind: "completed", hostId: null, tries: 0 },
+    ],
+  });
+  // GitHub refused the review: it holds none, and a restart looks for none.
+  expect(again.posts.unsure(CHANGE)).toEqual([]);
+  expect(() => again.posts.sent(run.id, "review", "3301")).toThrow(`sent: run ${run.id} owes no review post`);
+  // Its status block lands the ledger instead.
+  again.posts.sending(run.id, "status");
+  expect(again.rounds.ledger(CHANGE)).toEqual([finding]);
   expect(() => again.posts.degrade(runId("nobody"))).toThrow("degrade: no round saved for run nobody");
+});
+
+test("a round that owes no review lands its ledger as its status block's send begins, whatever GitHub answers", () => {
+  const dir = migrated();
+  const store = open(dir);
+  asked(store, CHANGE, job);
+  started(store, job.id, run);
+  const held: Finding = { ...finding, posted: false };
+  const posts = ["check", "status", "completed"] as const;
+  store.posts.saved(run.id, { n: 1, held: [held], ledger: [finding], plan: PLAN, posts }, T2);
+  expect(store.posts.withheld(CHANGE)).toEqual([finding.id]);
+  expect(store.posts.landed(run.id)).toBe(false);
+  store.posts.sending(run.id, "check");
+  store.posts.sent(run.id, "check", "111");
+  expect(store.rounds.ledger(CHANGE)).toEqual([held]);
+  // Begun: landed, though GitHub may refuse it, so the round's findings are never sent again.
+  store.posts.sending(run.id, "status");
+  store.close();
+  const again = open(dir);
+  expect(again.rounds.ledger(CHANGE)).toEqual([finding]);
+  expect(again.posts.withheld(CHANGE)).toEqual([]);
+  expect(again.posts.landed(run.id)).toBe(true);
+  expect(again.posts.unsure(CHANGE)).toEqual([]);
+  again.posts.sent(run.id, "status", "9001");
+  expect(again.rounds.ledger(CHANGE)).toEqual([finding]);
 });
 
 test("a run posting its round frees its engine, and its change stays busy for the take until the run ends", () => {
@@ -2452,7 +2498,7 @@ const dismissing =
   (ledger: Finding[]): Finding[] =>
     ledger.map((f) => (f.id === id ? { ...f, status: "dismissed" as const, closedIn: 1 } : f));
 
-const DISMISSAL_POSTS = ["reply", "summary", "completed", "minimize"] as const;
+const DISMISSAL_POSTS = ["reply", "status", "completed", "minimize"] as const;
 
 /** Round 1 of `CHANGE` posted by `run`, its check `111` sent, its review landed with `ledger`. */
 function postedRound(store: Store, ledger: Finding[]): void {
@@ -2469,15 +2515,7 @@ test("the replies Lookover kept for a change are its rounds' and its dismissals'
   expect(store.posts.replies(CHANGE)).toEqual([]);
   asked(store, CHANGE, job);
   started(store, job.id, run);
-  const posts = [
-    "check",
-    "review",
-    "reply:F1",
-    "reply:F2",
-    "summary",
-    "completed",
-    "minimize:IC_c1",
-  ] as const;
+  const posts = ["check", "review", "reply:F1", "reply:F2", "status", "completed", "minimize:IC_c1"] as const;
   store.posts.saved(run.id, { n: 1, held: [finding], ledger: [finding], plan: PLAN, posts }, T1);
   store.posts.sent(run.id, "check", "111");
   store.posts.sent(run.id, "reply:F1", "100004");
@@ -2495,7 +2533,7 @@ test("the replies Lookover kept for a change are its rounds' and its dismissals'
     at: T2,
   });
   store.dismissals.sent("d1", "reply", "100009");
-  store.dismissals.sent("d1", "summary", "9001");
+  store.dismissals.sent("d1", "status", "9001");
   store.close();
   const again = open(dir);
   // A reply begun and never marked sent has no id: the reply marker finds it.
@@ -2512,6 +2550,37 @@ test("the change's latest round that posted is given with its plan and its check
   started(store, preview.id, { ...run, id: runId("r2"), preview: true });
   roundEnded(store, runId("r2"), 2, [finding], T2, "preview");
   expect(store.posts.latest(CHANGE)).toEqual({ runId: run.id, plan: PLAN, degraded: false, checkId: "111" });
+});
+
+test("a dismissal after a preview reaches the round that posted too: that round's ledger, as it is now", () => {
+  const store = open(migrated());
+  const other: Finding = { ...finding, id: findingId("F2") };
+  postedRound(store, [finding, other]);
+  // The preview's round verifies F1 fixed; it posts nothing.
+  const preview: ReviewJob = { ...job, id: jobId("j2") };
+  asked(store, CHANGE, preview);
+  started(store, preview.id, { ...run, id: runId("r2"), preview: true });
+  const fixed: Finding = { ...finding, status: "verified_fixed", closedIn: 2 };
+  roundEnded(store, runId("r2"), 2, [fixed, other], T2, "preview");
+  store.dismissals.saved({
+    id: "d1",
+    changeId: CHANGE,
+    findingId: other.id,
+    runId: run.id,
+    checkId: null,
+    dismiss: dismissing("F2"),
+    posts: ["reply", "status", "minimize"],
+    at: T2 + 1,
+  });
+  const statuses = (n?: number) => store.rounds.ledger(CHANGE, n).map((f) => [String(f.id), f.status]);
+  expect(statuses()).toEqual([
+    ["F1", "verified_fixed"],
+    ["F2", "dismissed"],
+  ]);
+  expect(statuses(1)).toEqual([
+    ["F1", "open"],
+    ["F2", "dismissed"],
+  ]);
 });
 
 test("a dismissal is saved in one write with the ledger it leaves and its posts owed, and refused while a run of the change goes", () => {
@@ -2547,7 +2616,7 @@ test("a dismissal is saved in one write with the ledger it leaves and its posts 
     checkId: "111",
     posts: [
       { kind: "reply", hostId: "100004", tries: 1 },
-      { kind: "summary", hostId: null, tries: 0 },
+      { kind: "status", hostId: null, tries: 0 },
       { kind: "completed", hostId: null, tries: 0 },
       { kind: "minimize", hostId: null, tries: 0 },
     ],
@@ -2569,7 +2638,7 @@ test("a dismissal is saved in one write with the ledger it leaves and its posts 
       runId: run.id,
       checkId: null,
       dismiss: dismissing("F1"),
-      posts: ["reply", "summary", "minimize"],
+      posts: ["reply", "status", "minimize"],
       at: T2 + 2,
     }),
   ).toBe("reviewing");
@@ -2600,7 +2669,7 @@ test("a dismissal's ledger reaches the round whose review hasn't landed: a late 
     runId: run.id,
     checkId: null,
     dismiss: dismissing("F2"),
-    posts: ["reply", "summary", "minimize"],
+    posts: ["reply", "status", "minimize"],
     at: T2,
   });
   // The review is found on GitHub after all, by its marker: the ledger lands with the dismissal in it.
@@ -2686,53 +2755,6 @@ test("a repository gone from the installation: its jobs cancelled, what it owes 
   expect(again.rounds.of(CHANGE)).toEqual([{ n: 1, sha: pr1.head.sha }]);
   expect(again.inbox.replace(REPO, [pr1]).repositoryAdded).toBe(true);
   expect(again.inbox.open(ledger).map((c) => c.number)).toEqual([1]);
-});
-
-test("a manifest flow is kept by its state's hash across a restart until used up; those opened before a moment are forgotten (ADR 0053)", () => {
-  const dir = migrated();
-  const store = openStore({ home: dir, durable: false });
-  expect(store.appFlows.flow("a1")).toBeNull();
-  store.appFlows.opened("a1", 1_000, null);
-  store.appFlows.opened("b2", 5_000, null);
-  store.close();
-
-  const again = open(dir);
-  expect(again.appFlows.flow("a1")).toEqual({ openedAt: 1_000, place: null });
-  again.appFlows.usedUp("a1");
-  expect(again.appFlows.flow("a1")).toBeNull();
-  again.appFlows.opened("c3", 9_000, null);
-  again.appFlows.forget(9_000);
-  expect(again.appFlows.flow("b2")).toBeNull();
-  expect(again.appFlows.flow("c3")).toEqual({ openedAt: 9_000, place: null });
-});
-
-test("where the App is made is chosen once and kept across a restart, and each flow keeps the place it was opened for (ADR 0059)", () => {
-  const dir = migrated();
-  const store = openStore({ home: dir, durable: false });
-  const acme = { organisation: { id: 9000, login: "acme" }, person: { id: 42, login: "sam" } };
-  // Your own account until an organisation is chosen.
-  expect(store.appFlows.chosen()).toBeNull();
-  store.appFlows.choose(acme);
-  store.appFlows.opened("a1", 1_000, acme);
-  store.close();
-
-  const again = open(dir);
-  expect(again.appFlows.chosen()).toEqual(acme);
-  expect(again.appFlows.flow("a1")).toEqual({ openedAt: 1_000, place: acme });
-  again.appFlows.choose(null);
-  again.appFlows.opened("b2", 2_000, null);
-  expect(again.appFlows.chosen()).toBeNull();
-  // A flow keeps the place it was opened for, whatever is chosen after.
-  expect(again.appFlows.flow("a1")).toEqual({ openedAt: 1_000, place: acme });
-  expect(again.appFlows.flow("b2")).toEqual({ openedAt: 2_000, place: null });
-
-  // No place: a choice not taken, kept as such across a restart until another is chosen.
-  again.appFlows.choose("none");
-  again.close();
-  const third = open(dir);
-  expect(third.appFlows.chosen()).toBe("none");
-  third.appFlows.choose(acme);
-  expect(third.appFlows.chosen()).toEqual(acme);
 });
 
 /** The migration that names each change by its repository's owner too (ADR 0066). */

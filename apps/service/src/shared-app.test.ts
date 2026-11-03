@@ -1,34 +1,31 @@
 // The shared App, end to end on the fake (ADR 0065, ADR 0066): a person signs in from the setup with GitHub's device
 // flow, their sign-in kept sealed in the data folder, and their pull requests are reviewed, Lookover posting as them;
 // a crash mid-post resumes with one review; none of Lookover's posts, now the person's comments, is read as a request;
-// a data folder with its own App stays on it, a sign-in beside it or not. The service runs in this process on the
+// a data folder holding an App of its own from an earlier version and no sign-in starts at the setup's GitHub step. The service runs in this process on the
 // fake host, which plays GitHub's device flow, the accounts the sign-in reaches and the ports as the person.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { HostError, type SignIn, type State } from "@lookover/contracts";
 import { DemoClock, FakeGitHost } from "@lookover/testkit";
+import { type GitHubSide, type Keychain, memoryKeychain, type RunningService, signInStore } from "./index.ts";
 import {
-  appStore,
-  type GitHubSide,
-  type Keychain,
-  memoryKeychain,
-  type RunningService,
-  signInStore,
-} from "./index.ts";
-import {
-  BOT,
+  blockOn,
   eventually,
   fakeEngines,
   home,
   lastEvent,
+  ONE_FINDING,
   OWNER,
+  onTheDiff,
   openApp,
   PLANTED,
-  personalApp,
   post,
   pr1,
   review,
   SANDBOX,
   SHA1,
+  SHARED_BOT,
   sinceStart,
   snapshot,
   start,
@@ -42,8 +39,7 @@ setDefaultTimeout(TEST_LIMIT_MS);
 afterEach(stopAll);
 
 const PR1 = { repo: SANDBOX, number: 1 };
-/** The shared App's bot on the fake: on `shared` it never posts, the person does. */
-const SHARED_BOT = { id: 2020, login: "lookover-dev[bot]" };
+
 const userOnly = async () => {};
 /** A setup at its GitHub step, nothing asked of GitHub yet: what a fresh data folder shows there. */
 const AT_GITHUB = {
@@ -51,7 +47,6 @@ const AT_GITHUB = {
   step: "github",
   reached: "github",
   github: "start",
-  githubRefused: null,
   firstReviewChange: null,
 } as const;
 
@@ -69,17 +64,11 @@ const signInAt = (at: number): SignIn => ({
 });
 
 /**
- * GitHub as the fake plays it for a data folder that keeps its own App store and sign-in store on `keychain`: the
- * shared App offered, its device flow, its accounts and its ports the fake's; the own App's the fake's too.
+ * GitHub as the fake plays it for a data folder that keeps its sign-in store on `keychain`: the shared App offered, its
+ * device flow, its accounts and its ports the fake's.
  */
 function onShared(host: FakeGitHost, dir: string, keychain: Keychain): GitHubSide {
   return {
-    installations: host,
-    connect: ({ key }) => {
-      host.useKey(key);
-      return { intake: host, writer: host };
-    },
-    apps: appStore({ home: dir, keychain, userOnly }),
     shared: {
       signIn: host,
       signIns: signInStore({ home: dir, keychain, userOnly }),
@@ -91,6 +80,24 @@ function onShared(host: FakeGitHost, dir: string, keychain: Keychain): GitHubSid
 
 /** The snapshot now. */
 const stateOf = async (service: RunningService, cookie: string): Promise<State> => snapshot(service, cookie);
+
+test("a test's service runs signed in to the shared App unless it says, the sandbox's pull request posted as the owner", async () => {
+  const { service, host } = await start({ engines: fakeEngines({ reviews: 1 }) });
+  const cookie = await openApp(service);
+  expect((await review(service, cookie)).status).toBe(200);
+  const state = await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.reviews[PLANTED]?.job?.state === "done",
+  );
+  expect(state.connection).toMatchObject({
+    state: "connected",
+    person: { id: OWNER.id, login: OWNER.login },
+  });
+  // A round with no line comment posts no review (ADR 0074): its status block is the person's.
+  expect(host.reviewers(PR1)).toEqual([]);
+  expect(host.view(PR1).comments).toEqual([]);
+  expect(blockOn(host, PR1)).toContain(" · Nothing to fix");
+});
 
 test("signed in from the setup, the person's pull request is reviewed on the shared App, posted as them", async () => {
   const dir = home();
@@ -108,12 +115,12 @@ test("signed in from the setup, the person's pull request is reviewed on the sha
   });
   const cookie = await openApp(service);
   const before: State = await snapshot(service, cookie);
-  expect(before.connection).toMatchObject({ way: null, signIn: null, state: "not-connected", bot: null });
+  expect(before.connection).toMatchObject({ person: null, signIn: null, state: "not-connected" });
 
   expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
   const waiting: State = await snapshot(service, cookie);
   expect(waiting.connection.signIn).toEqual({
-    userCode: "FAKE-0001",
+    userCode: "D054-61DC",
     verificationUri: "https://github.com/login/device",
     expiresAt: T0 + 900_000,
   });
@@ -122,7 +129,7 @@ test("signed in from the setup, the person's pull request is reviewed on the sha
   expect(again.status).toBe(409);
   expect(await again.json()).toMatchObject({ signIn: "pending" });
 
-  host.enterCode("FAKE-0001");
+  host.enterCode("D054-61DC");
   await time.advance(5_000);
   const connected = await eventually(
     () => snapshot(service, cookie),
@@ -130,10 +137,7 @@ test("signed in from the setup, the person's pull request is reviewed on the sha
   );
   expect(connected.connection).toMatchObject({
     id: "github:sasensi",
-    way: "shared",
     signIn: null,
-    bot: null,
-    app: null,
   });
   expect(connected.setup.github).toBe("done");
   expect(Object.keys(connected.changes)).toEqual([PLANTED]);
@@ -148,8 +152,9 @@ test("signed in from the setup, the person's pull request is reviewed on the sha
     (s) => s.reviews[PLANTED]?.job?.state === "done",
   );
   const shown = host.view(PR1);
-  expect(shown.reviews).toHaveLength(1);
-  expect(shown.comments.map((c) => c.author.id)).toEqual([OWNER.id]);
+  expect(shown.reviews).toEqual([]);
+  expect(shown.comments).toEqual([]);
+  expect(blockOn(host, PR1)).toContain(" · Nothing to fix");
   expect(shown.checks.map((c) => `${c.status} ${c.conclusion}`)).toEqual(["completed success"]);
 });
 
@@ -168,7 +173,7 @@ test("a sign-in GitHub refuses, or whose code expires, shows no code any more; a
   const signIn = () => post(service, cookie, { type: "connection.signIn" });
 
   await signIn();
-  host.denyCode("FAKE-0001");
+  host.denyCode("D054-61DC");
   await time.advance(5_000);
   await eventually(
     () => snapshot(service, cookie),
@@ -178,7 +183,7 @@ test("a sign-in GitHub refuses, or whose code expires, shows no code any more; a
   await signIn();
   // Never entered: polled every 5 s, then ended at the code's expiry, 15 minutes on.
   await time.advance(899_000);
-  expect((await stateOf(service, cookie)).connection.signIn?.userCode).toBe("FAKE-0002");
+  expect((await stateOf(service, cookie)).connection.signIn?.userCode).toBe("D054-61DD");
   await time.advance(1_000);
   await eventually(
     () => snapshot(service, cookie),
@@ -186,14 +191,14 @@ test("a sign-in GitHub refuses, or whose code expires, shows no code any more; a
   );
 
   await signIn();
-  expect((await stateOf(service, cookie)).connection.signIn?.userCode).toBe("FAKE-0003");
+  expect((await stateOf(service, cookie)).connection.signIn?.userCode).toBe("D054-61DE");
   expect((await post(service, cookie, { type: "connection.cancelSignIn" })).status).toBe(200);
   expect((await stateOf(service, cookie)).connection.signIn).toBeNull();
   // Entered after the cancel: nothing polls it any more.
-  host.enterCode("FAKE-0003");
+  host.enterCode("D054-61DE");
   await time.advance(10_000);
   const after: State = await snapshot(service, cookie);
-  expect(after.connection).toMatchObject({ way: null, signIn: null, state: "not-connected" });
+  expect(after.connection).toMatchObject({ person: null, signIn: null, state: "not-connected" });
   expect(await signInStore({ home: dir, keychain: memoryKeychain(), userOnly }).read()).toEqual({
     state: "none",
   });
@@ -240,15 +245,15 @@ test("a service stopped mid-post on the shared App resumes after the restart: on
     changes: [pr1],
     clock: time,
   });
-  const engines = fakeEngines({ reviews: 1, time });
+  const engines = fakeEngines({ time });
+  engines.answer({ outcome: "ok", text: ONE_FINDING });
+  const retrieval = onTheDiff();
   const github = onShared(host, dir, keychain);
-  const first = await start({ home: dir, host, time, engines, github });
+  const first = await start({ home: dir, host, time, engines, retrieval, github });
   const cookie = await openApp(first.service);
   expect((await stateOf(first.service, cookie)).connection).toMatchObject({
     id: "github:sasensi",
-    way: "shared",
     state: "connected",
-    bot: null,
   });
   await review(first.service, cookie);
   await host.kept;
@@ -256,6 +261,7 @@ test("a service stopped mid-post on the shared App resumes after the restart: on
   host.stopped();
   await time.advance(0);
   expect(host.view(PR1).reviews).toHaveLength(1);
+  const ran = engines.runs.length;
 
   const last = lastEvent(dir);
   const second = await start({
@@ -263,6 +269,7 @@ test("a service stopped mid-post on the shared App resumes after the restart: on
     host,
     time,
     engines,
+    retrieval,
     github: onShared(host, dir, keychain),
     idsFrom: 100,
   });
@@ -271,11 +278,13 @@ test("a service stopped mid-post on the shared App resumes after the restart: on
     "round.finished",
   );
   expect(seen.at(-1)).toMatchObject({ job: { state: "done" }, round: { n: 1, sha: SHA1 } });
-  expect(engines.runs).toHaveLength(1);
+  expect(engines.runs).toHaveLength(ran);
   const shown = host.view(PR1);
-  expect(shown.reviews).toHaveLength(1);
-  expect(shown.comments.map((c) => c.author.id)).toEqual([OWNER.id]);
-  expect(shown.checks.map((c) => `${c.status} ${c.conclusion}`)).toEqual(["completed success"]);
+  expect(host.reviewers(PR1)).toEqual([OWNER.login]);
+  expect(shown.reviews.map((r) => r.comments.length)).toEqual([1]);
+  expect(shown.comments).toEqual([]);
+  expect(blockOn(host, PR1)).toContain("The key is logged");
+  expect(shown.checks.map((c) => c.status)).toEqual(["completed"]);
 });
 
 test("none of Lookover's posts, the person's comments on the shared App, is read as a request; the person's own is", async () => {
@@ -292,8 +301,9 @@ test("none of Lookover's posts, the person's comments on the shared App, is read
     () => snapshot(service, cookie),
     (s) => s.reviews[PLANTED]?.job?.state === "done",
   );
-  // The summary is the person's comment, through the App: polled for an hour, it asks for nothing.
-  expect(host.view(PR1).comments.map((c) => c.author.id)).toEqual([OWNER.id]);
+  // The status block is in the person's description, never a comment: polled for an hour, it asks for nothing.
+  expect(host.view(PR1).comments).toEqual([]);
+  expect(blockOn(host, PR1)).not.toBe("");
   for (let i = 0; i < 60; i++) await time.advance(60_000);
   expect(engines.runs).toHaveLength(1);
   expect((await stateOf(service, cookie)).reviews[PLANTED]?.rounds).toHaveLength(1);
@@ -309,41 +319,28 @@ test("none of Lookover's posts, the person's comments on the shared App, is read
   expect(engines.runs).toHaveLength(2);
 });
 
-test("a data folder with its own App stays on it, a sign-in kept beside it: the bot posts (as bun dev --live needs)", async () => {
+test("a folder holding an App of its own from an earlier version and no sign-in starts at the setup's GitHub step", async () => {
   const dir = home();
-  const keychain = memoryKeychain();
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  await appStore({ home: dir, keychain, userOnly }).write(
-    personalApp(1, "lookover-spike-sasensi"),
-    host.credentials().key,
+  // What an earlier version kept of its own App: read no more.
+  mkdirSync(join(dir, "github"), { recursive: true });
+  writeFileSync(
+    join(dir, "github", "app.json"),
+    JSON.stringify({ id: 1, slug: "lookover-spike-sasensi", key: { protection: "keychain" } }),
   );
-  await signInStore({ home: dir, keychain, userOnly }).write(signInAt(T0));
-  const engines = fakeEngines({ reviews: 1, time });
-  const { service } = await start({ home: dir, host, time, engines, github: onShared(host, dir, keychain) });
+  const host = sharedHost(time);
+  const { service } = await start({ home: dir, host, time, github: onShared(host, dir, memoryKeychain()) });
   const cookie = await openApp(service);
-  const state: State = await snapshot(service, cookie);
-  expect(state.connection).toMatchObject({
-    way: "own",
-    bot: BOT.login,
-    id: `github:${BOT.login}`,
-    state: "connected",
-  });
-  // A sign-in is refused while the own App is used.
-  const refused = await post(service, cookie, { type: "connection.signIn" });
-  expect(refused.status).toBe(409);
-  expect(await refused.json()).toMatchObject({ signIn: "own-app" });
-  await review(service, cookie);
-  await eventually(
-    () => snapshot(service, cookie),
-    (s) => s.reviews[PLANTED]?.job?.state === "done",
-  );
-  expect(host.view(PR1).comments.map((c) => c.author.id)).toEqual([BOT.id]);
-  // The sign-in beside it is left as it was.
-  expect((await signInStore({ home: dir, keychain, userOnly }).read()).state).toBe("kept");
+  const state = await stateOf(service, cookie);
+  expect(state.setup).toMatchObject({ done: false, step: "github", github: "start" });
+  expect(state.connection).toMatchObject({ id: null, state: "not-connected", person: null });
+  // The sign-in is offered: nothing else holds GitHub here.
+  expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
+  // Read no more, and left where it was.
+  expect(existsSync(join(dir, "github", "app.json"))).toBe(true);
 });
 
-test("signed in with the shared App installed nowhere yet, the connection names the person at once; a start reads them again; your own App clears them", async () => {
+test("signed in with the shared App installed nowhere yet, the connection names the person at once", async () => {
   const dir = home();
   const keychain = memoryKeychain();
   const time = new DemoClock({ at: T0 });
@@ -354,22 +351,14 @@ test("signed in with the shared App installed nowhere yet, the connection names 
   expect((await stateOf(service, cookie)).connection.person).toBeNull();
 
   expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
-  host.enterCode("FAKE-0001");
+  host.enterCode("D054-61DC");
   await time.advance(5_000);
   const signedIn = await eventually(
     () => snapshot(service, cookie),
-    (s) => s.connection.way === "shared",
+    (s) => s.connection.person !== null,
   );
   // No account reached, so no id yet: who signed in is said all the same.
   expect(signedIn.connection).toMatchObject({ id: null, accounts: [], person: OWNER });
-
-  const { id, key } = host.credentials();
-  expect((await post(service, cookie, { type: "connection.useApp", appId: id, key })).status).toBe(200);
-  const own = await eventually(
-    () => snapshot(service, cookie),
-    (s) => s.connection.way === "own",
-  );
-  expect(own.connection.person).toBeNull();
 });
 
 test("a folder signed in to the shared App starts with its person on the connection", async () => {
@@ -380,10 +369,10 @@ test("a folder signed in to the shared App starts with its person on the connect
   const host = sharedHost(time);
   const { service } = await start({ home: dir, host, time, github: onShared(host, dir, keychain) });
   const cookie = await openApp(service);
-  expect((await stateOf(service, cookie)).connection).toMatchObject({ way: "shared", person: OWNER });
+  expect((await stateOf(service, cookie)).connection).toMatchObject({ person: OWNER });
 });
 
-test("asking to install on an account Lookover doesn't name is refused, saying so; on your own App, as not shared", async () => {
+test("asking to install on an account Lookover doesn't name is refused, saying so; with nobody signed in, as signed out", async () => {
   const dir = home();
   const keychain = memoryKeychain();
   const time = new DemoClock({ at: T0 });
@@ -391,26 +380,22 @@ test("asking to install on an account Lookover doesn't name is refused, saying s
   const host = sharedHost(time);
   const { service } = await start({ home: dir, host, time, github: onShared(host, dir, keychain) });
   const cookie = await openApp(service);
-  expect((await stateOf(service, cookie)).connection).toMatchObject({ way: "shared", unreached: [] });
+  expect((await stateOf(service, cookie)).connection).toMatchObject({ unreached: [] });
   const notNamed = await post(service, cookie, { type: "connection.askToInstall", account: "ledger-dev" });
   expect(notNamed.status).toBe(409);
   expect(await notNamed.json()).toMatchObject({ askToInstall: "not-named" });
 
-  const ownDir = home();
-  const own = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  await appStore({ home: ownDir, keychain, userOnly }).write(
-    personalApp(1, "lookover-spike-sasensi"),
-    own.credentials().key,
-  );
-  const onOwn = await start({ home: ownDir, host: own, time, github: onShared(own, ownDir, keychain) });
-  const ownCookie = await openApp(onOwn.service);
-  const notShared = await post(onOwn.service, ownCookie, {
+  const outDir = home();
+  const out = sharedHost(time);
+  const signedOut = await start({ home: outDir, host: out, time, github: onShared(out, outDir, keychain) });
+  const outCookie = await openApp(signedOut.service);
+  const refused = await post(signedOut.service, outCookie, {
     type: "connection.askToInstall",
     account: "ledger-dev",
   });
-  expect(notShared.status).toBe(409);
-  expect(await notShared.json()).toMatchObject({ askToInstall: "not-shared" });
-  expect((await stateOf(onOwn.service, ownCookie)).connection.unreached).toEqual([]);
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toMatchObject({ askToInstall: "signed-out" });
+  expect((await stateOf(signedOut.service, outCookie)).connection.unreached).toEqual([]);
 });
 
 test("asking to install names an account: none is refused before it is read", async () => {
@@ -423,31 +408,6 @@ test("asking to install names an account: none is refused before it is read", as
   expect((await post(service, cookie, { type: "connection.askToInstall" })).status).toBe(400);
 });
 
-test("Use your own App on a folder signed in to the shared App moves it to own without a restart: the bot's connection", async () => {
-  const dir = home();
-  const keychain = memoryKeychain();
-  const time = new DemoClock({ at: T0 });
-  await signInStore({ home: dir, keychain, userOnly }).write(signInAt(T0));
-  const host = sharedHost(time);
-  const { service } = await start({ home: dir, host, time, github: onShared(host, dir, keychain) });
-  const cookie = await openApp(service);
-  expect((await stateOf(service, cookie)).connection).toMatchObject({ way: "shared", id: "github:sasensi" });
-  const { id, key } = host.credentials();
-  expect((await post(service, cookie, { type: "connection.useApp", appId: id, key })).status).toBe(200);
-  const own = await eventually(
-    () => snapshot(service, cookie),
-    (s) => s.connection.way === "own",
-  );
-  expect(own.connection).toMatchObject({
-    id: `github:${SHARED_BOT.login}`,
-    bot: SHARED_BOT.login,
-    app: { id },
-    state: "connected",
-  });
-  // The sign-in stays beside it; the own App wins at the next start too.
-  expect((await signInStore({ home: dir, keychain, userOnly }).read()).state).toBe("kept");
-});
-
 test("a poll GitHub can't answer is polled again; Sign in again on a set-up folder keeps it connected, the new sign-in kept", async () => {
   const dir = home();
   const keychain = memoryKeychain();
@@ -457,17 +417,17 @@ test("a poll GitHub can't answer is polled again; Sign in again on a set-up fold
   const { service } = await start({ home: dir, host, time, github: onShared(host, dir, keychain) });
   const cookie = await openApp(service);
   expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
-  host.enterCode("FAKE-0001");
+  host.enterCode("D054-61DC");
   host.refuse("unavailable");
   await time.advance(5_000);
-  expect((await stateOf(service, cookie)).connection.signIn?.userCode).toBe("FAKE-0001");
+  expect((await stateOf(service, cookie)).connection.signIn?.userCode).toBe("D054-61DC");
   host.refuse(null);
   await time.advance(5_000);
   const back = await eventually(
     () => snapshot(service, cookie),
     (s) => s.connection.signIn === null,
   );
-  expect(back.connection).toMatchObject({ id: "github:sasensi", way: "shared", state: "connected" });
+  expect(back.connection).toMatchObject({ id: "github:sasensi", state: "connected" });
   const kept = await signInStore({ home: dir, keychain, userOnly }).read();
   // The fake's token, not the one written by hand: the new sign-in replaced the last.
   expect(kept).toMatchObject({ state: "kept", signIn: { person: OWNER } });
@@ -488,20 +448,20 @@ test("GitHub failing to say who signed in keeps the tokens: asked again, never t
   });
   const cookie = await openApp(service);
   expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
-  host.enterCode("FAKE-0001");
+  host.enterCode("D054-61DC");
   host.refuseSignInPerson("unavailable");
   await time.advance(5_000);
   // The code is spent; the sign-in waits on who the person is.
-  expect((await stateOf(service, cookie)).connection.signIn?.userCode).toBe("FAKE-0001");
+  expect((await stateOf(service, cookie)).connection.signIn?.userCode).toBe("D054-61DC");
   await time.advance(5_000);
   const connected = await eventually(
     () => snapshot(service, cookie),
-    (s) => s.connection.way === "shared",
+    (s) => s.connection.person !== null,
   );
   expect(connected.connection).toMatchObject({ id: "github:sasensi", signIn: null });
   await time.advance(60_000);
   // One exchange: the code polled once, when it gave the tokens.
-  expect(host.codePolls("FAKE-0001")).toEqual([T0 + 5_000]);
+  expect(host.codePolls("D054-61DC")).toEqual([T0 + 5_000]);
   expect(await signInStore({ home: dir, keychain, userOnly }).read()).toMatchObject({
     state: "kept",
     signIn: { person: OWNER },
@@ -522,7 +482,7 @@ test("GitHub refusing the new token ends the sign-in: nothing kept, the code pol
   });
   const cookie = await openApp(service);
   await post(service, cookie, { type: "connection.signIn" });
-  host.enterCode("FAKE-0001");
+  host.enterCode("D054-61DC");
   host.refuseSignInPerson("unauthorized");
   await time.advance(5_000);
   await eventually(
@@ -530,8 +490,8 @@ test("GitHub refusing the new token ends the sign-in: nothing kept, the code pol
     (s) => s.connection.signIn === null,
   );
   await time.advance(60_000);
-  expect(host.codePolls("FAKE-0001")).toEqual([T0 + 5_000]);
-  expect((await stateOf(service, cookie)).connection.way).toBeNull();
+  expect(host.codePolls("D054-61DC")).toEqual([T0 + 5_000]);
+  expect((await stateOf(service, cookie)).connection.person).toBeNull();
   expect(await signInStore({ home: dir, keychain, userOnly }).read()).toEqual({ state: "none" });
 });
 
@@ -548,9 +508,27 @@ test("GitHub asking to slow down: 5 s more kept for every later poll, none at th
   });
   const cookie = await openApp(service);
   await post(service, cookie, { type: "connection.signIn" });
-  host.slowDownCode("FAKE-0001");
+  host.slowDownCode("D054-61DC");
   for (let i = 0; i < 5; i++) await time.advance(5_000);
-  expect(host.codePolls("FAKE-0001")).toEqual([T0 + 5_000, T0 + 15_000, T0 + 25_000]);
+  expect(host.codePolls("D054-61DC")).toEqual([T0 + 5_000, T0 + 15_000, T0 + 25_000]);
+});
+
+test("after a slow down, the next poll comes at the interval GitHub's answer carries, never later (#476)", async () => {
+  const dir = home();
+  const time = new DemoClock({ at: T0 });
+  const host = sharedHost(time);
+  const { service } = await start({
+    home: dir,
+    host,
+    time,
+    github: onShared(host, dir, memoryKeychain()),
+    setup: AT_GITHUB,
+  });
+  const cookie = await openApp(service);
+  await post(service, cookie, { type: "connection.signIn" });
+  host.slowDownCode("D054-61DC", 7_000);
+  for (let i = 0; i < 21; i++) await time.advance(1_000);
+  expect(host.codePolls("D054-61DC")).toEqual([T0 + 5_000, T0 + 12_000, T0 + 19_000]);
 });
 
 test("a code never entered ends exactly at its expiry, never polled then", async () => {
@@ -569,13 +547,13 @@ test("a code never entered ends exactly at its expiry, never polled then", async
   const expiresAt = (await stateOf(service, cookie)).connection.signIn?.expiresAt ?? 0;
   expect(expiresAt).toBe(T0 + 900_000);
   await time.advance(expiresAt - T0 - 1);
-  expect((await stateOf(service, cookie)).connection.signIn?.userCode).toBe("FAKE-0001");
+  expect((await stateOf(service, cookie)).connection.signIn?.userCode).toBe("D054-61DC");
   await time.advance(1);
   await eventually(
     () => snapshot(service, cookie),
     (s) => s.connection.signIn === null,
   );
-  expect(Math.max(...host.codePolls("FAKE-0001"))).toBeLessThan(expiresAt);
+  expect(Math.max(...host.codePolls("D054-61DC"))).toBeLessThan(expiresAt);
 });
 
 /** A host whose polls of the code are held until `letGo`: GitHub slow to answer one (or a rate limit held there). */
@@ -619,7 +597,7 @@ test("a code never entered ends at its expiry even while GitHub hasn't answered 
   );
   host.letGo();
   await time.advance(60_000);
-  expect((await stateOf(service, cookie)).connection).toMatchObject({ signIn: null, way: null });
+  expect((await stateOf(service, cookie)).connection).toMatchObject({ signIn: null, person: null });
 });
 
 /** A host whose device code is asked of it and held until `letGo`: GitHub slow to give one. */
@@ -657,88 +635,10 @@ test("a sign-in cancelled while GitHub gives its code shows no code once it come
   host.letGo();
   expect((await started).status).toBe(200);
   expect((await stateOf(service, cookie)).connection.signIn).toBeNull();
-  host.enterCode("FAKE-0001");
+  host.enterCode("D054-61DC");
   await time.advance(30_000);
-  expect(host.codePolls("FAKE-0001")).toEqual([]);
-  expect((await stateOf(service, cookie)).connection.way).toBeNull();
-});
-
-/** A host that holds its answer describing an App until `letGo`: "Use your own App" checking it, slowly. */
-class SlowApp extends FakeGitHost {
-  private release = () => {};
-  private readonly answered = new Promise<void>((resolve) => {
-    this.release = resolve;
-  });
-  private heard = () => {};
-  readonly asked = new Promise<void>((resolve) => {
-    this.heard = resolve;
-  });
-
-  letGo(): void {
-    this.release();
-  }
-
-  override async app(...args: Parameters<FakeGitHost["app"]>): ReturnType<FakeGitHost["app"]> {
-    this.heard();
-    await this.answered;
-    return super.app(...args);
-  }
-}
-
-test("a sign-in entered while your own App is being adopted: the own App wins, nothing kept, the code gone", async () => {
-  const dir = home();
-  const keychain = memoryKeychain();
-  const time = new DemoClock({ at: T0 });
-  const host = new SlowApp({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1], clock: time });
-  const { service } = await start({
-    home: dir,
-    host,
-    time,
-    github: onShared(host, dir, keychain),
-    setup: AT_GITHUB,
-  });
-  const cookie = await openApp(service);
-  expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
-  const { id, key } = host.credentials();
-  const used = post(service, cookie, { type: "connection.useApp", appId: id, key });
-  await host.asked;
-  host.enterCode("FAKE-0001");
-  await time.advance(5_000);
-  expect(host.codePolls("FAKE-0001")).toEqual([T0 + 5_000]);
-  host.letGo();
-  expect((await used).status).toBe(200);
-  const own = await eventually(
-    () => snapshot(service, cookie),
-    (s) => s.connection.way === "own" && s.connection.signIn === null,
-  );
-  expect(own.connection).toMatchObject({ app: { id }, bot: SHARED_BOT.login });
-  await time.advance(10_000);
-  expect((await stateOf(service, cookie)).connection.way).toBe("own");
-  expect(await signInStore({ home: dir, keychain, userOnly }).read()).toEqual({ state: "none" });
-});
-
-test("your own App adopted while a sign-in waits ends the sign-in: its code gone, never polled again", async () => {
-  const dir = home();
-  const time = new DemoClock({ at: T0 });
-  const host = sharedHost(time);
-  const { service } = await start({
-    home: dir,
-    host,
-    time,
-    github: onShared(host, dir, memoryKeychain()),
-    setup: AT_GITHUB,
-  });
-  const cookie = await openApp(service);
-  await post(service, cookie, { type: "connection.signIn" });
-  const { id, key } = host.credentials();
-  expect((await post(service, cookie, { type: "connection.useApp", appId: id, key })).status).toBe(200);
-  await eventually(
-    () => snapshot(service, cookie),
-    (s) => s.connection.way === "own" && s.connection.signIn === null,
-  );
-  host.enterCode("FAKE-0001");
-  await time.advance(30_000);
-  expect(host.codePolls("FAKE-0001")).toEqual([]);
+  expect(host.codePolls("D054-61DC")).toEqual([]);
+  expect((await stateOf(service, cookie)).connection.person).toBeNull();
 });
 
 /**
@@ -782,11 +682,11 @@ async function signedInNotInstalled(dir: string, time: DemoClock, host: FakeGitH
   });
   const cookie = await openApp(first.service);
   await post(first.service, cookie, { type: "connection.signIn" });
-  host.enterCode("FAKE-0001");
+  host.enterCode("D054-61DC");
   await time.advance(5_000);
   await eventually(
     () => snapshot(first.service, cookie),
-    (s) => s.connection.way === "shared" && s.connection.signIn === null,
+    (s) => s.connection.person !== null && s.connection.signIn === null,
   );
   await first.service.stop();
 }
@@ -812,7 +712,7 @@ test("signed in before the install, then the keychain lost: the setup says signe
     () => snapshot(service, cookie),
     (s) => s.connection.cause?.kind === "signed-out",
   );
-  expect(out.connection).toMatchObject({ way: "shared", person: OWNER });
+  expect(out.connection).toMatchObject({ person: OWNER });
   expect(out.setup.github).toBe("waiting-for-install");
 
   expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
@@ -823,7 +723,7 @@ test("signed in before the install, then the keychain lost: the setup says signe
     () => snapshot(service, cookie),
     (s) => s.connection.signIn === null && s.connection.cause === null,
   );
-  expect(back.connection).toMatchObject({ way: "shared", person: OWNER });
+  expect(back.connection).toMatchObject({ person: OWNER });
   expect((await signInStore({ home: dir, keychain, userOnly }).read()).state).toBe("kept");
 
   host.install();
@@ -832,31 +732,4 @@ test("signed in before the install, then the keychain lost: the setup says signe
     () => snapshot(service, cookie),
     (s) => s.setup.github === "done" && s.connection.state === "connected",
   );
-});
-
-test("signed in before the install, then the keychain lost: Use your own App moves it to own", async () => {
-  const dir = home();
-  const time = new DemoClock({ at: T0 });
-  const host = sharedHost(time, { installed: false });
-  await signedInNotInstalled(dir, time, host);
-  const { service } = await start({
-    home: dir,
-    host,
-    time,
-    github: keeperChecked(host, dir, memoryKeychain()),
-    idsFrom: 100,
-  });
-  const cookie = await openApp(service);
-  await time.advance(5_000);
-  await eventually(
-    () => snapshot(service, cookie),
-    (s) => s.connection.cause?.kind === "signed-out",
-  );
-  const { id, key } = host.credentials();
-  expect((await post(service, cookie, { type: "connection.useApp", appId: id, key })).status).toBe(200);
-  const own = await eventually(
-    () => snapshot(service, cookie),
-    (s) => s.connection.way === "own",
-  );
-  expect(own.connection).toMatchObject({ app: { id }, person: null });
 });

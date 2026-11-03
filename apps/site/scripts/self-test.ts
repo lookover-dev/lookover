@@ -296,7 +296,7 @@ const motionCases: Case[] = [
     name: "a chevron that turns and colours that fade with the theme under reduced motion",
     check: movingPages,
     files: { "site.css": `${chevron} ${transitions}`, "index.html": usedPage() },
-    expected: ["/: transition of transform, transition of background-color running under reduced motion"],
+    expected: ["/: transition of background-color, transition of transform running under reduced motion"],
   },
   {
     name: "an endless animation and a script's intro that ignore reduced motion",

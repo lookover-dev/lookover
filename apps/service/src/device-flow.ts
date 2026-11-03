@@ -1,6 +1,7 @@
 // "Sign in with GitHub", and Sign in again (ADR 0066): GitHub's device flow, run by the service. A start asks GitHub
 // for a device code and shows it on the connection (`signIn`: the code, GitHub's page, its expiry); then the code is
-// polled on the room's timers every `interval` GitHub gave, 5 s more each time GitHub asks to slow down, until the
+// polled on the room's timers every `interval` GitHub gave; when GitHub asks to slow down, at the interval its answer
+// carries, or 5 s more when it carries none, until the
 // person enters it, refuses it, the code expires (it ends then, on a timer of its own, whatever a poll is doing; never
 // polled past it: a code still shown past its expiry was entered), or the sign-in is
 // cancelled. Entered, the code gives the tokens and is spent: it is never polled again. Whose they are is asked of
@@ -28,22 +29,19 @@ import { said } from "./said.ts";
 import type { Timers } from "./timers.ts";
 
 export interface DeviceFlowDeps {
-  /** GitHub's side of it; null when no shared App is offered (demo mode's worlds without one). */
-  host: HostSignIn | null;
+  /** GitHub's side of it: the shared App's sign-in. */
+  host: HostSignIn;
   timers: Timers;
   clock: { now(): number };
   emit(body: EventBody): void;
-  /** Whether Lookover runs as its own App now (ADR 0066: it wins), so no sign-in is taken. */
-  ownApp(): boolean;
-  /** The sign-in made: kept and held. What it throws is logged, the sign-in not kept (the own App won meanwhile). */
+  /** The sign-in made: kept and held. What it throws is logged, the sign-in not kept (the store refused it). */
   signedIn(signIn: SignIn): Promise<void>;
   log(line: string): void;
 }
 
 export interface DeviceFlow {
   /**
-   * A device code asked of GitHub and shown, then polled. Refused while one waits, while Lookover runs as its own App,
-   * or with no shared App here. Throws GitHub's refusal of the code (`HostError`), nothing shown then.
+   * A device code asked of GitHub and shown, then polled. Refused while one waits. Throws GitHub's refusal of the code (`HostError`), nothing shown then.
    */
   start(): Promise<"ok" | { refused: SignInStartRefusal }>;
   /**
@@ -216,8 +214,6 @@ export function createDeviceFlow(d: DeviceFlowDeps): DeviceFlow {
   return {
     start: async () => {
       const { host } = d;
-      if (host === null) return { refused: "unavailable" };
-      if (d.ownApp()) return { refused: "own-app" };
       if (waiting !== null || starting !== null) return { refused: "pending" };
       const asked = { cancelled: false };
       starting = asked;

@@ -53,6 +53,7 @@ function finding(n: number, status: FindingStatus = "open", extra: Partial<Findi
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: null,
     status,
     posted: true,
     commented: true,

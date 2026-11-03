@@ -1,7 +1,6 @@
 // What the band's Refused line and the toast say of a command the service refused: "Lookover couldn't do that."
 // and the reason the UI knows from the status and the service's answer (spec #105), never the service's own words.
 import { expect, test } from "bun:test";
-import type { UseAppRefusal } from "@lookover/contracts";
 import { Refused } from "../api/http.ts";
 import { refusalOf, refusalText, refusalToast, sessionLost } from "./refusal.ts";
 
@@ -85,59 +84,16 @@ test("a settings command refused is said by the code the service sent, never by 
   });
 });
 
-test("an existing App or a new one refused is said by the data the service sent, which the GitHub step shows too (ADR 0053)", () => {
-  const useApp: UseAppRefusal = { kind: "missing-permissions", missing: ["checks"] };
-  const refused = refusalOf(new Refused(409, { error: "the App lacks permissions", useApp }));
-  expect(refused).toEqual({ status: 409, error: "the App lacks permissions", useApp });
-  expect(refusalText(refused).detail).toBe(
-    "This App lacks Checks: write. Give it on GitHub, then try again.",
-  );
-  // An organisation's App, as the person's own `gh` said (ADR 0059).
-  const taken: UseAppRefusal[] = [
-    { kind: "gh-missing" },
-    { kind: "gh-signed-out" },
-    { kind: "gh-unanswered", why: "sso" },
-    { kind: "not-a-member", organisation: "acme", person: "mira", invited: true },
-    { kind: "another-person", person: "otto", kept: "mira" },
-  ];
-  for (const useApp of taken)
-    expect(refusalOf(new Refused(409, { error: "x", useApp })).useApp).toEqual(useApp);
-  expect(
-    refusalText(
-      refusalOf(
-        new Refused(409, {
-          error: "x",
-          useApp: { kind: "not-a-member", organisation: "acme", person: "sasensi", invited: false },
-        }),
-      ),
-    ).detail,
-  ).toBe(
-    "gh is signed in as sasensi, who isn't a member of acme. Sign gh in as a member, or ask an admin of acme to add you.",
-  );
-  const named = refusalOf(new Refused(409, { error: "x", useApp: { kind: "live-config" } }));
-  expect(refusalText(named).detail).toBe("live.json names this App: live runs don't change it.");
-  const live = refusalOf(new Refused(409, { error: "x", createApp: { kind: "live-config" } }));
-  expect(live).toEqual({ status: 409, error: "x", createApp: { kind: "live-config" } });
-  expect(refusalText(live).detail).toBe("Live runs use the test App; they never create one.");
-  // Data of another shape, or a kind the UI doesn't know, is not taken.
-  const odd = [
-    { useApp: { kind: "stolen" } },
-    { useApp: "gh-missing" },
-    { useApp: { kind: "organisation" } },
-    { useApp: { kind: "gh-unanswered" } },
-    { useApp: { kind: "gh-unanswered", why: "weather" } },
-    { useApp: { kind: "not-a-member", organisation: "acme", person: "mira" } },
-    { useApp: { kind: "not-a-member", organisation: 7, person: "mira", invited: false } },
-    { useApp: { kind: "another-person", person: "otto" } },
-    { useApp: { kind: "missing-permissions", missing: ["admin"] } },
-    { useApp: { kind: "missing-permissions" } },
-    { createApp: "nope" },
-    { createApp: "already-made" },
-    { createApp: { kind: "nope" } },
-    { createApp: { kind: "gh-unanswered" } },
-  ];
-  for (const data of odd)
-    expect(refusalOf(new Refused(409, { error: "x", ...data }))).toEqual({ status: 409, error: "x" });
+test("an App of its own refused (`useApp`, `createApp`) is no longer read: the generic line, as any other conflict (ADR 0073)", () => {
+  for (const data of [
+    { useApp: { kind: "missing-permissions", missing: ["checks"] } },
+    { useApp: { kind: "not-a-key" } },
+    { createApp: { kind: "already-made" } },
+  ]) {
+    const refused = refusalOf(new Refused(409, { error: "x", ...data }));
+    expect(refused).toEqual({ status: 409, error: "x" });
+    expect(refusalToast(refused)).toBe("Lookover couldn't do that.");
+  }
 });
 
 test("Sign in with GitHub refused (ADR 0066): why, from the service's `signIn` or GitHub giving no code; said in place, no toast", () => {
@@ -158,6 +114,12 @@ test("Sign in with GitHub refused (ADR 0066): why, from the service's `signIn` o
     "signIn",
   );
   expect(refusalOf(new Refused(409, { error: "x", signIn: "weather" }))).toEqual({ status: 409, error: "x" });
+  // Every service offers the shared App: "unavailable" is no reason a sign-in is refused any more.
+  expect(refusalOf(new Refused(409, { error: "x", signIn: "unavailable" }), signIn)).toEqual({
+    status: 409,
+    error: "x",
+    command: signIn,
+  });
 });
 
 test("Ask to install refused (ADR 0067): why, from the service's `askToInstall`, in the toast; a kind the UI doesn't know is not taken", () => {
@@ -170,7 +132,7 @@ test("Ask to install refused (ADR 0067): why, from the service's `askToInstall`,
     askToInstall: "owner",
     command: ask,
   });
-  expect(said("not-shared")).toBe("Lookover isn't signed in to GitHub here.");
+  expect(said("signed-out")).toBe("Lookover isn't signed in to GitHub here.");
   expect(said("not-named")).toBe("That account isn't waiting to be installed any more.");
   expect(said("owner")).toBe("You own that account: install it there yourself.");
   expect(refusalToast(refusalOf(new Refused(409, { error: "x", askToInstall: "owner" }), ask))).toBe(
@@ -182,11 +144,7 @@ test("Ask to install refused (ADR 0067): why, from the service's `askToInstall`,
   });
 });
 
-test("an App refused is said once, in place by the GitHub step or the form: no toast; any other refusal has its toast", () => {
-  const useApp = refusalOf(new Refused(409, { error: "x", useApp: { kind: "not-a-key" } }));
-  expect(refusalToast(useApp)).toBeNull();
-  const createApp = refusalOf(new Refused(409, { error: "x", createApp: { kind: "already-made" } }));
-  expect(refusalToast(createApp)).toBeNull();
+test("any refusal but a sign-in's on setup has its toast", () => {
   const loading = refusalOf(new Refused(409, { error: "loading" }));
   expect(refusalToast(loading)).toBe("Lookover couldn't do that. A scenario is loading.");
 });

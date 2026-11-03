@@ -76,7 +76,6 @@ test("a review asked for while paused waits, deferred 'paused', and starts by it
     "run.posting",
     "run.posting",
     "run.posting",
-    "run.posting",
     "round.finished",
   ]);
   expect(resumed[0]).toMatchObject({ patch: { paused: null } });
@@ -106,7 +105,6 @@ test("a pause for an hour ends at its time with nobody asking, and the review wa
     "run.started",
     "run.step",
     "run.step",
-    "run.posting",
     "run.posting",
     "run.posting",
     "run.posting",

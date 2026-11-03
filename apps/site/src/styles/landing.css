@@ -353,7 +353,7 @@ section.lined {
   grid-template-columns: var(--h-sm) minmax(0, 1fr);
   gap: var(--s-3);
 }
-/* the person signed in: a round with their initial; Lookover's badge, the icon file, on the summary's */
+/* who posted: a round with their initial */
 .pr .av {
   position: relative;
   display: flex;
@@ -368,15 +368,6 @@ section.lined {
   font-size: var(--t-13);
   font-weight: 600;
 }
-.pr .av .badge {
-  position: absolute;
-  right: calc(-1 * var(--s-1));
-  bottom: calc(-1 * var(--s-1));
-  display: flex;
-  width: var(--s-4);
-  height: var(--s-4);
-}
-.pr .badge svg,
 .pr .check .ico svg {
   width: 100%;
   height: 100%;
@@ -408,9 +399,35 @@ section.lined {
   flex-direction: column;
   gap: var(--s-2);
 }
-.pr .cm-b .found-by {
+.pr .cm-b hr {
+  border: 0;
+  border-top: var(--line-w) solid var(--gh-border);
+  margin: 0;
+}
+/* Lookover's status block (ADR 0074): its heading as GitHub sets an h3, then its line */
+.pr .block-head {
+  font-size: var(--t-16);
+  font-weight: 600;
+}
+.pr .block-line {
   font-size: var(--t-12);
   color: var(--gh-muted);
+}
+/* the wordmark opening each post: the theme's file, on the text's line as GitHub's `absmiddle` */
+.pr .wm {
+  height: 1.3em;
+  width: auto;
+  vertical-align: middle;
+}
+.pr .block-head .wm {
+  height: 1.6em;
+}
+.pr .wm.on-light,
+:root[data-theme="light"] .pr .wm.on-dark {
+  display: none;
+}
+:root[data-theme="light"] .pr .wm.on-light {
+  display: inline;
 }
 .pr .diff {
   font: var(--t-12) / 1.6 var(--mono);
@@ -446,12 +463,6 @@ section.lined {
 .pr .diff .ln.hl span:last-child {
   background: var(--acc-soft);
   box-shadow: inset 3px 0 0 var(--acc);
-}
-.pr .sev {
-  font: 500 11px / 1 var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--acc-text);
 }
 .pr .thread {
   border-top: var(--line-w) solid var(--gh-border);

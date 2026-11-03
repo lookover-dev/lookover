@@ -1,10 +1,9 @@
 // Port: the Git host as the coding agent sees it, with its own login (ADR 0021, ADR 0043). `lookover wait`
-// (`agent-cli`) reads and writes through it with the agent's token, never with the App's key: the token's own
-// account (ADR 0066), the open change
-// of a branch, a change's head, the `Lookover` checks of a commit from one App, the change's conversation
-// comments with their reactions, and a comment written as the agent; Lookover's review threads, a reply in one
-// and resolving one (ADR 0052: the App can't resolve, the agent's login can). `agent-cli` holds the real adapter
-// (GitHub over HTTPS, GraphQL for the threads); `testkit`'s `FakeGitHost.asAgent` is the fake, over the same
+// (`agent-cli`) reads and writes through it with the agent's own token, never the person's sign-in: the token's own
+// account (ADR 0066), the open change of a branch, a change's head, the `Lookover` checks of a commit from one App, the
+// change's conversation comments with their reactions, and a comment written as the agent; Lookover's review threads, a
+// reply in one and resolving one (ADR 0052: the App can't resolve, the agent's login can). `agent-cli` holds the real
+// adapter (GitHub over HTTPS, GraphQL for the threads); `testkit`'s `FakeGitHost.asAgent` is the fake, over the same
 // memory the App's ports see.
 // It reports what the host shows; `wait` decides what it means (which comment is a request, which check counts,
 // which reply is a claim).
@@ -73,13 +72,13 @@ export interface AgentHost {
   comment(change: ChangeRef, body: string): Promise<string>;
   /**
    * Lookover's review threads on the change, oldest first: those whose root comment is the App `app`'s (its slug:
-   * the App's bot) or, given `person` (a numeric id), that person's, whom the App posts as on the shared App (ADR
-   * 0066), and holds a finding marker, resolved and outdated ones included. Each reply after the root, oldest first,
+   * the App's bot) or the person `person`'s (a numeric id), whom the App posts as (ADR 0066, 0073), and holds a
+   * finding marker, resolved and outdated ones included. Each reply after the root, oldest first,
    * whoever wrote it, the App's own included (`author.bot`, its login `<slug>[bot]` as REST names it; a person's
    * reply is `bot: false`); a reply by a deleted account is left out. Throws `HostError("not_found")` for a change
    * that isn't one.
    */
-  threads(change: ChangeRef, app: string, person?: number): Promise<AgentThread[]>;
+  threads(change: ChangeRef, app: string, person: number): Promise<AgentThread[]>;
   /**
    * Replies as the token's account in the thread holding the change's review comment `commentId`: a reply's id
    * files it under that thread's root, as GitHub does. Returns the reply's id. Throws `HostError("too_large")` over

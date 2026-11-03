@@ -1,12 +1,5 @@
-// What the adapter's tests share: GitHub's API stubbed as a list of routes, a throwaway App key that signs real
-// JWTs, and the checks GitHub makes of a JWT. Imported by tests only.
-import { createPublicKey, createVerify, generateKeyPairSync } from "node:crypto";
-
-// A throwaway key: the tests sign real JWTs with it, and never see the App's.
-const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-export const KEY = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
-export const APP = { id: 5202093, privateKey: KEY };
-const PUBLIC_KEY = createPublicKey(privateKey).export({ type: "spki", format: "pem" }).toString();
+// What the adapter's tests share: GitHub's API stubbed as a list of routes, and a route answering one token only.
+// Imported by tests only.
 
 export type Call = {
   method: string;
@@ -50,32 +43,6 @@ export function stubGitHub(...routes: Route[]) {
 }
 
 export const AT = Date.UTC(2026, 9, 6, 12, 0, 0);
-export const HOUR = 3_600_000;
-export const iso = (ms: number) => new Date(ms).toISOString();
-
-/** The claims of a JWT whose signature the App's public key accepts, or `null` for anything else. */
-export function verifiedClaims(authorization: string): Record<string, unknown> | null {
-  const [, jwt] = authorization.split(" ");
-  const [header, claims, signature] = (jwt ?? "").split(".");
-  if (!header || !claims || !signature) return null;
-  const ok = createVerify("RSA-SHA256")
-    .update(`${header}.${claims}`)
-    .verify(PUBLIC_KEY, signature, "base64url");
-  return ok ? JSON.parse(Buffer.from(claims, "base64url").toString()) : null;
-}
-
-/**
- * A JWT GitHub takes at `now`: the App's own signature and id (the spike App's unless `appId` is given), issued
- * already and not yet expired, for ten minutes at most.
- */
-export function acceptedJwt(authorization: string, now: number, appId = 5202093): boolean {
-  const claims = verifiedClaims(authorization);
-  if (claims === null || claims.iss !== String(appId)) return false;
-  const { iat, exp } = claims;
-  if (typeof iat !== "number" || typeof exp !== "number") return false;
-  const nowS = Math.floor(now / 1000);
-  return iat <= nowS && exp > nowS && exp - iat <= 600;
-}
 
 /** A route that answers only to its token: with another one, the stub falls through to its 404. */
 export const withToken =

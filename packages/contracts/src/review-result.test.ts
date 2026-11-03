@@ -311,7 +311,7 @@ describe("lookover.review-result/v1", () => {
     expect(reviewResultV1.safeParse({ ...reviewResultExample, findings: [inline, ...rest] }).success).toBe(
       true,
     );
-    const summary = { ...inline, placement: "summary" };
+    const summary = { ...inline, placement: "status" };
     const parsed = reviewResultV1.safeParse({ ...reviewResultExample, findings: [summary, ...rest] });
     expect(parsed.error?.issues[0]?.path).toEqual(["findings", 0, "placed"]);
   });

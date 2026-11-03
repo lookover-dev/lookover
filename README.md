@@ -23,8 +23,8 @@ Lookover is in 0.x: it works, and it changes. [What it doesn't do yet](#what-it-
 
 - **Reviews each pull request you open,** when it is ready for review. Optionally after every push, when you comment `/lookover review`, or when you click "Review now" in the app.
 - **Finds, then confirms.** One AI looks for problems, the other checks each one before it is posted. Use Claude, ChatGPT or both.
-- **Posts one review on GitHub:** inline comments placed on the diff, one summary comment that stays up to date, and a check on each commit with its findings in a form a program can read.
-- **Reads the threads on the next round.** A finding you fixed has its thread resolved; a finding is never posted twice; a reply you wrote is answered.
+- **Posts at most one review a round on GitHub:** its findings on the lines of the diff, its status at the end of the pull request's description, kept up to date, and a check on each commit with its findings in a form a program can read.
+- **Reads the threads on the next round.** A finding you fixed is verified, and `lookover wait` resolves its thread; a finding is never posted twice; a reply you wrote is answered.
 - **Follows your rules:** `REVIEW.md`, `AGENTS.md` and `CLAUDE.md`, read from the default branch.
 - **Shows what is happening** in an app in your browser: the queue, each review and its rounds, each AI and its sign-in, the logs, and the settings.
 
@@ -55,7 +55,7 @@ Lookover starts in the background and opens in your browser. Close the terminal 
 The setup takes a few minutes, one step at a time:
 
 1. **AI.** Sign in to Claude, Codex or both.
-2. **GitHub.** Sign in with GitHub: enter the code Lookover shows on GitHub's page, then install Lookover Dev on your account or your organisation and pick the repositories it may see. Lookover posts its reviews as you, each opening with “Lookover”. An App of your own is the [second way in](https://lookover.dev/docs/setup/#use-your-own-app), posting as itself: use it when your organisation won't install a third-party App, when you want a bot of your own, or when your data folder was set up with your own App before.
+2. **GitHub.** Sign in with GitHub: enter the code Lookover shows on GitHub's page, then install Lookover Dev on your account or your organisation and pick the repositories it may see. Lookover posts its reviews as you, each comment opening with Lookover's wordmark.
 3. **Repositories.** Pick the ones to review.
 4. **First review.** Pick an open pull request, or preview a review that posts nothing.
 5. **Your coding agent.** Install the skill, below.
@@ -114,11 +114,11 @@ See the [latest release](https://github.com/lookover-dev/lookover/releases/lates
 
 ## Security
 
-- **What runs where.** Lookover runs on your computer, as you. It reviews with the official `claude` and `codex` CLIs, signed in through their own flows: Lookover never reads your subscription's tokens. It talks to GitHub, and to nothing else: no telemetry, no server of ours. On GitHub it acts as you, through Lookover Dev, the App you sign in to: its token reaches only what both you and the App may reach. Lookover reads your organisations from your own `gh` when it is signed in as you. With your own App, it acts as that App instead.
+- **What runs where.** Lookover runs on your computer, as you. It reviews with the official `claude` and `codex` CLIs, signed in through their own flows: Lookover never reads your subscription's tokens. It talks to GitHub, and to nothing else: no telemetry, no server of ours. On GitHub it acts as you, through Lookover Dev, the App you sign in to: its token reaches only what both you and the App may reach. Lookover reads your organisations from your own `gh` when it is signed in as you.
 - **What the AI may do.** Each review runs in a read-only sandbox, on a checkout of the pull request. On Windows, Codex's sandbox isn't elevated: accepted because Codex reviews only your own changes. Hooks, MCP servers and settings that a pull request brings are turned off. No GitHub token reaches the model.
-- **No private key.** Lookover Dev has none: none was ever generated, and nobody holds one. An organisation that installs it trusts the `lookover-dev` account on GitHub.
-- **What it posts.** The review, its inline comments, the summary comment and the check, on the pull request it reviewed. Your teammates see your review written by you, opening with “Lookover”, a summary with Lookover's badge, and a Lookover check. With your own App, they are posted as the App. As you, when your coding agent runs them: `lookover wait`'s `/lookover review` comment and the threads it resolves once fixed, and `lookover reply`'s answers on a thread. Secrets in a known shape are taken out of what it posts and of its logs.
-- **What it keeps.** Everything is in one data folder on your computer: the reviews, the settings, the logs. Your sign-in with GitHub (or your own App's private key) is encrypted there, and the key that opens it is in your system's credential store. With no credential store (on some Linux systems), it is kept unencrypted in a file only you can open.
+- **No private key.** Lookover Dev has none: none was ever generated, and nobody holds one. An organisation that installs it trusts the `lookover-dev` account on GitHub, which could make one ([what that means](https://lookover.dev/docs/security/)).
+- **What it posts.** The review, its line comments, its status in the description and the check, on the pull request it reviewed. Your teammates see your review written by you, each comment opening with Lookover's wordmark, and a Lookover check. In the description Lookover rewrites only its own part, after your text. As you, when your coding agent runs them: `lookover wait`'s `/lookover review` comment and the threads it resolves once settled (fixed, withdrawn or dismissed), and `lookover reply`'s answers on a thread. Secrets in a known shape are taken out of what it posts and of its logs.
+- **What it keeps.** Everything is in one data folder on your computer: the reviews, the settings, the logs. Your sign-in with GitHub is encrypted there, and the key that opens it is in your system's credential store. With no credential store (on some Linux systems), it is kept unencrypted in a file only you can open.
 - **Forks are never reviewed by themselves,** so a stranger's code doesn't reach an AI unless you ask.
 
 Found a vulnerability? Please report it privately, as [SECURITY.md](https://github.com/lookover-dev/lookover/blob/main/SECURITY.md) says, never in a public issue.
@@ -128,9 +128,9 @@ Found a vulnerability? Please report it privately, as [SECURITY.md](https://gith
 1. In Settings › Your coding agent, "Remove the skill".
 2. In Settings, turn off "Start at login".
 3. `lookover stop`, then `npm uninstall -g lookover`.
-4. Delete Lookover's entry in your system's credential store: its name is `key.entry` in `github/sign-in.json` (or `github/app.json` with your own App), in the data folder (`lookover status` names the folder). With `"kept": "file"` there, there is no entry: the secret is a file in that folder.
+4. Delete Lookover's entry in your system's credential store: its name is `key.entry` in `github/sign-in.json`, in the data folder (`lookover status` names the folder); a data folder an earlier version set up with an App of your own also holds one in `github/app.json`. With `"kept": "file"` there, there is no entry: the secret is a file in that folder.
 5. Delete the data folder.
-6. On GitHub, under Settings › Applications › Authorized GitHub Apps, revoke Lookover Dev. With your own App, delete the App if you no longer want it.
+6. On GitHub, under Settings › Applications › Authorized GitHub Apps, revoke Lookover Dev.
 
 ## Contributing
 

@@ -1,37 +1,25 @@
-// The ports on a session that posts as a person (ADR 0066's `shared` way): intake and the writer ask the session who
-// posts, never the bot, and `findCheck` filters by the session's App. The payloads are GitHub's as spike 20 recorded
+// The ports on the person's session (ADR 0066, ADR 0073): intake and the writer ask the session who posts, and
+// `findCheck` filters by the session's App. The payloads are GitHub's as spike 20 recorded
 // them (`spikes/20-shared-app/results.json`): a review, its line comments and replies posted with the person's
-// token are the person's, with no `performed_via_github_app`; the summary, an issue comment, carries the App there.
+// token are the person's, with no `performed_via_github_app`.
 import { expect, test } from "bun:test";
-import {
-  commitSha,
-  FINDING_MARKER,
-  findingId,
-  REVIEW_MARKER,
-  SHARED_APP,
-  SUMMARY_MARKER,
-} from "@lookover/contracts";
-import { AT, type Call, type Route, stubGitHub, withToken } from "./github.test-support.ts";
+import { commitSha, FINDING_MARKER, findingId, REVIEW_MARKER, SHARED_APP } from "@lookover/contracts";
+import { AT, type Route, stubGitHub, withToken } from "./github.test-support.ts";
 import { createGitHub, type Session } from "./index.ts";
 
 const REPO = { owner: "lookover-dev", name: "lookover-sandbox" };
 const CHANGE = { repo: REPO, number: 2 };
 const PULL = "/repos/lookover-dev/lookover-sandbox/pulls/2";
-const ISSUE = "/repos/lookover-dev/lookover-sandbox/issues/2";
 /** The signed-in person, as spike 20's `GET /user` gave them. */
 const PERSON = { id: 11247504, login: "sasensi" };
 /** A teammate on the same pull request. */
 const TEAMMATE = { id: 5550001, login: "teammate" };
 const TOKEN = "ghu_person";
-/** `performed_via_github_app` as GitHub gives it on an issue comment the App's user token posted. */
-const VIA_SHARED: Via = { id: SHARED_APP.id, slug: SHARED_APP.slug, name: "Lookover Dev" };
-const VIA_OTHER: Via = { id: 4242, slug: "someone-elses-app", name: "Someone else's App" };
-
 /** A session that posts as the person: one token for every repository, the shared App's id. */
 const personSession: Session = {
   appId: SHARED_APP.id,
   withToken: (_repo, call) => call(TOKEN),
-  poster: () => Promise.resolve({ ...PERSON, bot: false }),
+  poster: () => Promise.resolve(PERSON),
 };
 
 function ports(...routes: Route[]) {
@@ -39,67 +27,6 @@ function ports(...routes: Route[]) {
   const github = createGitHub({ session: personSession, fetch: api.fetch, clock: { now: () => AT } });
   return { calls: api.calls, writer: github.writer, intake: github.intake };
 }
-
-type Via = { id: number; slug: string; name: string };
-type IssueComment = {
-  id: number;
-  user: { id: number; login: string };
-  body: string;
-  performed_via_github_app: Via | null;
-};
-
-/** The conversation, created and edited as GitHub does with the person's token: the App named on what it posts. */
-function conversation(comments: IssueComment[]): Route {
-  let next = 900;
-  const text = (call: Call) =>
-    typeof call.body === "object" &&
-    call.body !== null &&
-    "body" in call.body &&
-    typeof call.body.body === "string"
-      ? call.body.body
-      : "";
-  return withToken(TOKEN, (call) => {
-    if (call.method === "GET" && call.path === `${ISSUE}/comments?per_page=100`)
-      return { status: 200, body: comments };
-    if (call.method === "POST" && call.path === `${ISSUE}/comments`) {
-      const created = { id: next++, user: PERSON, body: text(call), performed_via_github_app: VIA_SHARED };
-      comments.push(created);
-      return { status: 201, body: created };
-    }
-    const edit = /\/issues\/comments\/(\d+)$/.exec(call.path);
-    const edited = edit && comments.find((c) => c.id === Number(edit[1]));
-    if (call.method === "PATCH" && edited) {
-      edited.body = text(call);
-      return { status: 200, body: edited };
-    }
-    return undefined;
-  });
-}
-
-test("the summary on a person's session is theirs, holds the marker and names the App: one the person wrote by hand is not it", async () => {
-  const comments: IssueComment[] = [
-    // The person quoting the summary by hand: theirs, the marker in it, no App.
-    { id: 1, user: PERSON, body: `${SUMMARY_MARKER}\nQuoted by hand.`, performed_via_github_app: null },
-    // Through another App's token: theirs, the marker in it, another App.
-    { id: 2, user: PERSON, body: `${SUMMARY_MARKER}\nAnother App.`, performed_via_github_app: VIA_OTHER },
-    // A teammate's own Lookover summary: the shared App, the marker, someone else.
-    { id: 3, user: TEAMMATE, body: `${SUMMARY_MARKER}\nTheirs.`, performed_via_github_app: VIA_SHARED },
-  ];
-  const { writer, calls } = ports(conversation(comments));
-  const first = await writer.upsertSummary(CHANGE, `${SUMMARY_MARKER}\nRound 1: 1 open.`);
-  expect(first).toBe("900");
-  expect(await writer.upsertSummary(CHANGE, `${SUMMARY_MARKER}\nRound 2: 0 open.`)).toBe("900");
-  expect(comments.map((c) => [c.id, c.body])).toEqual([
-    [1, `${SUMMARY_MARKER}\nQuoted by hand.`],
-    [2, `${SUMMARY_MARKER}\nAnother App.`],
-    [3, `${SUMMARY_MARKER}\nTheirs.`],
-    [900, `${SUMMARY_MARKER}\nRound 2: 0 open.`],
-  ]);
-  expect(calls.filter((c) => c.method !== "GET").map((c) => [c.method, c.path])).toEqual([
-    ["POST", `${ISSUE}/comments`],
-    ["PATCH", "/repos/lookover-dev/lookover-sandbox/issues/comments/900"],
-  ]);
-});
 
 test("the review on a person's session is found as theirs, by its marker; a teammate's holding it is not", async () => {
   const marker = `${REVIEW_MARKER}round-1 -->`;

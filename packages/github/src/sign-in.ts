@@ -24,6 +24,13 @@ import { deviceCode, oauthAnswer, oauthRefusal, type oauthToken, parse, person }
 
 /** What GitHub asks a device flow's poll to add to its interval when it says `slow_down`. */
 const SLOW_DOWN_MS = 5_000;
+
+/**
+ * The interval after a `slow_down` (#476): the one GitHub's answer carries (its docs: "The error response includes
+ * the new interval that you must use"), never more; 5 s more on the grant's only when the answer carries none.
+ */
+const slowedDown = (grant: DeviceGrant, seconds: number | undefined): number =>
+  seconds === undefined ? grant.interval + SLOW_DOWN_MS : seconds * 1000;
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 const TOKEN_PATH = "/login/oauth/access_token";
 
@@ -120,7 +127,7 @@ export function createSignIn({ api, fetch, web, clock, secret }: SignInParts): H
           case "authorization_pending":
             return { kind: "pending", grant };
           case "slow_down":
-            return { kind: "slow-down", grant: { ...grant, interval: grant.interval + SLOW_DOWN_MS } };
+            return { kind: "slow-down", grant: { ...grant, interval: slowedDown(grant, answer.interval) } };
           case "expired_token":
             return { kind: "expired" };
           case "access_denied":

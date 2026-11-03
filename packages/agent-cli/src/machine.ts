@@ -65,7 +65,6 @@ export function realWorld(cwd: string, env: Env): World {
   return {
     host: () => Promise.resolve(createAgentHost({ token: agentToken(env) })),
     git: localGit(cwd, env),
-    env,
     clock: { now: () => Date.now() },
     sleep: (ms) => Bun.sleep(ms),
     out: (line) => process.stdout.write(`${line}\n`),

@@ -25,13 +25,13 @@ lookover feedback   # the findings waiting on you, each with its thread
 lookover reply F3 wont-fix "The value is checked by the caller."
 ```
 
-`wait`, `feedback` and `reply` run from the checkout of the repository the agent works on, and take the pull request from the current branch (`--pr N` names another). They read the App's name from Lookover's data folder, else take the shared App, Lookover's own. On another computer with your own App, Settings › GitHub gives the line to put in the agent's environment, `LOOKOVER_APP=<slug>`, or pass `--app <slug>`. Of that App's checks they read only your own account's, never a colleague's.
+`wait`, `feedback` and `reply` run from the checkout of the repository the agent works on, and take the pull request from the current branch (`--pr N` names another). Of the Lookover checks on a commit they read only your own account's, never a colleague's.
 
 ## Wait for the review
 
 After every push, `lookover wait` takes your commit from local git, asks for its review if nobody has, and waits for its check: up to 30 minutes (`--timeout`), and 3 minutes for Lookover to pick the request up (`--appear-timeout`). Then it says what to do next by its exit code. `--json` prints the findings that need you as one JSON document.
 
-When the round verified a finding fixed, `wait` resolves its thread with your login: the App can't. When you replied on a thread since the last round, `wait` asks again on the same commit, and waits for the round that answers your reply.
+Then `wait` resolves the threads of the findings it verified fixed or withdrew. It resolves them with your login, as Lookover doesn't resolve threads; a finding the owner dismissed counts as withdrawn. When you replied on a thread since the last round, `wait` asks again on the same commit, and waits for the round that answers your reply.
 
 | Exit | Meaning | What the agent does |
 |---|---|---|
@@ -44,6 +44,8 @@ When the round verified a finding fixed, `wait` resolves its thread with your lo
 | 9 | No review appeared | Lookover is probably not running: `lookover status` says. |
 | 10 | A newer commit was pushed | Runs `wait` again, on the new head. |
 | 1, 2 | An error, or a wrong call | Reads the message, fixes the call or tells you. |
+
+Lookover writes its status in the pull request's description, in a block after your text. An agent that rewrites the description keeps that block as it is, markers included: the skill says so. Without it, the status is gone until Lookover's next round writes it back.
 
 ## Read what waits on you
 
@@ -67,7 +69,7 @@ lookover reply F3 wont-fix "The caller checks the range: see jobs.ts:40."
 | `deferred` | Deferred: (later, elsewhere) |
 | `question` | Question: |
 
-Then run `lookover wait`: the next round reads the answer. A finding in the summary only has no thread, and `reply` refuses it. A blocking finding you won't fix is kept once, with Lookover's reason; the second time, you are asked (exit 4). `reply` exits 0 when posted, 1 on an error, 2 on a wrong call.
+Then run `lookover wait`: the next round reads the answer. A finding in the status block only, in the pull request's description, has no thread, and `reply` refuses it. A blocking finding you won't fix is kept once, with Lookover's reason; the second time, you are asked (exit 4). `reply` exits 0 when posted, 1 on an error, 2 on a wrong call.
 
 ## Without Lookover's command
 

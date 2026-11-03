@@ -41,7 +41,7 @@ Close the terminal whenever you like: it keeps running, and starts again each ti
 The setup takes a few minutes, one step at a time:
 
 1. **AI.** Sign in to Claude, Codex or both.
-2. **GitHub.** Sign in with GitHub: enter the code it shows on GitHub's page, then install Lookover Dev on your account or your organisation and pick the repositories it may see. Lookover posts its reviews as you, each opening with “Lookover”. [The setup](/docs/setup/#2-github) also says how to use an App of your own.
+2. **GitHub.** Sign in with GitHub: enter the code it shows on GitHub's page, then install Lookover Dev on your account or your organisation and pick the repositories it may see. Lookover posts its reviews as you, each comment opening with Lookover's wordmark. [The setup](/docs/setup/#2-github) says what each account's row means.
 3. **Repositories.** Pick the ones to review.
 4. **First review.** Pick an open pull request, or preview a review that posts nothing. Once Lookover has reviewed one by itself, go on, or review another: a preview is no longer offered.
 5. **Your coding agent.** Install the `lookover-review-loop` skill for Claude Code and Codex, so your agent waits for the review, fixes what it found, pushes, and asks again until nothing is left.

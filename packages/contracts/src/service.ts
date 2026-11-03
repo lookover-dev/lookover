@@ -4,7 +4,6 @@ import type { CodingAgent } from "./coding-agent.ts";
 import type { Connection } from "./connection.ts";
 import type { EngineId, EngineState } from "./engine.ts";
 import type { EngineUnusable } from "./engines-port.ts";
-import type { KeyProtection } from "./github-app.ts";
 import type { SettingsFileError } from "./settings.ts";
 
 /**
@@ -32,9 +31,6 @@ export type CheckItem =
       check: "connection";
       state: Connection["state"];
       cause: Connection["cause"];
-      bot: string | null;
-      /** How the App's key is kept (ADR 0053); null when Lookover keeps none. */
-      key: KeyProtection | null;
     }
   | {
       check: "service";

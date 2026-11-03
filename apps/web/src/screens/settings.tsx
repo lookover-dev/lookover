@@ -19,7 +19,6 @@ import {
   Card,
   Check,
   Code,
-  Disclosure,
   Empty,
   Group,
   Icon,
@@ -28,7 +27,6 @@ import {
   Notice,
   Row,
   Said,
-  SameWidth,
   SaveState,
   Segmented,
   SetRow,
@@ -39,12 +37,7 @@ import { type RepositoryGroupHead, repositoryGroups } from "../view-model/accoun
 import { AGENT_INTRO } from "../view-model/coding-agent.ts";
 import { agoSentence, plural } from "../view-model/format.ts";
 import { followLogs, logLinesShown } from "../view-model/logs.ts";
-import {
-  addRepositoryLink,
-  departedNotice,
-  NEW_KEY_TEXT,
-  repositoriesFoot,
-} from "../view-model/onboarding.ts";
+import { addRepositoryLink, departedNotice, repositoriesFoot } from "../view-model/onboarding.ts";
 import { differences, lastReviewAt, openChangeCount, repositoryLabel } from "../view-model/select.ts";
 import {
   pickOf,
@@ -56,16 +49,11 @@ import {
   settingValueText,
   WHEN_TEXT,
 } from "../view-model/settings.ts";
-import {
-  GITHUB_SETTINGS_TEXT,
-  type GitHubSettingsView,
-  githubSettings,
-  OWN_APP_LINK,
-} from "../view-model/sign-in.ts";
+import { GITHUB_SETTINGS_TEXT, type GitHubSettingsView, githubSettings } from "../view-model/sign-in.ts";
 import { offersStartThisOne, START_THIS_ONE, startAtLoginHelp } from "../view-model/start-at-login.ts";
 import { AgentRows } from "./coding-agent.tsx";
 import { HeldDetail, Page, Sentence, useSaving } from "./common.tsx";
-import { AccountAction, AccountsList, AgentAppLine, CodeActions, UseAppForm } from "./github-app.tsx";
+import { AccountAction, AccountsList, CodeActions } from "./github-app.tsx";
 
 /** The control for one setting, used for your defaults and for a repository's own value. */
 function SettingControl({
@@ -187,11 +175,7 @@ export function Settings() {
         </div>
       </Card>
       <Group title="GitHub">
-        {github.way === "shared" ? (
-          <SharedGitHub view={github} anchor={row("github")} />
-        ) : (
-          <OwnGitHub view={github} anchor={row("github")} />
-        )}
+        <GitHubGroup view={github} anchor={row("github")} />
       </Group>
       <Group title="Your coding agent">
         <div {...row("agent")}>
@@ -218,104 +202,47 @@ export function Settings() {
 }
 
 /**
- * Settings › GitHub on your own App: its line and its page on GitHub; a refused or lost key's fix in one place (ADR
- * 0070): the problem said in the row, "Add a new key" in "Open on GitHub"'s place and width, the row holding every
- * text it can say, and "Use an existing App" open when Settings opens on it. `anchor`, the row Settings' links point at.
+ * Settings › GitHub (ADR 0067, ADR 0073): who is signed in, with Sign in again, and the code it gives in place, also
+ * while connected (Cancel keeps the sign-in); the accounts list, setup's own. Nothing else: there is one way in.
+ * `anchor`, the row Settings' links point at.
  */
-function OwnGitHub({
+function GitHubGroup({
   view,
   anchor,
 }: {
-  view: Extract<GitHubSettingsView, { way: "own" }>;
-  anchor: { id: string; "data-target": true | undefined };
-}) {
-  const state = useAppState();
-  const { link } = view;
-  return (
-    <>
-      <Card className="setcard">
-        <div {...anchor}>
-          <SetRow
-            title="Your App"
-            help={<HeldDetail shown={view.text} details={view.held} />}
-            extra={<AgentAppLine connection={state.connection} />}
-          >
-            {link ? (
-              <SameWidth
-                shown={link.shown}
-                labels={{
-                  open: (
-                    <LinkButton size="sm" href={link.href}>
-                      {OWN_APP_LINK.open}
-                    </LinkButton>
-                  ),
-                  newKey: (
-                    <LinkButton size="sm" href={link.href}>
-                      {OWN_APP_LINK.newKey}
-                    </LinkButton>
-                  ),
-                }}
-              />
-            ) : null}
-          </SetRow>
-        </div>
-      </Card>
-      <Disclosure summary="Use an existing App" defaultOpen={view.newKey}>
-        <p>{NEW_KEY_TEXT}</p>
-        <UseAppForm appId={state.connection.app?.id ?? null} />
-      </Disclosure>
-    </>
-  );
-}
-
-/**
- * Settings › GitHub on the shared App (ADR 0067): who is signed in, with Sign in again, and the code it gives in place,
- * also while connected (Cancel keeps the sign-in); the accounts list, setup's own; Use your own App, which replaces the
- * sign-in. `anchor`, the row Settings' links point at.
- */
-function SharedGitHub({
-  view,
-  anchor,
-}: {
-  view: Extract<GitHubSettingsView, { way: "shared" }>;
+  view: GitHubSettingsView;
   anchor: { id: string; "data-target": true | undefined };
 }) {
   const send = useSend();
   const T = GITHUB_SETTINGS_TEXT;
   return (
-    <>
-      <Card className="setcard">
-        {/* Setup's sign-in row, not a SetRow: its detail and actions nest spans a SetRow would restyle. */}
-        <div {...anchor} className="signed-in-row">
-          <div>
-            <b>{T.title}</b>
-            <div className="t-small sign-in-detail code-whole">
-              <HeldDetail shown={view.signIn.text} details={view.signIn.held} />
-            </div>
-          </div>
-          <div className="sign-in-acts">
-            <CodeActions
-              code={view.signIn.code}
-              onCancel={() => send({ type: "connection.cancelSignIn" })}
-              idle={
-                <Button size="sm" onClick={() => send({ type: "connection.signIn" })}>
-                  {T.again}
-                </Button>
-              }
-            />
+    <Card className="setcard">
+      {/* Setup's sign-in row, not a SetRow: its detail and actions nest spans a SetRow would restyle. */}
+      <div {...anchor} className="signed-in-row">
+        <div>
+          <b>{T.title}</b>
+          <div className="t-small code-whole">
+            <HeldDetail shown={view.signIn.text} details={view.signIn.held} />
           </div>
         </div>
-        {view.list.rows.length > 0 ? (
-          <div className="setcard-accounts">
-            <AccountsList list={view.list} />
-          </div>
-        ) : null}
-      </Card>
-      <Disclosure summary={T.own}>
-        <p>{T.ownBody}</p>
-        <UseAppForm appId={null} />
-      </Disclosure>
-    </>
+        <div className="sign-in-acts">
+          <CodeActions
+            code={view.signIn.code}
+            onCancel={() => send({ type: "connection.cancelSignIn" })}
+            idle={
+              <Button size="sm" onClick={() => send({ type: "connection.signIn" })}>
+                {T.again}
+              </Button>
+            }
+          />
+        </div>
+      </div>
+      {view.list.rows.length > 0 ? (
+        <div className="setcard-accounts">
+          <AccountsList list={view.list} />
+        </div>
+      ) : null}
+    </Card>
   );
 }
 
@@ -470,7 +397,7 @@ export function Repositories() {
           </thead>
           {repositoryGroups(state).map((group) => (
             <tbody key={group.key}>
-              {group.head === null ? null : <GroupHead head={group.head} />}
+              <GroupHead head={group.head} />
               {group.repos.map((r) => {
                 const n = openChangeCount(state, r.id);
                 const last = lastReviewAt(state, r.id);
@@ -522,7 +449,7 @@ export function Repositories() {
 }
 
 /**
- * A group of Repositories' head on the shared App (design-system.md "Repositories' group heads"): the account, in the
+ * A group of Repositories' head (design-system.md "Repositories' group heads"): the account, in the
  * table's header style and the only text of the group's header cell, then its cause's line held at every line a cause
  * can say, and its one fix on the right, its place as wide as every fix the account can have, so a cause coming or
  * going moves nothing. The cause and the fix are said twice, one shown: beside the account on a wide screen, in a row
@@ -569,11 +496,9 @@ function Departed({
       tone="mute"
       action={
         <span className="banner-acts">
-          {addBack ? (
-            <LinkButton size="sm" href={addBack}>
-              Add it back
-            </LinkButton>
-          ) : null}
+          <LinkButton size="sm" href={addBack}>
+            Add it back
+          </LinkButton>
           <IconButton icon="close" label="Dismiss" onClick={dismiss} />
         </span>
       }

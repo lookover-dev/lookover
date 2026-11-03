@@ -3,8 +3,8 @@
 // `connection.changed` before it is sent (`completed`) and once it is kept (`held`), and asks it to read the person's
 // own `gh` again (`read`).
 // - Owners: the person's own account (GitHub's id for it is theirs) is theirs; an organisation is theirs as their
-//   `gh` gave their role there; null when it said nothing of it. Always null on `own`, and before a sign-in.
-// - Not reached, on `shared` only: the person's own account first while the App isn't installed there (owner true),
+//   `gh` gave their role there; null when it said nothing of it. Always null before a sign-in.
+// - Not reached, once signed in: the person's own account first while the App isn't installed there (owner true),
 //   then the organisations their `gh` names, in its order, without the App, then those asked that it doesn't name,
 //   oldest ask first (an ask shows until its organisation is reached). `gh` counts only signed in as the person signed
 //   in, compared by GitHub's id, never the login, and only when it lists their organisations: one signed in as
@@ -15,7 +15,7 @@
 //   read for, and none once the room stopped (`stop`): its store is closed then.
 // - The asks (`ask`, "Ask to install on <org>"): an organisation named as not reached that the person doesn't own,
 //   kept in the store with when, the last ask winning; forgotten once the account is reached, and when another person
-//   signs in (their asks stay theirs). Refused off `shared` (`not-shared`), for an account not named (`not-named`),
+//   signs in (their asks stay theirs). Refused before a sign-in (`signed-out`), for an account not named (`not-named`),
 //   or one the person owns (`owner`).
 // - Accounts reached, listed by `gh` and asked are matched by GitHub's id, never the login: an organisation renamed
 //   between an ask and its install is one account, reached under its new login, its ask forgotten.
@@ -51,7 +51,7 @@ export interface UnreachedDeps {
 export interface Unreached {
   /**
    * A `connection.changed` patch, sent while the UI holds `was`, with the owners and the accounts not reached as they
-   * follow from it, when it moves the way, the person or the accounts. Any other patch as it is. Keeps nothing.
+   * follow from it, when it moves the person or the accounts. Any other patch as it is. Keeps nothing.
    */
   completed(patch: Partial<Connection>, was: Connection): Partial<Connection>;
   /**
@@ -75,7 +75,7 @@ export interface Unreached {
  */
 function namedIn(shown: Connection): GhOrganisation[] {
   const person = shown.person;
-  if (shown.way !== "shared" || person === null) return [];
+  if (person === null) return [];
   const reached = shown.accounts.flatMap((a): GhOrganisation[] =>
     a.owner === null || a.account.id === person.id
       ? []
@@ -105,8 +105,7 @@ export function createUnreached(d: UnreachedDeps): Unreached {
   /** The owners and the accounts not reached for the connection `c`. */
   const derived = (c: Connection): Pick<Connection, "accounts" | "unreached"> => {
     const person = c.person;
-    if (c.way !== "shared" || person === null)
-      return { accounts: c.accounts.map((a) => ({ ...a, owner: null })), unreached: [] };
+    if (person === null) return { accounts: c.accounts.map((a) => ({ ...a, owner: null })), unreached: [] };
     const organisations = organisationsOf(person);
     const own = (account: HostLogin) => account.id === person.id;
     const ownerOf = (account: HostLogin): boolean | null => {
@@ -169,7 +168,7 @@ export function createUnreached(d: UnreachedDeps): Unreached {
   const read = async (): Promise<void> => {
     const shown = d.shown();
     const person = shown.person;
-    if (stopped || shown.way !== "shared" || person === null) return;
+    if (stopped || person === null) return;
     const at = ++reads;
     const organisations = await organisationsNow(person);
     if (stopped || organisations === null || at !== reads || d.shown().person?.id !== person.id) return;
@@ -179,7 +178,7 @@ export function createUnreached(d: UnreachedDeps): Unreached {
 
   return {
     completed: (patch, was) => {
-      if (!("accounts" in patch || "person" in patch || "way" in patch)) return patch;
+      if (!("accounts" in patch || "person" in patch)) return patch;
       const { accounts, unreached } = derived({ ...was, ...patch });
       return {
         ...patch,
@@ -192,8 +191,7 @@ export function createUnreached(d: UnreachedDeps): Unreached {
       const person = next.person;
       // Another person signed in: nobody else's asks are theirs.
       if (person !== null && person.id !== was.person?.id) d.asks.signedIn(person.id);
-      if (next.way === "shared" && "accounts" in patch)
-        for (const a of next.accounts) d.asks.reached(a.account.id);
+      if (person !== null && "accounts" in patch) for (const a of next.accounts) d.asks.reached(a.account.id);
     },
     settle,
     read,
@@ -203,7 +201,7 @@ export function createUnreached(d: UnreachedDeps): Unreached {
     ask: async (account) => {
       const shown = d.shown();
       const person = shown.person;
-      if (shown.way !== "shared" || person === null) return { refused: "not-shared" };
+      if (person === null) return { refused: "signed-out" };
       const found = shown.unreached.find(
         (u) => u.kind === "organisation" && sameLogin(u.account.login, account),
       );

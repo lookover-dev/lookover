@@ -15,13 +15,13 @@
 // #2's clean round is hand-written, there being no recording of it.
 import { changeId, commitSha } from "@lookover/contracts";
 import { on, type Scenario, type ScenarioChange, type World } from "../scenario.ts";
-import { MIN, OWNER, unified } from "./ledger-api.ts";
+import { MIN, OWNER, SHARED_BOT, unified } from "./ledger-api.ts";
 
 const SEC = 1_000;
 
 const WORLD: World = {
   repo: { owner: "sasensi", name: "lookover-sandbox" },
-  bot: { id: 2, login: "lookover-spike-sasensi[bot]" },
+  bot: SHARED_BOT,
   owner: OWNER,
   // The versions the recordings were made with.
   engines: {

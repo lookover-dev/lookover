@@ -1,26 +1,21 @@
 // What lands on GitHub, in words (brand.md: plain, short, exact; says what it found, where, and what to do).
-// The review's top comment and each inline comment, the summary comment (every posted finding's status and
-// the round history, ADR 0023), and the check's title, summary and text. Every sentence that lands on the pull
-// request is written here and nowhere else, but for the phrases the app says too (contracts' `copy.ts`).
+// The review (its marker) and each line comment, the replies on the threads, and the check's title, summary and text;
+// the status block in the pull request's description is in `status.ts` (ADR 0074). Every sentence that lands on the
+// pull request is written here and nowhere else, but for the phrases the app says too (contracts' `copy.ts`).
 import type {
   CheckOutput,
-  ClaimKind,
   CommitSha,
   Deferral,
   EngineId,
-  EngineUnusable,
   Finding,
-  FindingClaim,
   FindingId,
   InlineComment,
-  ReplyKind,
   ReviewPost,
   ReviewResult,
   Severity,
   ThreadReply,
 } from "@lookover/contracts";
 import {
-  asSentence,
   bySeverity,
   CHECK_OUTPUT_MAX_BYTES,
   COMMENT_MAX_BYTES,
@@ -28,26 +23,21 @@ import {
   confirmFailureText,
   dayText,
   deferralText,
-  engineName,
   FINDING_MARKER,
   failureText,
-  foundAndCheckedText,
   isCounted,
-  isUnsettled,
   keptText,
-  LOOKOVERS_OPENING,
   replyMarker as markerOf,
-  NOT_RAISED_AGAIN,
   REVIEW_MARKER,
-  REVIEW_MAX_COMMENTS,
-  ruleText,
-  SUMMARY_MARKER,
+  replyKind,
   severityText,
   shortSha,
+  startsOnceText,
   twoDigits,
-  unusableFixedText,
   utf8Bytes,
+  wordmark,
 } from "@lookover/contracts";
+import { fenced } from "./fence.ts";
 import { fenceClosed, filteredAgain, postableLine } from "./filter.ts";
 import { cut } from "./fit.ts";
 import type { PlacedFinding } from "./place.ts";
@@ -60,26 +50,11 @@ const SEVERITY: Record<Severity, string> = {
   consider: "Consider",
 };
 
-/** A finding placed in the summary, and why. */
-type SummaryPlaced = Extract<PlacedFinding, { placement: "summary" }>;
-
-const OUTSIDE: Record<SummaryPlaced["outside"], string> = {
-  file_not_in_diff: "the file is not in the diff",
-  line_not_in_diff: "the line is not in the diff",
-  binary_file: "a binary file",
-  diff_truncated: "the diff was cut before this line",
-  text_not_in_diff: "the code it names is not in the diff",
-  host_refused: "GitHub would not place this round's comments",
-  review_full: `the review holds ${REVIEW_MAX_COMMENTS} comments at most`,
-  no_comment: "none was posted for it",
-  line_moved: "its line moved since it was found",
-};
-
 /**
  * A finding's severity as the pull request says it: a `blocking` finding lowered because the confirm pass didn't
  * confirm it says so (ADR 0044).
  */
-function severityOf(f: Finding): string {
+export function severityOf(f: Finding): string {
   const demoted = f.confirmation.verdict !== "confirmed" && f.confirmation.demoted;
   return severityText(SEVERITY[f.severity], demoted);
 }
@@ -100,24 +75,6 @@ function confirmLine(round: RoundToPost): string[] {
   ];
 }
 
-/**
- * Who found the round and who double-checked it (ADR 0055), as a sentence on its own line under the summary's header
- * (its twin in the app: `summaryComment` in apps/web/src/view-model/github.ts; both say `foundAndCheckedText`). The
- * lines under the headline say why a confirm pass or a second find pass gave no answer (`confirmLine`). No tokens
- * and no times: they are the owner's, kept in the app.
- */
-function byLine(round: RoundToPost): string {
-  const { engine, secondFind, confirmer, confirmFailure } = round.run;
-  const said = foundAndCheckedText({
-    reviewer: engine,
-    secondFind,
-    confirmer,
-    confirmFailure,
-    raised: round.reconciled.raised.length,
-  });
-  return asSentence(said);
-}
-
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 // Its twin in the app: `placeText` in apps/web/src/view-model/findings.ts. Change both together.
 /** `line 42`, `lines 42 to 44`; on the base side, `old line 42`: a line of the file before the change. */
@@ -126,8 +83,6 @@ function lines(f: Finding): string {
   const range = f.endLine !== null && f.endLine !== f.line;
   return range ? `${old}lines ${f.line} to ${f.endLine}` : `${old}line ${f.line}`;
 }
-/** The repository's rule a finding follows (ADR 0048), as a sentence: "Rule: REVIEW.md, line 12."; none without. */
-const ruleLine = (f: Finding): string[] => (f.rule ? [`Rule: ${ruleText(f.rule)}.`] : []);
 /** `content`, on one line, as a code span: a backtick run longer than any inside it. */
 function codeSpan(content: string): string {
   const longest = Math.max(0, ...(content.match(/`+/g) ?? []).map((run) => run.length));
@@ -138,7 +93,8 @@ function codeSpan(content: string): string {
 // A path the finder named outside the diff is the engine's text: its secrets removed with the round's (`findingFilter`),
 // filtered on its line here, in a code span or not.
 const where = (f: Finding) => `${postableLine(f.file.split("/").at(-1) ?? "")} ${lines(f)}`;
-const at = (f: Finding) => `${codeSpan(postableLine(f.file))} ${lines(f)}`;
+/** Where a finding is, on a line of its own: its path as code, then its line or lines. */
+export const findingAt = (f: Finding) => `${codeSpan(postableLine(f.file))} ${lines(f)}`;
 
 /**
  * "The rest can go" closes a sentence only when nothing else is open, posted or not (ADR 0042): never while a
@@ -152,7 +108,7 @@ function keptLine(round: RoundToPost): string[] {
   return kept === null ? [] : [kept];
 }
 
-/** The one sentence on where the pull request stands: the check's summary opens with it, the summary too. */
+/** The one sentence on where the pull request stands: the check's summary opens with it, and the result carries it. */
 export function headline(round: RoundToPost): string {
   const { findings, loop, open } = round.reconciled;
   const counted = bySeverity(findings.filter(isCounted), (f) => f.severity);
@@ -199,15 +155,25 @@ function fitted(text: string, budget: number): string {
   }
 }
 
+/** What every post opens with (ADR 0074): the wordmark, 18 px high, then its kind. Added after the output filter. */
+const opening = (kind: string) => `${wordmark(18)} · ${kind}\n\n`;
+
 /**
- * `text`, then its hidden marker line, within `COMMENT_MAX_BYTES`: `text` is cut to fit (#67), the marker never.
+ * The finding's suggestion as GitHub applies it in one click (ADR 0074, I-226): only on a comment that covers exactly
+ * its lines on the head side, so applying it replaces those lines and nothing else; none otherwise.
  */
-function marked(text: string, marker: string): string {
-  const tail = `\n\n${marker}`;
-  return `${fitted(text, COMMENT_MAX_BYTES - utf8Bytes(tail))}${tail}`;
+function suggestionOf(finding: Finding, at: Omit<InlineComment, "body">): string | null {
+  if (finding.suggestion === null || finding.side !== "head" || at.side !== "head") return null;
+  const last = (place: { line: number; endLine: number | null }) => place.endLine ?? place.line;
+  const exact = at.line === finding.line && last(at) === last(finding);
+  return exact ? fenced("suggestion", finding.suggestion) : null;
 }
 
-/** The comment of a finding placed inline, where `place` put it. */
+/**
+ * The comment of a finding placed inline, where `place` put it: its severity after the wordmark, its title in bold,
+ * its body, then its suggestion, kept only when it fits whole and the filter leaves it as written, then its marker.
+ * Only the body is cut (#67), the opening and the marker never.
+ */
 function inlineComment(round: RoundToPost, finding: Finding, at: Omit<InlineComment, "body">): InlineComment {
   const marker = JSON.stringify({
     v: 1,
@@ -216,90 +182,25 @@ function inlineComment(round: RoundToPost, finding: Finding, at: Omit<InlineComm
     severity: finding.severity,
     sha: round.sha,
   });
-  return {
-    ...at,
-    body: marked(
-      [
-        `${LOOKOVERS_OPENING}**${postableLine(finding.title)}** · ${severityOf(finding)}`,
-        fenceClosed(finding.body),
-        ...ruleLine(finding),
-      ].join("\n\n"),
-      `${FINDING_MARKER}${marker} -->`,
-    ),
-  };
+  const open = opening(severityOf(finding));
+  const tail = `\n\n${FINDING_MARKER}${marker} -->`;
+  const text = `**${postableLine(finding.title)}**\n\n${fenceClosed(finding.body)}`;
+  const suggestion = suggestionOf(finding, at);
+  if (suggestion !== null) {
+    const whole = filteredAgain(fenceClosed(`${text}\n\n${suggestion}`));
+    const fits = utf8Bytes(`${open}${whole}${tail}`) <= COMMENT_MAX_BYTES;
+    if (fits && whole.endsWith(`\n\n${suggestion}`)) return { ...at, body: `${open}${whole}${tail}` };
+  }
+  return { ...at, body: `${open}${fitted(text, COMMENT_MAX_BYTES - utf8Bytes(`${open}${tail}`))}${tail}` };
 }
 
-/**
- * The review's top comment: what this round posted, then what earlier rounds left open (the summary comment
- * has those). "The rest can go" only when nothing else is open, on the pull request or kept in the app.
- */
-function reviewBody(round: RoundToPost, inline: Finding[], summary: SummaryPlaced[]): string {
-  const sha = shortSha(round.sha);
-  const posted = inline.length + summary.length;
-  const earlier = Math.max(0, round.reconciled.open - posted);
-  const fresh = round.round > 1 ? "new " : "";
-  const first = inline[0] ?? summary[0]?.finding;
-  const lines: string[] = [];
-  if (!first) {
-    lines.push(`${LOOKOVERS_OPENING}Looked over ${sha}. Nothing ${fresh}to fix.`);
-  } else if (posted === 1) {
-    lines.push(`${LOOKOVERS_OPENING}Looked over ${sha}. One ${fresh}thing to fix, ${where(first)}.`);
-  } else {
-    lines.push(
-      `${LOOKOVERS_OPENING}Looked over ${sha}. ${posted} ${fresh}things to fix, starting with ${where(first)}.`,
-    );
-  }
-  if (earlier > 0) {
-    lines.push(
-      earlier === 1
-        ? "One finding from an earlier round is still open: it is in the summary comment."
-        : `${earlier} findings from earlier rounds are still open: they are in the summary comment.`,
-    );
-  } else {
-    lines[0] += restCanGo(round);
-  }
-  lines.push(...whySummary(summary));
-  return marked(lines.join("\n\n"), reviewMarker(round));
-}
-
-/** Why the round's findings in the summary have no comment of their own: one sentence per reason. */
-function whySummary(summary: SummaryPlaced[]): string[] {
-  const lines: string[] = [];
-  const outside = summary.filter((p) => p.outside !== "review_full").length;
-  const full = summary.length - outside;
-  if (summary.some((p) => p.outside === "host_refused")) {
-    lines.push(
-      "GitHub would not place this round's comments on their lines: the findings are in the summary comment.",
-    );
-  } else if (outside > 0) {
-    lines.push(
-      outside === 1
-        ? "One finding is on a line outside the diff: it is in the summary comment."
-        : `${outside} findings are on lines outside the diff: they are in the summary comment.`,
-    );
-  }
-  if (full > 0) {
-    lines.push(
-      full === 1
-        ? `One finding did not fit in the review's ${REVIEW_MAX_COMMENTS} comments: it is in the summary comment.`
-        : `${full} findings did not fit in the review's ${REVIEW_MAX_COMMENTS} comments: they are in the summary comment.`,
-    );
-  }
-  return lines;
-}
-
+/** The round's review: its hidden marker for a body (ADR 0074), and a comment on each finding it places inline. */
 export function renderReview(round: RoundToPost, placed: PlacedFinding[]): ReviewPost {
   const posting = new Set(round.reconciled.post.map((f) => f.id));
-  const thisRound = placed.filter((p) => posting.has(p.finding.id));
-  const inline = thisRound.flatMap((p) => (p.placement === "inline" ? [p] : []));
-  const summary = thisRound.flatMap((p) => (p.placement === "summary" ? [p] : []));
+  const inline = placed.flatMap((p) => (p.placement === "inline" && posting.has(p.finding.id) ? [p] : []));
   return {
     sha: round.sha,
-    body: reviewBody(
-      round,
-      inline.map((p) => p.finding),
-      summary,
-    ),
+    body: reviewMarker(round),
     comments: inline.map((p) => inlineComment(round, p.finding, p.at)),
   };
 }
@@ -325,28 +226,6 @@ export function replyMarker(round: Pick<RoundToPost, "run" | "reconciled">, find
 }
 
 /**
- * What the reply says first, by what the round decided. A finding kept once against its author is escalated the
- * next time (ADR 0052): the reply says so, unless the owner already has it.
- */
-function replyOpening(reply: ThreadReply, finding: Finding | undefined): { first?: string; last?: string } {
-  switch (reply.kind) {
-    case "kept":
-      return finding?.status === "escalated"
-        ? { first: "Kept. The owner decides." }
-        : { first: "Kept.", last: "If it is kept again, the owner decides." };
-    case "escalated":
-      return { first: "The owner decides this one." };
-    case "withdrawn":
-      return { first: "Withdrawn." };
-    case "answered":
-      // The answer to a question is the reason itself.
-      return {};
-    case "dismissed":
-      return { first: "Dismissed by the owner.", last: `It ${NOT_RAISED_AGAIN}.` };
-  }
-}
-
-/**
  * The hidden line that ends the owner's dismissal on a finding's thread (ADR 0052): the dismissal, apart from any run,
  * and the finding. What finds it on the host before it is sent again.
  */
@@ -356,7 +235,8 @@ export function dismissalMarker(dismissal: string, finding: FindingId): string {
 
 /**
  * The body of a reply on a finding's thread, with its hidden marker (the round's, unless given), within
- * `COMMENT_MAX_BYTES`: only the reason is cut, so its opening and closing lines are always said.
+ * `COMMENT_MAX_BYTES`: the wordmark and the reply's kind, its reason, its closing line. Only the reason is cut, so the
+ * rest is always said.
  */
 export function renderReply(
   round: RoundToPost,
@@ -364,132 +244,15 @@ export function renderReply(
   marker = replyMarker(round, reply.findingId),
 ): string {
   const finding = round.reconciled.findings.find((f) => f.id === reply.findingId);
-  const { first, last } = replyOpening(reply, finding);
-  const opening = first === undefined ? "" : `${first}\n\n`;
-  const closing = last === undefined ? "" : `\n\n${last}`;
+  const { kind, why: own, last } = replyKind(reply.kind, finding);
+  const open = opening(kind);
+  const closing = last === null ? "" : `\n\n${last}`;
   const tail = `\n\n${marker}`;
-  const room = COMMENT_MAX_BYTES - utf8Bytes(`${opening}${closing}${tail}`);
-  const why = fitted(reply.why.trim(), room);
+  const room = COMMENT_MAX_BYTES - utf8Bytes(`${open}${closing}${tail}`);
+  const why = own ?? fitted(reply.why.trim(), room);
   // An empty reason leaves the opening and the closing, without the blank lines around it.
-  return `${[first, why, last].filter((part) => part !== undefined && part !== "").join("\n\n")}${tail}`;
-}
-
-// The summary comment: where every posted finding stands, and the rounds so far (ADR 0023).
-
-/** What the author's claim said (ADR 0052), after their login. */
-const SAID: Record<ClaimKind, string> = {
-  claimed_fixed: "said fixed",
-  wont_fix: "said won't fix",
-  disputed: "disputed it",
-  deferred: "said deferred",
-  question: "asked",
-};
-
-/** What this round answered on a finding still unsettled: the word before the finder's reason. */
-const ANSWERED: Record<ReplyKind, string> = {
-  kept: "Kept",
-  answered: "Answered",
-  escalated: "Escalated to the owner",
-  withdrawn: "Withdrawn",
-  dismissed: "Dismissed by the owner",
-};
-
-/** Who claimed what on the finding's thread: "dana said won't fix", the login plain (a mention notifies). */
-const claimLine = (claim: FindingClaim) => `${claim.by} ${SAID[claim.kind]}`;
-
-/**
- * The finding's claim and this round's answer to it, under its entry: "dana said won't fix. Kept: <why>"; nothing
- * when the round answered no claim on it.
- */
-function answerLines(round: RoundToPost, f: Finding): string[] {
-  const reply = round.reconciled.replies.find((r) => r.findingId === f.id);
-  if (!reply || f.claim === null) return [];
-  return [`${claimLine(f.claim)}. ${ANSWERED[reply.kind]}: ${postableLine(reply.why)}`];
-}
-
-function settledLine(f: Finding): string {
-  switch (f.status) {
-    case "verified_fixed":
-      return `verified fixed${f.verifiedSha ? ` in ${shortSha(f.verifiedSha)}` : ""}`;
-    case "withdrawn":
-      return `withdrawn${f.closedWhy ? `: ${postableLine(f.closedWhy)}` : ""}`;
-    case "acknowledged":
-      // The author's call (ADR 0052): who said what; their words are on the thread.
-      if (f.claim !== null) return `acknowledged: ${claimLine(f.claim)}`;
-      return `acknowledged${f.closedWhy ? `: ${postableLine(f.closedWhy)}` : ""}`;
-    case "dismissed":
-      return `dismissed by the owner${f.closedWhy ? `: ${postableLine(f.closedWhy)}` : ""}`;
-    case "obsolete":
-      return "no longer in the code";
-    case "open":
-    case "escalated":
-      return "";
-  }
-}
-
-/** A heading and its list, as one block; nothing when the list is empty. */
-function section(heading: string, items: string[]): string[] {
-  return items.length > 0 ? [`**${heading}**\n${items.join("\n")}`] : [];
-}
-
-function roundsTable(round: RoundToPost): string {
-  const rounds = [...round.rounds, { n: round.round, sha: round.sha }];
-  const posted = round.reconciled.findings.filter((f) => f.posted);
-  const rows = rounds.map((r) => {
-    const raised = posted.filter((f) => f.raisedIn === r.n).length;
-    const fixed = posted.filter((f) => f.status === "verified_fixed" && f.closedIn === r.n).length;
-    return `| ${r.n} | ${shortSha(r.sha)} | ${raised} | ${fixed === 0 ? "–" : fixed} |`;
-  });
-  return ["| Round | Commit | Raised | Verified fixed |", "|---|---|---|---|", ...rows].join("\n");
-}
-
-/** A finding's line in a list: its id, severity, place and title, the title filtered as that line. */
-function findingEntry(f: Finding): string {
-  return `- ${f.id} · ${severityOf(f)} · ${at(f)} · ${postableLine(f.title)}`;
-}
-
-export function renderSummary(round: RoundToPost, placed: PlacedFinding[]): string {
-  const posted = bySeverity(
-    placed.filter((p) => p.finding.posted),
-    (p) => p.finding.severity,
-  );
-  const open = posted.filter((p) => p.finding.status === "open");
-  /** A finding's entry, with the claim this round answered under it. */
-  const entry = (f: Finding) => [findingEntry(f), ...answerLines(round, f)].join("\n  ");
-  const toFix = open.filter((p) => p.placement === "inline").map(({ finding: f }) => entry(f));
-  // Every open finding with no comment of its own, whatever the reason, in one list by severity: a cut from the end
-  // drops the least urgent (#67).
-  const notOnALine = open.flatMap((p) =>
-    p.placement === "summary"
-      ? [
-          [
-            findingEntry(p.finding),
-            postableLine(p.finding.body),
-            ...ruleLine(p.finding),
-            `No comment on the line: ${OUTSIDE[p.outside]}.`,
-            ...answerLines(round, p.finding),
-          ].join("\n  "),
-        ]
-      : [],
-  );
-  const needsOwner = posted.filter((p) => p.finding.status === "escalated").map(({ finding: f }) => entry(f));
-  const done = posted
-    .filter((p) => !isUnsettled(p.finding))
-    .map(({ finding: f }) => `- ${f.id} · ${postableLine(f.title)} · ${settledLine(f)}`);
-  const summary = [
-    `**Lookover** · round ${round.round} · looked over ${shortSha(round.sha)}\n${byLine(round)}`,
-    headline(round),
-    ...confirmLine(round),
-    ...keptLine(round),
-    ...section("Needs the owner", needsOwner),
-    ...section("To fix", toFix),
-    ...section("Not on a line", notOnALine),
-    ...section("Done", done),
-    roundsTable(round),
-  ].join("\n\n");
-  // Cut from the end (#67): what is least urgent, the history first, goes when it doesn't fit.
-  const head = `${SUMMARY_MARKER}\n\n`;
-  return `${head}${fitted(summary, COMMENT_MAX_BYTES - utf8Bytes(head))}`;
+  const said = [why, last].filter((part) => part !== null && part !== "").join("\n\n");
+  return `${said === "" ? open.trimEnd() : `${open}${said}`}${tail}`;
 }
 
 // The check: in progress while the round posts, then completed with the result (ADR 0006, ADR 0039).
@@ -498,19 +261,24 @@ export function checkInProgress(round: RoundToPost): CheckOutput {
   return {
     title: `Looking over ${shortSha(round.sha)}`,
     summary: `Round ${round.round} is being posted.`,
-    text: "The review, the summary comment and the result follow when the round is posted.",
+    text: "The review, its status in the pull request's description and the result follow when the round is posted.",
   };
 }
 
-/** The check's summary lists at most this many findings: it has a byte limit too, and the summary comment has them all. */
+/** The check's summary lists at most this many findings: it has a byte limit too, and the description lists every open one. */
 const CHECK_SUMMARY_LIST = 20;
+
+/** A finding's line in the check's list: its id, severity, place and title, the title filtered as that line. */
+function findingEntry(f: Finding): string {
+  return `- ${f.id} · ${severityOf(f)} · ${findingAt(f)} · ${postableLine(f.title)}`;
+}
 
 function checkSummary(round: RoundToPost): string {
   const counted = bySeverity(round.reconciled.findings.filter(isCounted), (f) => f.severity);
   const shown = counted.slice(0, CHECK_SUMMARY_LIST);
   const list = shown.map(findingEntry);
   const more = counted.length - shown.length;
-  if (more > 0) list.push(`- and ${more} more, in the summary comment`);
+  if (more > 0) list.push(`- and ${more} more, in the pull request's description`);
   // Its titles are the engine's words, of any length: cut at a line to fit too (#67).
   return fitted(
     [headline(round), ...confirmLine(round), ...keptLine(round), ...list].join("\n"),
@@ -521,11 +289,11 @@ function checkSummary(round: RoundToPost): string {
 /** The check's text for a result: a line for people, then the result's line, last. */
 export function checkText(result: ReviewResult, left: number): string {
   const lines = [
-    "The review and the summary comment are on the pull request. The last line of this text is the `lookover.review-result/v1` result, for coding agents.",
+    "The review is on the pull request, and where it stands in its description. The last line of this text is the `lookover.review-result/v1` result, for coding agents.",
   ];
   if (result.truncated) {
     lines.push(
-      `${plural(left, "finding")} did not fit the result and ${left === 1 ? "is" : "are"} left out of it; every posted finding is in the summary comment, and the app has them all.`,
+      `${plural(left, "finding")} did not fit the result and ${left === 1 ? "is" : "are"} left out of it; the open ones are in the pull request's description, and the app has them all.`,
     );
   }
   return [...lines, resultLine(result)].join("\n");
@@ -554,29 +322,11 @@ function resetText({ at, offset }: Reset): string {
   return `${dayText(d)} ${d.getUTCFullYear()} at ${twoDigits(d.getUTCHours())}:${twoDigits(d.getUTCMinutes())} (${zone})`;
 }
 
-/** What makes a missing engine usable: installed, or, its program found but not usable, what fixes that. */
-function missingFixed(engine: EngineId, unusable: EngineUnusable | null): string {
-  return unusable === null
-    ? `${engineName(engine)} is installed`
-    : unusableFixedText(unusable, engine, "the owner");
-}
-
 /** When a deferred job starts, after the app's words for why it waits; an engine's limit, at its reset if known. */
 function startsWhen(deferral: Deferral, reset: Reset | null): string {
-  switch (deferral.reason) {
-    case "paused":
-      return "once the owner resumes reviews";
-    case "connection":
-      return "once GitHub is back";
-    case "engine-signed-out":
-      return `by itself once the owner signs ${engineName(deferral.engine)} in`;
-    case "engine-missing":
-      return `by itself once ${missingFixed(deferral.engine, deferral.unusable)}`;
-    case "engine-limit":
-      return reset === null ? "once the limit resets" : `once the limit resets, on ${resetText(reset)}`;
-    case "engine-failed-self-test":
-      return `by itself once a version of ${engineName(deferral.engine)} passes it`;
-  }
+  return deferral.reason === "engine-limit" && reset !== null
+    ? `once the limit resets, on ${resetText(reset)}`
+    : startsOnceText(deferral);
 }
 
 const OPEN_TEXT =

@@ -6,7 +6,6 @@ import { expect, test } from "bun:test";
 import {
   type Connection,
   type ConnectionAccount,
-  type ConnectionApp,
   connectionId,
   DEMO_API,
   type DepartedRepository,
@@ -76,7 +75,6 @@ function signedIn(connection: Partial<Connection> = {}, repos: Repository[] = []
       step: "background",
       reached: "background",
       github: "done",
-      githubRefused: null,
       firstReviewChange: null,
     },
     engines: { claude: engine("claude", "Claude"), codex: engine("codex", "Codex") },
@@ -84,17 +82,13 @@ function signedIn(connection: Partial<Connection> = {}, repos: Repository[] = []
       id: connectionId("github:sasensi"),
       state: "connected",
       cause: null,
-      way: "shared",
       signIn: null,
       person: { id: 1, login: "sasensi" },
-      bot: null,
-      app: null,
       accounts: [],
       unreached: [],
       web: GITHUB_WEB,
       since: NOW,
       limitUntil: null,
-      gh: null,
       ...connection,
     },
     service: {
@@ -188,16 +182,13 @@ test("Install on another account is always last, to GitHub's own page, even with
   ]);
 });
 
-test("no list before a sign-in, once signed out, and on your own App", () => {
-  expect(rows(signedIn({ way: null, state: "not-connected", person: null }))).toEqual([]);
+test("no list before a sign-in, once signed out, or with nobody signed in", () => {
+  expect(rows(signedIn({ state: "not-connected", person: null }))).toEqual([]);
   expect(rows(signedIn({ state: "disconnected", cause: { kind: "signed-out" }, accounts: [own] }))).toEqual(
     [],
   );
-  expect(
-    rows(
-      signedIn({ way: "own", person: null, bot: "sam-reviewer[bot]", accounts: [{ ...own, owner: null }] }),
-    ),
-  ).toEqual([]);
+  // Nobody signed in, accounts or not: no list (ADR 0073).
+  expect(rows(signedIn({ person: null, accounts: [{ ...own, owner: null }] }))).toEqual([]);
 });
 
 // ---- reached ----
@@ -495,7 +486,7 @@ test("on the shared App, Repositories groups its rows by account, in the account
     repo("sasensi", "ledger-api"),
     repo("ledger-dev", "ledger-web"),
   ]);
-  expect(groups(state).map((g) => [g.key, g.head?.account, g.repos])).toEqual([
+  expect(groups(state).map((g) => [g.key, g.head.account, g.repos])).toEqual([
     ["sasensi", "sasensi", ["sasensi/ledger-api"]],
     // The account as GitHub writes it, its repositories in Repositories' order.
     ["Ledger-Dev", "Ledger-Dev", ["ledger-dev/billing", "ledger-dev/ledger-web"]],
@@ -559,35 +550,13 @@ test("an account with no repository has no group; a repository on no account rea
     repo("acme", "site"),
     repo("ledger-dev", "billing"),
   ]);
-  expect(groups(state).map((g) => [g.key, g.head?.cause, g.head?.fix, g.repos])).toEqual([
+  expect(groups(state).map((g) => [g.key, g.head.cause, g.head.fix, g.repos])).toEqual([
     ["ledger-dev", "", null, ["ledger-dev/billing"]],
     ["acme", "", null, ["acme/site"]],
   ]);
 });
 
-test("on your own App, one group without a head", () => {
-  const state = signedIn(
-    { way: "own", person: null, bot: "sam-reviewer[bot]", accounts: [{ ...own, owner: null }] },
-    [repo("sasensi", "ledger-api"), repo("sasensi", "billing")],
-  );
-  expect(groups(state)).toEqual([
-    { key: "all", head: null, repos: ["sasensi/ledger-api", "sasensi/billing"] },
-  ]);
-  expect(repositoryGroups(signedIn({ way: "own", person: null }))).toEqual([]);
-});
-
 // ---- Add a repository, Add it back ----
-
-const ownApp: ConnectionApp = {
-  id: 9,
-  slug: "lookover-q7x2ka",
-  account: { id: 1, login: "sasensi", type: "User" },
-  person: { id: 1, login: "sasensi" },
-};
-
-/** sasensi on their own App, installed on their account. */
-const onOwnApp = () =>
-  signedIn({ way: "own", person: null, app: ownApp, accounts: [{ ...own, owner: null }] }).connection;
 
 const departed = (owner: string, name: string): DepartedRepository => ({
   id: repositoryId(`${owner}/${name}`),
@@ -637,10 +606,6 @@ test("Add a repository on the shared App is hidden while nobody is signed in to 
   expect(addRepositoryLink(signedIn({ person: null, accounts: [] }).connection)).toBeNull();
 });
 
-test("Add a repository on your own App: its installation's settings, as before", () => {
-  expect(addRepositoryLink(onOwnApp())).toBe("https://github.com/settings/installations/11");
-});
-
 test("Add it back on the shared App: its account's installation settings when the person owns it, else GitHub's install page", () => {
   const { connection } = signedIn({ accounts: [own, org("ledger-dev", null, false)] });
   expect(departedNotice(connection, departed("sasensi", "ledger-api")).addBack).toBe(
@@ -662,11 +627,5 @@ test("Add it back on the shared App: GitHub's install page when its account is n
   const two = signedIn({ accounts: [own, org("ledger-dev", null, true, 22)] }).connection;
   expect(departedNotice(two, departed("ledger-dev", "billing")).addBack).toBe(
     "https://github.com/organizations/ledger-dev/settings/installations/22",
-  );
-});
-
-test("Add it back on your own App: its installation's settings, as before", () => {
-  expect(departedNotice(onOwnApp(), departed("sasensi", "x")).addBack).toBe(
-    "https://github.com/settings/installations/11",
   );
 });

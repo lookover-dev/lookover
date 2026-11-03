@@ -1,11 +1,12 @@
 // `AgentHost` over GitHub's REST API, with the agent's own token (ADR 0021): plain HTTPS, one request at a time,
 // every answer parsed where it enters, GitHub's refusals turned into `HostError`s as the `github` package does
-// for the App (this package never imports it: it would bring the App's key within reach). Listings follow the
-// `Link` header past 100 items. The token is sent as given and never written down. Whose it is, is `GET /user`'s.
-// The threads are GraphQL's (ADR 0052): only it knows a thread's id, which resolving takes, whether a person
-// resolved it, and whether it is outdated as soon as a push makes it so (REST's `line` lags minutes, #174). GraphQL
-// names an App's bot without `[bot]`: the App is told by its type and its slug, and its replies are named
-// `<slug>[bot]` as REST names them. GraphQL answers a refusal with `200` and an `errors` list: its type says which.
+// for the service (this package never imports it: it would bring the person's sign-in token, which the service keeps,
+// within reach, ADR 0073). Listings follow the `Link` header past 100 items. The token is sent as given and never
+// written down. Whose it is, is `GET /user`'s. The threads are GraphQL's (ADR 0052): only it knows a thread's id,
+// which resolving takes, whether a person resolved it, and whether it is outdated as soon as a push makes it so
+// (REST's `line` lags minutes, #174). GraphQL names an App's bot without `[bot]`: the App is told by its type and its
+// slug, and its replies are named `<slug>[bot]` as REST names them. GraphQL answers a refusal with `200` and an
+// `errors` list: its type says which.
 import {
   type AgentChange,
   type AgentHost,
@@ -178,17 +179,17 @@ function repliesOf(comments: ThreadComment[]): HostThreadReply[] {
 
 /**
  * The thread as Lookover's, with the replies of its first page; null when its root comment is neither the App
- * `app`'s (a bot of that login: GraphQL's has no `[bot]`) nor, given `person`, that person's (a user of that id, whom
+ * `app`'s (a bot of that login: GraphQL's has no `[bot]`) nor the person `person`'s (a user of that id, whom
  * the App posts as, ADR 0066), or holds no finding marker.
  */
-function lookoverThread(node: ReviewThread, app: string, person: number | undefined): AgentThread | null {
+function lookoverThread(node: ReviewThread, app: string, person: number): AgentThread | null {
   const [root, ...replies] = node.comments.nodes;
   if (!root || root.databaseId === null) return null;
   const finding = findingOfMarker(root.body);
   const author = root.author;
   const ours =
     (author?.__typename === "Bot" && author.login === app) ||
-    (person !== undefined && author?.__typename === "User" && author.databaseId === person);
+    (author?.__typename === "User" && author.databaseId === person);
   if (!ours || finding === null) return null;
   return {
     commentId: root.databaseId,
@@ -363,7 +364,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   async function threadsPage(
     change: ChangeRef,
     app: string,
-    person: number | undefined,
+    person: number,
     after: string | null,
   ): Promise<ThreadsPage> {
     const { repo, number } = change;

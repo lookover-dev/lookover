@@ -67,8 +67,10 @@ export interface HostViewComment extends HostComment {
   minimized: Minimized;
 }
 
-/** The change's checks on one commit, its reviews and its comments, oldest first. */
+/** The change's description, its checks on one commit, its reviews and its comments, oldest first. */
 export interface HostView {
+  /** The pull request's description as the host holds it, "" for none (GitHub's null): the status block in it. */
+  description: string;
   checks: HostCheck[];
   reviews: HostReview[];
   comments: HostViewComment[];

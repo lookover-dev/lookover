@@ -10,14 +10,15 @@ import { changeId, type RepositoryRef, type State } from "@lookover/contracts";
 import { DemoClock, FakeGitHost } from "@lookover/testkit";
 import {
   api,
-  BOT,
   fakeEngines,
   home,
   messages,
+  OWNER,
   openApp,
   post,
   pr1,
   SANDBOX,
+  SHARED_BOT,
   snapshot,
   start,
   stopAll,
@@ -74,7 +75,7 @@ function roundsIn(dir: string): string[] {
 test("a data folder from before keeps its history under the new ids: no review again at start, and the next is round 2", async () => {
   const dir = home();
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [], clock: time });
+  const host = new FakeGitHost({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [], clock: time });
   const first = await start({ home: dir, host, time, engines: fakeEngines({ reviews: 2 }) });
   const cookie = await openApp(first.service);
   const stream = messages(await fetch(api(first.service, "/events"), { headers: { cookie } }));
@@ -119,7 +120,14 @@ test("a data folder from before keeps its history under the new ids: no review a
 test("a departed repository's review keeps its old id, as the store does, while a watched one's is renamed", async () => {
   const dir = home();
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, repositories: [LEDGER], bot: BOT, changes: [], clock: time });
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    repositories: [LEDGER],
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [],
+    clock: time,
+  });
   const repos = [SANDBOX, LEDGER];
   const first = await start({ home: dir, host, time, repos, engines: fakeEngines({ reviews: 4 }) });
   const cookie = await openApp(first.service);

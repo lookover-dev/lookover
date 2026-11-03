@@ -44,19 +44,15 @@ export interface World {
    */
   repositories?: RepositoryRef[];
   bot: Account;
-  /** The person Lookover works for (ADR 0059): whose changes are theirs. The App's account too, unless `organisation`. */
+  /** The person Lookover works for (ADR 0059): whose changes are theirs, signed in to the shared App. */
   owner: Account;
   /**
-   * The organisation the App lives on (ADR 0059), whose repositories `repo` and `repositories` are, the owner an
-   * active member of it, its admin when `admin`; absent, the App is on the owner's own account.
-   */
-  organisation?: { account: Account; admin: boolean };
-  /**
-   * Signed in to the shared App at the start (ADR 0066), Lookover posting as the owner: the App on GitHub stands for
-   * its installation on the owner's account, granting `repo` and `repositories`; each of `reaches` is its installation
-   * on an organisation the owner is in, granting the repositories given (that organisation's), in GitHub's order after
-   * the owner's. Absent, the owner's own App, or what the setup says. `ownAccountInstalled`: false, not installed on the
-   * owner's own account (absent, installed). `sso`: that organisation asks for SAML SSO the sign-in hasn't, from the start. `unreached`: the owner's
+   * The shared App as the owner's sign-in reaches it (ADR 0066), signed in at the start once the setup is past its
+   * GitHub step, Lookover posting as the owner: the App on GitHub stands for its installation on the
+   * owner's account, granting `repo` and `repositories`; each of `reaches` is its installation on an organisation the
+   * owner is in, granting the repositories given (that organisation's), in GitHub's order after the owner's. Absent,
+   * the owner's account alone. `ownAccountInstalled`: false, not installed on the owner's own account (absent,
+   * installed). `sso`: that organisation asks for SAML SSO the sign-in hasn't, from the start. `unreached`: the owner's
    * organisations where it isn't installed (ADR 0067), each with its repositories, until an owner installs it there.
    * `owners`: the organisation's owners beside the owner, as its people page on GitHub's fake lists them (absent, none;
    * the owner is listed where `memberships` says they own it).
@@ -71,7 +67,7 @@ export interface World {
   /**
    * The organisations the owner's `gh` lists (ADR 0067), in its order, with the owner's role in each: what Lookover
    * reads them as while `gh` is signed in, and what GitHub's fake install page offers each (Install, or Request).
-   * Absent, none but `organisation`.
+   * Absent, none.
    */
   memberships?: { organisation: Account; role: GhRole }[];
   /** Each engine's health at the start; the self-tests pass unless a move says otherwise. */
@@ -81,11 +77,10 @@ export interface World {
   /** The rules files at the root of `main`, which every review reads (ADR 0048); none unless said. */
   rules?: Pick<RulesFile, "path" | "text">[];
   /**
-   * Where the owner is in the first-run setup at the start; absent, set up. The App is on GitHub either way (ADR
-   * 0053): once the setup says it was made, kept in the room's App store, and installed once it says so; before,
-   * made on another computer and installed on every repository, but not kept here, so nothing is listed until the
-   * owner makes a new one ("Create it on GitHub": the manifest flow on GitHub's fake pages) or gives this one ("Use
-   * an existing App", its id and a key from its fake page).
+   * Where the owner is in the first-run setup at the start; absent, set up. The shared App is on GitHub either way
+   * (ADR 0053, ADR 0073): once the setup is past its sign-in, the owner signed in to it, and installed once it says
+   * so; before, installed on every repository of the owner's, but nobody signed in here, so nothing is listed until
+   * the owner signs in ("Sign in with GitHub", its code entered on GitHub's fake device page or by the drawer).
    */
   setup?: Setup;
   /**

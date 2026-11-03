@@ -47,6 +47,7 @@ import {
   whyRaised,
 } from "../view-model/findings.ts";
 import { agoSentence, duration, plural } from "../view-model/format.ts";
+import { postedAs } from "../view-model/github.ts";
 import { roundRow } from "../view-model/rounds.ts";
 import { runLineParts, runSteps } from "../view-model/run.ts";
 import {
@@ -494,9 +495,10 @@ function Details({ it, state }: { it: ChangeReview; state: State }) {
               {review.preview ? (
                 "Nothing: this was a preview"
               ) : (
-                // The bot's name is never broken at a hyphen: the line wraps before it.
+                // The person's login is never broken at a hyphen: the line wraps before it.
                 <>
-                  As <span className="nowrap">{state.connection.bot}</span>, with a check on {shortSha(sha)}
+                  As <span className="nowrap">{postedAs(state.connection)}</span>, with a check on{" "}
+                  {shortSha(sha)}
                 </>
               )}
             </dd>

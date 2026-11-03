@@ -1,15 +1,16 @@
 // The program's configuration, read here and nowhere else (the `process.env` lint rule): the mode, the data
 // folder, the port, the app's origin, where to announce the URL to open, and the live config file (ADR 0039, ADR
-// 0053: the repositories the run may use, the App's id and its key's path; ADR 0060: the organisation's App on its
-// repositories when the file lists them, for live mode and the guarded program alike). With neither `--demo` nor `--live` it is
-// the program (ADR 0054): its data folder the user profile's unless `LOOKOVER_HOME` or `--home` names another, and
-// guarded by a live config when the data folder has one or `--live-config` names one.
+// 0053: the repositories the run may use; ADR 0073: its App, organisation and `watch` no longer read, the service
+// always on the shared App), and in live mode the folder whose sign-in it reads (`--sign-ins`, ADR 0073: the live
+// sign-in). With neither `--demo` nor `--live` it is the program (ADR 0054): its data folder the user profile's
+// unless `LOOKOVER_HOME` or `--home` names another, and guarded by a live config when the data folder has one or
+// `--live-config` names one.
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, posix, resolve, win32 } from "node:path";
 import type { PathOffer } from "@lookover/contracts";
 import type { LookoverCommands } from "./coding-agent.ts";
-import { type LiveConfig, liveConfigPath, readLiveConfig, servedLiveConfig } from "./live-config.ts";
+import { type LiveConfig, liveConfigPath, readLiveConfig } from "./live-config.ts";
 import { said } from "./said.ts";
 import type { Self } from "./self.ts";
 import { commandLine, quoted, skillCommandLine } from "./shell-line.ts";
@@ -64,11 +65,6 @@ interface AgentConfig {
 interface Real {
   /** The process registry, in the data folder: a start sweeps every orphan a crashed one left. */
   processes: string;
-  /**
-   * The line the start prints when its live config runs it as the organisation's App (`servedLiveConfig`, ADR
-   * 0060); absent otherwise.
-   */
-  asOrganisation?: string;
 }
 
 /**
@@ -87,7 +83,16 @@ export type Config =
       /** `--scenario=<id>`: the scenario the service starts on (ADR 0046); S10, a quiet day, by default. Demo mode only. */
       scenario: string;
     })
-  | (Common & Real & { mode: "live"; live: LiveConfig })
+  | (Common &
+      Real & {
+        mode: "live";
+        live: LiveConfig;
+        /**
+         * `--sign-ins=<dir>`, else the data folder: the folder whose sign-in to the shared App the service reads and
+         * renews in place (ADR 0073: `bun dev --live` names the live sign-in's). Live mode only.
+         */
+        signIns: string;
+      })
   | (Common &
       Real & {
         mode: "program";
@@ -109,7 +114,7 @@ export interface System {
 
 /** How `lookover serve` is called: every flag it reads. */
 export const SERVE_USAGE =
-  "Usage: lookover serve [--demo [--scenario=<id>] [--frozen=<ms>] | --live] [--live-config=<file>] [--home=<dir>] [--port=<n>] [--origin=<url>] [--announce=<file>] [--events-kept=<n>]";
+  "Usage: lookover serve [--demo [--scenario=<id>] [--frozen=<ms>] | --live [--sign-ins=<dir>]] [--live-config=<file>] [--home=<dir>] [--port=<n>] [--origin=<url>] [--announce=<file>] [--events-kept=<n>]";
 
 /**
  * Arguments `lookover` can't read: an option unknown, misspelt or in two words, two modes, a value of the wrong
@@ -184,6 +189,16 @@ function modeOf(argv: string[]): Mode {
   if (demo && live) throw new UsageError(`Pass --demo, --live or neither. ${SERVE_USAGE}`);
   if (demo) return "demo";
   return live ? "live" : "program";
+}
+
+/** `--sign-ins`, refused outside live mode. */
+function liveOnly(mode: Mode, signIns: string | undefined): void {
+  if (mode === "live" || signIns === undefined) return;
+  const why =
+    mode === "demo"
+      ? "demo mode signs in on its fake GitHub"
+      : "the program keeps its sign-in in its data folder";
+  throw new UsageError(`--sign-ins is for live mode: ${why}. ${SERVE_USAGE}`);
 }
 
 /** `--frozen` and `--scenario`, refused outside demo mode. */
@@ -346,6 +361,7 @@ const SWITCHES = new Set(["--demo", "--live"]);
 const VALUED: Record<string, string> = {
   home: "<dir>",
   "live-config": "<file>",
+  "sign-ins": "<dir>",
   port: "<n>",
   origin: "<url>",
   announce: "<file>",
@@ -387,6 +403,8 @@ export function readConfig(argv: string[], system: System, self: Self): Config {
   const frozen = wholeNumber(option("frozen"), "frozen", "milliseconds since the epoch");
   const scenario = option("scenario");
   demoOnly(mode, frozen, scenario);
+  const signIns = option("sign-ins");
+  liveOnly(mode, signIns);
   const home = given ?? profileHome(system);
   const agent = agentConfig(self, home, system);
   const common: Common = {
@@ -405,18 +423,20 @@ export function readConfig(argv: string[], system: System, self: Self): Config {
   // The live config lives in the data folder by default; the dev launcher names another one. One named must exist.
   const named = option("live-config") ?? system.env.LOOKOVER_LIVE_CONFIG;
   const path = resolve(named ?? liveConfigPath(common.home));
-  // Live mode needs one. With no "app", the App is the data folder's, or the setup's to give.
-  if (mode === "live") return { ...common, mode, ...served(path), processes };
+  // Live mode needs one, and reads its sign-in from the folder named, else the data folder (ADR 0073).
+  if (mode === "live")
+    return { ...common, mode, live: served(path), processes, signIns: resolve(signIns ?? common.home) };
   // The program: guarded when there is one, never run unguarded in its place when one named is missing.
-  const guard = named !== undefined || guardIn(path) ? served(path) : { live: undefined };
-  return { ...common, mode, ...guard, processes, atLogin: loginCommand(home, system, selfCommand(self)) };
+  const live = named !== undefined || guardIn(path) ? served(path) : undefined;
+  return { ...common, mode, live, processes, atLogin: loginCommand(home, system, selfCommand(self)) };
 }
 
 /**
- * The live config at `path` as a live service runs on it (ADR 0060): the organisation's App on its repositories when
- * it lists them, the guard's allow-list and the App given alike, and the line the start says it with.
+ * The live config at `path` as a live service runs on it (ADR 0073): its repositories, the guard's allow-list, and
+ * its ignored lines. Its App, its fork and its organisation are `bun run live`'s, never a way for the service to run:
+ * it runs on the shared App.
  */
-function served(path: string): Pick<Real, "asOrganisation"> & { live: LiveConfig } {
-  const { live, said } = servedLiveConfig(readLiveConfig(path), path);
-  return { live, ...(said === undefined ? {} : { asOrganisation: said }) };
+function served(path: string): LiveConfig {
+  const { repositories, ignored } = readLiveConfig(path);
+  return { repositories, ...(ignored === undefined ? {} : { ignored }) };
 }

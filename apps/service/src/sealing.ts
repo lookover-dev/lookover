@@ -1,6 +1,5 @@
-// The one sealing of the data folder's secrets (ADR 0053's pattern, ADR 0066: "one sealing for both"): the App's key
-// (`app-store.ts`) and the sign-in to the shared App (`sign-in-store.ts`), each in `github/` under a name of its own
-// (`app`, `sign-in`). Under the keychain, `<name>.<entry>.key` holds the secret encrypted with AES-256-GCM (12-byte
+// The sealing of the data folder's secrets (ADR 0053's pattern, ADR 0066): the sign-in to the shared App
+// (`sign-in-store.ts`), in `github/` under a name of its own (`sign-in`). Under the keychain, `<name>.<entry>.key` holds the secret encrypted with AES-256-GCM (12-byte
 // nonce, then the 16-byte tag, then the ciphertext) under a random 256-bit data key kept in the keychain entry, the
 // caller's associated data binding it to what it is for. The entry's name is random, made at each write
 // (`lookover-dev-…` for a data folder under `.dev`, `lookover-…` otherwise): two data folders never share one, and a
@@ -9,8 +8,8 @@
 // whole or not at all (a temporary file, then a rename). A new secret never overwrites the one the record names: its
 // file has a name of its own, so the record's rename, which is the caller's, is the one moment the secret changes;
 // what the record no longer names (the old entry and its file, an unencrypted file, a stopped write's temporary
-// files) is removed after it lands, or at the next write. Each name sweeps only its own files, so the App's and the
-// sign-in's never touch each other's. A secret that no longer opens (the entry or its file gone, the data key or the
+// files) is removed after it lands, or at the next write. Each name sweeps only its own files: what an earlier version
+// kept under another name (an App's key, `app`) is never touched. A secret that no longer opens (the entry or its file gone, the data key or the
 // ciphertext not the ones written together) is `lost`, with why.
 // It must never know: what the secret is, or what the record holds beside where the secret is.
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
@@ -53,7 +52,7 @@ export function secretAt(name: SecretName, plain: string): z.ZodType<SecretAt> {
 }
 
 /** The secrets the data folder seals, each its own name in `github/`: letters and dashes, no pattern's character. */
-export type SecretName = "app" | "sign-in";
+export type SecretName = "sign-in";
 
 const NONCE = 12;
 const TAG = 16;

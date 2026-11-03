@@ -25,3 +25,6 @@ export const LOADER = {
   dot: 5.09,
   hole: { rx: 5.53, ry: 6.15 },
 } as const;
+
+/** The wordmark's drawing box, its files' `viewBox`: the simulated GitHub page sizes it from it. */
+export const WORDMARK_BOX = { width: 4004, height: 1210 } as const;

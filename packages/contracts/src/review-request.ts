@@ -57,7 +57,7 @@ function markerOf(body: string): Pick<ReviewRequestText, "commit" | "reply"> {
 
 /**
  * What a comment's text asks, when it is a review request: its first line, trimmed, is the command (or the command
- * then `full`), in any case, and it holds no Lookover marker but the request's (a summary or a finding that quotes the
+ * then `full`), in any case, and it holds no Lookover marker but the request's (a post of Lookover's that quotes the
  * command is no request). Null for any other comment.
  */
 export function readRequest(body: string): ReviewRequestText | null {

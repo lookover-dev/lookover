@@ -10,9 +10,7 @@ import {
   type ChangeId,
   type CodingAgent,
   type ConnectionAccount,
-  type ConnectionApp,
   type ConnectionId,
-  type ConnectionWay,
   changeIdOf,
   changeNameParts,
   connectionId,
@@ -51,16 +49,10 @@ export interface Facts {
   command: string;
   /** Your coding agent (ADR 0058), as the machine said it at start. */
   agent: CodingAgent;
-  /** The way Lookover is on GitHub (ADR 0066); null with neither an App nor a sign-in. */
-  way: ConnectionWay | null;
-  /** The connection's id once installed (`connectionIdOf` the bot, or the person on `shared`); null with neither. */
+  /** The connection's id once installed (`connectionIdOf` the person); null before a sign-in. */
   connectionId: ConnectionId | null;
-  /** The person signed in to the shared App (ADR 0066); null on `own` and with neither. */
+  /** The person signed in to the shared App (ADR 0066); null before a sign-in. */
   person: HostLogin | null;
-  /** The App's bot, `<slug>[bot]`; null with no App (ADR 0053), and on `shared`. */
-  bot: string | null;
-  /** The owner's App, never its key; null with none. Shown once the setup says it is made. */
-  app: ConnectionApp | null;
   /** Each account reached, with its installation and its own cause (ADR 0066), once listed; none before. */
   accounts: ConnectionAccount[];
   /** GitHub's web address the app's links are built on (ADR 0053): GitHub's own in live mode, its fake in demo mode. */
@@ -90,35 +82,29 @@ export const SET_UP: Setup = {
   step: "background",
   reached: "background",
   github: "done",
-  githubRefused: null,
   firstReviewChange: null,
 };
 
-/** A data folder no one set up: its first step, nothing done (ADR 0053's live mode with no App named). */
+/** A data folder no one set up: its first step, nothing done (ADR 0053's program on a fresh data folder). */
 export const NEW_OWNER: Setup = {
   done: false,
   step: "ai",
   reached: "ai",
   github: "start",
-  githubRefused: null,
   firstReviewChange: null,
 };
 
 /**
- * Whether the App is on GitHub, as the setup says (ADR 0047, ADR 0053): installed, with repositories or none.
- * Until then there is no connection, and nothing to list.
+ * Whether the shared App is installed, as the setup says (ADR 0047, ADR 0053): with repositories or none. Until then
+ * there is no connection, and nothing to list.
  */
 export const appInstalled = (setup: Setup): boolean =>
   setup.github === "done" || setup.github === "nothing-granted";
 
-/** Whether the App is made, as the setup says: given or created, installed or not yet. */
-export const appMade = (setup: Setup): boolean =>
-  setup.github !== "start" && setup.github !== "waiting-for-app";
+/** Whether the setup's GitHub step is past its sign-in, as the setup says: installed or not yet (ADR 0073). */
+export const signedInAtSetup = (setup: Setup): boolean => setup.github !== "start";
 
-/**
- * The connection's id, once installed: of the bot on `own`, of the person's login on `shared` (ADR 0066), the bot's
- * `[bot]` keeping the two apart.
- */
+/** The connection's id, once installed: of the person's login (ADR 0066). */
 export const connectionIdOf = (poster: string) => connectionId(`github:${poster}`);
 
 /** The id the UI knows a repository by. */
@@ -191,9 +177,8 @@ export function changeFactsOf(open: OpenChange[], owner: { id: number }): Map<Ch
 
 /**
  * The changes the UI shows whose author moved from "you" to "other" or back, as the store's facts say it now, sent
- * again (`change.opened` on a change shown keeps what Lookover kept of it): another person signed in to the shared App,
- * or an own App in place of it, works for someone else (ADR 0066), so "is it yours" is asked again, in the events a tab
- * replays too. None when nobody's changed.
+ * again (`change.opened` on a change shown keeps what Lookover kept of it): another person signed in to the shared App
+ * works for someone else (ADR 0066), so "is it yours" is asked again, in the events a tab replays too. None when nobody's changed.
  */
 export function ownershipMoved(
   shown: State,
@@ -261,27 +246,22 @@ function engineOf(
 }
 
 /**
- * The connection the setup leads to: the bot's, or the person's on `shared`, once it is installed; until then none,
- * with its way, and its name and its App once created (ADR 0053, ADR 0066). No sign-in waits at start.
+ * The connection the setup leads to: the person's, once the shared App is installed; until then none, with who is
+ * signed in (ADR 0053, ADR 0066). No sign-in waits at start.
  */
 function connectionOf(f: Facts): State["connection"] {
   const installed = appInstalled(f.setup) && f.connectionId !== null;
-  const made = appMade(f.setup);
   return {
     id: installed ? f.connectionId : null,
     state: installed ? "connected" : "not-connected",
     cause: null,
-    way: f.way,
     signIn: null,
     person: f.person,
-    bot: made ? f.bot : null,
-    app: made ? f.app : null,
     accounts: installed ? f.accounts : [],
     unreached: [],
     web: f.web,
     since: f.startedAt,
     limitUntil: null,
-    gh: null,
   };
 }
 

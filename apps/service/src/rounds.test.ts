@@ -9,6 +9,7 @@ import { join } from "node:path";
 import {
   apply,
   type CommitSha,
+  commitSha,
   isCounted,
   jobId,
   type ReviewJob,
@@ -19,6 +20,7 @@ import {
 } from "@lookover/contracts";
 import {
   api,
+  blockOn,
   FIXED,
   home,
   messages,
@@ -46,6 +48,8 @@ afterAll(stopAll);
 
 const { dir: sandboxDir, sandbox, head: HEAD, remove } = plantedSandbox();
 afterAll(remove);
+/** The planted sandbox's `main`, its pull request's merge base. */
+const MAIN = commitSha("610d86d8a2803f372824568f561862ad97de6880");
 const plantedAuthor = (() => {
   const author = sandbox.changes[0]?.author;
   if (!author) throw new Error("the planted sandbox has no pull request");
@@ -175,6 +179,7 @@ test("round 1 posts in order with a valid result", () => {
     round: {
       n: 1,
       sha: HEAD,
+      base: MAIN,
       reviewer: "claude",
       confirmer: "codex",
       confirmFallback: null,
@@ -224,15 +229,17 @@ test("round 1 posts in order with a valid result", () => {
   ]);
 
   // What GitHub received: the job's one check, waiting its turn, then in
-  // progress (ADR 0043), then the round in the fixed order (ADR 0039), the result as the check's last line, valid.
+  // progress (ADR 0043) with the status block saying so (ADR 0074), then the round in the fixed order (ADR 0039), the
+  // result as the check's last line, valid.
   expect(posts.map((p) => (p.kind === "check.updated" ? `${p.kind} ${p.output.title}` : p.kind))).toEqual([
     "check.created",
     "check.updated Looking over 703205d",
+    "status.written",
     "review",
-    "summary.created",
+    "status.written",
     "check.completed",
   ]);
-  const completed = posts[4];
+  const completed = posts[5];
   if (completed?.kind !== "check.completed") throw new Error("no completed check");
   expect(completed.checkId).toBe(posts[0]?.kind === "check.created" ? posts[0].checkId : "");
   // A blocking finding is open on the pull request: neutral, never failure (ADR 0006).
@@ -341,28 +348,32 @@ test("the fix pushed, round 2 verifies it and posts what is new", async () => {
   expect(round2.findings.map((f) => f.confirmation.verdict)).toEqual(["confirmed", "unsure", "confirmed"]);
   expect(round2.findings[2]?.confirmation).toMatchObject({ by: "codex", verdict: "confirmed" });
 
-  // Two reviews, one summary created then edited, two checks; the second check names the fix commit.
+  // Two reviews, the status block rewritten as each round runs and posts, two checks; the second check names the fix
+  // commit.
   expect(host.posts.map((p) => p.kind)).toEqual([
     "check.created",
     "check.updated",
+    "status.written",
     "review",
-    "summary.created",
+    "status.written",
     "check.completed",
     "check.created",
     "check.updated",
+    "status.written",
     "review",
-    "summary.edited",
+    "status.written",
     "check.completed",
   ]);
   const shown = host.view({ repo: SANDBOX, number: 1 });
   expect(shown.reviews.map((r) => r.sha)).toEqual([HEAD, FIXED]);
-  expect(shown.comments).toHaveLength(1);
+  expect(shown.comments).toEqual([]);
+  expect(blockOn(host, { repo: SANDBOX, number: 1 })).toContain(" · 2 things to fix");
   // One check per commit: the view shows the head's, or the commit's named.
   const checks = (sha?: CommitSha) =>
     host.view({ repo: SANDBOX, number: 1 }, sha).checks.map((c) => `${c.sha} ${c.status} ${c.conclusion}`);
   expect(checks(HEAD)).toEqual([`${HEAD} completed neutral`]);
   expect(checks()).toEqual([`${FIXED} completed neutral`]);
-  const completed2 = host.posts[9];
+  const completed2 = host.posts[11];
   if (completed2?.kind !== "check.completed") throw new Error("no second completed check");
   expect(completed2.output.title).toBe("Looked over 4700cff: 2 things to fix");
   const result2 = readResult(completed2.output.text);

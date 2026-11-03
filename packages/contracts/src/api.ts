@@ -59,20 +59,6 @@ export interface MintedLink {
 }
 
 /**
- * The manifest flow's pages on the service (ADR 0053), named once for the service and the web app. `manifest`: the
- * page "Create it on GitHub" opens in a new tab (session-checked), which opens a flow and posts the manifest to
- * GitHub with its state; it is also "Open GitHub again" while no App is kept. `callback`: where GitHub's redirect
- * brings the code back (no session, no same-site check: the flow's state alone, its query never logged).
- * `installed`: the install's `setup_url`, a page in Lookover's look with Back to setup (ADR 0058) that trusts nothing
- * it is given.
- */
-export const APP_FLOW = {
-  manifest: "/api/v1/github/new",
-  callback: "/api/v1/github/callback",
-  installed: "/api/v1/github/installed",
-} as const;
-
-/**
  * The names on the event stream: `event` carries an `Event` as JSON; `reload` says to fetch the snapshot
  * again; `keepalive` says a quiet stream is still alive (a comment wouldn't reach the browser's `EventSource`),
  * so a client can tell a dead connection, which a proxy or a sleeping laptop keeps open, from a quiet one;

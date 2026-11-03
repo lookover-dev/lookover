@@ -5,10 +5,10 @@
 //
 // The story is the demo's S2 scenario, shortened: ledger-api, pull request #148, "Add rate limiting to
 // /v1/invoices", the commits a1f9c2e and b2c3d4e, one finding found by Codex and double-checked by Claude, verified
-// fixed in round 2. Its words are the ones Lookover says: the review and the summary as `publish` writes them, each
-// opening with "Lookover ·", posted as the person signed in to the shared App (ADR 0065), the badge on the summary
-// alone, as design-system.md's "The story" draws it, and the thread resolved by `lookover wait`, as Lookover posts no
-// reply on a fixed thread.
+// fixed in round 2. Its words are the ones Lookover says (ADR 0074): the status block in the description as each
+// round starts and is posted, a review with no body and its line comment, each post opening with the wordmark, posted
+// as the person signed in to the shared App (ADR 0065), with no badge, as design-system.md's "The story" draws it,
+// and the thread resolved by `lookover wait`, as Lookover posts no reply on a fixed thread.
 import { eyes, ICON, mark } from "../brand/eyes.generated.ts";
 
 /** The review pattern the app's panel shows: find, then confirm. */
@@ -18,12 +18,29 @@ const PATTERN = {
   steps: ["Codex looks for problems", "Claude double-checks each finding", "Posted on GitHub"],
 };
 
-/** The person signed in, an example: the shared App posts the review and the summary as them. */
+/** The person signed in, an example: the shared App posts the review as them. */
 const PERSON = "mira";
 
-/** Their avatar, a round with their initial; with Lookover's badge on what GitHub shows was posted through the App. */
-const avatar = (badged: boolean) =>
-  `<span class="ts-person" aria-hidden="true">${PERSON.charAt(0).toUpperCase()}${badged ? `<span class="ts-badge">${ICON}</span>` : ""}</span>`;
+/** Their avatar, a round with their initial. */
+const AVATAR = `<span class="ts-person" aria-hidden="true">${PERSON.charAt(0).toUpperCase()}</span>`;
+
+/**
+ * The wordmark every post opens with, as GitHub draws it: the theme's file, at the URL Lookover's posts point at
+ * (contracts' `WORDMARK_URLS`), the CSS showing the page's theme's one. Its width and height from the files' drawing,
+ * so nothing moves as it loads.
+ */
+const WORDMARK =
+  '<img class="ts-wm on-dark" src="/brand/lookover-wordmark-on-dark.svg" width="60" height="18" alt="Lookover">' +
+  '<img class="ts-wm on-light" src="/brand/lookover-wordmark.svg" width="60" height="18" alt="Lookover">';
+
+/** The status heading's wordmark: its own files at 26 px, the size `publish` writes in that heading. */
+const HEAD_WORDMARK =
+  '<img class="ts-wm on-dark" src="/brand/lookover-wordmark-on-dark.svg" width="86" height="26" alt="Lookover">' +
+  '<img class="ts-wm on-light" src="/brand/lookover-wordmark.svg" width="86" height="26" alt="Lookover">';
+
+/** The status block as it reads at one point of the story (`data-st`, the check's moments): its heading and lines. */
+const status = (at: string, head: string, lines: readonly string[]) =>
+  `<span class="ts-sttext" data-st="${at}"><span class="ts-sthead">${HEAD_WORDMARK} · ${head}</span>${lines.map((line) => `<span class="ts-stline">${line}</span>`).join("")}</span>`;
 
 /** The story in five beats, at the scene's time (ms): the phone's list, and where each starts. */
 export const THREE_SIDES_BEATS = [
@@ -31,7 +48,7 @@ export const THREE_SIDES_BEATS = [
   { at: 2900, text: "Lookover sees the push and runs the review: Codex finds, Claude double-checks." },
   {
     at: 6900,
-    text: "One review lands: the verdict, one finding on its line, the check. The agent is told what to do.",
+    text: "One review lands: the finding on its line, the status in the description, the check. The agent is told what to do.",
   },
   { at: 11000, text: "The agent reads it, fixes, replies, pushes. Round 2 checks the fix only." },
   { at: 17300, text: "Verified fixed. The check turns green. Merging stays your call." },
@@ -50,7 +67,8 @@ const ring = () =>
   `<span class="ts-aring"><svg viewBox="0 0 36 36"><circle class="trk" cx="18" cy="18" r="15"/><circle class="prg" cx="18" cy="18" r="15" pathLength="100"/></svg></span>`;
 
 /**
- * GitHub's side: the pull request, its check, the review, the finding on its line and its thread, the merge button.
+ * GitHub's side: the pull request, the status block in its description, its check, the review, the finding on its
+ * line and its thread, the merge button.
  * The scene's middle panel, and the card the phone shows under the beats.
  */
 export function githubPanelHTML(): string {
@@ -61,24 +79,25 @@ export function githubPanelHTML(): string {
           <div class="ts-layer" data-gh="pr">
             <div class="ts-prtitle">Add rate limiting to /v1/invoices <span>#148</span></div>
             <div class="ts-prmeta"><span class="ts-open">Open</span><span><code>add-rate-limit</code> into <code>main</code> · by the agent</span></div>
+            <div class="ts-status" data-status><span class="ts-stslot">
+              ${status("r1", "Looking over <code>a1f9c2e</code>", ["Round 1"])}
+              ${status("found", "One thing to fix", ["Round 1 · <code>a1f9c2e</code>", "<b>Blocking</b> · <a>API key is written to the request log</a> · <code>src/middleware/rateLimit.ts</code> line 42"])}
+              ${status("r2", "Looking over <code>b2c3d4e</code>", ["Round 2"])}
+              ${status("clear", "Nothing to fix", ["Round 2 · <code>b2c3d4e</code> · 1 fixed"])}
+            </span></div>
             <div class="ts-check">
               <span class="ts-chkico">${ICON}</span>
               <span class="ts-chkname">Lookover<span class="ts-chkslot"><span class="ts-chktext wait" data-chk="wait">Waiting</span><span class="ts-chktext run" data-chk="r1">Reviewing · round 1</span><span class="ts-chktext acc" data-chk="found">1 blocking finding</span><span class="ts-chktext run" data-chk="r2">Checking the fix</span><span class="ts-chktext ok" data-chk="clear">Nothing to fix</span></span></span>
             </div>
             <div class="ts-review" data-review>
-              ${avatar(false)}
-              <div><div class="ts-rvhead"><b class="ts-who">${PERSON}</b> <span class="ts-muted">reviewed</span></div>
-                <div class="ts-rvslot"><p class="ts-rvtext" data-verdict="1">Lookover · Looked over <code>a1f9c2e</code>. One thing to fix, rateLimit.ts line 42. The rest can go.</p><p class="ts-rvtext" data-verdict="2">Lookover · Looked over <code>b2c3d4e</code>. Nothing new to fix. The rest can go.</p></div></div>
+              ${AVATAR}
+              <div class="ts-rvhead"><b class="ts-who">${PERSON}</b> <span class="ts-muted">commented</span></div>
             </div>
             <div class="ts-finding" data-finding>
               <div class="ts-fpath"><code>src/middleware/rateLimit.ts</code> line 42</div>
               <div class="ts-fcode"><div><i>41</i><span>if (limited) {</span></div><div class="hl"><em class="ts-mkr"></em><i>42</i><span>  log.warn("throttled", req.headers);</span></div></div>
-              <div class="ts-fbody"><span class="ts-sevslot"><span class="ts-sev" data-sev="blocking">Blocking</span><span class="ts-sev ok" data-sev="fixed">Verified fixed</span></span><b>API key is written to the request log</b><p>When a client is throttled, the full headers are logged, including Authorization.</p></div>
+              <div class="ts-fbody"><span class="ts-fopen">${WORDMARK} · <span class="ts-sev" data-sev="blocking">Blocking</span></span><b>API key is written to the request log</b><p>When a client is throttled, the full headers are logged, including Authorization.</p></div>
               <div class="ts-thread"><span data-reply><b>agent</b> · Fixed in <code>b2c3d4e</code></span><span data-verified><b>Resolved</b> · verified fixed in <code>b2c3d4e</code> <em>✓</em></span></div>
-            </div>
-            <div class="ts-summary" data-summary>
-              ${avatar(true)}
-              <span class="ts-sumslot"><span class="ts-sumtext" data-verdict="1"><b>Lookover</b> · round 1 · One thing to fix.</span><span class="ts-sumtext" data-verdict="2"><b>Lookover</b> · round 2 · Nothing to fix.</span></span>
             </div>
             <div class="ts-merge" data-merge><span class="ts-mergebtn">Merge pull request</span><span>Your call, not the reviewer's.</span></div>
           </div>

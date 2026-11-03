@@ -6,7 +6,6 @@ import {
   type MouseEvent,
   type ReactNode,
   useId,
-  useRef,
   useState,
 } from "react";
 import type { WithCommand } from "../view-model/format.ts";
@@ -234,49 +233,6 @@ export function LinkButton({
   );
 }
 
-/**
- * A secret given as a file and never shown (design-system.md, Key file input): "Choose a file", then the chosen
- * file's name, or `placeholder` before one is chosen. Hands the file over; reading it is the caller's.
- */
-export function KeyFile({
-  id,
-  name,
-  placeholder,
-  accept,
-  invalid = false,
-  onChoose,
-}: {
-  id: string;
-  /** The chosen file's name; null before one is chosen. */
-  name: string | null;
-  placeholder: string;
-  accept: string;
-  invalid?: boolean;
-  onChoose: (file: File | null) => void;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  return (
-    <div className="input keyfile" aria-invalid={invalid || undefined}>
-      <Button id={id} size="sm" onClick={() => ref.current?.click()}>
-        Choose a file
-      </Button>
-      <span className={`kf-name ${name === null ? "none" : ""}`}>{name ?? placeholder}</span>
-      <input
-        ref={ref}
-        type="file"
-        accept={accept}
-        tabIndex={-1}
-        aria-hidden="true"
-        onChange={(e) => {
-          onChoose(e.target.files?.[0] ?? null);
-          // Cleared, so choosing the same file again (after fixing it on disk) still fires.
-          e.target.value = "";
-        }}
-      />
-    </div>
-  );
-}
-
 /** A value the owner copies into another program (design-system.md, Value to copy): the value, then a copy button. */
 export function CopyLine({ value, onCopy }: { value: string; onCopy: () => void }) {
   return (
@@ -316,46 +272,6 @@ export function Tag({
       {children}
     </span>
   );
-}
-
-/** A form field: label above, help below, or the error in its place (design-system.md, Input). */
-export function Field({
-  label,
-  help,
-  error,
-  htmlFor,
-  children,
-}: {
-  label: string;
-  help?: string;
-  error?: string;
-  htmlFor?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="field">
-      <label htmlFor={htmlFor}>{label}</label>
-      {children}
-      {/* The error in the help's place, the help kept unseen under it: the field keeps its height (Input). */}
-      {error && help ? (
-        <span className="field-note">
-          <span className="help" aria-hidden="true">
-            {help}
-          </span>
-          <span className="err">{error}</span>
-        </span>
-      ) : error ? (
-        <span className="err">{error}</span>
-      ) : help ? (
-        <span className="help">{help}</span>
-      ) : null}
-    </div>
-  );
-}
-
-/** An input on the page ground (design-system.md, Input). */
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={`input ${props.className ?? ""}`} />;
 }
 
 export function Search({ kbd, ...props }: InputHTMLAttributes<HTMLInputElement> & { kbd?: string }) {
@@ -647,7 +563,8 @@ export function Session({ words }: { words: string | WithCommand }) {
 
 /**
  * A sentence, plain or with commands in it: each command shown as inline code (design-system.md "Inline code"), at
- * the size of the line it is in. Punctuation that follows a command (`, but`, `.`) sits against it.
+ * the size of the line it is in, a device code in its own face ("Device code"). Punctuation that follows a command
+ * (`, but`, `.`) sits against it.
  */
 export function Said({ words }: { words: string | WithCommand }) {
   if (typeof words === "string") return words;
@@ -655,7 +572,7 @@ export function Said({ words }: { words: string | WithCommand }) {
   const gap = /^[,.:;]/.test(next) ? "" : " ";
   return (
     <span className="said">
-      {words.before} <code>{words.command}</code>
+      {words.before} <code className={words.kind}>{words.command}</code>
       {gap}
       <Said words={words.after} />
     </span>

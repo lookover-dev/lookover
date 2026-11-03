@@ -27,7 +27,6 @@ describeGh("memoryGh", {
     admin: [lookoverDev, orbit],
     member: [harbor],
     pending: invitedTo,
-    absent: "github",
   }),
   signedOut: async () => memoryGh({ as: null }),
   missing: async () => memoryGh({ as: "missing" }),
@@ -52,7 +51,6 @@ test("the fake: another sign-in reads that account's memberships, and a failure 
   const gh = samsGh();
   gh.signIn(teammate);
   expect(await gh.person()).toEqual({ kind: "signed-in", account: teammate });
-  expect(await gh.membership("lookover-dev")).toEqual({ kind: "active", person: teammate, admin: false });
   expect(await gh.memberships()).toEqual({
     kind: "listed",
     person: teammate,
@@ -61,7 +59,14 @@ test("the fake: another sign-in reads that account's memberships, and a failure 
 
   gh.signIn(sam);
   gh.leave("lookover-dev", sam);
-  expect(await gh.membership("lookover-dev")).toEqual({ kind: "absent" });
+  expect(await gh.memberships()).toEqual({
+    kind: "listed",
+    person: sam,
+    organisations: [
+      { organisation: orbit, role: "owner" },
+      { organisation: harbor, role: "member" },
+    ],
+  });
 
   gh.fail("timeout");
   expect(await gh.person()).toMatchObject({ kind: "unanswered", why: "timeout" });
@@ -77,5 +82,4 @@ test("the fake emptied: signed out, every organisation and failure forgotten", a
   expect(await gh.person()).toEqual({ kind: "signed-out" });
   gh.signIn(sam);
   expect(await gh.memberships()).toEqual({ kind: "listed", person: sam, organisations: [] });
-  expect(await gh.membership("orbit")).toEqual({ kind: "absent" });
 });

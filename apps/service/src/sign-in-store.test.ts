@@ -1,8 +1,9 @@
 // The sign-in store (ADR 0066, "The sign-in is kept like the key"): the person signed in to the shared App in
 // `github/sign-in.json`, their tokens sealed in `github/sign-in.<entry>.key` under a data key the keychain holds, or
-// in a user-only file when the keychain can't, as the App's key is. Every test runs on the fake keychain.
+// in a user-only file when the keychain can't. Every test runs on the fake keychain.
 import { afterAll, expect, test } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -16,11 +17,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SignIn } from "@lookover/contracts";
 import {
-  appStore,
   boundedKeychain,
   type Keychain,
   memoryKeychain,
-  type StoredApp,
+  signInEntryOf,
   signInStore,
   type Timers,
 } from "./index.ts";
@@ -175,22 +175,16 @@ test("a deleted keychain entry reads as lost, naming the person; the keeper then
   expect(await storeOf(home, keychain).keeper.read()).toBeNull();
 });
 
-test("the sign-in and the App kept in one folder never remove each other's files", async () => {
+test("the sign-in never removes the files an earlier version's App left in the folder", async () => {
   const home = folder();
   const keychain = memoryKeychain();
-  const app: StoredApp = {
-    id: 4242,
-    slug: "lookover-x7k2qa",
-    account: { id: 1234, login: "sasensi", type: "User" },
-    person: { id: 1234, login: "sasensi" },
-  };
-  const apps = appStore({ home, keychain, userOnly });
-  await apps.write(app, "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n");
+  // What an earlier version kept of its own App: its record and its key's sealed file.
+  const left = ["app.json", "app.lookover-111111111111111111111111.key", "app.222222222222222222222222.pem"];
+  mkdirSync(join(home, "github"), { recursive: true });
+  for (const name of left) writeFileSync(join(home, "github", name), "an earlier version's");
   await storeOf(home, keychain).write(SAM);
-  await apps.write(app, "-----BEGIN RSA PRIVATE KEY-----\nMIIF\n-----END RSA PRIVATE KEY-----\n");
   await storeOf(home, keychain).write(OCTOCAT);
-  expect(keychain.names()).toHaveLength(2);
-  expect((await apps.read()).state).toBe("kept");
+  for (const name of left) expect(existsSync(join(home, "github", name))).toBe(true);
   expect(await storeOf(home, keychain).read()).toEqual({
     state: "kept",
     signIn: OCTOCAT,
@@ -208,4 +202,24 @@ test("the keychain entry starts lookover-dev- for a data folder under .dev", asy
   const names = keychain.names();
   expect(names.filter((n) => /^lookover-dev-[0-9a-f]{24}$/.test(n))).toHaveLength(1);
   expect(names.filter((n) => /^lookover-[0-9a-f]{24}$/.test(n))).toHaveLength(1);
+});
+
+test("signInEntryOf names the keychain entry the sign-in is kept under now, and none for a file or no sign-in", async () => {
+  const home = folder();
+  expect(await signInEntryOf(home)).toBeNull();
+  const keychain = memoryKeychain();
+  await storeOf(home, keychain).write(SAM);
+  const first = await signInEntryOf(home);
+  expect(keychain.names()).toEqual([first ?? "none named"]);
+  // A renewal is a new sign-in to the store: a new entry, the old one removed.
+  await storeOf(home, keychain).write(OCTOCAT);
+  const renewed = await signInEntryOf(home);
+  expect(renewed).not.toBe(first);
+  expect(keychain.names()).toEqual([renewed ?? "none named"]);
+
+  const inFile = folder();
+  await signInStore({ home: inFile, keychain: memoryKeychain({ refuse: true }), userOnly }).write(SAM);
+  expect(await signInEntryOf(inFile)).toBeNull();
+  writeFileSync(join(inFile, "github", "sign-in.json"), "{ changed by hand");
+  expect(await signInEntryOf(inFile)).toBeNull();
 });

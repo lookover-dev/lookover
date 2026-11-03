@@ -1,6 +1,5 @@
-// The check's `external_id` (ADR 0066): `<job>@<person's id>`, on both ways in, so two people's checks on one pull
-// request never mix (each finds its own again, ADR 0044) and the agent can tell whose is whose. The person is the
-// one Lookover posts for: the App's person on `own`, the signed-in person on `shared`.
+// The check's `external_id` (ADR 0066): `<job>@<person's id>`, so two people's checks on one pull request never mix (each finds its own again, ADR 0044) and the agent can tell whose is whose. The person is the
+// one Lookover posts for: the person signed in to the shared App.
 
 /** A numeric id as GitHub writes one: digits, no leading zero. */
 const ID = /^[1-9][0-9]*$/;

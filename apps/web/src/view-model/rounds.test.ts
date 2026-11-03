@@ -8,6 +8,7 @@ function round(extra: Partial<Round> = {}): Round {
   return {
     n: 1,
     sha: commitSha("703205d"),
+    base: null,
     reviewer: "codex",
     secondFind: null,
     confirmer: "claude",

@@ -116,8 +116,6 @@ async function sharedFor(host: FakeGitHost, dir: string, o: { hold: boolean; lis
     fetchSpec: (...a) => host.fetchSpec(...a),
   };
   const github: GitHubSide = {
-    installations: host,
-    connect: () => ({ intake: host, writer: host }),
     shared: { signIn, signIns, accounts, connect: () => ({ intake, writer: host }) },
   };
   return {
@@ -146,7 +144,7 @@ async function bobSignsIn(
   time: DemoClock,
 ) {
   expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
-  host.enterCode("FAKE-0001");
+  host.enterCode("D054-61DC");
   await time.advance(5_000);
   return eventually(
     () => snapshot(service, cookie),
@@ -176,13 +174,13 @@ test("a discovery begun under the last sign-in that answers once another person 
   await time.advance(5 * MIN);
   await until(() => shared.held.length === 1);
   const asBob: State = await bobSignsIn(service, cookie, host, time);
-  expect(asBob.connection).toMatchObject({ way: "shared", person: BOB });
+  expect(asBob.connection).toMatchObject({ person: BOB });
 
   // The owner's listing answers now, reaching nothing: it is the last sign-in's, and nothing departs for it.
   shared.held[0]?.answer([]);
   await until(() => shared.held.length === 2);
   const after: State = await snapshot(service, cookie);
-  expect(after.connection).toMatchObject({ id: "github:bob", way: "shared", person: BOB });
+  expect(after.connection).toMatchObject({ id: "github:bob", person: BOB });
   expect(after.connection.cause).toBeNull();
   expect(after.repos.map((r) => String(r.id))).toEqual(["sasensi/lookover-sandbox"]);
   expect(Object.keys(after.changes)).toEqual([PLANTED]);
@@ -246,7 +244,7 @@ test("a sign-in replaced while the service was stopped: the connection names the
   await shared.signIns.write(signInAt(T0));
   const again = await start({ home: dir, host, time, github: shared.github });
   const restarted: State = await snapshot(again.service, await openApp(again.service));
-  expect(restarted.connection).toMatchObject({ id: "github:sasensi", way: "shared", person: OWNER });
+  expect(restarted.connection).toMatchObject({ id: "github:sasensi", person: OWNER });
 });
 
 /** An organisation both people reach, and its repository. */
@@ -320,7 +318,6 @@ test("an install's check begun under the last sign-in that answers once another 
       step: "github",
       reached: "github",
       github: "waiting-for-install",
-      githubRefused: null,
       firstReviewChange: null,
     },
   });
@@ -370,7 +367,6 @@ test("a repository's first poll begun under the last sign-in that answers once a
       step: "github",
       reached: "github",
       github: "waiting-for-install",
-      githubRefused: null,
       firstReviewChange: null,
     },
   });

@@ -10,7 +10,7 @@
 // Lookover filters again, last, once it has cut, trimmed, flattened or put a filtered text in a comment (render.ts):
 // `filteredAgain` keeps the breaks already there, which are the filter's, and adds none twice.
 import type { Finding } from "@lookover/contracts";
-import { closes, closing, type Fence, opened } from "./fence.ts";
+import { closes, closing, type Fence, fenced, opened } from "./fence.ts";
 import type { PlacedRound } from "./types.ts";
 
 /** The invisible break the filter puts in: a zero-width space, not a space to markdown. */
@@ -172,8 +172,20 @@ export interface RoundFilters {
 }
 
 /**
+ * A finding's suggestion when the filter leaves it as written in its block (ADR 0074): code GitHub would put in place
+ * of the finding's lines, so one the filter changes (a secret, a hidden character, a carriage return) is not offered
+ * at all, rather than changed. One empty or blank once trimmed is none too: applied, it would delete those lines.
+ */
+function unchanged(suggestion: string, filter: (text: string) => string): string | null {
+  if (suggestion.trim() === "") return null;
+  const block = fenced("suggestion", suggestion);
+  return filter(block) === block ? suggestion : null;
+}
+
+/**
  * The filter of a round's findings, one object for each finding however often it is given: its category, title, body
- * and reason for closing, the confirm pass's reason and evidence, its claim's text, and its path. The path is for
+ * and reason for closing, the confirm pass's reason and evidence, its claim's text, its suggestion (dropped when the
+ * filter would change it), and its path. The path is for
  * showing only: placement reads the finding as given, so a comment goes on its path as the diff names it.
  */
 export function findingFilter({ text: filter, path }: RoundFilters): (f: Finding) => Finding {
@@ -198,6 +210,7 @@ export function findingFilter({ text: filter, path }: RoundFilters): (f: Finding
       body: filter(f.body),
       closedWhy: f.closedWhy === null ? null : filter(f.closedWhy),
       claim: f.claim === null ? null : { ...f.claim, text: filter(f.claim.text) },
+      suggestion: f.suggestion === null ? null : unchanged(f.suggestion, filter),
     };
     done.set(f, clean);
     return clean;

@@ -6,11 +6,12 @@ import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { type RepositoryRef, repositoryId } from "@lookover/contracts";
 import { DemoClock, FakeGitHost } from "@lookover/testkit";
 import {
-  BOT,
   home,
+  OWNER,
   openApp,
   post,
   SANDBOX,
+  SHARED_BOT,
   snapshot,
   start,
   startRoom,
@@ -30,7 +31,14 @@ const WEB_ID = repositoryId(`${WEB.owner}/${WEB.name}`);
 
 /** The fake GitHub, its App installed on the sandbox, ledger-api and ledger-web. */
 const hostOn = (time: DemoClock) =>
-  new FakeGitHost({ repo: SANDBOX, repositories: [LEDGER, WEB], bot: BOT, changes: [], clock: time });
+  new FakeGitHost({
+    repo: SANDBOX,
+    repositories: [LEDGER, WEB],
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [],
+    clock: time,
+  });
 
 test("a repository the installation stops listing is said departed, kept across a restart, and no longer said once listed again", async () => {
   const time = new DemoClock({ at: T0 });

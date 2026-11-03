@@ -6,7 +6,15 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { changeId, DEMO_API, type Event, findingId, repositoryId } from "@lookover/contracts";
+import {
+  changeId,
+  DEMO_API,
+  type Event,
+  findingId,
+  githubLinks,
+  repositoryId,
+  SHARED_APP,
+} from "@lookover/contracts";
 import { scenarioOf } from "../index.ts";
 import { eventually, TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
@@ -15,7 +23,6 @@ import {
   brief,
   inject,
   installApp,
-  makeApp,
   onGitHub,
   send,
   snapshotOf,
@@ -275,22 +282,13 @@ test("settings-unwritable: every settings save is refused, its file held open; n
   expect((await snapshotOf(door)).seq).toBe(seq);
 });
 
-/** The App's page and its installation's on GitHub's fake pages, as the connection names them. */
+/** The shared App's install page on GitHub's fake pages, and the installation's on the person's own account. */
 async function pagesOf(door: Awaited<ReturnType<typeof morning>>) {
   const { connection } = await snapshotOf(door);
   return {
-    app: `/settings/apps/${connection.app?.slug}`,
     installation: `/settings/installations/${connection.accounts[0]?.installationId}`,
-    install: `/apps/${connection.app?.slug}/installations/new`,
+    install: `/apps/${SHARED_APP.slug}/installations/new`,
   };
-}
-
-/** "Add a new key": one generated on the App's page, then given under "Use an existing App". The status it answered. */
-async function newKey(door: Awaited<ReturnType<typeof morning>>): Promise<number> {
-  const { app } = await pagesOf(door);
-  const key = await onGitHub(door, app, [["action", "generate-key"]]);
-  const appId = (await snapshotOf(door)).connection.app?.id ?? 0;
-  return (await send(door, { type: "connection.useApp", appId, key })).status;
 }
 
 test("app-uninstalled: the connection shows the App uninstalled; installed again on GitHub, it comes back on its new installation", async () => {
@@ -303,55 +301,29 @@ test("app-uninstalled: the connection shows the App uninstalled; installed again
     cause: { kind: "uninstalled", suspended: false },
   });
   await installApp(door, `${DEMO_API.github}${install}`);
-  await advance(door, MIN);
+  // No repository left to poll: the next discovery, five minutes on, finds the new installation.
+  await advance(door, 5 * MIN);
   const back = (await snapshotOf(door)).connection;
   expect(back).toMatchObject({ state: "connected", cause: null });
   expect(back.accounts[0]?.installationId).not.toBe(was);
 });
 
-test("app-suspended: the connection shows the App suspended; unsuspended on GitHub, it comes back", async () => {
+test("app-suspended: the person's own account shows the App suspended, the connection up; unsuspended on GitHub, it comes back", async () => {
   const door = await morning();
   const { installation } = await pagesOf(door);
   expect(await inject(door, "app-suspended")).toBe(200);
   expect((await snapshotOf(door)).connection).toMatchObject({
-    state: "disconnected",
-    cause: { kind: "uninstalled", suspended: true },
+    state: "connected",
+    cause: null,
+    accounts: [{ account: { login: "sasensi" }, cause: { kind: "uninstalled", suspended: true } }],
   });
   await onGitHub(door, installation, [["action", "unsuspend"]]);
   await advance(door, MIN);
-  expect((await snapshotOf(door)).connection).toMatchObject({ state: "connected", cause: null });
-});
-
-test("key-refused: GitHub refuses the App's key as revoked; a new key from the App's page heals it", async () => {
-  const door = await morning();
-  expect(await inject(door, "key-refused")).toBe(200);
   expect((await snapshotOf(door)).connection).toMatchObject({
-    state: "disconnected",
-    cause: { kind: "key-refused", why: "revoked" },
+    state: "connected",
+    cause: null,
+    accounts: [{ cause: null }],
   });
-  expect(await newKey(door)).toBe(200);
-  expect((await snapshotOf(door)).connection).toMatchObject({ state: "connected", cause: null });
-});
-
-test("key-lost: Lookover restarts and finds its key gone, open tabs told to reload; a new key from the App's page heals it", async () => {
-  const door = await morning();
-  const events = await stream(door, BRIEF_SEEDED);
-  expect(await inject(door, "key-lost")).toBe(200);
-  for (;;) {
-    const { value, done } = await events.next();
-    if (done) throw new Error("The event stream ended");
-    if (value.event === "reload") break;
-  }
-  const lost = await snapshotOf(door);
-  expect(lost.connection).toMatchObject({
-    state: "disconnected",
-    cause: { kind: "key-lost" },
-    app: { id: 1, slug: "lookover-spike-sasensi" },
-  });
-  // The story goes on: what the room watched is still there.
-  expect(lost.changes[id(135)]).toBeDefined();
-  expect(await newKey(door)).toBe(200);
-  expect((await snapshotOf(door)).connection).toMatchObject({ state: "connected", cause: null });
 });
 
 /** Demo mode's Lookover off the PATH: the program, downloaded to a folder with a space in its path (ADR 0058). */
@@ -493,39 +465,6 @@ test("login-taken: Lookover restarts and another Lookover holds start at login: 
   expect((await snapshotOf(door)).service).toMatchObject({ startAtLogin: true, atLogin: "this" });
 });
 
-test("key-lost with no App kept (S1): nothing to lose, the fault says so", async () => {
-  const door = await startScenario(scenarioOf("S1"));
-  const none = await send(door, { type: "demo.inject", fault: "key-lost" });
-  expect([none.status, await none.json()]).toEqual([409, { error: "no App kept yet" }]);
-});
-
-test("key-lost mid-round (S3): the round is cut with the room, nothing of it recorded; the new room takes the job again, and S3's story goes on to round 1 posted", async () => {
-  const door = await startScenario(scenarioOf("S3"));
-  const csv = changeId("sasensi/ledger-api#151");
-  expect((await snapshotOf(door)).reviews[csv]?.run).toMatchObject({ reviewer: "claude", step: "finding" });
-  // A command under way when the fault comes answers from the room it reached, before that room stops.
-  const [checked, lost] = await Promise.all([send(door, { type: "engine.check" }), inject(door, "key-lost")]);
-  expect([checked.status, lost]).toEqual([200, 200]);
-  const restarted = await snapshotOf(door);
-  expect(restarted.connection).toMatchObject({ cause: { kind: "key-lost" } });
-  expect(restarted.reviews[csv]?.rounds).toEqual([]);
-  expect(restarted.reviews[csv]?.job?.failure ?? null).toBeNull();
-  expect(await newKey(door)).toBe(200);
-  // The run taken again from the restart ends asking for a sign-in (Claude signs out as S3 says): the job waits
-  // for Claude; signed in, the review runs to its end.
-  await advance(door, 3 * MIN);
-  expect((await snapshotOf(door)).reviews[csv]?.job).toMatchObject({
-    state: "deferred",
-    deferral: { reason: "engine-signed-out", engine: "claude" },
-  });
-  expect((await send(door, { type: "engine.signIn", id: "claude" })).status).toBe(200);
-  await advance(door, 40_000);
-  await advance(door, 4 * MIN);
-  const posted = (await snapshotOf(door)).reviews[csv];
-  expect(posted?.job?.failure ?? null).toBeNull();
-  expect(posted?.rounds.map((r) => [r.n, r.reviewer, r.confirmer])).toEqual([[1, "claude", "codex"]]);
-});
-
 test("repository-added, repository-removed: one added to the App is watched at once; removed, it goes; none left, the fault says so", async () => {
   const door = await morning();
   const repoIds = async () => (await snapshotOf(door)).repos.map((r) => [r.id, r.enabled]);
@@ -565,14 +504,20 @@ test("repository-removed, repository-back: the one removed is said departed; add
   expect(back.departed).toEqual([]);
 });
 
-test("nothing-granted: S1's new App installed on no repository, the setup says so; granted all on GitHub, it goes on", async () => {
+test("nothing-granted: S1 signed in, the App installed on no repository, the setup says so; granted all on GitHub, it goes on", async () => {
   const door = await startScenario(scenarioOf("S1"));
   expect((await send(door, { type: "setup.goto", step: "github" })).status).toBe(200);
-  const installPage = await makeApp(door);
   expect(await inject(door, "nothing-granted")).toBe(200);
+  expect((await send(door, { type: "connection.signIn" })).status).toBe(200);
+  expect(await inject(door, "sign-in-entered")).toBe(200);
+  await advance(door, 5_000);
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.connection.person !== null,
+  );
   await advance(door, 4_000);
   expect((await snapshotOf(door)).setup).toMatchObject({ github: "nothing-granted" });
-  await installApp(door, installPage);
+  await installApp(door, githubLinks.install(DEMO_API.github, SHARED_APP.slug));
   await advance(door, 4_000);
   const granted = await snapshotOf(door);
   expect(granted.setup).toMatchObject({ github: "done", step: "github", reached: "repos" });
@@ -589,9 +534,8 @@ test("sign-in-entered: S1 signed in to the shared App from the setup, the code o
   const waiting = await snapshotOf(door);
   // The page is GitHub's fake, under demo mode's web address: nothing demo mode shows opens github.com.
   expect(waiting.connection).toMatchObject({
-    way: null,
     signIn: {
-      userCode: "FAKE-0001",
+      userCode: "D054-61DC",
       verificationUri: `${DEMO_API.github}/login/device`,
       expiresAt: T0 + 15 * MIN,
     },
@@ -602,7 +546,7 @@ test("sign-in-entered: S1 signed in to the shared App from the setup, the code o
   // The sign-in is kept on disk before the code goes; then the install's next check (4 s) finds the accounts.
   await eventually(
     () => snapshotOf(door),
-    (s) => s.connection.way === "shared",
+    (s) => s.connection.person !== null,
   );
   await advance(door, 4_000);
   const signedIn = await eventually(
@@ -610,12 +554,9 @@ test("sign-in-entered: S1 signed in to the shared App from the setup, the code o
     (s) => s.setup.github === "done",
   );
   expect(signedIn.connection).toMatchObject({
-    way: "shared",
     id: "github:sasensi",
     state: "connected",
     signIn: null,
-    bot: null,
-    app: null,
   });
   expect(signedIn.setup).toMatchObject({ github: "done", reached: "repos" });
   expect(signedIn.repos.map((r) => r.id)).toEqual([
@@ -634,7 +575,7 @@ test("github-signed-out before the install: the setup's connection says signed o
   await advance(door, 5_000);
   await eventually(
     () => snapshotOf(door),
-    (s) => s.connection.way === "shared" && s.connection.signIn === null,
+    (s) => s.connection.person !== null && s.connection.signIn === null,
   );
   expect(await inject(door, "github-signed-out")).toBe(200);
   await advance(door, 4_000);
@@ -642,7 +583,7 @@ test("github-signed-out before the install: the setup's connection says signed o
     () => snapshotOf(door),
     (s) => s.connection.cause !== null,
   );
-  expect(out.connection).toMatchObject({ way: "shared", cause: { kind: "signed-out" } });
+  expect(out.connection).toMatchObject({ cause: { kind: "signed-out" } });
   expect(out.setup.github).toBe("waiting-for-install");
 
   expect((await send(door, { type: "connection.signIn" })).status).toBe(200);
@@ -652,7 +593,7 @@ test("github-signed-out before the install: the setup's connection says signed o
     () => snapshotOf(door),
     (s) => s.connection.signIn === null && s.connection.cause === null,
   );
-  expect(back.connection).toMatchObject({ way: "shared", person: { login: "sasensi" } });
+  expect(back.connection).toMatchObject({ person: { login: "sasensi" } });
 });
 
 test("sign-in-denied: the person cancels on GitHub, the code goes and nothing is signed in; the code also entered on the fake's page", async () => {
@@ -662,7 +603,6 @@ test("sign-in-denied: the person cancels on GitHub, the code goes and nothing is
   expect(await inject(door, "sign-in-denied")).toBe(200);
   await advance(door, 5_000);
   expect((await snapshotOf(door)).connection).toMatchObject({
-    way: null,
     signIn: null,
     state: "not-connected",
   });
@@ -670,7 +610,7 @@ test("sign-in-denied: the person cancels on GitHub, the code goes and nothing is
   // Started again, the next code entered on GitHub's fake page, as the browser does there.
   expect((await send(door, { type: "connection.signIn" })).status).toBe(200);
   const code = (await snapshotOf(door)).connection.signIn?.userCode ?? "";
-  expect(code).toBe("FAKE-0002");
+  expect(code).toBe("D054-61DD");
   expect(
     await onGitHub(door, "/login/device", [
       ["user_code", code],
@@ -680,9 +620,9 @@ test("sign-in-denied: the person cancels on GitHub, the code goes and nothing is
   await advance(door, 5_000);
   const signedIn = await eventually(
     () => snapshotOf(door),
-    (s) => s.connection.way !== null,
+    (s) => s.connection.person !== null,
   );
-  expect(signedIn.connection).toMatchObject({ way: "shared", signIn: null });
+  expect(signedIn.connection).toMatchObject({ signIn: null });
 });
 
 test("a fault that isn't one is refused at the door", async () => {

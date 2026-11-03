@@ -1,47 +1,27 @@
-// An organisation's App (ADR 0059), through the service's entry, on fakes only: the App ACME owns, put straight into
-// the data folder's App store with the person it works for, as the manifest flow and "Use an existing App" will keep
-// it. GitHub (the fake) describes the App as ACME's, installs it on ACME and lists ACME's repositories. Discovery takes
-// that installation, and the person rule holds as on a personal App: only the person's changes, and their coding
+// An organisation's repositories (ADR 0059, ADR 0066), through the service's entry, on fakes only: the owner signed in
+// to the shared App, installed on ACME, whose repositories it lists. Discovery takes that installation, and the person
+// rule holds as on the person's own account: only the person's changes, and their coding
 // agents' pushed under their login, are reviewed by themselves; a teammate's is skipped `not-yours`, their
 // `/lookover review` ignored, the person's on it reviewed by Claude alone; a fork follows the fork rule. Replies
 // count from the person and the change's author, never another teammate (a fork's: `claims.test.ts`).
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import {
-  type AppCredentials,
-  changeId,
-  commitSha,
-  connectionCauseOf,
-  type Event,
-  HostError,
-  type Repository,
-} from "@lookover/contracts";
-import { openStore } from "@lookover/store";
-import {
-  DemoClock,
-  type FakeChange,
-  type FakeEngines,
-  FakeGitHost,
-  type ScriptedRun,
-} from "@lookover/testkit";
+import { changeId, commitSha, type Event, type Repository } from "@lookover/contracts";
+import { DemoClock, type FakeChange, type FakeEngines, type ScriptedRun } from "@lookover/testkit";
 import { again, roundOne, STILL } from "./claims.test-support.ts";
 import {
   ACME,
   ACME_WEB,
   api,
-  BOT,
   fakeEngines,
   home,
   messages,
   OWNER,
-  onFakeGitHub,
-  onOrganisationApp,
   openApp,
   organisationHost,
   pr1,
-  SANDBOX,
+  signedInOn,
   snapshot,
   start,
-  startRoom,
   stopAll,
   T0,
   TEST_LIMIT_MS,
@@ -84,7 +64,7 @@ function bothEngines(): FakeEngines {
 const startedBy = (events: Event[]) =>
   events.flatMap((e) => (e.type === "run.started" ? [e.run.reviewer] : []));
 
-/** The service on ACME's App, kept in the data folder, working for the owner; listening to its events. */
+/** The service signed in as the owner, the shared App installed on ACME; listening to its events. */
 async function onAcme(changes: FakeChange[] = []) {
   const time = new DemoClock({ at: T0 });
   const host = organisationHost(time, changes);
@@ -95,20 +75,20 @@ async function onAcme(changes: FakeChange[] = []) {
     host,
     time,
     engines,
-    github: await onOrganisationApp(host, dir),
+    github: await signedInOn(host, dir),
   });
   const cookie = await openApp(service);
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   return { service, host, time, engines, cookie, stream };
 }
 
-test("the installation on the organisation is found and its repositories discovered; the App's account and the person apart", async () => {
+test("the installation on the organisation is found and its repositories discovered; the person is not the organisation", async () => {
   const { service, cookie } = await onAcme();
   const state = await snapshot(service, cookie);
   expect(state.connection).toMatchObject({
     state: "connected",
-    app: { account: ACME, person: OWNER },
-    accounts: [{ account: ACME, installationId: 60_000_001, cause: null }],
+    person: OWNER,
+    accounts: [{ account: ACME, cause: null }],
   });
   expect(state.repos.map((r: Repository) => r.id)).toEqual(["acme/web", "acme/api"]);
 });
@@ -168,12 +148,12 @@ test("a fork of an organisation's repository follows the fork rule: skipped, eve
   expect(startedBy(await until(stream, "round.finished"))).toEqual(["claude"]);
 });
 
-/** Round 1 on `change`, one of ACME's `web`, with ACME's App kept in the data folder working for the owner. */
+/** Round 1 on `change`, one of ACME's `web`, the owner signed in to the shared App installed on ACME. */
 async function roundOneOnAcme(change: FakeChange) {
   const time = new DemoClock({ at: T0 });
   const host = organisationHost(time);
   const dir = home();
-  const github = await onOrganisationApp(host, dir);
+  const github = await signedInOn(host, dir);
   return roundOne({ change, host, time, home: dir, github });
 }
 
@@ -203,80 +183,4 @@ test("on a teammate's change the person asked for, its author's reply counts (AD
     id: "F1",
     claim: { kind: "deferred", by: TEAMMATE.login, count: 1 },
   });
-});
-
-test("live.json's organisation App works for the person their own gh names; without gh, it is refused at start", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = organisationHost(time);
-  const { connect } = onFakeGitHub(host);
-  // As `live.json` names it: never stored, described by GitHub at start, ACME's.
-  const given = { installations: host, connect, given: host.credentials() };
-  const asked: string[] = [];
-  const person = async () => {
-    asked.push("person");
-    return { id: 11247504, login: "sasensi" };
-  };
-  const { service } = await start({ home: home(), host, time, github: { ...given, person } });
-  const state = await snapshot(service, await openApp(service));
-  expect(state.connection).toMatchObject({
-    state: "connected",
-    app: { account: ACME, person: { id: 11247504, login: "sasensi" } },
-  });
-  expect(asked).toEqual(["person"]);
-
-  // The person is never the organisation: with nobody to ask, the App is refused at start, as before.
-  const dir = home();
-  // Its own store, closed after: a refused start leaves it open.
-  const store = openStore({ home: dir, durable: false });
-  await expect(start({ home: dir, store, host, time, github: given })).rejects.toThrow(
-    "belongs to the organisation acme",
-  );
-  store.close();
-});
-
-test("live.json's organisation App described after start, gh signed out by then: GitHub's refusal, its cause unreachable", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = organisationHost(time);
-  const { connect } = onFakeGitHub(host);
-  // GitHub refuses the App at start, then answers: it is described at the first call that needs it, here Reconnect.
-  let refusing = true;
-  const app = (credentials: AppCredentials) =>
-    refusing ? Promise.reject(new HostError("unavailable", "GitHub is down")) : host.app(credentials);
-  const person = () => Promise.reject(new Error("gh is signed out (gh auth login)"));
-  const github = {
-    installations: {
-      convertManifest: (code: string) => host.convertManifest(code),
-      app,
-      installation: (credentials: AppCredentials) => host.installation(credentials),
-      repositories: (credentials: AppCredentials, id: number) => host.repositories(credentials, id),
-    },
-    connect,
-    given: host.credentials(),
-    person,
-  };
-  const { room } = await startRoom({ home: home(), host, time, github });
-  refusing = false;
-
-  const refused = await room.reconnect().then(
-    () => null,
-    (error: unknown) => error,
-  );
-  if (!(refused instanceof HostError)) throw new Error(`refused with ${String(refused)}`);
-  expect(refused.failure).toBe("unavailable");
-  expect(connectionCauseOf(refused)).toEqual({ kind: "unreachable" });
-  expect(refused.message).toBe("gh is signed out (gh auth login)");
-});
-
-test("an organisation's App not installed says the organisation; a personal App, the person's account", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = organisationHost(time);
-  host.uninstall();
-  const dir = home();
-  const { logged } = await startRoom({ home: dir, host, time, github: await onOrganisationApp(host, dir) });
-  expect(logged.join("\n")).toContain("lookover-spike-sasensi is not installed on the organisation acme");
-
-  const personal = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [], clock: time });
-  personal.uninstall();
-  const mine = await startRoom({ host: personal, time });
-  expect(mine.logged.join("\n")).toContain("lookover-spike-sasensi is not installed on sasensi's account");
 });

@@ -45,15 +45,13 @@ export interface AgentHostFixture {
   head: CommitSha;
   /** The App's slug: the checks `check` creates are its. */
   app: string;
-  /** The numeric id of the App's bot, as the App knows itself (REST's): its replies in a thread name it. */
-  botId: number;
   /** The account the adapter's token belongs to: what `host.comment` writes as. */
   account: { id: number; login: string };
   /**
-   * The person the App posts as, signed in to it (ADR 0066): its threads are theirs, asked for by their id, and
-   * `account` is someone else. None: the App posts as its bot.
+   * The person the App posts as, signed in to it (ADR 0066): its threads are theirs, asked for by their id; `account`
+   * may be someone else.
    */
-  person?: { id: number; login: string };
+  person: { id: number; login: string };
   /**
    * The App creates the `Lookover` check on the commit, with that status and external id (`checkExternalId`'s).
    * Returns its id.
@@ -147,7 +145,7 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
   /** Lookover's threads on the change, once the host shows one: what `postFinding` just wrote. */
   const threadShown = (f: AgentHostFixture) =>
     readUntil(
-      () => f.host.threads(f.change, f.app, f.person?.id),
+      () => f.host.threads(f.change, f.app, f.person.id),
       (threads) => threads[0] !== undefined,
       "the finding's thread",
       patience,
@@ -158,7 +156,7 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
    */
   const repliesShown = (f: AgentHostFixture) =>
     shown(
-      async () => (await f.host.threads(f.change, f.app, f.person?.id)).map((t) => t.replies),
+      async () => (await f.host.threads(f.change, f.app, f.person.id)).map((t) => t.replies),
       [[]],
       "the finding's thread",
     );
@@ -295,9 +293,9 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
 
     test("a change nobody reviewed has no threads; a change that isn't one is not found, and nothing is replied", async () => {
       const f = await setup();
-      expect(await f.host.threads(f.change, f.app, f.person?.id)).toEqual([]);
+      expect(await f.host.threads(f.change, f.app, f.person.id)).toEqual([]);
       const missing = { ...f.change, number: NO_CHANGE };
-      await expect(f.host.threads(missing, f.app, f.person?.id)).rejects.toMatchObject({
+      await expect(f.host.threads(missing, f.app, f.person.id)).rejects.toMatchObject({
         failure: "not_found",
       });
       const root = await f.postFinding(findingId("F1"));
@@ -326,7 +324,7 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
         at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
       });
       const account = { ...f.account, bot: false };
-      const app = f.person ? { ...f.person, bot: false } : { id: f.botId, login: `${f.app}[bot]`, bot: true };
+      const app = { ...f.person, bot: false };
       const thread = [
         {
           commentId: root,
@@ -343,15 +341,13 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
           ],
         },
       ];
-      const ours = () => f.host.threads(f.change, f.app, f.person?.id);
+      const ours = () => f.host.threads(f.change, f.app, f.person.id);
       expect(await shown(ours, thread, "the thread with its three replies")).toEqual(thread);
       // Another App's threads are left out, whatever their marker.
-      expect(await f.host.threads(f.change, `${f.app}-other`)).toEqual([]);
-      // Asked for another person's, the person's roots are none of Lookover's; the bot's still are (ADR 0066). The
-      // bot's are a write's effect, read until shown; the person's none, absent, read once.
+      expect(await f.host.threads(f.change, `${f.app}-other`, NO_PERSON)).toEqual([]);
+      // Asked for another person's, the person's roots are none of Lookover's (ADR 0066): absent, read once.
       const roots = async () => (await f.host.threads(f.change, f.app, NO_PERSON)).map((t) => t.commentId);
-      const nobody = f.person ? await roots() : await shown(roots, [root], "the bot's thread");
-      expect(nobody).toEqual(f.person ? [] : [root]);
+      expect(await roots()).toEqual([]);
     });
 
     test("a thread resolved reads resolved, and resolving it again changes nothing; a thread that isn't one is not found", async () => {
@@ -361,11 +357,11 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
       if (!thread) throw new Error("The finding's thread is not read");
       await f.host.resolve(thread.threadId);
       const resolved = [{ ...thread, resolved: true }];
-      const ours = () => f.host.threads(f.change, f.app, f.person?.id);
+      const ours = () => f.host.threads(f.change, f.app, f.person.id);
       expect(await shown(ours, resolved, "the thread resolved")).toEqual(resolved);
       // Resolving again changes nothing: read once.
       await f.host.resolve(thread.threadId);
-      expect((await f.host.threads(f.change, f.app, f.person?.id)).map((t) => t.resolved)).toEqual([true]);
+      expect((await f.host.threads(f.change, f.app, f.person.id)).map((t) => t.resolved)).toEqual([true]);
       await expect(f.host.resolve(NO_THREAD)).rejects.toMatchObject({ failure: "not_found" });
     });
 
@@ -380,7 +376,7 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
         threads.map((t) => [t.commentId, t.findingId, t.outdated, t.resolved]);
       const replies = (threads: AgentThread[]) => threads[0]?.replies.map((r) => [r.commentId, r.body]);
       const threads = await readUntil(
-        () => f.host.threads(f.change, f.app, f.person?.id),
+        () => f.host.threads(f.change, f.app, f.person.id),
         (read) => equals(outdated)(states(read)) && equals(replied)(replies(read)),
         "the thread outdated, with its reply",
         patience,
@@ -409,7 +405,7 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
       const refused = f.unresolving().resolve(thread.threadId);
       await expect(refused).rejects.toMatchObject({ failure: "unauthorized" });
       await expect(refused).rejects.toThrow(`GitHub refused to resolve thread ${thread.threadId}: `);
-      expect((await f.host.threads(f.change, f.app, f.person?.id)).map((t) => t.resolved)).toEqual([false]);
+      expect((await f.host.threads(f.change, f.app, f.person.id)).map((t) => t.resolved)).toEqual([false]);
     });
 
     for (const { failure: refusal, when } of Object.values(REFUSALS)) {
@@ -424,7 +420,7 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
         await expect(f.host.checks(f.change.repo, f.head, "lookover")).rejects.toMatchObject(failure);
         await expect(f.host.comments(f.change)).rejects.toMatchObject(failure);
         await expect(f.host.comment(f.change, "Refused.")).rejects.toMatchObject(failure);
-        await expect(f.host.threads(f.change, "lookover")).rejects.toMatchObject(failure);
+        await expect(f.host.threads(f.change, "lookover", NO_PERSON)).rejects.toMatchObject(failure);
         await expect(f.host.reply(f.change, 1, "Refused.")).rejects.toMatchObject(failure);
         await expect(f.host.resolve(NO_THREAD)).rejects.toMatchObject(failure);
       });

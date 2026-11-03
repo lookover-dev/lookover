@@ -23,7 +23,6 @@
     "@lookover/settings": "workspace:*",
     "@lookover/store": "workspace:*",
     "@lookover/testkit": "workspace:*",
-    "@lookover/web": "workspace:*",
     "hono": "^4.12.0",
     "zod": "^4.6.5"
   },
@@ -41,8 +40,7 @@
       "@lookover/review": "wired by the composition root",
       "@lookover/settings": "wired by the composition root",
       "@lookover/store": "wired by the composition root",
-      "@lookover/testkit": "the fakes demo mode runs on, through its ./demo entry (ADR 0039)",
-      "@lookover/web": "the pages GitHub's redirects reach look like Lookover (ADR 0058): its ./standalone entry gives the design system's stylesheet, the eyes and the theme's key as text, one source, no copy"
+      "@lookover/testkit": "the fakes demo mode runs on, through its ./demo entry (ADR 0039)"
     }
   }
 }

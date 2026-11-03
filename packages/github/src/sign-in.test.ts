@@ -152,6 +152,39 @@ describe("the device flow", () => {
     });
   });
 
+  test("a slow_down carrying GitHub's new interval is polled at that interval, never more (GitHub's docs, #476)", async () => {
+    const slowDown = (interval: number) => ({
+      status: 200,
+      body: { ...oauthError("slow_down").body, interval },
+    });
+    const answers = [slowDown(10), slowDown(15)];
+    const { signIn } = signInOver(pollRoute(() => answers.shift() ?? slowDown(15)));
+    // The interval Lookover held was already past GitHub's: GitHub's is the one kept.
+    expect(await signIn.pollSignIn({ ...GRANT, interval: 20_000 })).toEqual({
+      kind: "slow-down",
+      grant: { ...GRANT, interval: 10_000 },
+    });
+    expect(await signIn.pollSignIn({ ...GRANT, interval: 10_000 })).toEqual({
+      kind: "slow-down",
+      grant: { ...GRANT, interval: 15_000 },
+    });
+  });
+
+  test("a slow_down whose interval is no positive number still slows down, by 5 s (GitHub's docs, #476)", async () => {
+    const slowDown = (interval: unknown) => ({
+      status: 200,
+      body: { ...oauthError("slow_down").body, interval },
+    });
+    const answers = [slowDown(0), slowDown(-3), slowDown("ten"), slowDown(null)];
+    const { signIn } = signInOver(pollRoute(() => answers.shift() ?? slowDown(0)));
+    for (const _ of [0, -3, "ten", null]) {
+      expect(await signIn.pollSignIn(GRANT)).toEqual({
+        kind: "slow-down",
+        grant: { ...GRANT, interval: 10_000 },
+      });
+    }
+  });
+
   test("a code that ran out is expired, one the person refused is denied (GitHub's docs)", async () => {
     const answers = [oauthError("expired_token"), oauthError("access_denied")];
     const { signIn } = signInOver(pollRoute(() => answers.shift() ?? oauthError("expired_token")));

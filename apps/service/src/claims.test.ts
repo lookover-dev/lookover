@@ -10,20 +10,23 @@ import {
   type HostThread,
   REPLY_MARKER,
   readResult,
+  statusOf,
+  withoutWordmark,
 } from "@lookover/contracts";
 import { DemoClock, type FakeChange, FakeGitHost, ScriptedRetrieval } from "@lookover/testkit";
 import { again, answered, CONFIRMED, FOUND, roundOne, STILL, TOTAL_ADDED } from "./claims.test-support.ts";
 import {
-  BOT,
   fakeEngines,
   home,
   OWNER,
   onAcmeWeb,
-  onOrganisationApp,
   organisationHost,
   pr1,
+  roundWritten,
   SANDBOX,
   SHA1_PUSHED,
+  SHARED_BOT,
+  signedInOn,
   start,
   stopAll,
   T0,
@@ -55,8 +58,10 @@ test("a won't fix on a blocking finding is kept in round 2 and escalated to the 
     claim: { kind: "wont_fix", text: "Won't fix: the last invoice is a sentinel.", by: "sasensi", count: 1 },
     resolution: { kind: "kept", round: 2, explanation: STILL },
   });
-  const summary = w.host.view(PR1).comments.find((c) => c.author.id === BOT.id)?.body ?? "";
-  expect(summary).toContain(`sasensi said won't fix. Kept: ${STILL}`);
+  // Kept: still to fix, linked to its thread, where the claim and the answer are.
+  expect(statusOf(w.host.view(PR1).description)).toContain(
+    `- **Blocking** · [The total skips the last invoice](${pr1.url}#discussion_r${w.root}) · \`src/total.ts\` line 12`,
+  );
 
   // The second won't fix: kept against its author twice, so only the owner settles it.
   w.host.seedReply(PR1, w.root, { author: OWNER, body: "Won't fix. It stays." });
@@ -72,6 +77,9 @@ test("a won't fix on a blocking finding is kept in round 2 and escalated to the 
     claim: { kind: "wont_fix", text: "Won't fix. It stays.", count: 2 },
     resolution: { kind: "escalated", round: 3 },
   });
+  expect(statusOf(w.host.view(PR1).description)).toContain(
+    "  Said won't fix twice, kept twice: the owner decides on the thread.",
+  );
 
   // Nothing new on the thread: the claim answered is never quoted again.
   await w.ask(again(true, STILL));
@@ -154,7 +162,7 @@ test("on an organisation's App, the person's reply on a teammate's fork counts, 
   const time = new DemoClock({ at: T0 });
   const host = organisationHost(time);
   const dir = home();
-  const github = await onOrganisationApp(host, dir);
+  const github = await signedInOn(host, dir);
   const w = await roundOne({ change: fork, host, time, home: dir, github });
   w.host.seedReply(w.ref, w.root, { author: OWNER, body: "Deferred: the sentinel goes next sprint." });
   // The teammate who opened it: their word never steers the round.
@@ -172,7 +180,7 @@ test("on an organisation's App, the person's reply on a teammate's fork counts, 
 test("signed in on the shared App, the owner's own reply is their claim, Lookover's replies as them never are, nor a teammate's copy of its marker", async () => {
   const time = new DemoClock({ at: T0 });
   // Lookover posts as the owner (ADR 0066): its threads, its replies and the owner's words are by one account.
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [], clock: time, person: OWNER });
+  const host = new FakeGitHost({ repo: SANDBOX, bot: SHARED_BOT, changes: [], clock: time, person: OWNER });
   const w = await roundOne({ host, time });
   const claim = w.host.seedReply(PR1, w.root, {
     author: OWNER,
@@ -211,7 +219,7 @@ class EditedReplies extends FakeGitHost {
 
 test("signed in on the shared App, Lookover's reply the owner edited, its marker gone, is still Lookover's by its kept id", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new EditedReplies({ repo: SANDBOX, bot: BOT, changes: [], clock: time, person: OWNER });
+  const host = new EditedReplies({ repo: SANDBOX, bot: SHARED_BOT, changes: [], clock: time, person: OWNER });
   const w = await roundOne({ host, time });
   w.host.seedReply(PR1, w.root, { author: OWNER, body: "Won't fix: the last invoice is a sentinel." });
   await w.ask(again(true, STILL));
@@ -241,7 +249,13 @@ class RefusedThreads extends FakeGitHost {
 
 test("a round whose threads read GitHub refuses fails, posting nothing that drops the claim; the next round reads it", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new RefusedThreads({ repo: SANDBOX, bot: BOT, changes: [], clock: time });
+  const host = new RefusedThreads({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [],
+    clock: time,
+  });
   const w = await roundOne({ host, time });
   w.host.seedReply(PR1, w.root, { author: OWNER, body: "Won't fix: the last invoice is a sentinel." });
   host.refusing = true;
@@ -264,7 +278,13 @@ test("a round whose threads read GitHub refuses fails, posting nothing that drop
 
 test("round 1 reads no threads: with no posted finding unsettled, a refused read can't fail it", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new RefusedThreads({ repo: SANDBOX, bot: BOT, changes: [], clock: time });
+  const host = new RefusedThreads({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [],
+    clock: time,
+  });
   // Refused for good: the check's result, which reads them too, goes without them at once.
   host.refusing = true;
   host.failure = "unauthorized";
@@ -343,29 +363,59 @@ const SHOULD_FIX: Parameters<typeof roundOne>[0] = {
 const repliesOn = (host: FakeGitHost) =>
   host.posts.flatMap((p) => (p.kind === "reply" ? [{ commentId: p.commentId, body: p.body }] : []));
 
-/** A reply's words, without the blank line and hidden marker that end it. */
-const said = (body: string) => body.slice(0, body.indexOf(`\n\n${REPLY_MARKER}`));
+/** A reply's words, as the agent reads them: without the wordmark that opens it, nor the hidden marker that ends it. */
+const said = (body: string) => withoutWordmark(body.slice(0, body.indexOf(`\n\n${REPLY_MARKER}`)));
 
-test("a claim kept, then escalated, is answered once each on its thread, after the review and before the summary", async () => {
+test("a claim kept, then escalated, is answered once each on its thread, after the review and before the status block", async () => {
   const w = await roundOne();
   w.host.seedReply(PR1, w.root, { author: OWNER, body: "Won't fix: the last invoice is a sentinel." });
   const before = w.host.posts.length;
-  await w.ask(again(true, STILL));
+  // Round 2 also finds a new finding on the diff, so it owes a review (ADR 0074): the reply comes after it.
+  await w.ask(
+    answered({
+      findings: [
+        {
+          path: "src/total.ts",
+          line: 20,
+          severity: "blocking",
+          category: "correctness",
+          title: "The tax is added twice",
+          body: "The tax is added in the loop and again after it.",
+          defect_key: "tax-added-twice",
+        },
+      ],
+      earlier: [{ id: "F1", present: true, why: STILL }],
+    }),
+    answered({
+      verdicts: [
+        {
+          id: "C1",
+          verdict: "confirmed",
+          reason: "The tax is added on line 20 and again after the loop.",
+          evidence: ["src/total.ts:20"],
+          severity: "blocking",
+        },
+      ],
+    }),
+  );
   expect(
     w.host.posts
       .slice(before)
+      // The round's posts: not the job's check or status block as it ran.
+      .filter((p) => p.kind !== "status.written" || roundWritten(p))
       .map((p) => p.kind)
       .filter((kind) => kind !== "reaction" && kind !== "check.created" && kind !== "check.updated"),
-  ).toEqual(["review", "reply", "summary.edited", "check.completed", "minimized"]);
+  ).toEqual(["review", "reply", "status.written", "check.completed", "minimized"]);
   expect(repliesOn(w.host).map((r) => ({ ...r, body: said(r.body) }))).toEqual([
-    { commentId: w.root, body: `Kept.\n\n${STILL}\n\nIf it is kept again, the owner decides.` },
+    { commentId: w.root, body: `Kept\n\n${STILL}\n\nIf it is kept again, the owner decides.` },
   ]);
 
   w.host.seedReply(PR1, w.root, { author: OWNER, body: "Won't fix. It stays." });
   await w.ask(again(true, STILL));
+  // Kept twice against "won't fix": the prototype's words (ADR 0074), not the finder's.
   expect(repliesOn(w.host).map((r) => said(r.body))).toEqual([
-    `Kept.\n\n${STILL}\n\nIf it is kept again, the owner decides.`,
-    `The owner decides this one.\n\n${STILL}`,
+    `Kept\n\n${STILL}\n\nIf it is kept again, the owner decides.`,
+    `The owner decides this one\n\nKept twice against "won't fix". Fix it, or resolve this thread to keep the code as it is.`,
   ]);
   expect(repliesOn(w.host).map((r) => r.commentId)).toEqual([w.root, w.root]);
 
@@ -385,7 +435,7 @@ test("a claim written while the round answering the one before ran is read by th
   await time.advance(MIN);
   w.host.seedReply(PR1, w.root, { author: OWNER, body: "Won't fix: the last invoice is a sentinel." });
   await time.advance(15 * MIN);
-  expect(repliesOn(w.host).map((r) => said(r.body))).toEqual([why]);
+  expect(repliesOn(w.host).map((r) => said(r.body))).toEqual([`Answer\n\n${why}`]);
   expect(w.result().findings[0]).toMatchObject({ claim: { kind: "question" } });
 
   // Lookover's answer to the question came after the won't fix: round 3 still reads it.
@@ -450,7 +500,7 @@ test("of two findings, only the one with a claim is answered, on its own thread"
   expect(repliesOn(w.host).map((r) => ({ ...r, body: said(r.body) }))).toEqual([
     {
       commentId: second,
-      body: "Kept.\n\nThe tax is still added twice.\n\nIf it is kept again, the owner decides.",
+      body: "Kept\n\nThe tax is still added twice.\n\nIf it is kept again, the owner decides.",
     },
   ]);
 });
@@ -461,7 +511,7 @@ test("a question is answered on its thread with the finder's words, and the find
   const why = "The one at index length - 1: the loop stops before it.";
   await w.ask(again(true, why));
   expect(repliesOn(w.host).map((r) => ({ ...r, body: said(r.body) }))).toEqual([
-    { commentId: w.root, body: why },
+    { commentId: w.root, body: `Answer\n\n${why}` },
   ]);
   expect(w.result().findings[0]).toMatchObject({ status: "open", claim: { kind: "question", count: 0 } });
 });
@@ -474,7 +524,7 @@ test("a dispute the finder agrees with withdraws the finding: said on its thread
 
   expect(w.result().findings[0]).toMatchObject({ status: "withdrawn" });
   expect(repliesOn(w.host).map((r) => ({ ...r, body: said(r.body) }))).toEqual([
-    { commentId: w.root, body: `Withdrawn.\n\n${why}` },
+    { commentId: w.root, body: `Withdrawn\n\n${why}` },
   ]);
   const view = w.host.view(PR1);
   const root = view.reviews.flatMap((r) => r.comments).find((c) => c.id === String(w.root));

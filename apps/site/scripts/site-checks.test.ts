@@ -1,11 +1,15 @@
 // The site's browser-free checks, proven to bite on small built sites (ADR 0064, 8): a link or asset that leads to no
 // file or to no element of that id fails; a script, style or font from another host fails. No build: each test
-// writes the few pages it needs.
+// writes the few pages it needs. The wordmark every post on GitHub opens with (ADR 0074) is served at the two URLs
+// contracts freezes: a build without either fails, and so does the site's `public/` folder, which Astro copies into
+// the build as it is.
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { brokenLinks, foreignLoads } from "./site-checks.ts";
+import { fileURLToPath } from "node:url";
+import { WORDMARK_URLS } from "@lookover/contracts";
+import { brokenLinks, foreignLoads, unservedUrls } from "./site-checks.ts";
 
 const temps: string[] = [];
 afterAll(() => {
@@ -199,5 +203,46 @@ describe("nothing loaded from another host, proven to bite", () => {
       "/_astro/site.css: style from fonts.googleapis.com",
       "/_astro/site.css: font from fonts.gstatic.com",
     ]);
+  });
+});
+
+describe("the wordmark's URLs, proven to bite", () => {
+  const urls = Object.values(WORDMARK_URLS);
+
+  test("passes a build serving both", () => {
+    const dist = built({
+      "brand/lookover-wordmark.svg": "<svg/>",
+      "brand/lookover-wordmark-on-dark.svg": "<svg/>",
+    });
+    expect(unservedUrls(dist, urls)).toEqual([]);
+  });
+
+  test("names each one the build lacks", () => {
+    expect(unservedUrls(built({ "brand/lookover-wordmark.svg": "<svg/>" }), urls)).toEqual([
+      "https://lookover.dev/brand/lookover-wordmark-on-dark.svg: not in the build",
+    ]);
+    expect(unservedUrls(built({ "brand/lookover-wordmark-on-dark.svg": "<svg/>" }), urls)).toEqual([
+      "https://lookover.dev/brand/lookover-wordmark.svg: not in the build",
+    ]);
+  });
+
+  test("names a folder by that name, which serves a page, not the file", () => {
+    const dist = built({
+      "brand/lookover-wordmark.svg/index.html": page(""),
+      "brand/lookover-wordmark-on-dark.svg": "<svg/>",
+    });
+    expect(unservedUrls(dist, urls)).toEqual([
+      "https://lookover.dev/brand/lookover-wordmark.svg: not in the build",
+    ]);
+  });
+
+  test("names a URL on another host, which the site can't serve", () => {
+    expect(unservedUrls(built({ "x.svg": "<svg/>" }), ["https://example.com/x.svg"])).toEqual([
+      "https://example.com/x.svg: not on lookover.dev",
+    ]);
+  });
+
+  test("the site's public folder, which the build copies as it is, serves both", () => {
+    expect(unservedUrls(fileURLToPath(new URL("../public", import.meta.url)), urls)).toEqual([]);
   });
 });

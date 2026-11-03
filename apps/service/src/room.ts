@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import type { Gh, GhChoices, GhNoAnswer, GhUnanswered, LimitMet, SignIn } from "@lookover/contracts";
+import type { Gh, LimitMet, SignIn } from "@lookover/contracts";
 import {
   type AskToInstallRefusal,
   accountOf,
@@ -25,10 +25,7 @@ import {
   type Engines,
   type EventBody,
   type Finding,
-  type GhAdminOrganisations,
-  type GhMemberships,
   GITHUB_WEB,
-  type HostInstallations,
   type IdGen,
   type JobState,
   type LoginItemKind,
@@ -54,8 +51,6 @@ import type { Retrieval } from "@lookover/retrieval";
 import { createConfirm, createReview } from "@lookover/review";
 import type { SettingsFiles } from "@lookover/settings";
 import { openStore, type Store } from "@lookover/store";
-import { type AppFlow, createAppFlow, type GhRead } from "./app-flow.ts";
-import type { Membership, StoredApp } from "./app-store.ts";
 import { createChecks } from "./checks.ts";
 import {
   type AgentPorts,
@@ -77,10 +72,9 @@ import {
   type GitHubSide,
   type Installation,
 } from "./installation.ts";
-import { flowLines, logLineOf } from "./log-lines.ts";
+import { logLineOf } from "./log-lines.ts";
 import { secretShapesRemoved } from "./log-sink.ts";
 import { type LoginItem, nowhereLoginItem } from "./login-item.ts";
-import { type GhMember, memberOf } from "./membership.ts";
 import { createPoller, type Poller } from "./poller.ts";
 import { createQueue } from "./queue.ts";
 import { createReactions } from "./reactions.ts";
@@ -102,7 +96,6 @@ import { createSignIn, type SignInOpener, type SignInRefusal } from "./sign-in.t
 import { memorySkillFolders, SKILL_NAME } from "./skill-folders.ts";
 import {
   appInstalled,
-  appMade,
   changeFactsOf,
   numberOf,
   ownerNamedLeft,
@@ -112,9 +105,11 @@ import {
   rulesOf,
   SET_UP,
   settingsOf,
+  signedInAtSetup,
   snapshotOf,
 } from "./snapshot.ts";
 import { atLoginLeft, createStartAtLogin, matchedAtStart } from "./start-at-login.ts";
+import { statusNow } from "./status-block.ts";
 import { REAL_TIMERS, type Timers } from "./timers.ts";
 import { createUnreached } from "./unreached.ts";
 
@@ -157,8 +152,8 @@ export interface RoomOptions {
   /** New job and run ids. Random by default; a test seeds its own. */
   ids?: IdGen;
   /**
-   * GitHub at the App level and where the App comes from (ADR 0053): the room watches what its installation lists,
-   * reviews through the repository ports its key signs, and takes the owner and the bot from it.
+   * GitHub through the shared App (ADR 0066, ADR 0073): the room watches what the person's installations list,
+   * reviews through the repository ports as the person signed in, and takes the owner from their sign-in.
    */
   github: GitHubSide;
   engines: Engines;
@@ -189,13 +184,13 @@ export interface RoomOptions {
   settingsFiles?: SettingsFiles;
   /**
    * The first-run setup a data folder starts at, written when the store keeps none yet: set up by default; a
-   * demo scenario's world, or the first step in live mode with no App named (ADR 0047, ADR 0053). Later starts read
-   * what the store kept, unless `setUpAtOnce`.
+   * demo scenario's world, or the first step on a fresh data folder nobody signed in to (ADR 0047, ADR 0053). Later
+   * starts read what the store kept, unless `setUpAtOnce`.
    */
   setup?: Setup;
   /**
-   * `live.json` names the App (ADR 0053): the data folder is set up at once, whatever setup it kept. With no App at
-   * all, the setup shows again whatever it kept.
+   * Live mode's sign-in is kept (ADR 0073): the data folder is set up at once, whatever setup it kept. With nobody
+   * signed in, the setup's GitHub step shows again whatever it kept.
    */
   setUpAtOnce?: boolean;
   /**
@@ -243,11 +238,9 @@ export interface RoomOptions {
   loginItem?: AtLoginItem;
   /**
    * The person's own `gh` (ADR 0059), read only: the real one for the program and live mode, testkit's fake in demo
-   * mode (`runService` chooses); none in a test that doesn't ask, read as `gh` not installed. Read when the setup's
-   * GitHub step asks (`gh.check`) and when "Create it on GitHub" names an organisation, never for your own account;
-   * on an organisation's App, for the person's membership at start, every hour and on `gh.check`; on the shared App
-   * (ADR 0067), for the person's organisations and their role in each, at start, once a sign-in is kept and after
-   * each "Ask to install", never waited for by discovery.
+   * mode (`runService` chooses); none in a test that doesn't ask, read as `gh` not installed. Read for the person's
+   * organisations and their role in each (ADR 0067), at start, once a sign-in is kept and after each "Ask to
+   * install", never waited for by discovery.
    */
   gh?: Gh;
   /**
@@ -317,59 +310,19 @@ export interface Room {
    * owner chose (ADR 0054), and settles once it has.
    */
   setup: Omit<SetupFlow, "finish"> & { finish(): Promise<void> };
-  /** The owner's App (ADR 0053): what onboarding's two paths, the manifest flow and "Use an existing App", end with. */
+  /** The person on GitHub (ADR 0066): their sign-in to the shared App, and their asks to install it. */
   github: {
-    /** The App kept now, never its key; null with none: "Use an existing App" refuses another id while one is kept. */
-    app(): StoredApp | null;
-    /** Whether the data folder keeps the App (an App store): false when `live.json` names it, which nothing replaces. */
-    keepsApps: boolean;
-    /** GitHub at the App level: a manifest converted, an App described, its installation. */
-    installations: HostInstallations;
-    /**
-     * An App created or given, adopted without a restart: kept in the App store (its key in the keychain, or the
-     * user-only file), the repository ports signing with it from now on, the connection showing it; then its install
-     * waited for, or, installed already (a new key for the App kept), its repositories and changes listed again.
-     * Rejects when `live.json` names the App (Lookover keeps no other) or the App store can't keep it, nothing kept
-     * then. Once kept, it resolves: a listing GitHub refuses is said by the connection's cause. `membership`: what the
-     * person's `gh` just answered for an organisation's App, kept with it in place of any answer before (ADR 0059).
-     */
-    adopt(app: StoredApp, key: string, membership?: Membership): Promise<void>;
-    /**
-     * `work` after the App's other checks and adoptions, one at a time (one App per data folder): "Use an existing
-     * App" and GitHub's redirect back each check which App is kept and adopt theirs inside it, so two tabs giving two
-     * Apps at once never both find none kept. `adopt` itself doesn't wait: called inside `work`, it would never run.
-     */
-    oneAtATime<T>(work: () => Promise<T>): Promise<T>;
-    /** The manifest flow (ADR 0053): "Create it on GitHub", its page's flow, and GitHub's redirect back. */
-    flow: AppFlow;
-    /**
-     * The person's own `gh` read again (ADR 0059): who it is signed in as and the organisations they admin, sent as
-     * `connection.changed { gh }` when it differs from what the UI holds (without `gh`'s own words, which it answers).
-     */
-    checkGh(): Promise<GhRead>;
-    /**
-     * The person's own `gh` asked for its account's membership of `organisation` (ADR 0059): "Use an existing App"
-     * on an organisation's App. No `gh`: not installed. When it couldn't answer, its own words go to the log.
-     */
-    membership(organisation: string): Promise<GhMember>;
-    /**
-     * The person's membership of the App's organisation asked of their `gh` now (ADR 0059), as the hour's check does:
-     * "Check again" (`gh.check`) and the drawer's faults. A member again, GitHub is listed again at once. Nothing for
-     * a personal App. Never rejects.
-     */
-    checkMembership(): Promise<void>;
     /**
      * "Sign in with GitHub", or Sign in again (ADR 0066): a device code asked of GitHub and shown on the connection,
-     * polled until entered (the sign-in kept, replacing the last, the way `shared` from then on), refused, expired or
-     * cancelled. Refused while one waits, while Lookover runs as its own App, or with no shared App offered here;
-     * throws GitHub's refusal of the code.
+     * polled until entered (the sign-in kept, replacing the last), refused, expired or cancelled. Refused while one
+     * waits; throws GitHub's refusal of the code.
      */
     signIn(): Promise<"ok" | { refused: SignInStartRefusal }>;
     /** The sign-in waiting given up, its code no longer shown; nothing when none waits. */
     cancelSignIn(): void;
     /**
      * "Ask to install on <org>" (ADR 0067): the ask on `account` (a login) kept with its time, until that account is
-     * reached or another person signs in, the person's `gh` read again; refused off `shared`, for an account
+     * reached or another person signs in, the person's `gh` read again; refused before a sign-in, for an account
      * `Connection.unreached` doesn't name, or one the person owns.
      */
     askToInstall(account: string): Promise<"ok" | { refused: AskToInstallRefusal }>;
@@ -497,14 +450,14 @@ const keptAnyway = (): void => {};
 
 /**
  * Builds a room: opens the store (or takes the open one it is given) and, when it keeps no setup yet, writes
- * the setup it starts at; reads the App and, once the setup says it is installed, the repositories its installation
- * lists (ADR 0053); asks both engines' health, records its start as the next event, forgets the repositories the
- * installation no longer lists, lists the changes and the comments (not while no bot is installed: the setup lists
- * once it is), puts back in the queue or fails the jobs a stopped service left running, takes the next job and starts
- * the poll's loop and the installation's. Rejects when the store won't open, or the App store can't be read; GitHub
- * refusing the App, its installation or the changes at start is no rejection (ADR 0053): the room is built, the
- * connection shows the cause, and the installation is listed again a minute on (a rate limit only waits). Nor is a key
- * that no longer opens: the connection shows it.
+ * the setup it starts at; reads the sign-in to the shared App and, once the setup says it is installed, the
+ * repositories its installations list (ADR 0053, ADR 0066); asks both engines' health, records its start as the next
+ * event, forgets the repositories the installations no longer list, lists the changes and the comments (not while
+ * nothing is installed: the setup lists once it is), puts back in the queue or fails the jobs a stopped service left
+ * running, takes the next job and starts the poll's loop and the installation's. Rejects when the store won't open, or
+ * the sign-in store can't be read; GitHub refusing the installations or the changes at start is no rejection (ADR
+ * 0053): the room is built, the connection shows the cause, and the installations are listed again a minute on (a
+ * rate limit only waits). Nor is a sign-in that no longer opens: the connection shows it signed out.
  */
 export async function buildRoom(o: RoomOptions): Promise<Room> {
   const store = o.store ?? openStore({ home: o.home });
@@ -518,7 +471,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   const timers = o.timers ?? REAL_TIMERS;
   /** What the room watches: the store's last listing until the start's listing makes it the room's own. */
   const watching = { all: (): readonly RepositoryRef[] => store.repos.listed() };
-  // The App, its installation and what it lists (ADR 0053). Its moves reach parts made below, once the room runs.
+  // The person signed in, the installations they reach and what those list (ADR 0066). Its moves reach parts made
+  // below, once the room runs.
   const github = createInstallation({
     side: o.github,
     timers,
@@ -530,12 +484,10 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     installed: (granted) => setup.installed(granted),
     reached: (cause) => poller.reached(cause),
     accountBack: () => queue.take(),
-    member: (organisation) => memberOf(o.gh, organisation),
-    memberAgain: () => void reconnect().catch(keptAnyway),
     log: logLine,
   });
-  const listedAtStart = await opened(store, github, o.github);
-  // What the installation lists now; what the store listed last when it wasn't listed (a lost key, no App yet).
+  const listedAtStart = await opened(store, github);
+  // What the installations list now; what the store listed last when they weren't listed (nobody signed in yet).
   const watched = watchedOf(listedAtStart ?? store.repos.listed());
   watching.all = () => watched.all;
   // The settings as their files say them (ADR 0049): read once now, before the self-tests start, then again after
@@ -593,11 +545,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       version: o.version,
       command: commandAtStart,
       agent: agentAtStart,
-      way: github.way(),
       connectionId: github.connectionId(),
       person: github.person(),
-      bot: github.bot(),
-      app: github.app(),
       accounts: github.accounts(),
       web: webOf(o),
       engines,
@@ -714,7 +663,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     ...deviceCodeLeft(shown, startedAt),
     ...startAtLoginLeft(shown, store.setup.startAtLogin(), startedAt),
     ...atLoginLeft(shown.service.atLogin, heldAtStart, startedAt),
-    // The App and its installation as read now, where the log says those of before the stop (a reinstall meanwhile).
+    // The person and their installations as read now, where the log says those of before the stop (a reinstall
+    // meanwhile).
     ...identityLeft(shown, github, startedAt),
     // Whose changes are whose for the person held now, where the log says it for another (a sign-in replaced while
     // stopped, by another process on the folder).
@@ -747,14 +697,19 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       watched.all.flatMap((repo) => store.inbox.open(repo)),
       github.owner,
     );
-  // The repository ports as the App now held signs (ADR 0053).
+  // The repository ports as the person now held (ADR 0066).
   const { intake, writer } = github.ports;
+  // The block's time and the resets of the engines' limits, as the UI is told them (ADR 0055).
+  const statusFacts = {
+    now: () => o.clock.now(),
+    limitUntil: (engine: EngineId) => shown.engines[engine].limitUntil,
+  };
   // A post GitHub refuses for a moment is tried again on the room's own clock and timers (ADR 0044).
   const publisher = createPublisher({
     writer,
-    // Each check's external id names the person Lookover works for, read at each post (ADR 0066): the App's, or the
-    // one signed in to the shared App. With neither there is nobody: the post fails, said in the log, rather than
-    // write a check its reader can't find again.
+    // Each check's external id names the person Lookover works for, read at each post (ADR 0066): the one signed in
+    // to the shared App. With nobody signed in the post fails, said in the log, rather than write a check its reader
+    // can't find again.
     person: () => personPosting(github),
     // The result names each finding's thread, from one read as the round's check is completed (ADR 0052).
     threads: (change) => intake.threads(change),
@@ -769,6 +724,9 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     log: (line) => (o.log ?? console.error)(line),
     // What an engine or a person wrote is posted without the secrets the log sink knows (ADR 0056).
     secretsRemoved: secretsRemovedOf(o),
+    // The status block says where the change stands as it is written, read from the store then (ADR 0074).
+    status: (change, threads) =>
+      statusNow(store, changeIdOf(change.repo, change.number), threads, statusFacts),
   });
   /** Each part logs where the options say, else to the console. */
   const logged = o.log === undefined ? {} : { log: o.log };
@@ -780,7 +738,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     host: "github",
     changeRef: (changeId) => ({ repo: watched.ofChange(changeId), number: numberOf(changeId) }),
     onlyCodex: (changeId) => settings(repoIdOf(watched.ofChange(changeId))).values.reviewers === "codex",
-    limitUntil: (engine) => shown.engines[engine].limitUntil,
+    limitUntil: statusFacts.limitUntil,
+    status: (changeId) => statusNow(store, changeId, [], statusFacts),
     ...logged,
   });
   const runs = createRun({
@@ -1018,7 +977,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       type: "service.changed",
       at,
       patch: {
-        checks: { at, running: false, items: checkItems(shown, kept.now().invalid, freeGb, github.key()) },
+        checks: { at, running: false, items: checkItems(shown, kept.now().invalid, freeGb) },
       },
     });
   };
@@ -1035,11 +994,10 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
 
   // "Sign in with GitHub" (ADR 0066): the device flow, its code on the connection, the sign-in kept once entered.
   const deviceFlow = createDeviceFlow({
-    host: sharedSignIn(o.github),
+    host: o.github.shared.signIn,
     timers,
     clock: o.clock,
     emit,
-    ownApp: () => github.way() === "own",
     signedIn: (made) => signedIn(made),
     log: logLine,
   });
@@ -1086,8 +1044,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
         };
 
   /**
-   * "Reconnect" (ADR 0053): the App read again (a lost key from the App store, `live.json`'s described), its
-   * installation's repositories listed again, then every repository's changes; what the listing of the changes throws
+   * "Reconnect" (ADR 0053): the installations' repositories listed again, then every repository's changes; what the listing of the changes throws
    * first, else what the installation's did. The connection shows the cause the listing met, or none once it answers.
    */
   const reconnect = async (): Promise<void> => {
@@ -1104,74 +1061,23 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     }
   };
 
-  /** An App created or given, adopted: kept, then its install waited for, or, installed already, listed again. */
-  const adopt = async (app: StoredApp, key: string, membership?: Membership): Promise<void> => {
-    await github.adopt(app, key, membership);
-    // The App's person, maybe not the one signed in before it: whose changes are whose, asked again.
-    for (const body of ownershipMoved(shown, openChanges(), o.clock.now())) emit(body);
-    // The own App wins (ADR 0066): a sign-in waiting is given up.
-    deviceFlow.cancel();
-    setup.appGiven();
-    const installed = appInstalled(store.setup.read());
-    // From the shared App to an own one, installed already (ADR 0066): the connection is the bot's from now on.
-    for (const body of renamedFor(github, shown, o.clock.now(), installed)) emit(body);
-    // The connection keeps why the listing failed; the App is kept all the same.
-    if (installed) await reconnect().catch(keptAnyway);
-  };
   /**
-   * A sign-in to the shared App made (ADR 0066): kept and held, the ports posting as its person; then, as an App
-   * adopted, its install waited for, or, installed already (Sign in again once signed out), the connection named for
-   * the person and its repositories and changes listed again. One at a time with the App's checks and adoptions: an
-   * own App adopted meanwhile wins, the sign-in refused.
+   * A sign-in to the shared App made (ADR 0066): kept and held, the ports posting as its person; then its install
+   * waited for, or, installed already (Sign in again once signed out), the connection named for the person and its
+   * repositories and changes listed again.
    */
-  const signedIn = (made: SignIn): Promise<void> => oneAtATime(() => keptSignIn(made));
-  const keptSignIn = async (made: SignIn): Promise<void> => {
-    if (github.way() === "own") throw new Error("Lookover runs as its own App here: it wins over a sign-in");
+  const signedIn = async (made: SignIn): Promise<void> => {
     await github.signedIn(made);
     // Their organisations, as their `gh` names them: read once per sign-in, never waited for.
     void unreached.read().catch(unshown);
     // Another person signed in: their changes and the others' are told apart for them now.
     for (const body of ownershipMoved(shown, openChanges(), o.clock.now())) emit(body);
-    setup.appGiven();
+    setup.signedIn();
     const installed = appInstalled(store.setup.read());
     for (const body of renamedFor(github, shown, o.clock.now(), installed)) emit(body);
     // Not waited for: the code leaves once the sign-in is kept, the listing goes on behind it.
     if (installed) void reconnect().catch(keptAnyway);
   };
-
-  /** The App's checks and adoptions, one after the other; never rejects. */
-  let adopting: Promise<unknown> = Promise.resolve();
-  const oneAtATime = <T>(work: () => Promise<T>): Promise<T> => {
-    const next = adopting.then(work);
-    adopting = next.catch(() => {});
-    return next;
-  };
-  /** The person's own `gh` read now (none: not installed), sent when the UI holds another answer. */
-  const checkGh = async (): Promise<GhRead> => {
-    const read = await ghReadOf(o.gh);
-    const choices: GhChoices = {
-      person: withoutWords(read.person),
-      organisations: withoutWords(read.organisations),
-    };
-    if (!isDeepStrictEqual(shown.connection.gh, choices))
-      emit({ type: "connection.changed", at: o.clock.now(), patch: { gh: choices } });
-    return read;
-  };
-  /** The person's own `gh` asked for its membership of `organisation` (none: not installed); its words logged. */
-  const membership = async (organisation: string): Promise<GhMember> => {
-    const answer = await memberOf(o.gh, organisation);
-    if (answer.kind === "unanswered") logLine(flowLines.ghUnanswered(answer.why, answer.detail));
-    return answer;
-  };
-  const flow = createAppFlow({
-    store,
-    clock: o.clock,
-    github: { app: github.stored, installations: o.github.installations, adopt, oneAtATime },
-    gh: { read: checkGh },
-    setup,
-    liveConfig: o.github.liveConfig === true,
-    log: logLine,
-  });
 
   return {
     snapshot,
@@ -1180,17 +1086,6 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     refresh: listed,
     reconnect,
     github: {
-      app: github.stored,
-      keepsApps: o.github.apps !== undefined,
-      installations: o.github.installations,
-      adopt,
-      oneAtATime,
-      flow,
-      checkGh,
-      membership,
-      checkMembership: async () => {
-        if (await github.checkMembership()) await reconnect().catch(keptAnyway);
-      },
       signIn: deviceFlow.start,
       cancelSignIn: deviceFlow.cancel,
       askToInstall: unreached.ask,
@@ -1236,10 +1131,9 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       unreached.stop();
       signIn.stop();
       deviceFlow.stop();
-      const githubStopped = github.stop();
+      github.stop();
       runFolders.stop();
       await poller.stop();
-      await githubStopped;
       await queue.stop();
       // A dismissal's post under way is cut: the next start resumes it.
       await dismissals.stop();
@@ -1340,7 +1234,7 @@ function watchedOf(repos: readonly RepositoryRef[]): Watched {
 
 /**
  * The setup a start goes on from (ADR 0047, ADR 0053): the one given when the store keeps none yet, else the one it
- * kept, set up at once when `live.json` names the App.
+ * kept, set up at once when live mode's sign-in is kept.
  */
 function setUp(store: Store, o: Pick<RoomOptions, "setup" | "setUpAtOnce">): void {
   if (!store.setup.kept()) store.setup.write(o.setup ?? SET_UP);
@@ -1348,21 +1242,18 @@ function setUp(store: Store, o: Pick<RoomOptions, "setup" | "setUpAtOnce">): voi
 }
 
 /**
- * The App read at start, and what its installation lists when the setup says it is installed; null when nothing was
- * listed. With no App at all, the setup shows again, whatever it kept (ADR 0053); `live.json`'s is an App, even
- * while GitHub won't describe it. An App the store keeps while the setup still asks for one (a stop between `adopt`'s
- * two writes, "Create it on GitHub" or "Use an existing App") has its install waited for, as `appGiven` would.
+ * The sign-in read at start, and what its installations list when the setup says the App is installed; null when
+ * nothing was listed. With nobody signed in, the setup's GitHub step shows again, whatever the setup kept and whatever
+ * else the data folder holds (ADR 0073: an App of its own from an earlier version is read no more). A sign-in kept
+ * while the setup still asks for one (the service stopped before the setup heard of it) has its install waited for,
+ * as `signedIn` would.
  */
-async function opened(store: Store, github: Installation, side: GitHubSide): Promise<RepositoryRef[] | null> {
+async function opened(store: Store, github: Installation): Promise<RepositoryRef[] | null> {
   const listed = await github.open(appInstalled(store.setup.read()));
-  if (side.given !== undefined) return listed;
-  const made = appMade(store.setup.read());
-  // Neither an App nor a sign-in (ADR 0066): the setup's GitHub step, which offers both.
-  if (github.way() === null && made) store.setup.write({ done: false, step: "github", github: "start" });
-  // Kept by the App store or the sign-in store, and the service stopped before the setup heard of it (`adopt`,
-  // `signedIn`): its install waited for.
-  else if (github.way() !== null && !made)
-    store.setup.write({ github: "waiting-for-install", githubRefused: null });
+  const signedIn = github.person() !== null;
+  const asked = signedInAtSetup(store.setup.read());
+  if (!signedIn && asked) store.setup.write({ done: false, step: "github", github: "start" });
+  else if (signedIn && !asked) store.setup.write({ github: "waiting-for-install" });
   return listed;
 }
 
@@ -1585,48 +1476,27 @@ function connectionFor(connection: Connection, repoId: RepositoryId | null): Pic
 }
 
 /**
- * The App, its bot and its installation as `open` read them at start (ADR 0053), when the replayed log says others:
- * uninstalled and installed again while the service was stopped, the log's last `connection.changed` names the old
- * installation, whose links ("Add a repository", "Unsuspend") lead nowhere, and discovery, finding its own id current,
- * would never say the new one. The person signed in too (ADR 0066): another sign-in kept while stopped, by another
- * process on the folder, where the log names the last one. One `connection.changed` with what moved; nothing for
- * what `open` didn't read (GitHub refusing at start: the log's are the last known), unless the log's are another
- * person's or another way's: their id and accounts are then never this one's, and those read (none, maybe) stand.
+ * The person signed in and their installations as `open` read them at start (ADR 0053, ADR 0066), when the replayed
+ * log says others: uninstalled and installed again while the service was stopped, the log's last `connection.changed`
+ * names the old installation, whose links ("Add a repository", "Unsuspend") lead nowhere, and discovery, finding its
+ * own id current, would never say the new one; another sign-in kept while stopped, by another process on the folder,
+ * where the log names the last one. One `connection.changed` with what moved; nothing for what `open` didn't read
+ * (GitHub refusing at start: the log's are the last known), unless the log's are another person's: their id and
+ * accounts are then never this one's, and those read (none, maybe) stand.
  */
 function identityLeft(shown: State, github: Installation, at: number): EventBody[] {
   const was = shown.connection;
-  const app = github.app();
-  const bot = github.bot();
-  // On `shared` the person posts (ADR 0066): no bot, no App, and the connection named for them once installed.
-  const shared = github.way() === "shared";
-  const patch: Partial<Connection> = {
-    ...whoLeft(was, github),
-    ...(app !== null && !isDeepStrictEqual(app, was.app) ? { app } : {}),
-    ...(bot !== null && bot !== was.bot ? { bot } : {}),
-    ...(shared && was.bot !== null ? { bot: null } : {}),
-    ...(shared && was.app !== null ? { app: null } : {}),
-  };
-  return Object.keys(patch).length === 0 ? [] : [{ type: "connection.changed", at, patch }];
-}
-
-/**
- * Who the connection is as `open` read it, where the log `was` says another (`identityLeft`): the way, the person
- * signed in, the connection's id and its accounts. The log's id and accounts stand for what wasn't read, unless they
- * are another person's or another way's.
- */
-function whoLeft(was: Connection, github: Installation): Partial<Connection> {
-  const way = github.way();
   const person = github.person();
   const id = github.connectionId();
   const accounts = github.accounts();
   // Another holds now than the log says: what the log knows of the connection is that other's.
-  const another = way !== was.way || !isDeepStrictEqual(person, was.person);
-  return {
-    ...(way !== was.way ? { way } : {}),
-    ...(!isDeepStrictEqual(person, was.person) ? { person } : {}),
+  const another = !isDeepStrictEqual(person, was.person);
+  const patch: Partial<Connection> = {
+    ...(another ? { person } : {}),
     ...((another || (was.id !== null && id !== null)) && id !== was.id ? { id } : {}),
     ...((another || accounts.length > 0) && !sameReach(accounts, was.accounts) ? { accounts } : {}),
   };
+  return Object.keys(patch).length === 0 ? [] : [{ type: "connection.changed", at, patch }];
 }
 
 /**
@@ -1640,39 +1510,8 @@ const sameReach = (a: readonly ConnectionAccount[], b: readonly ConnectionAccoun
   );
 
 /**
- * What the person's own `gh` says now (ADR 0059): the organisations they admin, and who it is signed in as, which a
- * listed membership names. Only a list that can't answer asks who it is (a token without `read:org` still says); a
- * `gh` that can't say who it is gives that same answer for its organisations. No `gh`: not installed.
- */
-async function ghReadOf(gh: Gh | undefined): Promise<GhRead> {
-  if (gh === undefined) return { person: { kind: "missing" }, organisations: { kind: "missing" } };
-  const memberships = await gh.memberships();
-  if (memberships.kind === "listed")
-    return {
-      person: { kind: "signed-in", account: memberships.person },
-      organisations: ownedOf(memberships),
-    };
-  const person = await gh.person();
-  if (person.kind !== "signed-in") return { person, organisations: person };
-  return { person, organisations: memberships };
-}
-
-/** The organisations the person owns, of their memberships: where "Create your App" may make the App (ADR 0059). */
-function ownedOf(memberships: GhMemberships): GhAdminOrganisations {
-  if (memberships.kind !== "listed") return memberships;
-  const owned = memberships.organisations.filter((m) => m.role === "owner").map((m) => m.organisation);
-  return { kind: "listed", organisations: owned };
-}
-
-/** An answer of `gh` as the setup shows it: `gh`'s own words, which only the log keeps, left out. */
-function withoutWords<T extends { kind: string }>(answer: T | GhUnanswered): T | GhNoAnswer {
-  if (answer.kind !== "unanswered" || !("detail" in answer)) return answer;
-  return { kind: "unanswered", why: answer.why };
-}
-
-/**
  * The setup as the store keeps it (ADR 0047), when the replayed log says another: the start set it up at once
- * (`live.json` names the App) or showed it again (no App at all) after the events of an earlier setup. One
+ * (live mode's sign-in) or showed it again (nobody signed in) after the events of an earlier setup. One
  * `setup.changed` with the whole kept setup, or nothing when they agree.
  */
 function setupLeft(shown: State, kept: Setup, at: number): EventBody[] {
@@ -1689,13 +1528,7 @@ function startAtLoginLeft(shown: State, kept: boolean, at: number): EventBody[] 
     : [{ type: "service.changed", at, patch: { startAtLogin: kept } }];
 }
 
-/** GitHub's device flow when the shared App is offered (ADR 0066); null when it isn't. */
-const sharedSignIn = (side: GitHubSide) => side.shared?.signIn ?? null;
-
-/**
- * The connection named for whoever posts now, once `installed`, when the UI names it for another (a new sign-in, or
- * an own App in place of the shared one, ADR 0066).
- */
+/** The connection named for the person signed in now, once `installed`, when the UI names it for another (ADR 0066). */
 function renamedFor(github: Installation, shown: State, at: number, installed: boolean): EventBody[] {
   const id = github.connectionId();
   return !installed || id === null || id === shown.connection.id
@@ -1703,11 +1536,10 @@ function renamedFor(github: Installation, shown: State, at: number, installed: b
     : [{ type: "connection.changed", at, patch: { id } }];
 }
 
-/** The id of the person Lookover works for and posts the checks for; throws with neither an App nor a sign-in. */
+/** The id of the person Lookover works for and posts the checks for; throws with nobody signed in. */
 function personPosting(github: Installation): number {
   const { id } = github.owner;
-  if (id === 0)
-    throw new Error("No App is held and nobody is signed in: there is nobody to post the check for");
+  if (id === 0) throw new Error("Nobody is signed in: there is nobody to post the check for");
   return id;
 }
 

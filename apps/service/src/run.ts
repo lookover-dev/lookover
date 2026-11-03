@@ -23,13 +23,14 @@
 // withdrawn) and the global ids of the requests its job answers, from the store: a resume after a crash reads nothing
 // again, and its posts (`publish`'s `postsOf`, replies and comments minimized included) are saved owed with it.
 // The outbox (ADR 0044): once reconciled, the round is saved before anything is posted, in one write with the run's
-// step, publishing: the round and the ledger it leaves (its findings to post held as not posted until its review
-// lands), what its posts are rendered from, and the posts it owes. From then on the engine is free (`freed`): the
-// queue may start another change's job on it, while the change stays busy until the posts are sent or given up.
+// step, publishing: the round and the ledger it leaves (its findings to post held as not posted until the round lands:
+// its review sent, or with no line comment, no review owed, its status block begun, ADR 0074), what its posts are
+// rendered from, and the posts it owes. From then on the engine is free (`freed`): the queue may start another
+// change's job on it, while the change stays busy until the posts are sent or given up.
 // `publish` sends the owed posts through the store's `posts`, each marked sent before the next. Every post sent,
 // the run ends as its round: its job done, and `round.finished` sent to the UI. `publish` tries a transient refusal
 // again on the service's timers for about an hour (ADR 0044); a refusal it gives up on gives the posts up:
-// the job fails `publish_failed`, the round is kept with what landed (its findings unposted when its review didn't),
+// the job fails `publish_failed`, the round is kept with what landed (its findings unposted when it didn't land),
 // sent to the UI as `round.finished` with the failed job, and the job's check follows that failure. A run a stopped
 // service left at publishing is resumed by the queue's recovery (`resume`): its posts go on from where they were,
 // and it ends the same way; nothing is found again. Before a round reads the ledger, an earlier round's review whose
@@ -246,8 +247,8 @@ type End =
   | { kind: "failed"; failure: FailureFacts }
   /** Its round saved: every post sent. */
   | { kind: "posted"; plan: Plan }
-  /** Its round saved: the posts given up at a host refusal; `reviewed` when its review had landed. */
-  | { kind: "given-up"; plan: Plan; failure: FailureFacts; reviewed: boolean }
+  /** Its round saved: the posts given up at a host refusal; `landed` when its ledger had landed. */
+  | { kind: "given-up"; plan: Plan; failure: FailureFacts; landed: boolean }
   /** The service is stopping: the run was cut and records nothing more. */
   | { kind: "stopped" };
 
@@ -380,7 +381,7 @@ function threw(error: unknown, signal: AbortSignal): End {
 }
 
 /**
- * The ledger until the round's review lands: the findings this round posts (`post`: raised now, or withheld by an
+ * The ledger until the round lands: the findings this round posts (`post`: raised now, or withheld by an
  * earlier round), held as not posted.
  */
 const held = (ledger: Finding[], post: Finding[]): Finding[] => {
@@ -488,11 +489,12 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
   /**
    * An earlier round's review whose send began and was never marked sent (GitHub's answer lost, or the store failed
    * to keep it) is looked for on GitHub by its marker before this round reads the ledger: found, it is marked sent,
-   * which lands that round's ledger, so its findings count as posted and are never posted again as withheld.
+   * which lands that round's ledger, so its findings count as posted and are never posted again as withheld. Only a
+   * round that owed a review is looked for (ADR 0074: one with no line comment posts none).
    */
   async function landedUnsure(changeId: ChangeId): Promise<void> {
-    for (const { runId, plan, degraded } of d.store.posts.unsure<Plan>(changeId)) {
-      const found = await d.publisher.findReview(plan.post, degraded);
+    for (const { runId, plan } of d.store.posts.unsure<Plan>(changeId)) {
+      const found = await d.publisher.findReview(plan.post);
       if (found !== null) d.store.posts.sent(runId, "review", found.reviewId, found.commented);
     }
   }
@@ -682,6 +684,7 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
       round: {
         n,
         sha: c.job.sha,
+        base: prepared.mergeBase,
         reviewer: c.engine,
         secondFind,
         ...confirmed,
@@ -799,7 +802,7 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
     } catch (error) {
       if (signal.aborted) return { kind: "stopped" };
       // A refusal of the host, or anything else that stopped the posts (the store, a bug): given up, the round kept.
-      return { kind: "given-up", plan, failure: postFailure(error), reviewed: reviewLanded(runId) };
+      return { kind: "given-up", plan, failure: postFailure(error), landed: ledgerLanded(runId) };
     }
     return { kind: "posted", plan };
   }
@@ -824,6 +827,7 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
       if (signal.aborted) return;
       const same =
         next.sent === posting.sent &&
+        next.owed === posting.owed &&
         next.wait?.until === posting.wait?.until &&
         next.wait?.refusal === posting.wait?.refusal;
       posting = next;
@@ -836,6 +840,8 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
       degrade() {
         if (signal.aborted) throw new Error("the service is stopping");
         d.store.posts.degrade(runId);
+        // The review is owed no more.
+        show({ ...posting, owed: posting.owed - 1 });
       },
       sending(kind: PostKind) {
         if (signal.aborted) throw new Error("the service is stopping");
@@ -854,12 +860,13 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
     };
   }
 
-  /** Whether the run's review landed, as the outbox kept it; false when the store can't say. */
-  function reviewLanded(runId: RunId): boolean {
+  /**
+   * Whether the run's round landed its ledger, as the outbox kept it (its review sent, or with none owed, its status
+   * block begun); false when the store can't say.
+   */
+  function ledgerLanded(runId: RunId): boolean {
     try {
-      return (
-        d.store.posts.of<Plan>(runId)?.posts.some((p) => p.kind === "review" && p.hostId !== null) ?? false
-      );
+      return d.store.posts.landed(runId);
     } catch (error) {
       log(`the posts of run ${runId} could not be read: ${error}`);
       return false;
@@ -870,7 +877,7 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
    * The run's end, recorded by `write`: tried once more if the store throws; if it throws again, the job is failed
    * in a write of its own, so its run ends and its engine is free, and the UI hears of that instead. Null when even
    * that failed (the error goes to the log, and the job stays running until the next start). The job's check
-   * follows that failure, unless the round's posts completed it (`checked`); a round whose review landed (`posted`)
+   * follows that failure, unless the round's posts completed it (`checked`); a round that landed (`posted`)
    * still answers the requests that led to its job: their 🚀 is owed all the same.
    */
   function ended(
@@ -951,10 +958,10 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
         return;
       case "given-up": {
         const write = () =>
-          d.store.jobs.runEnded(r.runId, { kind: "failed", failure: end.failure, posted: end.reviewed }, t);
-        const job = ended(r, t, write, { posted: end.reviewed, checked: false });
+          d.store.jobs.runEnded(r.runId, { kind: "failed", failure: end.failure, posted: end.landed }, t);
+        const job = ended(r, t, write, { posted: end.landed, checked: false });
         if (job === null) return;
-        // The round stays, with what landed: its findings held off the pull request when its review didn't.
+        // The round stays, with what landed: its findings held off the pull request when it didn't land.
         finished(r, t, job, end.plan, d.store.rounds.ledger(r.changeId));
         d.checks.follow({ changeId: r.changeId, job }, { run: r.facts });
         return;

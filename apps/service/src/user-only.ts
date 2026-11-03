@@ -1,5 +1,5 @@
-// Files only the user who runs the service may open: the App store's (ADR 0053), above all the key kept unencrypted
-// when the keychain can't keep it, `instance.json`, and the folders that hold the logs (ADR 0054). Elsewhere the mode,
+// Files only the user who runs the service may open: the sign-in store's (ADR 0066), above all the tokens kept
+// unencrypted when the keychain can't keep them, `instance.json`, and the folders that hold the logs (ADR 0054). Elsewhere the mode,
 // 0600 (a folder's 0700). On Windows the mode only toggles read-only and a
 // new file inherits its folder's access list, so the list is replaced by one entry: the current user, by SID, full
 // control (`icacls`). Two short programs, run directly rather than through the process runner, which is for long

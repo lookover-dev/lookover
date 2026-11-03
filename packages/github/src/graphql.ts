@@ -1,5 +1,5 @@
-// The App side's one GraphQL client (ADR 0052): what REST can't do, minimizing a comment and reading whether one
-// is hidden, sent to GitHub's GraphQL endpoint with the installation token the caller holds, through the same
+// The one GraphQL client (ADR 0052): what REST can't do, minimizing a comment and reading whether one is hidden,
+// sent to GitHub's GraphQL endpoint with the token of the person signed in (ADR 0066), through the same
 // HTTP client as every REST call (its rate-limit headers read, its refusals typed). GitHub answers a refused
 // GraphQL request `200` with `errors`: each is turned into the `HostError` it means, by GitHub's error type.
 import { HostError } from "@lookover/contracts";

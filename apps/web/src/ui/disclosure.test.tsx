@@ -1,13 +1,13 @@
 // A disclosure starts closed, or open when asked (`defaultOpen`), read once as it appears (design-system.md,
-// Disclosure; ADR 0070): Settings' "Use an existing App" while the key is refused.
+// Disclosure; ADR 0070).
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Disclosure } from "./basics.tsx";
 
 const shown = (defaultOpen = false) =>
   renderToStaticMarkup(
-    <Disclosure summary="Use an existing App" defaultOpen={defaultOpen}>
-      <p>Its form.</p>
+    <Disclosure summary="Why wasn't it reviewed?" defaultOpen={defaultOpen}>
+      <p>Its reason.</p>
     </Disclosure>,
   );
 

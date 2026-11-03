@@ -5,6 +5,7 @@
 // organisation asking for SAML SSO (GitHub's 403 with `X-GitHub-SSO`), is that account's cause; an installation gone
 // between the two reads is left out. Anything else refuses the call, the connection's: signed out, unreachable.
 import {
+  type HostAccount,
   type HostAccounts,
   HostError,
   type HostInstallation,
@@ -14,9 +15,31 @@ import {
 } from "@lookover/contracts";
 import { allows } from "./allowed.ts";
 import { type GitHubApi, ssoAsked } from "./api.ts";
-import { accountOf, everyPage } from "./installations.ts";
 import { installationRepositories, parse, person, userInstallations } from "./schemas.ts";
 import type { UserSession } from "./user-session.ts";
+
+/** A listing's pages, each read whole as the `Link` header gives the next: a discovery read is not cached. */
+async function everyPage<T>(
+  api: GitHubApi,
+  first: string,
+  bearer: string,
+  read: (body: unknown, what: string) => T[],
+): Promise<T[]> {
+  const items: T[] = [];
+  for (let where: string | null = first; where !== null; ) {
+    const page = await api.page(where, bearer, false);
+    items.push(...read(page.body, `GET ${where}`));
+    where = page.next;
+  }
+  return items;
+}
+
+/** GitHub's account type as the contracts take it: anything but a person's account is an organisation's. */
+const accountOf = (account: { id: number; login: string; type: string }): HostAccount => ({
+  id: account.id,
+  login: account.login,
+  type: account.type === "User" ? "User" : "Organization",
+});
 
 export function createAccounts(
   api: GitHubApi,
@@ -30,7 +53,6 @@ export function createAccounts(
         api,
         `/user/installations/${id}/repositories?per_page=100`,
         token,
-        undefined,
         (body, what) => parse(installationRepositories, body, what).repositories,
       );
       return listed
@@ -52,7 +74,6 @@ export function createAccounts(
           api,
           "/user/installations?per_page=100",
           token,
-          undefined,
           (body, what) => parse(userInstallations, body, what).installations,
         ),
       );

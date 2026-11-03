@@ -91,7 +91,7 @@ export interface DemoServiceOptions extends ServerOptions {
   log?(line: string): void;
   /** What builds each room, its seed played: the driver's `buildDemoRoom`, unless a test holds or breaks one. */
   driver?: typeof buildDemoRoom;
-  /** What makes each room's App store files user-only: the App store's own unless a test injects a quicker one. */
+  /** What makes each room's sign-in store files user-only: the store's own unless a test injects a quicker one. */
   userOnly?: DemoRoomOptions["userOnly"];
   /** The person's `gh` (ADR 0059) every room holds, as each world says: a test's own; none, one per room. */
   gh?: DemoRoomOptions["gh"];

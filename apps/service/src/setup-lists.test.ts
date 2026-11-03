@@ -1,8 +1,7 @@
 // Setup's two lists follow the host (ADR 0068, #407): while setup shows Repositories or First review, every watched
 // repository is polled at the hot cadence, so a pull request opened then is sent as `change.opened` within one hot
-// interval, and one closed as `change.closed`, with no reload. On the person's own App and on the shared App signed
-// in on two accounts, the organisation's repository included. Through the service's door, on the fakes and the held
-// clock.
+// interval, and one closed as `change.closed`, with no reload. On the shared App signed in on one account, and on two
+// accounts, the organisation's repository included. Through the service's door, on the fakes and the held clock.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   type ChangeId,
@@ -49,7 +48,6 @@ const setupOn = (step: SetupStep): Setup => ({
   step,
   reached: step,
   github: "done",
-  githubRefused: null,
   firstReviewChange: null,
 });
 
@@ -107,7 +105,7 @@ async function followsTheHost(
   expect(openIn(await snapshot(service, cookie), repo)).toEqual(openIn(before, repo));
 }
 
-test("on the person's own App, setup's lists get a pull request opened, then closed, within one hot interval", async () => {
+test("on the shared App on one account, setup's lists get a pull request opened, then closed, within one hot interval", async () => {
   const { service, host, time } = await start({ changes: [pr1], setup: setupOn("repos") });
   await followsTheHost(service, host, time, SANDBOX);
 });
@@ -144,8 +142,6 @@ async function signedIn(host: FakeGitHost, dir: string): Promise<GitHubSide> {
   const signIns = signInStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
   await signIns.write(signInAt(T0));
   return {
-    installations: host,
-    connect: () => ({ intake: host, writer: host }),
     shared: {
       signIn: host,
       signIns,

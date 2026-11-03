@@ -15,7 +15,6 @@ import {
   type ScriptedRun,
 } from "@lookover/testkit";
 import {
-  BOT,
   fakeEngines,
   OWNER,
   pr1,
@@ -32,8 +31,6 @@ afterEach(stopAll);
 
 const MIN = 60_000;
 const PR1 = { repo: SANDBOX, number: 1 };
-/** The App's slug, as the agent names it to `wait`: its bot's login without `[bot]`. */
-const APP = "lookover-spike-sasensi";
 
 /** Round 1's find pass: one blocking finding on a line of the diff. */
 const ROUND_1: ScriptedRun = {
@@ -109,7 +106,6 @@ function agentOn(host: FakeGitHost, time: DemoClock) {
       branch: () => Promise.resolve(pr1.head.ref),
       origin: () => Promise.resolve(SANDBOX),
     },
-    env: { LOOKOVER_APP: APP },
     clock: time,
     sleep: (ms) => time.advance(ms),
     out: (line) => out.push(line),
@@ -127,7 +123,7 @@ function agentOn(host: FakeGitHost, time: DemoClock) {
   };
 }
 
-/** A post as a short line: a check with its state, a reaction, a review or the summary. */
+/** A post as a short line: a check with its state, a reaction, a review or the status block. */
 function line(p: HostPost): string {
   switch (p.kind) {
     case "check.created":
@@ -139,8 +135,7 @@ function line(p: HostPost): string {
       return p.reaction;
     case "review":
       return "review";
-    case "summary.created":
-    case "summary.edited":
+    case "status.written":
     case "reply":
     case "minimized":
       return p.kind;
@@ -158,11 +153,13 @@ test("the pull request opens, round 1 posts by itself, wait says fix; the fix is
   // The agent opens its pull request. Within the idle minute the poll sees it and round 1 runs, unasked.
   host.open(pr1);
   await time.advance(MIN);
+  // F1 is off the scripted diff: it is in the status block, and the round posts no review (ADR 0074).
   expect(host.posts.map(line)).toEqual([
     "check queued",
     "check in_progress",
-    "review",
-    "summary.created",
+    // The status block follows the job: Looking over (ADR 0074).
+    "status.written",
+    "status.written",
     "check neutral",
   ]);
 
@@ -199,14 +196,15 @@ test("the pull request opens, round 1 posts by itself, wait says fix; the fix is
     "eyes",
     "check queued",
     "check in_progress",
-    "review",
-    "summary.edited",
+    // The status block follows the job: Looking over (ADR 0074).
+    "status.written",
+    "status.written",
     "check success",
     "minimized",
     "rocket",
   ]);
-  // The one request is the agent's, written as the owner, answered with 👀 and 🚀 by the App, minimized once answered.
-  expect(host.view(PR1).comments.filter((c) => c.author.id !== BOT.id)).toEqual([
+  // The one request is the agent's, written as the owner, answered with 👀 and 🚀 posted as the owner, minimized once answered.
+  expect(host.view(PR1).comments.filter((c) => isReviewRequest(c.body))).toEqual([
     {
       id: expect.any(String),
       author: OWNER,
@@ -241,8 +239,9 @@ test("on a colleague's pull request, skipped when it opened, wait asks anyway; t
     "eyes",
     "check queued",
     "check in_progress",
-    "review",
-    "summary.created",
+    // The status block follows the job: Looking over (ADR 0074).
+    "status.written",
+    "status.written",
     "check neutral",
     "minimized",
     "rocket",

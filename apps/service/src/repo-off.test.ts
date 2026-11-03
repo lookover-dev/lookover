@@ -13,6 +13,7 @@ import {
   openApp,
   post,
   pr1,
+  roundWritten,
   SANDBOX,
   snapshot,
   start,
@@ -144,5 +145,7 @@ test("the owner's request on a draft is still reviewed", async () => {
     trigger: "manual",
     state: "done",
   });
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  // Posted: its status block (it found nothing, so no review: ADR 0074).
+  expect(host.posts.filter(roundWritten)).toHaveLength(1);
+  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(0);
 });

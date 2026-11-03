@@ -18,7 +18,7 @@ const WRITER_CALLS = {
   completeCheck: "write",
   publishReview: "write",
   findReview: "read",
-  upsertSummary: "write",
+  upsertStatus: "write",
   react: "write",
   reply: "write",
   minimize: "write",
@@ -49,21 +49,37 @@ const readsOf = (calls: Record<string, string>): (keyof FakeGitHost)[] =>
     .filter(([, kind]) => kind === "read")
     .map(([call]) => fakeCall(call));
 
-/** The App's reads a lagging host answers stale after a write: the writer's, the intake's, and the fake's `view`. */
-const LAGGED: readonly (keyof FakeGitHost)[] = [...readsOf(WRITER_CALLS), ...readsOf(INTAKE_CALLS), "view"];
+/**
+ * The App's reads a lagging host answers stale after a write: the writer's, the intake's, the fake's `view`, and the
+ * description `upsertStatus` reads before it writes.
+ */
+const LAGGED: readonly (keyof FakeGitHost)[] = [
+  ...readsOf(WRITER_CALLS),
+  ...readsOf(INTAKE_CALLS),
+  "view",
+  "description",
+];
 
 /**
  * `fake` lagging: after any write through the returned port (the writer's posts, the fixture's seeding, a push), each
- * of the App's reads made before it answers as it last did for its next `lag` reads. `fetchSpec` passes through.
+ * of the App's reads made before it answers as it last did for its next `lag` reads, the description `upsertStatus`
+ * reads included, as GitHub's does. `fetchSpec` passes through.
  */
 export const laggingGitHost = (fake: FakeGitHost, lag: number): Lagging<FakeGitHost> => {
   const lagged = lagging(fake, LAGGED, lag);
-  // `fetchSpec` reads and holds a function: past the proxy, so it is neither remembered nor counted as a write.
+  const upsertStatus: FakeGitHost["upsertStatus"] = (change, render) =>
+    fake
+      .upsertStatusReading(change, render, () => lagged.port.description(change))
+      .then(() => lagged.wrote());
   return {
     ...lagged,
     port: new Proxy(lagged.port, {
-      get: (target, name, receiver) =>
-        name === "fetchSpec" ? fake.fetchSpec.bind(fake) : Reflect.get(target, name, receiver),
+      get(target, name, receiver) {
+        // `fetchSpec` reads and holds a function: past the proxy, so it is neither remembered nor counted as a write.
+        if (name === "fetchSpec") return fake.fetchSpec.bind(fake);
+        if (name === "upsertStatus") return upsertStatus;
+        return Reflect.get(target, name, receiver);
+      },
     }),
   };
 };

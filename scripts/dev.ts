@@ -3,17 +3,22 @@
 // fake GitHub and a Claude and a Codex answering from a script, no network; its data in `.dev/data-demo`) and the
 // app on it, `/api` proxied from the app's port to the service's, so the browser sees one origin (ADR 0010).
 // `--scenario=<id>` picks the scenario it starts on (S10, a quiet day, by default). `bun dev --live` starts the
-// service in live mode instead: the real GitHub App, `claude` and `codex` on every repository the live
-// config lists: the sandbox and Lookover's own, ADR 0041, ADR 0053 (the live config in `.dev/data/live.json`, the
-// data in `.dev/data-live`, one store at its root), under the machine-wide live lock, so
-// a real review can be watched from "Review now". Every worktree gets its own ports, derived from its path, so
-// several can run side by side (decision 0013). Without `--live` it never calls `claude` or `codex` and never
-// touches the network.
+// service in live mode instead (ADR 0073): the shared App, signed in with the live sign-in (`LOOKOVER_HOME`'s, else
+// the main checkout's `.dev/data`, read and renewed in place, never copied), the real `claude` and `codex`, on
+// Lookover's own repository and the organisation's sandbox, named here (`DEV_REPOSITORIES`, written as the live
+// config it serves with, `.dev/data-live/live.json`; the data in `.dev/data-live`, one store at its root), under the
+// machine-wide live lock, so a real review can be watched from "Review now". Every worktree gets its own ports,
+// derived from its path, so several can run side by side (decision 0013). Without `--live` it never calls `claude`
+// or `codex` and never touches the network.
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
+import { liveSignInFolder } from "./live-sign-in-folder.ts";
 import { instanceOf, portFor } from "./port.ts";
+
+/** What `bun dev --live` watches (ADR 0073): Lookover's own repository and the organisation's sandbox, nothing else. */
+const DEV_REPOSITORIES = ["lookover-dev/lookover-private", "lookover-dev/lookover-sandbox"];
 
 const root = resolve(import.meta.dir, "..");
 const devDir = join(root, ".dev");
@@ -42,15 +47,32 @@ const stop = () => {
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 
+/**
+ * Live mode's arguments: its data folder, the live config naming `DEV_REPOSITORIES` (written there each start), and
+ * the live sign-in's folder. Outside a clone with no `LOOKOVER_HOME`, it says why and exits.
+ */
+function liveWiring(): string[] {
+  const home = join(devDir, "data-live");
+  let signIns: string;
+  try {
+    signIns = liveSignInFolder({ cwd: root, env: process.env });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return process.exit(1);
+  }
+  mkdirSync(home, { recursive: true });
+  const config = join(home, "live.json");
+  writeFileSync(config, `${JSON.stringify({ repositories: DEV_REPOSITORIES }, null, 2)}\n`);
+  return ["--live", `--live-config=${config}`, `--home=${home}`, `--sign-ins=${signIns}`];
+}
+
 /** Starts the service (demo or live mode) on its own port and waits for the URL that opens the app on it. */
 async function startService(): Promise<{ origin: string; openUrl: string }> {
   const servicePort = await portFor(root, 3);
   const announce = join(devDir, "service.json");
   rmSync(announce, { force: true });
   const scenario = process.argv.filter((a) => a.startsWith("--scenario="));
-  const wiring = live
-    ? ["--live", `--live-config=${join(devDir, "data", "live.json")}`, `--home=${join(devDir, "data-live")}`]
-    : ["--demo", `--home=${join(devDir, "data-demo")}`, ...scenario];
+  const wiring = live ? liveWiring() : ["--demo", `--home=${join(devDir, "data-demo")}`, ...scenario];
   const child = spawn(
     process.execPath,
     [

@@ -7,14 +7,7 @@
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  APP_FLOW,
-  DEMO_API,
-  type DemoCommand,
-  type Event,
-  type FaultId,
-  type State,
-} from "@lookover/contracts";
+import { DEMO_API, type DemoCommand, type Event, type FaultId, type State } from "@lookover/contracts";
 import { openStore } from "@lookover/store";
 import {
   type DemoServiceOptions,
@@ -33,8 +26,8 @@ const running: RunningService[] = [];
 /**
  * S10's world with a seed of five minutes, #135 opened and reviewed in it: what a test stands on when the story
  * behind it doesn't matter (a load's own steps, an engine's fault). Its room builds in a tenth of S10's time, whose
- * seed is two and a half hours of polls; its fourteen events are the start, the repository, #135 and its review, with
- * main's rules as its review read them and its outbox as it posted.
+ * seed is two and a half hours of polls; its fifteen events are the start, the account the sign-in to the shared App
+ * reaches, the repository, #135 and its review, with main's rules as its review read them and its outbox as it posted.
  */
 export function brief(): Scenario {
   return {
@@ -73,7 +66,7 @@ export async function startScenario(
     frozen: options.at ?? T0,
     version: "0.1.0",
     log: (line) => logged.push(line),
-    userOnly: async () => {}, // `icacls` is slow; the App store's own tests check it.
+    userOnly: async () => {}, // `icacls` is slow; the sign-in store's own tests check it.
     ...(options.eventsKept === undefined ? {} : { eventsKept: options.eventsKept }),
     ...(options.scenarios === undefined ? {} : { scenarios: options.scenarios }),
     ...(options.driver === undefined ? {} : { driver: options.driver }),
@@ -150,10 +143,6 @@ export function logOf({ home }: { home: string }): Event[] {
   return events;
 }
 
-/** Text a page wrote in HTML, read back. */
-const fromHtml = (s: string) =>
-  s.replaceAll("&quot;", '"').replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
-
 /** A redirect's target, or an error saying what answered instead. */
 function redirected(res: Response, what: string): string {
   const location = res.headers.get("location");
@@ -163,33 +152,8 @@ function redirected(res: Response, what: string): string {
 }
 
 /**
- * "Create it on GitHub" as the browser follows it (ADR 0053): the page it opens, its form posted to GitHub's "new
- * App" page (the fake's, which makes the App at once), GitHub's redirect to the callback followed with no session, as
- * from another site. The App's install page the callback sends the tab to.
- */
-export async function makeApp({ service, cookie }: Door): Promise<string> {
-  const page = await fetch(`${service.origin}${APP_FLOW.manifest}`, { headers: { cookie } });
-  if (page.status !== 200) throw new Error(`The manifest page answered ${page.status}`);
-  const html = await page.text();
-  const action = fromHtml(/<form[^>]* action="([^"]*)"/.exec(html)?.[1] ?? "");
-  const manifest = fromHtml(/name="manifest" value="([^"]*)"/.exec(html)?.[1] ?? "");
-  const made = await fetch(new URL(action, service.origin), {
-    method: "POST",
-    redirect: "manual",
-    headers: { cookie, origin: service.origin },
-    body: new URLSearchParams({ manifest }),
-  });
-  const back = await fetch(new URL(redirected(made, "GitHub's new App page"), service.origin), {
-    redirect: "manual",
-    headers: { "sec-fetch-site": "cross-site" },
-  });
-  return redirected(back, "The callback");
-}
-
-/**
- * The App installed from its install page, on all the owner's repositories, as the owner does on GitHub; then
- * GitHub's redirect followed: to the install's setup page, or, for an App the pages didn't make, its installation's
- * page. Its words.
+ * The shared App installed from its install page, on all the owner's repositories, as the owner does on GitHub; then
+ * GitHub's redirect to its installation's page followed. Its words.
  */
 export async function installApp({ service, cookie }: Door, installPage: string): Promise<string> {
   const installed = await fetch(new URL(installPage, service.origin), {
@@ -202,13 +166,14 @@ export async function installApp({ service, cookie }: Door, installPage: string)
   const setup = await fetch(new URL(redirected(installed, "GitHub's install page"), service.origin), {
     headers: { cookie },
   });
-  if (setup.status !== 200) throw new Error(`The install's setup page answered ${setup.status}`);
+  if (setup.status !== 200) throw new Error(`The installation's page answered ${setup.status}`);
   return setup.text();
 }
 
 /**
  * GitHub's fake page at `path` under demo mode's web address, as the owner's browser opens it, or posts its form with
- * `fields`: its words (a key, for the App page's "Generate a private key"). Throws unless it answers 200.
+ * `fields` (the code typed on the device page, `/login/device`; "Unsuspend" on an installation's settings): its words.
+ * Throws unless it answers 200.
  */
 export async function onGitHub(
   { service, cookie }: Door,

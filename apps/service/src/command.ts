@@ -1,12 +1,10 @@
 // The one `lookover` command (ADR 0054, "One `lookover` command"): reads its first word and hands the rest on.
 // `serve` runs the service in the foreground, as its other arguments describe (`readConfig`), printing nothing with
 // `--background`; `start`, `open`, `status` and `stop` run it in the background and reach it (`background.ts`); `wait`, `feedback`
-// and `reply` are the agent's (`agent-cli`'s `run`, ADR 0043), given `--app` with the slug of the App kept in the
-// data folder when neither `--app` nor `LOOKOVER_APP` names one (none kept: `agent-cli` takes the shared App's),
-// so `agent-cli` never reads the data folder; plus
+// and `reply` are the agent's (`agent-cli`'s `run`, ADR 0043), handed their arguments without `--home=`: they read
+// the one App, the shared App (ADR 0073), and never the data folder; plus
 // `--version` and `help`; and `--skill`, in no help, the skill it installs, for the build's check. `main.ts` runs it on this machine; a test, with its own.
 import { USAGE as AGENT_USAGE } from "@lookover/agent-cli";
-import { keptSlug } from "./app-store.ts";
 import {
   BACKGROUND_HELP,
   BACKGROUND_LINES,
@@ -18,7 +16,6 @@ import {
 } from "./background.ts";
 import {
   type Config,
-  dataFolder,
   HOME_IN_ONE_WORD,
   isHomeOption,
   readConfig,
@@ -72,10 +69,7 @@ help       This list.
 Exit (all but wait, feedback and reply): 0 done or running, 1 error, 2 usage, 3 not running (status
 and open; stop exits 0 then: nothing is left running).
 
-${AGENT_USAGE}
-
-wait, feedback and reply take the App's slug from the data folder (--home=<dir>, LOOKOVER_HOME, else your
-profile's) when neither --app nor LOOKOVER_APP names it, else the shared App's.`;
+${AGENT_USAGE}`;
 
 /**
  * Runs `lookover` with `argv`: its exit code, or null once `serve` serves (the process then runs on until a signal
@@ -98,12 +92,12 @@ export async function lookover(argv: string[], deps: LookoverDeps): Promise<numb
   if (verb === "status") return status(rest, deps);
   if (verb === "stop") return stop(rest, deps);
   if (AGENT_VERBS.has(verb)) {
-    // `--home <dir>` would hand the folder on as the agent's argument and read the slug from another data folder.
+    // `--home <dir>` would hand the folder on as the agent's argument.
     if (rest.includes("--home")) {
       deps.print.err(HOME_IN_ONE_WORD);
       return 2;
     }
-    return deps.agent([verb, ...(await withApp(rest, deps.system))]);
+    return deps.agent([verb, ...rest.filter((arg) => !isHomeOption(arg))]);
   }
   deps.print.err(`lookover has no command "${verb}".`);
   deps.print.err(LOOKOVER_USAGE);
@@ -154,17 +148,4 @@ function skill(argv: string[], deps: LookoverDeps): number {
     deps.print.err(said(error));
     return refusalExit(error);
   }
-}
-
-/**
- * The agent's arguments without `--home=`, and `--app` with the data folder's App when neither they nor
- * `LOOKOVER_APP` name one; as they are when the data folder keeps none, for the agent's command to take the shared
- * App's.
- */
-async function withApp(argv: string[], system: System): Promise<string[]> {
-  const handed = argv.filter((arg) => !isHomeOption(arg));
-  const named = argv.some((arg) => arg === "--app" || arg.startsWith("--app=")) || !!system.env.LOOKOVER_APP;
-  if (named) return handed;
-  const slug = await keptSlug(dataFolder(argv, system));
-  return slug === null ? handed : [...handed, "--app", slug];
 }

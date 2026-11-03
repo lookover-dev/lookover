@@ -8,7 +8,6 @@ import {
   type EngineId,
   type EngineState,
   engineDetailText,
-  type HostAccount,
 } from "@lookover/contracts";
 import { checkLine, connectionText, engineStateText, serviceStatus } from "./health.ts";
 
@@ -46,26 +45,12 @@ test("an AI's state in a few words", () => {
 
 test("GitHub and the service in a few words", () => {
   const line = (patch: Partial<Parameters<typeof connectionText>[0]>) =>
-    connectionText({ state: "connected", cause: null, bot: "sam-reviewer[bot]", app: null, ...patch });
-  expect(line({})).toBe("connected as sam-reviewer[bot]");
+    connectionText({ state: "connected", cause: null, person: { id: 7, login: "sam" }, ...patch });
+  // Signed in (ADR 0066, ADR 0073): connected as the person who posts, and never as nobody.
+  expect(line({})).toBe("connected as sam");
+  expect(line({ person: null })).toBe("connected");
   expect(line({ state: "disconnected" })).toBe("disconnected");
-  expect(line({ state: "not-connected", bot: null })).toBe("not connected");
-  // The status menu names the account the App is on (ADR 0059): the person's own, or the organisation.
-  const app = (account: HostAccount) => ({
-    id: 1,
-    slug: "lookover-x",
-    account,
-    person: { id: 7, login: "sam" },
-  });
-  expect(line({ bot: "x[bot]", app: app({ id: 9, login: "ledger-dev", type: "Organization" }) })).toBe(
-    "connected as x[bot], on the ledger-dev organisation",
-  );
-  expect(line({ bot: "x[bot]", app: app({ id: 7, login: "sam", type: "User" }) })).toBe(
-    "connected as x[bot], on your GitHub account",
-  );
-  // Signed in to the shared App (ADR 0066), no bot: connected as the person, and never as nobody.
-  expect(line({ bot: null, person: { id: 7, login: "sam" } })).toBe("connected as sam");
-  expect(line({ bot: null })).toBe("connected");
+  expect(line({ state: "not-connected", person: null })).toBe("not connected");
   expect(serviceStatus({ startAtLogin: true, atLogin: "this", loginItem: "os" })).toEqual({
     ok: true,
     text: "running, starts at login",
@@ -88,14 +73,10 @@ test("GitHub and the service in a few words", () => {
 });
 
 test("GitHub disconnected says its cause in a few words (ADR 0053)", () => {
-  const text = (cause: ConnectionCause) =>
-    connectionText({ state: "disconnected", cause, bot: null, app: null });
+  const text = (cause: ConnectionCause) => connectionText({ state: "disconnected", cause });
   expect(text({ kind: "unreachable" })).toBe("unreachable");
   expect(text({ kind: "uninstalled", suspended: false })).toBe("App uninstalled");
   expect(text({ kind: "uninstalled", suspended: true })).toBe("App suspended");
-  expect(text({ kind: "key-refused", why: "revoked" })).toBe("key refused");
-  expect(text({ kind: "key-lost" })).toBe("key lost");
-  expect(text({ kind: "not-a-member", organisation: "acme" })).toBe("membership lost");
   expect(text({ kind: "signed-out" })).toBe("signed out");
   expect(text({ kind: "sso", organisation: "acme", url: null })).toBe("SSO needed");
 });
@@ -196,31 +177,16 @@ test("each health check says what it checked, whether it is fine, and the detail
       },
     ],
     [
-      { check: "connection", state: "connected", cause: null, bot: "sam-reviewer[bot]", key: null },
-      { label: "GitHub", ok: true, detail: "connected as sam-reviewer[bot]" },
+      { check: "connection", state: "connected", cause: null },
+      { label: "GitHub", ok: true, detail: "connected" },
     ],
     [
       {
         check: "connection",
         state: "disconnected",
         cause: { kind: "unreachable" },
-        bot: "sam-reviewer[bot]",
-        key: null,
       },
       { label: "GitHub", ok: false, detail: "unreachable" },
-    ],
-    // How the App's key is kept (ADR 0053): said beside the connection, unencrypted named for what it is.
-    [
-      { check: "connection", state: "connected", cause: null, bot: "sam-reviewer[bot]", key: "keychain" },
-      { label: "GitHub", ok: true, detail: "connected as sam-reviewer[bot] · key in the keychain" },
-    ],
-    [
-      { check: "connection", state: "connected", cause: null, bot: "sam-reviewer[bot]", key: "user-file" },
-      {
-        label: "GitHub",
-        ok: true,
-        detail: "connected as sam-reviewer[bot] · key unencrypted in a user-only file: no keychain",
-      },
     ],
     [
       { check: "service", state: "running", startAtLogin: true, atLogin: "this", loginItem: "os" },

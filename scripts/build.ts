@@ -21,17 +21,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
-import { API, APP_FLOW } from "@lookover/contracts";
+import { API } from "@lookover/contracts";
 import { renderSkill, SKILL_NAME, skillCommandLine, skillStampOf, VERSION } from "@lookover/service";
 
 const root = resolve(import.meta.dir, "..");
 const WEB = join(root, "apps", "web");
 const WEB_DIST = join(WEB, "dist");
-/** What the service's stand-alone pages carry from the web app (`apps/web/src/standalone.ts`). */
-const SYSTEM_CSS = join(WEB, "src", "styles", "system.css");
-const TOKENS_CSS = join(WEB, "src", "styles", "tokens.css");
-const TOKENS_IMPORT = '@import "./tokens.css";';
-const FAVICON = join(WEB, "public", "favicon.svg");
+/** The device code's face's licence, put in the build by `apps/web/scripts/font-licences.ts`. */
+const DEVICE_CODE_LICENCE = "fonts/atkinson-hyperlegible-mono-LICENSE.txt";
 const SERVICE_SRC = join(root, "apps", "service", "src");
 const MIGRATIONS = join(root, "packages", "store", "src", "migrations");
 const DIST = join(root, "dist");
@@ -157,21 +154,26 @@ async function checkServed(origin: string): Promise<void> {
   const bytes = (await served.arrayBuffer()).byteLength;
   if (served.status !== 200 || bytes !== Bun.file(join(WEB_DIST, script)).size)
     failed(`its ${script} answered ${served.status} with ${bytes} bytes, not the built file`);
-  // The tab GitHub returns to (ADR 0058): a stand-alone page, the design system's stylesheet and the eyes in it.
-  const installed = await fetch(`${origin}${APP_FLOW.installed}`);
-  const standalone = await installed.text();
-  const [tokens, style, eyes] = await Promise.all([
-    Bun.file(TOKENS_CSS).text(),
-    Bun.file(SYSTEM_CSS).text(),
-    Bun.file(FAVICON).text(),
-  ]);
-  // The page joins the tokens in front of system.css's rules, the lines after its import of them.
-  const rules = style.slice(style.indexOf(TOKENS_IMPORT) + TOKENS_IMPORT.length);
-  const carried = [tokens, rules, eyes].every((part) => standalone.includes(part));
-  if (installed.status !== 200 || !style.includes(TOKENS_IMPORT) || !carried)
-    failed(
-      `its installed page answered ${installed.status} without tokens.css, system.css and favicon.svg in it`,
-    );
+  await checkDeviceCodeFace(origin, html);
+}
+
+/**
+ * The device code's face (design-system.md "Device code"): the stylesheet the page loads names Atkinson Hyperlegible
+ * Mono's woff2, and the binary serves it and the face's licence as the build holds them.
+ */
+async function checkDeviceCodeFace(origin: string, html: string): Promise<void> {
+  const sheet = /href="\/(assets\/[^"]+\.css)"/.exec(html)?.[1] ?? failed("its page loads no stylesheet");
+  const css = await Bun.file(join(WEB_DIST, sheet)).text();
+  const face =
+    /\/(assets\/atkinson-hyperlegible-mono-[^)"'\s]+\.woff2)/.exec(css)?.[1] ??
+    failed(`its ${sheet} names no Atkinson Hyperlegible Mono woff2`);
+  for (const file of [face, DEVICE_CODE_LICENCE]) {
+    const answer = await fetch(`${origin}/${file}`);
+    const bytes = (await answer.arrayBuffer()).byteLength;
+    const built = Bun.file(join(WEB_DIST, file));
+    if (answer.status !== 200 || !(await built.exists()) || bytes !== built.size)
+      failed(`its ${file} answered ${answer.status} with ${bytes} bytes, not the built file`);
+  }
 }
 
 /**

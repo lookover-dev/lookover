@@ -2,6 +2,29 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.7.0](https://github.com/lookover-dev/lookover/compare/v0.6.0...v0.7.0) (2026-11-03)
+
+### Breaking changes
+
+- **setup:** "Use your own App" is gone: you sign in with GitHub, and Lookover reviews as you through its shared App. A data folder set up on its own App starts at setup again; sign in there, and delete the old App on GitHub when you like.
+- **github:** the summary comment is gone. Lookover writes its status in a block of its own at the end of the pull request's description, and rewrites only that block.
+- **cli:** `lookover wait`, `feedback` and `reply` no longer take `--app`.
+
+### Features
+
+- **github:** the status block says where the pull request stands: looking over a commit, what's left to fix with a link to each thread, what needs your look, waiting for an engine's limit, or why Lookover couldn't look.
+- **github:** every post opens with Lookover's wordmark, in GitHub's light and dark themes.
+- **github:** a review carries only its line comments; a round with nothing to say on a line posts no review.
+- **github:** a finding outside the diff links to its lines, which GitHub shows as a snippet.
+- **github:** when the finder wrote a fix, its line comment carries it as a suggestion you can commit from GitHub.
+- **github:** Lookover's replies on a thread say what they are: withdrawn, kept, or yours to decide.
+- **cli:** `lookover wait` also resolves the threads Lookover withdrew or dismissed, and says why.
+- **setup:** the sign-in code is set in Atkinson Hyperlegible Mono, so `0` and `D`, `O`, `1` and `I` read apart.
+
+### Bug Fixes
+
+- **setup:** when GitHub asks Lookover to slow down while you sign in, it waits as long as GitHub says.
+
 ## [0.6.0](https://github.com/lookover-dev/lookover/compare/v0.5.0...v0.6.0) (2026-11-02)
 
 ### Features

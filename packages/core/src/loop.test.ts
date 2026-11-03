@@ -36,6 +36,7 @@ function finding(
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: null,
     status,
     posted,
     commented: false,

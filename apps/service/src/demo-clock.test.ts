@@ -79,7 +79,7 @@ class HeldWall implements Wall {
 test("demo.advance moves the room's time: the poll runs, a timed pause ends, and each move is one clock event, numbered", async () => {
   const { service, host } = await start({ engines: fakeEngines({ reviews: 1 }), changes: [pr1] });
   const cookie = await openApp(service);
-  const stream = messages(await fetch(`${api(service, "/events")}?after=3`, { headers: { cookie } }));
+  const stream = messages(await fetch(`${api(service, "/events")}?after=4`, { headers: { cookie } }));
   expect((await post(service, cookie, { type: "service.pause", for: "hour" })).status).toBe(200);
   expect((await review(service, cookie)).status).toBe(200);
   await until(stream, "job.changed");
@@ -90,10 +90,11 @@ test("demo.advance moves the room's time: the poll runs, a timed pause ends, and
   expect((await post(service, cookie, { type: "demo.advance", ms: 60_000 })).status).toBe(200);
   const minute = await until(stream, "clock");
   expect(minute.map(named)).toEqual([`change.opened ${NINTH}`, "clock"]);
-  // Numbered by the store like any event: the start, the repository, #1, the pause, the job twice, #9, then it.
-  expect(minute.at(-1)).toMatchObject({ type: "clock", at: T0 + 60_000, seq: 8 });
+  // Numbered by the store like any event: the start, the account the sign-in reaches, the repository, #1, the
+  // pause, the job twice, #9, then it.
+  expect(minute.at(-1)).toMatchObject({ type: "clock", at: T0 + 60_000, seq: 9 });
   const shown = await snapshot(service, cookie);
-  expect(shown).toMatchObject({ seq: 8, now: T0 + 60_000 });
+  expect(shown).toMatchObject({ seq: 9, now: T0 + 60_000 });
   expect(shown.reviews[PLANTED]).toMatchObject({ job: pausedJob, run: null });
 
   // The rest of the hour: the pause ends at its time, and the review it held runs to its round before the move
@@ -105,7 +106,6 @@ test("demo.advance moves the room's time: the poll runs, a timed pause ends, and
     `run.started ${PLANTED}`,
     `run.step ${PLANTED}`,
     `run.step ${PLANTED}`,
-    `run.posting ${PLANTED}`,
     `run.posting ${PLANTED}`,
     `run.posting ${PLANTED}`,
     `run.posting ${PLANTED}`,
@@ -129,7 +129,7 @@ test("a scripted run's duration elapses on the held clock: the round lands when 
     changes: [pr1],
   });
   const cookie = await openApp(service);
-  const stream = messages(await fetch(`${api(service, "/events")}?after=3`, { headers: { cookie } }));
+  const stream = messages(await fetch(`${api(service, "/events")}?after=4`, { headers: { cookie } }));
   expect((await review(service, cookie)).status).toBe(200);
   await until(stream, "run.step");
   expect((await post(service, cookie, { type: "demo.advance", ms: 89_999 })).status).toBe(200);
@@ -141,21 +141,21 @@ test("a scripted run's duration elapses on the held clock: the round lands when 
 test("while nothing moves, the keepalive carries the service's now; demo.advance then sends the clock event", async () => {
   const { service } = await start({ changes: [pr1] });
   const cookie = await openApp(service);
-  const stream = messages(await fetch(`${api(service, "/events")}?after=3`, { headers: { cookie } }));
+  const stream = messages(await fetch(`${api(service, "/events")}?after=4`, { headers: { cookie } }));
   const two = Promise.all([next(stream), next(stream)]);
   expect((await post(service, cookie, { type: "demo.advance", ms: 20_000 })).status).toBe(200);
   const [alive, moved] = await two;
   expect(alive).toEqual({ id: null, event: "keepalive", data: JSON.stringify({ at: T0 + 15_000 }) });
   expect(moved.event).toBe("event");
-  expect(JSON.parse(moved.data)).toEqual({ type: "clock", at: T0 + 20_000, seq: 4 });
+  expect(JSON.parse(moved.data)).toEqual({ type: "clock", at: T0 + 20_000, seq: 5 });
 });
 
 test("demo.step jumps to the next timer: the poll's wake, 10 s away", async () => {
   const { service } = await start({ changes: [pr1] });
   const cookie = await openApp(service);
-  const stream = messages(await fetch(`${api(service, "/events")}?after=3`, { headers: { cookie } }));
+  const stream = messages(await fetch(`${api(service, "/events")}?after=4`, { headers: { cookie } }));
   expect((await post(service, cookie, { type: "demo.step" })).status).toBe(200);
-  expect(await until(stream, "clock")).toEqual([{ type: "clock", at: T0 + WAKE_MS, seq: 4 }]);
+  expect(await until(stream, "clock")).toEqual([{ type: "clock", at: T0 + WAKE_MS, seq: 5 }]);
   expect((await snapshot(service, cookie)).now).toBe(T0 + WAKE_MS);
 });
 
@@ -166,11 +166,11 @@ test("demo.clock runs the clock with the real time at a speed, and stands it sti
   expect((await post(service, cookie, { type: "demo.clock", running: true, speed: 60 })).status).toBe(200);
   // One real second at sixty times the speed: a minute on the service's clock, and no event for it.
   wall.passes(1_000);
-  expect(await snapshot(service, cookie)).toMatchObject({ seq: 3, now: T0 + 60_000 });
+  expect(await snapshot(service, cookie)).toMatchObject({ seq: 4, now: T0 + 60_000 });
 
   expect((await post(service, cookie, { type: "demo.clock", running: false, speed: 1 })).status).toBe(200);
   wall.passes(1_000);
-  expect(await snapshot(service, cookie)).toMatchObject({ seq: 3, now: T0 + 60_000 });
+  expect(await snapshot(service, cookie)).toMatchObject({ seq: 4, now: T0 + 60_000 });
 
   // A speed of zero is no speed.
   expect((await post(service, cookie, { type: "demo.clock", running: true, speed: 0 })).status).toBe(400);

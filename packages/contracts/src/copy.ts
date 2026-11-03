@@ -1,20 +1,22 @@
-// The phrases more than one place says, written once (coding standards: every sentence a person reads is written
-// once). The app's view model words the screens, `publish` words the pull request and the service's log file
-// (`apps/service/src/log-lines.ts`) words what the service did; where two of them say the same thing (an engine's
-// name, why a review waits or was skipped, why it failed, why it was cancelled, why its confirm pass or Deep's second
-// find gave no answer, who found a round and who double-checked it, why a post waits and when it is tried again, how
-// many findings stay in the app), they take it from here, so they never drift; so do the few ways of writing a thing
-// they share (a phrase as a sentence, a short commit, a day, a clock's two digits). Here, not in a package of its
-// own: the web imports only `contracts`. Phrases start lower case and carry no full stop, so the caller places them
-// in its sentence (`asSentence` makes one a sentence of its own); titles and sentences start upper case. Each map is a
-// `Record` over its union: a new value fails the typecheck.
+// The phrases more than one place says, written once (coding standards: every sentence a person reads is written once).
+// The app's view model words the screens, `publish` words the pull request and the service's log file
+// (`apps/service/src/log-lines.ts`) words what the service did; where two of them say the same thing (an engine's name,
+// why a review waits or was skipped, why it failed, why it was cancelled, why its confirm pass or Deep's second find
+// gave no answer, who found a round and who double-checked it, why a post waits and when it is tried again, how many
+// findings stay in the app, the status block in the description, the kind of each reply on a thread), they take it
+// from here, so they never drift; so do the few ways of writing a thing they share (a phrase as a sentence, a short
+// commit, a day, a clock's two digits).
+// Here, not in a package of its own: the web imports only `contracts`. Phrases start lower case and carry no full stop,
+// so the caller places them in its sentence (`asSentence` makes one a sentence of its own); titles and sentences start
+// upper case. Each map is a `Record` over its union: a new value fails the typecheck.
+import type { ClaimKind, FindingClaim } from "./claim.ts";
 import type { ConfirmFailure } from "./confirm.ts";
 import type { EngineId } from "./engine.ts";
 import type { EngineHealth, EngineUnusable } from "./engines-port.ts";
-import type { GhRefusal } from "./gh.ts";
-import type { CreateAppRefusal } from "./github-app.ts";
+import type { Finding } from "./finding.ts";
 import type { TransientHostFailure } from "./host.ts";
 import type { CancelReason, Deferral, JobFailure, JobFailureKind, SkipReason } from "./job.ts";
+import type { ReplyKind } from "./reconciled.ts";
 import type { Round } from "./round.ts";
 import type { CitedRule } from "./rule.ts";
 
@@ -56,13 +58,6 @@ export function upperFirst(phrase: string): string {
 export function asSentence(phrase: string): string {
   return `${upperFirst(phrase)}.`;
 }
-
-/**
- * What the review's body and each of its line comments open with on GitHub, on both ways (ADR 0066), and the app's
- * mock of the pull request too: signed in on the shared App, Lookover posts as the person, and this is the only thing
- * on GitHub that says the words are Lookover's.
- */
-export const LOOKOVERS_OPENING = "Lookover · ";
 
 /** An engine whose version failed the self-test (ADR 0044), as a phrase after its name, or as its state. */
 export const FAILED_SAFETY_CHECK = "didn't pass Lookover's safety check";
@@ -162,45 +157,6 @@ export function unusableStateText(why: EngineUnusable | null): string | null {
   return why?.kind === "too-old" ? "too old" : null;
 }
 
-/** The command that signs the person's own `gh` in (ADR 0059). */
-export const GH_SIGN_IN = "gh auth login";
-
-/**
- * What gets the person's own `gh` to answer for them (ADR 0059), up to `GH_SIGN_IN`: installed then signed in, or
- * signed in. The setup and "Use an existing App" each say it in a sentence of their own.
- */
-export const GH_FIX_BEFORE = {
-  "gh-missing": "install gh, then run",
-  "gh-signed-out": "run",
-} as const satisfies Record<Exclude<GhRefusal["kind"], "gh-unanswered">, string>;
-
-/** The fix as one phrase: "install gh, then run gh auth login". */
-export const ghFixText = (kind: keyof typeof GH_FIX_BEFORE): string => `${GH_FIX_BEFORE[kind]} ${GH_SIGN_IN}`;
-
-/** The setup's disclosure where an App made before is given, as it reads on screen. */
-export const USE_EXISTING_APP = "Advanced: use an existing App";
-
-/**
- * Why "Create it on GitHub" made no App (ADR 0053), as a sentence: the setup screen says it, the tab GitHub's page
- * would open in says it, and the command's answer gives it to the console.
- */
-export function createAppRefusalText(refusal: CreateAppRefusal): string {
-  switch (refusal.kind) {
-    case "live-config":
-      return "Live runs use the test App; they never create one.";
-    case "already-made":
-      return "Lookover already keeps an App.";
-    case "gh-missing":
-      return `Creating it on an organisation needs the GitHub CLI: ${ghFixText("gh-missing")}.`;
-    case "gh-signed-out":
-      return `Creating it on an organisation needs gh signed in: ${ghFixText("gh-signed-out")}.`;
-    case "gh-unanswered":
-      return "gh couldn't answer. Check again in a moment.";
-    case "not-an-admin":
-      return `Only an admin of the organisation can create its App. Once one has, use it under “${USE_EXISTING_APP}”.`;
-  }
-}
-
 /** What a deferred review waits for, in plain words: "Claude is signed out". */
 export function deferralText(deferral: Deferral): string {
   switch (deferral.reason) {
@@ -225,7 +181,7 @@ const FAILED: Record<JobFailureKind, (engine: EngineId | null) => string> = {
   service_stopped: () => "the service stopped before the review finished",
   prepare_failed: () => "the code could not be fetched",
   review_failed: (engine) => `${engine === null ? "the reviewer" : ENGINE[engine]} gave no review`,
-  publish_failed: () => "GitHub refused the review",
+  publish_failed: () => "GitHub refused a post",
   host_failed: () => "GitHub did not answer",
   unexpected: () => "the review could not run",
 };
@@ -356,3 +312,191 @@ export function ruleText(rule: Pick<CitedRule, "file" | "line">): string {
 
 /** What the owner's dismissal of a finding as wrong (ADR 0052) keeps from then on, as a phrase after "It". */
 export const NOT_RAISED_AGAIN = "won't be raised again on this pull request";
+
+// The status block in the pull request's description (ADR 0074), as `publish` posts it and the app's simulated
+// GitHub page shows it.
+
+/** The status block's heading for a round posted: "Nothing to fix", "One thing to fix", "3 things to fix". */
+export function thingsText(n: number): string {
+  return n === 0 ? "Nothing to fix" : n === 1 ? "One thing to fix" : `${n} things to fix`;
+}
+
+const STOPPED: Record<JobFailureKind, (engine: EngineId | null) => string> = {
+  review_failed: (engine) =>
+    `${engine === null ? "The reviewer" : ENGINE[engine]} stopped before it finished.`,
+  service_stopped: () => "Lookover stopped before it finished.",
+  prepare_failed: () => "Lookover couldn't get the code ready.",
+  host_failed: () => "GitHub didn't answer.",
+  publish_failed: () => "Lookover couldn't post the round.",
+  unexpected: () => "Something went wrong in Lookover.",
+};
+
+/**
+ * Why a job failed, as the status block's sentence by its kind, naming the engine that was reviewing: "Codex stopped
+ * before it finished."; "The reviewer" when no run had started.
+ */
+export function stoppedText(kind: JobFailureKind, engine: EngineId | null): string {
+  return STOPPED[kind](engine);
+}
+
+/** What the status block of a failed job asks, after why it failed. */
+export const TRY_AGAIN = "Push again, or comment `/lookover review`, to try again.";
+
+/**
+ * When a deferred review starts, after "starts", for anyone on the pull request: "once GitHub is back"; an engine's
+ * limit, "once the limit resets", its reset worded by the caller.
+ */
+export function startsOnceText(deferral: Deferral): string {
+  switch (deferral.reason) {
+    case "paused":
+      return "once the owner resumes reviews";
+    case "connection":
+      return "once GitHub is back";
+    case "engine-signed-out":
+      return `by itself once the owner signs ${ENGINE[deferral.engine]} in`;
+    case "engine-missing":
+      return `by itself once ${
+        deferral.unusable === null
+          ? `${ENGINE[deferral.engine]} is installed`
+          : unusableFixedText(deferral.unusable, deferral.engine, "the owner")
+      }`;
+    case "engine-limit":
+      return "once the limit resets";
+    case "engine-failed-self-test":
+      return `by itself once a version of ${ENGINE[deferral.engine]} passes it`;
+  }
+}
+
+/**
+ * Why a job waits and when its review starts, as the status block's sentences: null, behind the reviews before it;
+ * an engine's limit, at `resetsAt` as the caller words it ("at 14:20", "on Wed 4 Nov at 14:20") when known.
+ */
+export function waitingText(deferral: Deferral | null, resetsAt: string | null): string {
+  if (deferral === null) return "The review starts once the reviews before it are done.";
+  if (deferral.reason === "engine-limit") {
+    const when = resetsAt === null ? "" : `, ${resetsAt}`;
+    return `${ENGINE[deferral.engine]} reached its usage limit. The review starts when it resets${when}.`;
+  }
+  return `${asSentence(deferralText(deferral))} The review starts ${startsOnceText(deferral)}.`;
+}
+
+/** The status block's heading while the owner has to decide a finding, and a thread's label on the simulated page. */
+export const NEEDS_YOUR_LOOK = "Needs your look";
+
+/**
+ * The block's heading while a round runs on `commit`, as its pieces, the commit as the caller writes it (a link on
+ * the pull request, a commit chip on the simulated page): "again" on the last round's commit.
+ */
+export function lookingOverHead<C>(commit: C, again: boolean): (string | C)[] {
+  return ["Looking over ", commit, ...(again ? [" again"] : [])];
+}
+
+/** The block's heading while a job waits on `commit`, as its pieces. */
+export function waitingHead<C>(commit: C): (string | C)[] {
+  return ["Waiting to look over ", commit];
+}
+
+/** The block's heading once a job on `commit` failed, as its pieces. */
+export function failedHead<C>(commit: C): (string | C)[] {
+  return ["Couldn't look over ", commit];
+}
+
+/**
+ * A posted round's counts over its posted findings, after its commit: "3 fixed, 1 withdrawn", withdrawn by the
+ * finder or dismissed by the owner; "" for none.
+ */
+export function roundCountsText(findings: Pick<Finding, "status" | "posted">[]): string {
+  const on = findings.filter((f) => f.posted);
+  const fixed = on.filter((f) => f.status === "verified_fixed").length;
+  const withdrawn = on.filter((f) => f.status === "withdrawn" || f.status === "dismissed").length;
+  return [fixed > 0 ? `${fixed} fixed` : null, withdrawn > 0 ? `${withdrawn} withdrawn` : null]
+    .filter((c) => c !== null)
+    .join(", ");
+}
+
+/**
+ * A posted round's line in the block, as its pieces, the commit as the caller writes it: "Round 3 · <commit> · 3
+ * fixed, 1 withdrawn", the counts over `findings`, the ledger, left out when there are none.
+ */
+export function roundLine<C>(
+  n: number,
+  commit: C,
+  findings: Pick<Finding, "status" | "posted">[],
+): (string | C)[] {
+  const counts = roundCountsText(findings);
+  return [`Round ${n} · `, commit, ...(counts === "" ? [] : [` · ${counts}`])];
+}
+
+/** The second line of a finding with no line comment, from its body: "Not in the diff: reminders go out twice." */
+export function notInDiffText(body: string): string {
+  return `Not in the diff: ${body.charAt(0).toLowerCase()}${body.slice(1)}`;
+}
+
+const KEPT_TWICE: Record<Exclude<ClaimKind, "disputed">, string> = {
+  wont_fix: "Said won't fix twice, kept twice",
+  claimed_fixed: "Said fixed twice, kept twice",
+  deferred: "Said deferred twice, kept twice",
+  question: "Asked twice, kept twice",
+};
+
+/**
+ * Why the owner decides an escalated finding, as the status block's line under it, by its newest claim: a dispute
+ * the finder still calls wrong, however often it was kept (core escalates a blocking one at once); another claim,
+ * kept twice against it, named by its kind (core keeps only the newest claim, so a dispute then a won't fix, kept
+ * twice, reads "Said won't fix twice"); no claim, kept twice.
+ */
+export function escalationText(claim: ClaimKind | null): string {
+  const why =
+    claim === "disputed"
+      ? "Disputed, and the finder still calls it wrong"
+      : claim === null
+        ? "Kept twice"
+        : KEPT_TWICE[claim];
+  return `${why}: the owner decides on the thread.`;
+}
+
+/** Why the owner decides a finding kept twice against "won't fix" (ADR 0074), in the reply on its thread. */
+export const KEPT_TWICE_WONT_FIX =
+  'Kept twice against "won\'t fix". Fix it, or resolve this thread to keep the code as it is.';
+
+/**
+ * A reply on a finding's thread, after the wordmark: its kind; its fixed words in place of the finder's why, if any;
+ * and what it says last, if anything.
+ */
+export interface ReplyWords {
+  kind: string;
+  why: string | null;
+  last: string | null;
+}
+
+/**
+ * What a reply on a finding's thread is, by what the round decided (`reply`) and the finding as it left it. A finding
+ * kept once against its author is escalated the next time (ADR 0052): the reply says so, unless the owner already
+ * has it; one escalated after "won't fix" kept twice gets the fixed words, not the finder's.
+ */
+export function replyKind(
+  reply: ReplyKind,
+  finding: (Pick<Finding, "status" | "kept"> & { claim: Pick<FindingClaim, "kind"> | null }) | undefined,
+): ReplyWords {
+  const words = (kind: string, why: string | null = null, last: string | null = null) => ({
+    kind,
+    why,
+    last,
+  });
+  switch (reply) {
+    case "kept":
+      return finding?.status === "escalated"
+        ? words("Kept. The owner decides")
+        : words("Kept", null, "If it is kept again, the owner decides.");
+    case "escalated":
+      return finding?.claim?.kind === "wont_fix" && finding.kept >= 2
+        ? words("The owner decides this one", KEPT_TWICE_WONT_FIX)
+        : words("The owner decides this one");
+    case "withdrawn":
+      return words("Withdrawn");
+    case "answered":
+      return words("Answer");
+    case "dismissed":
+      return words("Dismissed by the owner", null, `It ${NOT_RAISED_AGAIN}.`);
+  }
+}

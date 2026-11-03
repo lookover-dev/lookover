@@ -14,10 +14,7 @@ import {
   engineName,
   type Finding,
   type FixAction,
-  githubLinks,
-  type HostAccount,
   isUnsettled,
-  ownInstallation,
   type Repository,
   type RepositoryId,
   type Review,
@@ -31,11 +28,17 @@ import {
   type Turn,
 } from "@lookover/contracts";
 import type { Tone } from "../ui/basics.tsx";
-import { accountFix, installFirstFix, ownsAccount, ssoFix } from "./accounts.ts";
-import { adminOf, keyBand, RECONNECT } from "./app-key.ts";
+import {
+  accountFix,
+  installFirstFix,
+  ownsAccount,
+  saidSignedOut,
+  sharedRepositoriesLink,
+  ssoFix,
+} from "./accounts.ts";
 import { deferralText, waitingNotice } from "./deferral.ts";
 import { ago, agoSentence, clock, isToday, itOrThem, plural, until, type WithCommand } from "./format.ts";
-import { accountText, causeText, connectionText, engineStateText } from "./health.ts";
+import { causeText, connectionText, engineStateText } from "./health.ts";
 import { runLine } from "./run.ts";
 import { FINISHING, SIGN_IN_TEXT, waitingText } from "./sign-in.ts";
 import { atLoginMismatch } from "./start-at-login.ts";
@@ -576,44 +579,8 @@ function engineUsed(state: State, id: EngineId): boolean {
 /** A new sign-in to the shared App (ADR 0066): the one fix of a sign-in GitHub no longer takes. */
 const SIGN_IN_AGAIN = { label: "Sign in again", command: { type: "connection.signIn" } } as const;
 
-/**
- * A refused or lost key's one fix (ADR 0070): Settings' GitHub group, where "Add a new key" and "Use an existing App"
- * are, said without "in Settings" on Settings itself (`detailHere`); Reconnect while no App is known, as there is no
- * page to make a key on, on the shared App, which has no key (ADR 0066), and for the clock.
- */
-function keyFix(
-  connection: Connection,
-  cause: Extract<ConnectionCause, { kind: "key-refused" | "key-lost" }>,
-): ProblemSaid {
-  const inSettings = connection.way === "own" && connection.app !== null;
-  const { title, detail, newKey } = keyBand(cause, inSettings ? "settings" : "reconnect");
-  if (!newKey || !inSettings) return { title, detail, fix: RECONNECT };
-  return {
-    title,
-    detail,
-    detailHere: keyBand(cause, "here").detail,
-    fix: { label: "Open Settings", path: "/settings#github" },
-  };
-}
-
-/** "until an admin of acme unsuspends it on GitHub": who lifts a suspended installation's suspension. */
-const unsuspendedBy = (admin: string | null): string =>
-  `until ${admin === null ? "you unsuspend" : `${admin} unsuspends`} it on GitHub`;
-
-/** The one fix of a suspended installation: its page on GitHub, where it is unsuspended. */
-const unsuspendFix = (web: string, account: HostAccount, installationId: number) => ({
-  label: "Unsuspend it on GitHub",
-  href: githubLinks.installation(web, account, installationId),
-});
-
-/** The one fix of an App no longer installed: its install page on GitHub. */
-const installFix = (web: string, slug: string) => ({
-  label: "Install it on GitHub",
-  href: githubLinks.install(web, slug),
-});
-
-/** "Check again" (ADR 0059): the person's `gh` read again, their membership with it. */
-const CHECK_AGAIN = { label: "Check again", command: { type: "gh.check" } } as const;
+/** Reconnect, the band's button when no cause is named: the connection read again from the start. */
+const RECONNECT = { label: "Reconnect GitHub", command: { type: "connection.reconnect" } } as const;
 
 /**
  * What a connection that can't be used says, by its cause (ADR 0053), each with its one fix; its short line is the
@@ -623,39 +590,22 @@ function causeProblem(connection: Connection, cause: ConnectionCause): Omit<Prob
   return { short: `GitHub ${causeText(cause)}`, ...causeFix(connection, cause) };
 }
 
-/** The App's installation suspended: "you" unsuspend it, or an admin of its organisation. */
-function suspendedFix({ app, web, accounts }: Connection): ProblemSaid {
-  const installation = ownInstallation(accounts);
-  return {
-    title: "Lookover's App is suspended on GitHub",
-    detail: `Reviews cannot be read or posted ${unsuspendedBy(adminOf(app?.account))}.`,
-    fix:
-      app && installation !== undefined
-        ? unsuspendFix(web, app.account, installation.installationId)
-        : RECONNECT,
-  };
-}
-
 /**
- * The App no longer installed on its account: your GitHub account, or an organisation, whose admin installs it. On
- * the shared App (ADR 0066), installed on none of the person's accounts any more: the accounts list's first fix.
+ * The App suspended, the whole connection held (ADR 0066): unsuspended where its repositories are chosen, the one
+ * installation the person owns, else GitHub's install page, which lists every account.
  */
-function uninstalledFix(connection: Connection): ProblemSaid {
-  const { app, web, way } = connection;
-  if (way === "shared")
-    return {
-      title: "Lookover's App is no longer installed",
-      detail: `${SHARED_APP.slug} is installed on none of your GitHub accounts. Reviews cannot be read or posted until it is installed again.`,
-      fix: installFirstFix(connection),
-    };
-  const admin = adminOf(app?.account);
-  const until = admin === null ? "it is installed again" : `${admin} installs it again`;
-  return {
-    title: "Lookover's App is no longer installed",
-    detail: `${app?.slug ?? "The App"} was removed from ${app ? accountText(app) : "your GitHub account"}. Reviews cannot be read or posted until ${until}.`,
-    fix: app ? installFix(web, app.slug) : RECONNECT,
-  };
-}
+const suspendedFix = (connection: Connection): ProblemSaid => ({
+  title: "Lookover's App is suspended on GitHub",
+  detail: "Reviews cannot be read or posted until you unsuspend it on GitHub.",
+  fix: { label: "Unsuspend it on GitHub", href: sharedRepositoriesLink(connection) },
+});
+
+/** Installed on none of the person's accounts any more (ADR 0066): the accounts list's first fix. */
+const uninstalledFix = (connection: Connection): ProblemSaid => ({
+  title: "Lookover's App is no longer installed",
+  detail: `${SHARED_APP.slug} is installed on none of your GitHub accounts. Reviews cannot be read or posted until it is installed again.`,
+  fix: installFirstFix(connection),
+});
 
 /** A problem said with its tone: whether it needs the person or only waits. */
 type ProblemToned = ProblemSaid & Pick<Problem, "tone">;
@@ -668,41 +618,30 @@ const needs = (said: ProblemSaid): ProblemToned => ({ tone: "need", ...said });
  * only waits (ADR 0070), its tone `warn` and no fix; every other cause needs the person.
  */
 function causeFix(connection: Connection, cause: ConnectionCause): ProblemToned {
-  switch (cause.kind) {
-    case "unreachable":
-      // The poller and discovery try again every minute by themselves, so no button.
-      return {
-        tone: "warn",
-        title: "GitHub can't be reached",
-        detail: `Since ${clock(connection.since)}. Lookover tries again every minute. Nothing is lost.`,
-        fix: null,
-      };
-    case "uninstalled":
-      return needs(cause.suspended ? suspendedFix(connection) : uninstalledFix(connection));
-    case "key-refused":
-    case "key-lost":
-      return needs(keyFix(connection, cause));
-    case "not-a-member":
-      return needs({
-        title: `You're no longer a member of ${cause.organisation}`,
-        detail: `Your gh says you aren't an active member of ${cause.organisation}, so Lookover stopped reviewing. Once an admin adds you back, check again.`,
-        fix: CHECK_AGAIN,
-      });
-    case "signed-out":
-      // Only a new sign-in brings it back (ADR 0066): its code shows on the connection once asked.
-      return needs({
-        title: "You're signed out of GitHub",
-        detail:
-          "GitHub no longer takes your sign-in. Reviews cannot be read or posted until you sign in again.",
-        fix: SIGN_IN_AGAIN,
-      });
-    case "sso":
-      return needs({
-        title: `${cause.organisation} asks you to sign in with SSO`,
-        detail: `${cause.organisation} protects its repositories with single sign-on. Its reviews cannot be read or posted until you sign in there.`,
-        fix: ssoFix(connection, cause.organisation, cause.url),
-      });
-  }
+  // Signed out: only a new sign-in brings it back (ADR 0066), its code shown on the connection once asked.
+  if (saidSignedOut(cause))
+    return needs({
+      title: "You're signed out of GitHub",
+      detail:
+        "GitHub no longer takes your sign-in. Reviews cannot be read or posted until you sign in again.",
+      fix: SIGN_IN_AGAIN,
+    });
+  if (cause.kind === "unreachable")
+    // The poller and discovery try again every minute by themselves, so no button.
+    return {
+      tone: "warn",
+      title: "GitHub can't be reached",
+      detail: `Since ${clock(connection.since)}. Lookover tries again every minute. Nothing is lost.`,
+      fix: null,
+    };
+  if (cause.kind === "uninstalled")
+    return needs(cause.suspended ? suspendedFix(connection) : uninstalledFix(connection));
+  // What is left is SSO.
+  return needs({
+    title: `${cause.organisation} asks you to sign in with SSO`,
+    detail: `${cause.organisation} protects its repositories with single sign-on. Its reviews cannot be read or posted until you sign in there.`,
+    fix: ssoFix(connection, cause.organisation, cause.url),
+  });
 }
 
 function connectionProblem(connection: Connection, now: number): Problem {
@@ -713,7 +652,7 @@ function connectionProblem(connection: Connection, now: number): Problem {
           short: "GitHub disconnected",
           tone: "need" as const,
           title: "GitHub is disconnected",
-          detail: `Your App lost its access at ${clock(connection.since)}. Reviews cannot be read or posted.`,
+          detail: `Lookover lost its access at ${clock(connection.since)}. Reviews cannot be read or posted.`,
           fix: RECONNECT,
         }
       : causeProblem(connection, connection.cause);
@@ -729,7 +668,7 @@ function codeAsked(
   { cause, signIn }: Connection,
   now: number,
 ): Pick<Problem, "detail" | "fix" | "busy"> | null {
-  if (cause?.kind !== "signed-out" || signIn === null) return null;
+  if (!saidSignedOut(cause) || signIn === null) return null;
   if (now >= signIn.expiresAt) return { detail: FINISHING, fix: SIGN_IN_AGAIN, busy: true };
   return {
     detail: waitingText(signIn.userCode, until(now, signIn.expiresAt)),

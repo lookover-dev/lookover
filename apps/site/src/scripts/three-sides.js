@@ -149,6 +149,8 @@ export function threeSides(stage) {
   show($('[data-chip="r1"]'), arrive + 100);
   tl.rise($('[data-round="1"]'), arrive + 150, 300);
   swap($('[data-chk="wait"]'), $('[data-chk="r1"]'), arrive + 100);
+  tl.rise($("[data-status]"), arrive + 100, 300);
+  show($('[data-st="r1"]'), arrive + 100);
   focus(arrive + 300, ["app"]);
   const n1 = $$('[data-round="1"] .ts-astep').length;
   const r1 = [];
@@ -165,15 +167,13 @@ export function threeSides(stage) {
   swap($('[data-round="1"]'), $('.ts-acard[data-verdict="1"]'), post + 200, 240);
   swap($('[data-chip="r1"]'), $('[data-chip="fix"]'), post + 300);
   tl.rise($("[data-review]"), arrive, 300);
-  show($('.ts-rvtext[data-verdict="1"]'), arrive);
   tl.rise($("[data-finding]"), arrive + 200, 300);
   tl.add($(".ts-mkr"), [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], {
     at: arrive + 480,
     dur: 360,
   });
   show($('[data-sev="blocking"]'), arrive + 480);
-  tl.rise($("[data-summary]"), arrive + 400, 300);
-  show($('.ts-sumtext[data-verdict="1"]'), arrive + 400);
+  swap($('[data-st="r1"]'), $('[data-st="found"]'), arrive + 400);
   swap($('[data-chk="r1"]'), $('[data-chk="found"]'), arrive + 560);
   focus(arrive + 400, ["github"]);
   // 4 · the agent is told, fixes, asks again (≈9.3 – 14 s)
@@ -197,6 +197,7 @@ export function threeSides(stage) {
   swap($('.ts-acard[data-verdict="1"]'), $('[data-round="2"]'), arrive, 240);
   swap($('[data-chip="fix"]'), $('[data-chip="r2"]'), arrive + 100);
   swap($('[data-chk="found"]'), $('[data-chk="r2"]'), arrive + 100);
+  swap($('[data-st="found"]'), $('[data-st="r2"]'), arrive + 100);
   focus(arrive + 300, ["app"]);
   steps(2, [
     [arrive + 300, arrive + 1300],
@@ -209,14 +210,12 @@ export function threeSides(stage) {
   swap($('[data-round="2"]'), $('.ts-acard[data-verdict="2"]'), post2 + 150, 240);
   swap($('[data-chip="r2"]'), $('[data-chip="clean"]'), post2 + 250);
   tl.rise($("[data-verified]"), arrive, 240);
-  swap($('[data-sev="blocking"]'), $('[data-sev="fixed"]'), arrive + 60);
   tl.add($(".ts-mkr"), [{ backgroundColor: "var(--acc-soft)" }, { backgroundColor: "var(--ok-soft)" }], {
     at: arrive + 60,
     dur: 300,
   });
   swap($('[data-chk="r2"]'), $('[data-chk="clear"]'), arrive + 150);
-  swap($('.ts-rvtext[data-verdict="1"]'), $('.ts-rvtext[data-verdict="2"]'), arrive + 150);
-  swap($('.ts-sumtext[data-verdict="1"]'), $('.ts-sumtext[data-verdict="2"]'), arrive + 150);
+  swap($('[data-st="r2"]'), $('[data-st="clear"]'), arrive + 150);
   const back2 = arrive + 250;
   const arrive2 = link(X.ghL, X.agentR, Y.back, back2, "clear", LINK, { from: 18, to: 30 });
   focus(back2, ["agent", "github", "app"]);

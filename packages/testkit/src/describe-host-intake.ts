@@ -7,13 +7,13 @@
 // skipped (the real GitHub can't be made to rate-limit on purpose). `setup.notInstalled`, the same for an App
 // with no installation, every call not found as GitHub answers (ADR 0053; the sandbox has it installed: skipped
 // live). Whether the refusal names the App uninstalled is the adapter's to tell: GitHub's 404 for a repository's
-// installation can't, the service's discovery does (`HostInstallations.installation` null).
+// installation can't, the service's discovery does (`HostAccounts.accounts` without it).
 // `setup.forks`, the same for a change from a fork and one whose fork is gone (ADR 0048): the sandbox has none,
 // since GitHub lets no account fork its own repository, so it runs against the fake only.
 // The host keeps comments' times to the second, so a case that needs one comment edited after a point lets a
 // second pass first, and no case expects two comments written in the same second in a given order.
-// Lookover's threads (ADR 0052): the fixture posts a finding as who posts (the bot, or a signed-in person, ADR
-// 0066), replies and comments inline as the owner,
+// Lookover's threads (ADR 0052): the fixture posts a finding as who posts (the person signed in to the shared App,
+// ADR 0066), replies and comments inline as the owner,
 // and pushes a commit that replaces the finding's line.
 // Nothing in the suite is GitHub's: the clone URL is checked as any host's.
 // `setup.patience` is how long the host may take to show a write (ADR 0069): each read after a write that expects its
@@ -71,8 +71,8 @@ export interface HostIntakeFixture {
   /** Closes `open`. Returns once the host shows it. */
   close(): Promise<void>;
   /**
-   * Who posts, as the host knows them: the author of Lookover's threads. The App's bot, or the person signed in to the
-   * App (ADR 0066); `owner` is then someone else, whose copied marker names no thread.
+   * Who posts, as the host knows them: the author of Lookover's threads, the person signed in to the shared App (ADR
+   * 0066); `owner`, when someone else, is one whose copied marker names no thread.
    */
   poster: { id: number; login: string };
   /**
@@ -527,7 +527,7 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       async () => {
         if (!notInstalled) return;
         await everyCallFails(notInstalled, "not_found");
-        // GitHub's 404 can't say the App is uninstalled, but nothing may blame the key.
+        // GitHub's 404 can't say the App is uninstalled, but nothing may blame the person's sign-in.
         const { intake, repo } = await notInstalled();
         const cause = await intake.listOpenChanges(repo).then(
           () => "answered",

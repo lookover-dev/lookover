@@ -5,46 +5,32 @@ import {
   cancelPhrase,
   cancelText,
   confirmFailureText,
-  createAppRefusalText,
   deferralText,
   engineDetailText,
   engineHealthText,
   engineName,
+  escalationText,
+  failedHead,
   failureText,
   findersText,
   foundAndCheckedText,
   keptText,
+  lookingOverHead,
+  NEEDS_YOUR_LOOK,
   NOTHING_NEW_TO_CHECK,
+  notInDiffText,
   postWaitText,
+  replyKind,
+  roundCountsText,
+  roundLine,
   shortSha,
   skipText,
   twoDigits,
   unusableFixedText,
   unusableStateText,
   upperFirst,
+  waitingHead,
 } from "./index.ts";
-
-test("why no App is created says what Lookover keeps or runs on, for the setup screen, GitHub's tab and the console", () => {
-  expect(createAppRefusalText({ kind: "live-config" })).toBe(
-    "Live runs use the test App; they never create one.",
-  );
-  expect(createAppRefusalText({ kind: "already-made" })).toBe("Lookover already keeps an App.");
-});
-
-test("why no App is created on an organisation says what gh needs, or who can create it", () => {
-  expect(createAppRefusalText({ kind: "gh-missing" })).toBe(
-    "Creating it on an organisation needs the GitHub CLI: install gh, then run gh auth login.",
-  );
-  expect(createAppRefusalText({ kind: "gh-signed-out" })).toBe(
-    "Creating it on an organisation needs gh signed in: run gh auth login.",
-  );
-  expect(createAppRefusalText({ kind: "gh-unanswered", why: "offline" })).toBe(
-    "gh couldn't answer. Check again in a moment.",
-  );
-  expect(createAppRefusalText({ kind: "not-an-admin" })).toBe(
-    "Only an admin of the organisation can create its App. Once one has, use it under “Advanced: use an existing App”.",
-  );
-});
 
 test("an engine is named after its program", () => {
   expect([engineName("claude"), engineName("codex")]).toEqual(["Claude", "Codex"]);
@@ -134,7 +120,7 @@ test("why a review did not run names the engine that gave no review, or says the
     "the service stopped before the review finished",
   );
   expect(failureText({ kind: "prepare_failed", engine: "claude" })).toBe("the code could not be fetched");
-  expect(failureText({ kind: "publish_failed", engine: "claude" })).toBe("GitHub refused the review");
+  expect(failureText({ kind: "publish_failed", engine: "claude" })).toBe("GitHub refused a post");
   expect(failureText({ kind: "host_failed", engine: null })).toBe("GitHub did not answer");
   expect(failureText({ kind: "unexpected", engine: null })).toBe("the review could not run");
   // A job that failed before anyone said why.
@@ -220,4 +206,87 @@ test("why a change wasn't reviewed", () => {
     "only Codex may review here, and it reviews only your own pull requests from this repository",
   );
   expect(skipText("fork")).toBe("it comes from a fork");
+});
+
+test("why the owner decides an escalated finding: a dispute whatever its keeps, else the claim kept twice", () => {
+  expect(escalationText("disputed")).toBe(
+    "Disputed, and the finder still calls it wrong: the owner decides on the thread.",
+  );
+  expect(escalationText("wont_fix")).toBe(
+    "Said won't fix twice, kept twice: the owner decides on the thread.",
+  );
+  expect(escalationText("claimed_fixed")).toBe(
+    "Said fixed twice, kept twice: the owner decides on the thread.",
+  );
+  expect(escalationText("deferred")).toBe(
+    "Said deferred twice, kept twice: the owner decides on the thread.",
+  );
+  expect(escalationText("question")).toBe("Asked twice, kept twice: the owner decides on the thread.");
+  expect(escalationText(null)).toBe("Kept twice: the owner decides on the thread.");
+});
+
+test("a reply's kind by what the round decided: kept once warns, kept on an escalated one hands over", () => {
+  const open = { status: "open" as const, kept: 1, claim: null };
+  const escalated = (kept: number, kind: "wont_fix" | "disputed") => ({
+    status: "escalated" as const,
+    kept,
+    claim: { kind },
+  });
+  expect(replyKind("kept", open)).toEqual({
+    kind: "Kept",
+    why: null,
+    last: "If it is kept again, the owner decides.",
+  });
+  expect(replyKind("kept", escalated(3, "wont_fix"))).toEqual({
+    kind: "Kept. The owner decides",
+    why: null,
+    last: null,
+  });
+  expect(replyKind("escalated", escalated(2, "wont_fix"))).toEqual({
+    kind: "The owner decides this one",
+    why: 'Kept twice against "won\'t fix". Fix it, or resolve this thread to keep the code as it is.',
+    last: null,
+  });
+  expect(replyKind("escalated", escalated(1, "wont_fix")).why).toBeNull();
+  expect(replyKind("escalated", escalated(0, "disputed"))).toEqual({
+    kind: "The owner decides this one",
+    why: null,
+    last: null,
+  });
+  expect(replyKind("withdrawn", open)).toEqual({ kind: "Withdrawn", why: null, last: null });
+  expect(replyKind("answered", open)).toEqual({ kind: "Answer", why: null, last: null });
+  expect(replyKind("dismissed", undefined)).toEqual({
+    kind: "Dismissed by the owner",
+    why: null,
+    last: "It won't be raised again on this pull request.",
+  });
+});
+
+test("a round's line: its number, its commit, then what was fixed and withdrawn among the posted findings", () => {
+  const f = (status: "verified_fixed" | "withdrawn" | "dismissed" | "open", posted = true) => ({
+    status,
+    posted,
+  });
+  expect(roundLine(3, "C", [f("verified_fixed"), f("withdrawn"), f("dismissed"), f("open")])).toEqual([
+    "Round 3 · ",
+    "C",
+    " · 1 fixed, 2 withdrawn",
+  ]);
+  expect(roundLine(2, "C", [f("withdrawn"), f("verified_fixed", false)])).toEqual([
+    "Round 2 · ",
+    "C",
+    " · 1 withdrawn",
+  ]);
+  expect(roundLine(1, "C", [f("open")])).toEqual(["Round 1 · ", "C"]);
+  expect(roundCountsText([f("verified_fixed"), f("verified_fixed")])).toBe("2 fixed");
+  expect(roundCountsText([f("open")])).toBe("");
+});
+
+test("the status block's headings and its note for a finding not in the diff", () => {
+  expect(NEEDS_YOUR_LOOK).toBe("Needs your look");
+  expect(lookingOverHead("C", false)).toEqual(["Looking over ", "C"]);
+  expect(lookingOverHead("C", true)).toEqual(["Looking over ", "C", " again"]);
+  expect(waitingHead("C")).toEqual(["Waiting to look over ", "C"]);
+  expect(failedHead("C")).toEqual(["Couldn't look over ", "C"]);
+  expect(notInDiffText("Reminders go out twice.")).toBe("Not in the diff: reminders go out twice.");
 });

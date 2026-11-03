@@ -501,7 +501,7 @@ export async function movingPages(browser: Browser, site: Site): Promise<string[
       });
       names.push(...started);
       if (names.length > 0)
-        moving.push(`${page}: ${[...new Set(names)].join(", ")} running under reduced motion`);
+        moving.push(`${page}: ${[...new Set(names)].sort().join(", ")} running under reduced motion`);
     }
     return moving;
   } finally {

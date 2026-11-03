@@ -30,6 +30,9 @@ import m27 from "./migrations/20261028090100-setup-github-elsewhere.sql" with { 
 import m28 from "./migrations/20261030090000-change-ids-with-owner.sql" with { type: "text" };
 import m29 from "./migrations/20261030100000-install-asks.sql" with { type: "text" };
 import m30 from "./migrations/20261031090000-changes-opened-at.sql" with { type: "text" };
+import m31 from "./migrations/20261102090000-one-way-in.sql" with { type: "text" };
+import m32 from "./migrations/20261103090000-status-posts.sql" with { type: "text" };
+import m33 from "./migrations/20261103100000-findings-suggestion.sql" with { type: "text" };
 
 /** Every migration of `src/migrations/`, in name order, its SQL bundled with the code. */
 export const EMBEDDED: { name: string; sql: string }[] = [
@@ -64,4 +67,7 @@ export const EMBEDDED: { name: string; sql: string }[] = [
   { name: "20261030090000-change-ids-with-owner", sql: m28 },
   { name: "20261030100000-install-asks", sql: m29 },
   { name: "20261031090000-changes-opened-at", sql: m30 },
+  { name: "20261102090000-one-way-in", sql: m31 },
+  { name: "20261103090000-status-posts", sql: m32 },
+  { name: "20261103100000-findings-suggestion", sql: m33 },
 ];

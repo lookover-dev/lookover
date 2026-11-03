@@ -1,6 +1,5 @@
 /* The design system's tokens, dark and light: their one home (ADR 0064, 3). The app reads them through system.css,
-   which imports this file; the stand-alone pages get them joined in front of system.css (standalone.ts); the site
-   imports them from `@lookover/web/tokens.css`. Change a token here and in design-system.md (the site's two sizes live only there, not in the HTML reference), never in a copy. */
+   which imports this file; the site imports them from `@lookover/web/tokens.css`. Change a token here and in design-system.md (the site's two sizes live only there, not in the HTML reference), never in a copy. */
 
 /* ============ 1. TOKENS ============ */
 :root {
@@ -41,6 +40,8 @@
   --display: "Figtree Variable", "Figtree", sans-serif;
   --body: "Hanken Grotesk Variable", "Hanken Grotesk", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* a code typed elsewhere, the device code alone (design-system.md "Device code") */
+  --mono-code: "Atkinson Hyperlegible Mono", "IBM Plex Mono", ui-monospace, monospace;
   --t-12: 12px;
   --t-13: 13px;
   --t-14: 14px;

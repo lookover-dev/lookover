@@ -41,7 +41,7 @@ test.each(COPIES.map((c) => [c.path, c] as const))(
   },
 );
 
-test("the copies are the eleven brand files, the app's favicon, module and stylesheet, the sheet, and the site's five", () => {
+test("the copies are the eleven brand files, the app's favicon, module, stylesheet and two wordmarks, the sheet, and the site's five", () => {
   expect(COPIES.map((c) => c.path)).toEqual([
     "docs/product/brand/lookover-wordmark.svg",
     "docs/product/brand/lookover-wordmark-on-dark.svg",
@@ -57,6 +57,8 @@ test("the copies are the eleven brand files, the app's favicon, module and style
     "apps/web/public/favicon.svg",
     "apps/web/src/ui/eyes.generated.ts",
     "apps/web/src/styles/system.css",
+    "apps/web/public/brand/lookover-wordmark.svg",
+    "apps/web/public/brand/lookover-wordmark-on-dark.svg",
     "docs/product/brand/sheet.html",
     "apps/site/public/favicon.svg",
     "apps/site/public/brand/lookover-wordmark.svg",

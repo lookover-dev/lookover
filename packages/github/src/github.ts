@@ -1,11 +1,10 @@
-// The adapter's composition: one session (the App's, the person's, or one given), one API client, the ports over them.
+// The adapter's composition: one session (the person's, or one given), one API client, the ports over them.
 import {
   type ChangeRef,
   type Clock,
   type CommitSha,
   GITHUB_WEB,
   type HostAccounts,
-  type HostInstallations,
   type HostIntake,
   type HostSignIn,
   type HostView,
@@ -16,8 +15,6 @@ import {
 import { createAccounts } from "./accounts.ts";
 import { allowedOnly } from "./allowed.ts";
 import { type Fetch, GitHubApi, type RateLimit } from "./api.ts";
-import { AppSession } from "./auth.ts";
-import { createInstallations } from "./installations.ts";
 import { createIntake } from "./intake.ts";
 import { parse, repository } from "./schemas.ts";
 import type { Session } from "./session.ts";
@@ -34,18 +31,11 @@ export interface Account {
 
 /**
  * Who the snapshot shows: the repository's owner (their changes are "you") and who posts, the session's poster: the
- * App's bot, or the person signed in to the App (ADR 0066).
+ * person signed in to the shared App (ADR 0066).
  */
 export interface Identity {
   owner: Account;
   poster: Account;
-}
-
-/** The App as the live config gives it: its id and the PEM text of its private key. */
-export interface AppCredentials {
-  id: number;
-  /** The private key's PEM text. Read from the key file by config code; never logged. */
-  privateKey: string;
 }
 
 /** How the adapter reaches GitHub, and what it may use there. */
@@ -64,20 +54,23 @@ export interface HostOptions {
   /** The HTTP client, for tests. `globalThis.fetch` when not given. */
   fetch?: Fetch;
   /**
-   * Given each secret the adapter holds, as it comes to hold it and before any request carries it: the App's key, each
-   * JWT it signs, each installation token it buys, a manifest's code and the key it converts to. The service's log
-   * removes them (ADR 0054). Nobody is told when not given.
+   * A pause of `ms`, for tests: the status block's write waits a second between two reads while GitHub's read lags
+   * (ADR 0069), measured on `clock`. A real timer when not given.
+   */
+  sleep?(ms: number): Promise<void>;
+  /**
+   * Given each secret the adapter holds, as it comes to hold it and before any request carries it: a device code, each
+   * token and refresh token of the person's. The service's log removes them (ADR 0054). Nobody is told when not given.
    */
   secret?(value: string): void;
 }
 
 /**
- * How the adapter is signed in (ADR 0066): with the App's key (`app`: its session buys a token per repository and
- * posts as its bot), as the person signed in to the shared App (`keeper`: where their sign-in is kept, read and
- * renewed there; one token for every repository, posting as them), or on a session made elsewhere (`session`).
+ * How the adapter is signed in (ADR 0066, ADR 0073): as the person signed in to the shared App (`keeper`: where their
+ * sign-in is kept, read and renewed there; one token for every repository, posting as them), or on a session made
+ * elsewhere (`session`).
  */
-export type GitHubOptions = HostOptions &
-  ({ app: AppCredentials } | { keeper: SignInKeeper } | { session: Session });
+export type GitHubOptions = HostOptions & ({ keeper: SignInKeeper } | { session: Session });
 
 export interface GitHub {
   intake: HostIntake;
@@ -115,12 +108,6 @@ function signInOf(options: HostOptions, api: GitHubApi, clock: Clock): HostSignI
   });
 }
 
-/** The App level of GitHub (contracts' `HostInstallations`): the credentials come with each call. */
-export function createHostInstallations(options: HostOptions): HostInstallations {
-  const { api, clock } = apiOf(options);
-  return createInstallations(api, clock, options.repositories, options.secret ?? (() => {}));
-}
-
 /**
  * What the person whose sign-in `keeper` keeps reaches through the shared App (contracts' `HostAccounts`, ADR 0066):
  * their sign-in read and renewed as the person's session does it.
@@ -136,15 +123,16 @@ export function createGitHub(options: GitHubOptions): GitHub {
   const { api, clock } = apiOf(options);
   const secret = options.secret ?? (() => {});
   const session =
-    "app" in options
-      ? new AppSession(api, options.app, clock, secret)
-      : "keeper" in options
-        ? new UserSession(signInOf(options, api, clock), options.keeper, clock, secret)
-        : options.session;
+    "keeper" in options
+      ? new UserSession(signInOf(options, api, clock), options.keeper, clock, secret)
+      : options.session;
   const allowed = allowedOnly(options.repositories);
   return {
     intake: createIntake(api, session, allowed),
-    writer: createWriter(api, session, allowed),
+    writer: createWriter(api, session, allowed, {
+      clock,
+      sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+    }),
     rateLimit: () => api.rateLimit(),
     view: createView(api, session, allowed),
     async identity(repo) {

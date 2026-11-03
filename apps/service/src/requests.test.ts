@@ -9,26 +9,28 @@ import {
   type Reaction,
   type RepositoryRef,
   reviewRequest,
-  SUMMARY_MARKER,
+  STATUS_MARKER,
 } from "@lookover/contracts";
 import { DemoClock, FakeGitHost, type HostPost } from "@lookover/testkit";
 import {
   api,
-  BOT,
   fakeEngines,
   heldRuns,
   home,
   lastEvent,
   messages,
+  OTHER_BOT,
   OWNER,
   openApp,
   PLANTED,
   pr1,
   pr2,
   refusingEnds,
+  roundWritten,
   SANDBOX,
   SHA1,
   SHA1_PUSHED,
+  SHARED_BOT,
   sinceStart,
   snapshot,
   start,
@@ -58,9 +60,9 @@ function line(p: HostPost): string {
       return `check ${p.conclusion}`;
     case "review":
       return "review";
-    case "summary.created":
-    case "summary.edited":
-      return "summary";
+    case "status.written":
+      // The job's block as it waits or runs (ADR 0074), or a round's.
+      return roundWritten(p) ? "status" : "status of the job";
     case "reply":
     case "minimized":
       return p.kind;
@@ -71,6 +73,12 @@ function line(p: HostPost): string {
 const asked = (posts: HostPost[]): string[] => posts.map(line);
 
 const reactions = (posts: HostPost[]) => asked(posts).filter((p) => /^(eyes|rocket) /.test(p));
+
+/**
+ * The rounds posted, one status block write each. The rounds here find nothing, so they post no review
+ * (ADR 0074): the block is what says a round posted.
+ */
+const postedRounds = (posts: HostPost[]) => posts.filter(roundWritten);
 
 test("the owner's /lookover review gets 👀, a queued check, a round, then 🚀, with nobody clicking", async () => {
   const { service, host, time } = await start({ changes: [pr1], engines: fakeEngines({ reviews: 1 }) });
@@ -90,8 +98,8 @@ test("the owner's /lookover review gets 👀, a queued check, a round, then 🚀
     `eyes ${comment}`,
     "check queued",
     "check in_progress",
-    "review",
-    "summary",
+    "status of the job",
+    "status",
     "check success",
     "minimized",
     `rocket ${comment}`,
@@ -108,10 +116,10 @@ test("the command from another account, from the App, on an issue or a closed pu
 
   host.editComment(thanks, "/lookover review");
   host.seedComment(ref(1), { author: OCTOCAT, body: "/lookover review" });
-  host.seedComment(ref(1), { author: BOT, body: "/lookover review" });
+  host.seedComment(ref(1), { author: OTHER_BOT, body: "/lookover review" });
   host.seedIssueComment(7, { author: OWNER, body: "/lookover review" });
-  // A summary or a finding that quotes the command holds Lookover's own marker.
-  host.seedComment(ref(1), { author: OWNER, body: `/lookover review\n${SUMMARY_MARKER}` });
+  // A post of Lookover's that quotes the command holds Lookover's own marker.
+  host.seedComment(ref(1), { author: OWNER, body: `/lookover review\n${STATUS_MARKER}` });
   host.seedComment(ref(2), { author: OWNER, body: "/lookover review" });
   host.close(ref(2));
   await time.advance(5 * MIN);
@@ -184,7 +192,8 @@ test("two requests while a review waits make one job; a request during the run m
     `rocket ${third}`,
     `rocket ${fourth}`,
   ]);
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(2);
+  expect(host.posts.filter((p) => p.kind === "review")).toEqual([]);
+  expect(postedRounds(host.posts)).toHaveLength(2);
 });
 
 test("a colleague's draft marked ready while the owner's request waits records no skip beside it", async () => {
@@ -255,8 +264,9 @@ test("a request whose round was posted gets its 🚀, though the round's end cou
   const comment = host.seedComment(ref(1), { author: OWNER, body: "/lookover review" });
   await time.advance(MIN);
   await time.advance(0);
-  // The review, its summary and its completed check are on GitHub: the request was answered.
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  // Its status block and its completed check are on GitHub (no review: no line comment): the request was answered.
+  expect(host.posts.filter((p) => p.kind === "review")).toEqual([]);
+  expect(postedRounds(host.posts)).toHaveLength(1);
   expect(reactions(host.posts)).toEqual([`eyes ${comment}`, `rocket ${comment}`]);
 });
 
@@ -272,7 +282,13 @@ class RefusingReactions extends FakeGitHost {
 
 test("a reaction GitHub refused is sent again, a request's 👀 before its 🚀, each once", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new RefusingReactions({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
+  const host = new RefusingReactions({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+  });
   const logged: string[] = [];
   await start({ host, time, engines: fakeEngines({ reviews: 1 }), log: (l) => logged.push(l) });
   await time.advance(5_000);
@@ -302,7 +318,7 @@ class PagedTwice extends FakeGitHost {
 
 test("a request GitHub lists twice in one poll is answered once, in that poll", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new PagedTwice({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
+  const host = new PagedTwice({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1], clock: time });
   const logged: string[] = [];
   await start({ host, time, engines: fakeEngines({ reviews: 1 }), log: (l) => logged.push(l) });
   await time.advance(5_000);
@@ -311,7 +327,8 @@ test("a request GitHub lists twice in one poll is answered once, in that poll", 
   await time.advance(MIN);
   await time.advance(0);
   expect(reactions(host.posts)).toEqual([`eyes ${comment}`, `rocket ${comment}`]);
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  expect(host.posts.filter((p) => p.kind === "review")).toEqual([]);
+  expect(postedRounds(host.posts)).toHaveLength(1);
   // Nothing went wrong: the log says the one review, and nothing else (ADR 0055).
   expect(logged).toEqual([
     "sasensi/lookover-sandbox#1 opened by sasensi: Add unpaid filter and rewrite total",
@@ -335,7 +352,7 @@ class Between extends FakeGitHost {
 
 test("a request on a pull request opened after the poll listed them is answered by the next poll", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new Between({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
+  const host = new Between({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1], clock: time });
   await start({ host, time, engines: fakeEngines({ reviews: 1 }) });
   await time.advance(5_000);
   // A colleague's pull request, which only a request gets reviewed, opened and asked for between the poll's two
@@ -370,7 +387,13 @@ test("a request on a closed pull request is no request when it is reopened later
 
 test("requests written before Lookover first ran are not requests, edited into one later neither", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+  });
   host.seedComment(ref(1), { author: OWNER, body: "/lookover review" });
   const old = host.seedComment(ref(1), { author: OWNER, body: "Will ask later" });
   await time.advance(5_000);
@@ -388,7 +411,8 @@ test("requests written before Lookover first ran are not requests, edited into o
 function skewedHost(time: DemoClock, skew: number): FakeGitHost {
   return new FakeGitHost({
     repo: SANDBOX,
-    bot: BOT,
+    bot: SHARED_BOT,
+    person: OWNER,
     changes: [pr1],
     clock: { now: () => time.now() + skew },
   });
@@ -464,7 +488,8 @@ test("a restart runs no handled request again and reacts no twice; one written w
     `eyes ${asleep}`,
     `rocket ${asleep}`,
   ]);
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(2);
+  expect(host.posts.filter((p) => p.kind === "review")).toEqual([]);
+  expect(postedRounds(host.posts)).toHaveLength(2);
 });
 
 test("a request whose run a restart cut, behind a follow-up, is answered by the follow-up's round", async () => {
@@ -492,9 +517,11 @@ test("a request whose run a restart cut, behind a follow-up, is answered by the 
     engines: fakeEngines({ reviews: 1 }),
   });
   await time.advance(MIN);
-  expect(
-    host.posts.filter((p) => p.kind === "review").map((p) => p.kind === "review" && p.review.sha),
-  ).toEqual([SHA1_PUSHED]);
+  // One round posted, on the newest commit: its check there is the one that succeeded.
+  expect(postedRounds(host.posts)).toHaveLength(1);
+  expect(host.view(ref(1), SHA1_PUSHED).checks.map((c) => [c.status, c.conclusion])).toEqual([
+    ["completed", "success"],
+  ]);
   expect(reactions(host.posts)).toEqual([
     `eyes ${cut}`,
     `eyes ${behind}`,

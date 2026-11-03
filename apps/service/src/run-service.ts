@@ -1,10 +1,10 @@
 // The service run as a program, once its configuration is read (ADR 0039, ADR 0054): the one place that chooses what
-// the service is wired with. Demo mode plays a scenario on the scripted fakes (ADR 0046); live mode wires the real
-// GitHub App and the real `claude` and `codex` on every repository the live config lists (the sandboxes and Lookover's
-// own, ADR 0041, ADR 0053; the organisation's App on its repositories when the file lists them, said once at start,
-// ADR 0060), under the machine-wide live lock. The program (ADR 0054) wires the same real ones, under
-// the same lock, on every repository the App is installed on, or, guarded by a live config, on its repositories only
-// with no App ever created; it makes no one-time link at start and serves this clone's web app when the program's build
+// the service is wired with. Demo mode plays a scenario on the scripted fakes (ADR 0046); live mode wires the shared
+// App and the real `claude` and `codex` on every repository the live config lists (the sandboxes and Lookover's own,
+// ADR 0041, ADR 0053; its sign-in read from the folder `--sign-ins` names, who it runs as said once at start, ADR
+// 0073), under the machine-wide live lock. The program (ADR 0054) wires the same real ones, under the same lock, on
+// every repository the shared App's installations list, or, guarded by a live config, on its repositories only; it
+// makes no one-time link at start and serves this clone's web app when the program's build
 // made it. The compiled binary (`bun run build`) serves the web app it carries, in every mode. It opens the log first
 // (ADR 0054), which every line it prints, the service's log and an uncaught error go through; then it takes the data
 // folder's instance lock (one service per data folder, ADR 0054), then the live lock; the program unguarded registers
@@ -17,7 +17,7 @@
 // the real process; a test, with its own.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Clock, Gh } from "@lookover/contracts";
+import { type Clock, type Gh, repositoryName, SHARED_APP } from "@lookover/contracts";
 import type { WebBuild } from "./background.ts";
 import { type AgentPorts, commandNow } from "./coding-agent.ts";
 import { type CommandPath, memoryCommandPath, osCommandPath } from "./command-path.ts";
@@ -25,7 +25,7 @@ import { type Config, realSystem, skillFor } from "./config.ts";
 import { scenarioOf } from "./demo/scenarios.ts";
 import { osGh } from "./gh.ts";
 import { InstanceHeld, keptPort, takeInstance } from "./instance.ts";
-import { guarded, liveAdapters } from "./live.ts";
+import { guarded, type LiveAdapters, type LiveOptions, type LiveStart, liveAdapters } from "./live.ts";
 import { type LiveConfig, WATCH_IGNORED } from "./live-config.ts";
 import { acquireLiveLock, LiveLockHeld } from "./live-lock.ts";
 import { type FileLogSink, openLogSink } from "./log-sink.ts";
@@ -171,8 +171,6 @@ export async function runService(config: Config, given: ProgramDeps): Promise<Ru
   let agent: AgentPorts | undefined;
   try {
     if (config.mode !== "demo" && config.live?.ignored?.includes("watch")) deps.print.err(WATCH_IGNORED);
-    // A copied live.json that runs it as the organisation's App (ADR 0060) says so, so it can't surprise.
-    if (config.mode !== "demo" && config.asOrganisation !== undefined) deps.print.out(config.asOrganisation);
     // One real review at a time on this machine (ADR 0039, ADR 0054): a second live service, or the program beside
     // one, refuses with who holds the lock.
     if (config.mode !== "demo")
@@ -294,7 +292,7 @@ async function start(
   };
   /**
    * The service on the real GitHub and engines: live mode's, or the program's (ADR 0054), guarded by its live config
-   * when it has one, whatever the adapters say. GitHub refusing it at start (down, the key refused, the App not
+   * when it has one, whatever the adapters say. GitHub refusing it at start (down, the sign-in refused, the App not
    * installed) never stops it (ADR 0053): it starts, the connection shows why, and "Reconnect" or the next listing
    * brings it back. The program makes no link at start, and serves the built web app.
    */
@@ -302,6 +300,7 @@ async function start(
     liveConfig: LiveConfig | undefined,
     processes: string,
     atLogin: string[] | null,
+    live: Pick<LiveOptions, "signIns"> = {},
   ): Promise<RunningService> => {
     const program = atLogin !== null;
     // Start at login on the machine for the program alone, and only unguarded (ADR 0054): the loop's runs, guarded by
@@ -312,15 +311,14 @@ async function start(
         ? (deps.loginItem ?? ((command) => osLoginItem(command, realSystem())))(atLogin)
         : undefined;
     const gh = ghOf(deps);
-    const adapters = await (deps.liveAdapters ?? liveAdapters)({
+    const adapters = await adaptersOf(deps, {
       home,
       processes,
       env,
       git,
       config: liveConfig,
       secret: (value) => logSink.secret(value),
-      // `live.json`'s organisation App works for the person `gh` names (ADR 0059).
-      gh,
+      ...live,
     });
     const webFiles = deps.webFiles ?? (program ? builtWebApp(deps.webDist ?? CLONE_DIST) : undefined);
     return await startService({
@@ -340,12 +338,13 @@ async function start(
       version: VERSION,
     });
   };
-  if (config.mode === "live") return await real(config.live, config.processes, null);
+  if (config.mode === "live")
+    return await real(config.live, config.processes, null, { signIns: config.signIns });
   if (config.mode === "program") return await real(config.live, config.processes, config.atLogin);
   // Demo mode (ADR 0046): the scenario's seed is played on the demo clock before the first request is answered;
   // then the clock flows with the real time, or with `--frozen` (`bun run proof`) stands still at that instant,
   // so two runs serve the same facts. The developer drawer's verbs move the clock and the fake world. Each room's
-  // App store and sign-in store sit in the data folder the log made user-only, and a file made in it is the user's
+  // sign-in store sits in the data folder the log made user-only, and a file made in it is the user's
   // alone already (`makeUserOnly`): none runs `icacls` of its own, which cost S10's start a program per file.
   return await startDemoService({
     ...server,
@@ -356,6 +355,35 @@ async function start(
     ...(deps.webFiles === undefined ? {} : { webFiles: deps.webFiles }),
     version: VERSION,
   });
+}
+
+/**
+ * The real adapters (`deps`' in a test); live mode, its sign-in's folder named, says who it runs as and on what, so a
+ * sign-in elsewhere can't surprise (ADR 0073).
+ */
+async function adaptersOf(deps: ProgramDeps, options: LiveOptions): Promise<LiveAdapters> {
+  const adapters = await (deps.liveAdapters ?? liveAdapters)(options);
+  if (options.signIns !== undefined && adapters.start !== undefined)
+    deps.print.out(runsAs(adapters.start, options));
+  return adapters;
+}
+
+/**
+ * The line live mode starts with: the person its sign-in to the shared App names, where it is kept, and the
+ * repositories it watches.
+ */
+function runsAs(start: LiveStart, { signIns, config }: LiveOptions): string {
+  switch (start.as) {
+    case "signed-out":
+      return `Not signed in to the shared App: ${signIns} keeps no sign-in. Sign in from the app.`;
+    case "lost":
+      return `Not signed in to the shared App: the sign-in ${signIns} keeps for ${start.person.login} no longer opens. Sign in again: bun run live --sign-in.`;
+    case "signed-in": {
+      const names = (config?.repositories ?? []).map(repositoryName);
+      const on = names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+      return `Runs on the shared App, ${SHARED_APP.slug}, as ${start.person.login}, signed in at ${signIns}, on ${on}.`;
+    }
+  }
 }
 
 /** The person's `gh` on the real GitHub and engines, read only: the real one under a live config too (ADR 0059). */

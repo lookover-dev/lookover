@@ -19,8 +19,11 @@ import { z } from "zod";
 import { pastPrefix } from "./prefix.ts";
 
 export interface Rounds {
-  /** The change's findings as the last round left them; empty before the first round. */
-  ledger(changeId: ChangeId): Finding[];
+  /**
+   * The change's findings as the last round left them, or as round `n` left them when given (with the dismissals
+   * saved while it was the last); empty before the first round, or with no round `n`.
+   */
+  ledger(changeId: ChangeId, n?: number): Finding[];
   /** The rounds so far, in order: their number and the commit each reviewed. */
   of(changeId: ChangeId): Pick<Round, "n" | "sha">[];
   /**
@@ -84,6 +87,7 @@ export function roundWriter(
 export function rounds(db: Database): Rounds {
   const selectAll = db.query("SELECT n, sha FROM rounds WHERE change_id = ? ORDER BY n");
   const selectLast = db.query("SELECT findings FROM rounds WHERE change_id = ? ORDER BY n DESC LIMIT 1");
+  const selectRound = db.query("SELECT findings FROM rounds WHERE change_id = ? AND n = ?");
   const selectPosted = db.query(
     "SELECT MAX(posted_at) AS at FROM rounds WHERE change_id >= ?1 AND change_id < ?2",
   );
@@ -112,8 +116,8 @@ export function rounds(db: Database): Rounds {
   return {
     lastPostedAt: (changes) => postedRow.parse(selectPosted.get(changes, pastPrefix(changes))).at,
     // `findings` is written above from typed values: reading it back is reading our own JSON.
-    ledger: (changeId) => {
-      const row = selectLast.get(changeId);
+    ledger: (changeId, n) => {
+      const row = n === undefined ? selectLast.get(changeId) : selectRound.get(changeId, n);
       return row === null ? [] : JSON.parse(ledgerRow.parse(row).findings);
     },
     of: (changeId) => roundRows.parse(selectAll.all(changeId)),

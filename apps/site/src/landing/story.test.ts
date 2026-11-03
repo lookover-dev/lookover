@@ -36,20 +36,34 @@ describe("the three-sided story", () => {
     }
   });
 
-  test("the review, the summary and the thread read as Lookover posts them, as the person signed in", () => {
+  test("the status block, the review and the thread read as Lookover posts them, as the person signed in", () => {
     const panel = githubPanelHTML();
-    expect(textsOf(panel, "ts-rvtext")).toEqual([
-      "Lookover · Looked over a1f9c2e. One thing to fix, rateLimit.ts line 42. The rest can go.",
-      "Lookover · Looked over b2c3d4e. Nothing new to fix. The rest can go.",
+    // The status block in the description (ADR 0074), as each round starts and is posted: its heading, then its line.
+    expect(textsOf(panel, "ts-sthead")).toEqual([
+      "· Looking over a1f9c2e",
+      "· One thing to fix",
+      "· Looking over b2c3d4e",
+      "· Nothing to fix",
     ]);
-    expect(textsOf(panel, "ts-sumtext")).toEqual([
-      "Lookover · round 1 · One thing to fix.",
-      "Lookover · round 2 · Nothing to fix.",
+    expect(textsOf(panel, "ts-stline")).toEqual([
+      "Round 1",
+      "Round 1 · a1f9c2e",
+      "Blocking · API key is written to the request log · src/middleware/rateLimit.ts line 42",
+      "Round 2",
+      "Round 2 · b2c3d4e · 1 fixed",
     ]);
-    // The shared App posts as the person (ADR 0065): no bot, and Lookover's badge on the summary alone.
-    expect(panel).toContain('<b class="ts-who">mira</b>');
+    // Every post opens with the wordmark, the theme's file at the URL Lookover's posts draw.
+    expect(panel.match(/class="ts-wm on-dark" src="\/brand\/lookover-wordmark-on-dark\.svg"/g)).toHaveLength(
+      5,
+    );
+    expect(panel.match(/class="ts-wm on-light" src="\/brand\/lookover-wordmark\.svg"/g)).toHaveLength(5);
+    expect(textsOf(panel, "ts-fopen")).toEqual(["· Blocking"]);
+    // The shared App posts as the person (ADR 0065): no bot, no badge, and a review with no body.
+    expect(panel).toContain('<b class="ts-who">mira</b> <span class="ts-muted">commented</span>');
     expect(panel).not.toContain("ts-bot");
-    expect(panel.match(/class="ts-badge"/g)).toHaveLength(1);
+    expect(panel).not.toContain("ts-badge");
+    expect(panel).not.toContain("summary");
+    expect(panel).not.toContain("Lookover ·");
     // Lookover posts no reply on a fixed thread: `lookover wait` resolves it.
     expect(panel).toContain("<b>Resolved</b> · verified fixed in <code>b2c3d4e</code>");
     expect(panel).not.toContain("<b>lookover</b> ·");

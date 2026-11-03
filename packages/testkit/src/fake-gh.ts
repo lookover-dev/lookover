@@ -1,5 +1,5 @@
 // The person's own `gh` (ADR 0059), in memory: who it is signed in as, that account's active memberships with its role
-// in each (ADR 0067), and its membership of one organisation. The port and its shapes are contracts' (`Gh`); the real
+// in each (ADR 0067). The port and its shapes are contracts' (`Gh`); the real
 // one is the service's (`ghCli`), and `describeGh` holds both to one contract.
 import type { Gh, GhUnanswered, GhWhy, HostLogin } from "@lookover/contracts";
 
@@ -13,8 +13,8 @@ export interface GhMember {
  * The fake: `gh` signed in as `as` (`null`: signed out; `"missing"`: not installed), organisations and their members
  * kept per account, so another sign-in reads another person's memberships; each account answered with its id and login
  * only, as `gh` answers, whatever else it was given. `fail(why)` makes every read "can't answer"
- * with `why` until `null` (`scope` spares `person`, which needs none); `fail(why, organisation)` that organisation's
- * membership alone, and the list of memberships too when `why` is `sso` (GitHub's `partial-results`).
+ * with `why` until `null` (`scope` spares `person`, which needs none); `fail("sso", organisation)` the list of
+ * memberships, an organisation asking for SSO (GitHub's `partial-results`).
  */
 export interface MemoryGh extends Gh {
   signIn(as: HostLogin | null | "missing"): void;
@@ -70,15 +70,6 @@ export function memoryGh(o: { as?: HostLogin | null | "missing" } = {}): MemoryG
         return [{ organisation: { ...organisation }, role: member.admin ? "owner" : "member" } as const];
       });
       return { kind: "listed", person: { ...who }, organisations: listed };
-    },
-    membership: async (organisation) => {
-      const who = signedIn(true);
-      if (!isAccount(who)) return who;
-      const failed = failingOrganisation.get(key(organisation));
-      if (failed !== undefined) return unanswered(failed);
-      const member = members.get(key(organisation))?.get(who.id);
-      if (member === undefined) return { kind: "absent" };
-      return { kind: member.state, person: { ...who }, admin: member.admin };
     },
     signIn: (account) => {
       as = account === null || account === "missing" ? account : { id: account.id, login: account.login };

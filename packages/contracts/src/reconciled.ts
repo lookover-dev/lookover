@@ -63,7 +63,7 @@ export interface Reconciled {
 /**
  * Why Lookover answers on a finding's thread (ADR 0052): it kept the finding against its author's claim, withdrew
  * it, escalated it to the owner, answered a question, or the owner dismissed it. Only a conversation is answered:
- * never a finding verified fixed or acknowledged, which the summary says.
+ * never a finding verified fixed or acknowledged, which the check and the status block count.
  */
 export type ReplyKind = "kept" | "withdrawn" | "escalated" | "answered" | "dismissed";
 

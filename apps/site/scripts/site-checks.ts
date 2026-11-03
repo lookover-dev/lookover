@@ -1,6 +1,7 @@
 // The site's checks that need no browser (ADR 0064, 8), run on a build folder by `bun run site:check`: no internal
-// link or asset leads nowhere, and nothing is loaded from another host. Pure reads of the files; each finding is a
-// line `<page or file>: <what>`, so the check prints them as they are.
+// link or asset leads nowhere, nothing is loaded from another host, and the URLs Lookover's posts point at are
+// served. Pure reads of the files; each finding is a line `<page or file>: <what>`, so the check prints them as they
+// are.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
@@ -39,6 +40,20 @@ export function servedFile(dist: string, path: string): string | undefined {
   return candidates
     .map((candidate) => join(dist, ...candidate.split("/")))
     .find((file) => existsSync(file) && statSync(file).isFile());
+}
+
+/**
+ * The URLs the build folder doesn't serve as files of their own, path for path: a page by that name is not the
+ * file. The wordmark Lookover's posts on GitHub draw (contracts' `WORDMARK_URLS`, ADR 0074) must never move: every
+ * post already written points at it. Each as `<url>: not in the build`, or `<url>: not on lookover.dev`, in order.
+ */
+export function unservedUrls(dist: string, urls: readonly string[]): string[] {
+  return urls.flatMap((url) => {
+    const parsed = urlOf(url, ORIGIN);
+    if (parsed === undefined || !isSite(parsed)) return [`${url}: not on lookover.dev`];
+    const file = join(dist, ...decodeURIComponent(parsed.pathname).split("/"));
+    return existsSync(file) && statSync(file).isFile() ? [] : [`${url}: not in the build`];
+  });
 }
 
 /** The HTML without the bodies of its scripts, whose strings are not links. */

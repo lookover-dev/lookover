@@ -7,7 +7,7 @@
 import { afterAll, afterEach, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Rule, readResult, repositoryId, SUMMARY_MARKER } from "@lookover/contracts";
+import { type Rule, readResult, repositoryId, statusOf } from "@lookover/contracts";
 import { openStore } from "@lookover/store";
 import { SANDBOX_BAIT, ScriptedRetrieval, type ScriptedRun } from "@lookover/testkit";
 import {
@@ -144,8 +144,9 @@ test("both passes follow main's rules, not the change's; the finding cites REVIE
     ["repo_rule", "REVIEW.md", 3, RULE],
   ]);
   const view = host.view({ repo: SANDBOX, number: 1 });
-  expect(view.reviews[0]?.comments[0]?.body).toContain("Rule: REVIEW.md, line 3.");
-  expect(view.comments.find((c) => c.body.startsWith(SUMMARY_MARKER))).toBeDefined();
+  // The comment adds no rule line of its own (ADR 0074): the finder cites the rule in its body; the result names it.
+  expect(view.reviews[0]?.comments[0]?.body).not.toContain("Rule: REVIEW.md");
+  expect(statusOf(view.description)).not.toContain("Rule:");
   const result = readResult(view.checks[0]?.output.text ?? "");
   expect(result?.findings.map((f) => f.rule)).toEqual([
     { id: finished.findings[0]?.rule?.id ?? "", source: "REVIEW.md", line: 3 },

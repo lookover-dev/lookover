@@ -33,7 +33,6 @@ function snapshot(seq: number, title: string): State {
     unusable: null,
     since: NOW,
     limitUntil: null,
-    gh: null,
     signingIn: false,
   };
   return {
@@ -44,7 +43,6 @@ function snapshot(seq: number, title: string): State {
       step: "background",
       reached: "background",
       github: "done",
-      githubRefused: null,
       firstReviewChange: null,
     },
     engines: {
@@ -55,17 +53,13 @@ function snapshot(seq: number, title: string): State {
       id: null,
       state: "connected",
       cause: null,
-      bot: null,
-      app: null,
       accounts: [],
       unreached: [],
-      way: null,
       signIn: null,
       person: null,
       web: GITHUB_WEB,
       since: NOW,
       limitUntil: null,
-      gh: null,
     },
     service: {
       state: "running",
@@ -325,25 +319,6 @@ test("send says whether the service took the command", async () => {
   const store = new Store(s.api);
   await settled();
   expect(await store.send({ type: "service.resume" })).toBe(false);
-});
-
-test("a refused Use an existing App is said in the console without its key (ADR 0053)", async () => {
-  const s = service(snapshot(5, "first"), new Refused(501, { error: "not available yet" }));
-  const store = new Store(s.api);
-  await settled();
-  const said: string[] = [];
-  const error = console.error;
-  console.error = (...args: unknown[]) => said.push(JSON.stringify(args));
-  try {
-    const key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEsecret0key\n-----END RSA PRIVATE KEY-----\n";
-    expect(await store.send({ type: "connection.useApp", appId: 4242, key })).toBe(false);
-  } finally {
-    console.error = error;
-  }
-  expect(said).toHaveLength(1);
-  expect(said[0]).toContain("connection.useApp");
-  expect(said[0]).toContain("4242");
-  expect(said[0]).not.toContain("secret0key");
 });
 
 test("a refusal, after an unlock too, runs what follows a refusal, never what follows a take (the save stamp)", async () => {

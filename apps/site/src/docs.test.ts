@@ -72,6 +72,19 @@ describe("the docs", () => {
     }).toEqual(help);
   });
 
+  test("the coding agent's page names the threads `wait` resolves as its help does", () => {
+    const words = (text: string) =>
+      /resolves\s+the\s+threads\s+of\s+the\s+findings\s+it\s+([^.]+)\./.exec(text)?.[1]?.replace(/\s+/g, " ");
+    expect(words(USAGE)).toBe("verified fixed or withdrew");
+    expect(words(page("coding-agent.md"))).toBe(words(USAGE));
+  });
+
+  test("the coding agent's page puts a finding with no thread in the status block, no summary comment", () => {
+    const text = page("coding-agent.md");
+    expect(text).not.toContain("in the summary only");
+    expect(text).toContain("in the status block only, in the pull request's description");
+  });
+
   test("the coding agent's page lists `reply`'s claims, each with the words it opens the reply with", () => {
     const rows = lines("coding-agent.md")
       .map((line) => /^\| `([a-z-]+)` \| ([^:|]+):/.exec(line))

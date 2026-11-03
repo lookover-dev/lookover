@@ -1,17 +1,16 @@
 // @lookover/testkit: the fakes and the port suites (ADR 0031, ADR 0033, ADR 0039).
 // The decision it hides: how Lookover stands in for the outside world without calling it. An in-memory Git host
-// (`FakeGitHost`: `HostIntake` and `HostWriter` at once, recording every post and enforcing GitHub's known rules,
-// and the coding agent's side of it, `AgentHost`, through `asAgent`), an in-memory engine (`FakeEngines`, answering
-// from a script, per engine or shared), the fake `claude` and `codex` programs replaying recordings of the real ones
+// (`FakeGitHost`: `HostIntake` and `HostWriter` at once, recording every post and enforcing GitHub's known rules, and
+// the coding agent's side of it, `AgentHost`, through `asAgent`), an in-memory engine (`FakeEngines`, answering from a
+// script, per engine or shared), the fake `claude` and `codex` programs replaying recordings of the real ones
 // (`fakeClaude`, `fakeCodex`; each `review` is a real review of the planted bugs), the sandbox repository planted
 // locally with git (`plantSandbox`, `pushSandboxFix`, `SANDBOX_FIX`; `plantSandboxRules`: the owner's `REVIEW.md` on
 // `main`, and pull request #1's own hostile rules files holding `SANDBOX_BAIT`, ADR 0048), and one shared suite per
-// port (`describeEngines`, `describeHostIntake`, `describeHostWriter`, `describeAgentHost`,
-// `describeHostInstallation`, either way in: the own App's credentials or the person signed in to the shared App,
-// `describeGh`, `describeSignIn`: the device flow on the fake only, a person enters its code), run against the fake in
-// every check and against the real adapter in `bun run live`, so "the fake behaves like the real thing" is proven,
-// not assumed. The person's own `gh` (ADR 0059: who it is signed in as, the organisations it admins, one
-// organisation's membership) is `memoryGh`, on contracts' port (`Gh`).
+// port (`describeEngines`, `describeHostIntake`, `describeHostWriter`, `describeAgentHost`, `describeHostAccounts`, the
+// person signed in to the shared App, `describeGh`, `describeSignIn`: the device flow on the fake only, a person enters
+// its code), run against the fake in every check and against the real adapter in `bun run live`, so "the fake behaves
+// like the real thing" is proven, not assumed. The person's own `gh` (ADR 0059: who it is signed in as, the
+// organisations it admins, one organisation's membership) is `memoryGh`, on contracts' port (`Gh`).
 // Two audiences, two entries. Tests: every package's tests use the fakes and the suites through this entry (a
 // test file may import this package). Demo mode (ADR 0031, ADR 0046), through `@lookover/testkit/demo`
 // (`src/demo.ts`), which never reaches `bun:test`: the service's demo driver (`apps/service/src/demo/`, the one
@@ -20,31 +19,29 @@
 // fake programs. Those pieces are the product's demo mode, not test helpers that leaked: they must work outside a
 // test (no test runner, a real data folder, a service that runs for hours) and stay true to the real host and the
 // real `claude` and `codex`, since what `bun dev` and the proof screenshots show is what they do.
-// Interface: the fakes implement the ports of @lookover/contracts and add what a test needs to script and to
-// observe them: `FakeEngines` runs that take their time and leave their folder (in memory); `FakeGitHost` as a
-// world that moves (ADR 0043): refusals (`refuse`, rate-limited with its `retryAt`; `refuseChecks`, the check
-// writes alone), every check state recorded (created `queued` or `in_progress`, updated, completed), changes
-// opened (with their own commits' messages, counted from their base), marked ready and closed after it was made
-// (`open`, `markReady`, `close`), pushes with their commit count and messages, on the head or rewriting it, that
-// re-anchor earlier comments (`push` with its edits), comments from the owner and others written and edited at the
-// time of its injected clock (`seedComment`, `editComment`, or the agent's `asAgent(account).comment`), a check of
-// the same name from another App (`foreignCheck`), the bot's reactions counted per comment, its listings
-// `unchanged` when read again with nothing changed, as GitHub's `304`, the owner's several repositories
-// (`repositories`), the owner's App and its installation as GitHub's `HostInstallations` (ADR 0053: made from a
-// manifest, installed on all or some repositories, uninstalled, suspended, its key revoked, a repository added,
-// removed or archived; refused as GitHub refuses, each refusal with its `connectionCause`: not installed, the App's
+// Interface: the fakes implement the ports of @lookover/contracts and add what a test needs to script and to observe
+// them: `FakeEngines` runs that take their time and leave their folder (in memory); `FakeGitHost` as a world that moves
+// (ADR 0043): refusals (`refuse`, rate-limited with its `retryAt`; `refuseChecks`, the check writes alone), every check
+// state recorded (created `queued` or `in_progress`, updated, completed), changes opened (with their own commits'
+// messages, counted from their base), marked ready and closed after it was made (`open`, `markReady`, `close`), pushes
+// with their commit count and messages, on the head or rewriting it, that re-anchor earlier comments (`push` with its
+// edits), comments from the owner and others written and edited at the time of its injected clock (`seedComment`,
+// `editComment`, or the agent's `asAgent(account).comment`), a check of the same name from another App
+// (`foreignCheck`), the person's reactions counted per comment, its listings `unchanged` when read again with nothing
+// changed, as GitHub's `304`, the owner's several repositories (`repositories`), the shared App's installation on the
+// person's own account (ADR 0053: installed on all or some repositories, uninstalled, suspended, a repository added,
+// removed or archived; refused as GitHub refuses, each refusal with its `connectionCause`: not installed, the ports'
 // calls are `not_found`; the agent's go on), the person signing in to the shared App as GitHub's `HostSignIn` (ADR
 // 0066: a device code entered, refused or run out, polled too soon and asked to slow down, a sign-in refreshed once per
 // refresh token, every one refused once the person takes the App back, `revokeSignIn`), what that person reaches as
-// GitHub's `HostAccounts` (ADR 0066: the App's own installation and, in `reaches`, others on other accounts, each
-// with its repositories, which the repository ports serve through it; one suspended, `suspend(login)`, or asking for
-// SAML SSO, `askSso` until `signInSso`, refuses only its own repositories and says so on its account), and GitHub's web side for demo
-// mode (`fakeGitHubPages`: the "new App" page that makes the App and redirects to the callback with a code, the install
-// page that grants repositories then goes to the App's setup page, the installation's page, each sending the browser to
-// the service only), and Lookover's review threads (ADR 0052): every inline comment with its id and node id, the bot's
-// replies and replies seeded by anyone (`seedReply`, each filed as an empty review as GitHub files it), another
-// account's inline comment (`seedInline`), comments minimized (`minimize`, shown by `view`), threads outdated by a
-// push.
+// GitHub's `HostAccounts` (ADR 0066: the installation on their own account, holding only their repositories, and, in
+// `reaches`, others on other accounts, each with its repositories, which the repository ports serve through it; one
+// suspended, `suspend(login)`, or asking for SAML SSO, `askSso` until `signInSso`, refuses only its own repositories
+// and says so on its account), and GitHub's web side for demo mode (`fakeGitHubPages`: the device page, the install
+// page that grants repositories, the installation's page, each sending the browser to the service only), and Lookover's
+// review threads (ADR 0052): every inline comment with its id and node id, the person's replies and replies seeded by
+// anyone (`seedReply`, each filed as an empty review as GitHub files it), another account's inline comment
+// (`seedInline`), comments minimized (`minimize`, shown by `view`), threads outdated by a push.
 // `DemoClock` (ADR 0046) is the service's `Clock` and `Timers` in one: standing still, time moves only by
 // `advance` and `step`, which fire the due timers in their due order and let the work each started settle before
 // the next, and `jump`, which fires each one at most once (one re-armed on the way, where the jump lands); flowing
@@ -107,15 +104,11 @@ export {
 export { describeEngines, type EnginesFixture, type EnginesSetup } from "./describe-engines.ts";
 export { describeGh, type GhFixture, type GhSetup } from "./describe-gh.ts";
 export {
-  describeHostInstallation,
+  describeHostAccounts,
   type HostAccountsFixture,
   type HostAccountsSetup,
-  type HostInstallationAdapter,
-  type HostInstallationFixture,
-  type HostInstallationSetup,
-  type ManifestFixture,
   type ReachFixture,
-} from "./describe-host-installation.ts";
+} from "./describe-host-accounts.ts";
 export {
   describeHostIntake,
   type ForkIntakeFixture,
@@ -153,13 +146,11 @@ export {
 } from "./fake-gh.ts";
 export {
   type CommentableRange,
-  type FakeAppOptions,
   type FakeChange,
   FakeGitHost,
   type FakeGitHostOptions,
   type FakeGitHubReached,
   type FakeGitHubView,
-  type FakeManifest,
   type FakeReach,
   type HostPost,
   type HostRefusal,

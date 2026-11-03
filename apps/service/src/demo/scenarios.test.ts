@@ -26,10 +26,10 @@ afterAll(stopAll);
 const MIN = 60_000;
 const id = (n: number) => changeId(`sasensi/lookover-sandbox#${n}`);
 /**
- * S10's seed: sixty-eight events (the start, the repository, six pull requests and their reviews, their outboxes as
+ * S10's seed: sixty-six events (the start, the account the sign-in reaches, the repository, six pull requests and their reviews, their outboxes as
  * they posted, main's rules read and counted three times).
  */
-const SEEDED = 68;
+const SEEDED = 66;
 
 /**
  * S10 loaded once for the file (its seed is two and a half hours of polls), and the drawer's listing of it read as
@@ -108,6 +108,33 @@ test("the moves after the seed are armed on the clock: a pause the owner sets, t
   expect(state.service.paused).toEqual({ since: T0 + MIN, until: T0 + MIN + 60 * MIN });
   expect(state.changes[id(146)]).toMatchObject({ openedAt: T0 + 2 * MIN });
   expect(state.reviews[id(146)]?.job).toMatchObject({ state: "deferred", deferral: { reason: "paused" } });
+});
+
+test("every scenario starts signed in on the shared App, posting as the owner, but S1, at the setup's GitHub step; S15 is retired", async () => {
+  const people: Record<string, string | null> = {};
+  for (const scenario of SCENARIOS) {
+    const at = scenario.id === "S10" ? door : await startScenario(scenario);
+    const { connection } = await snapshotOf(at);
+    people[scenario.id] = connection.person?.login ?? null;
+  }
+  expect(people).toEqual({
+    S1: null,
+    S2: "sasensi",
+    S3: "sasensi",
+    S4: "sasensi",
+    S5: "sasensi",
+    S6: "sasensi",
+    S7: "sasensi",
+    S8: "sasensi",
+    S9: "sasensi",
+    S10: "sasensi",
+    S11: "sasensi",
+    S12: "sasensi",
+    S13: "sasensi",
+    S14: "sasensi",
+    S16: "sasensi",
+    S17: "sasensi",
+  });
 });
 
 test("the listing: every scenario as the drawer shows it, the one loaded, the clock standing still, the faults", async () => {

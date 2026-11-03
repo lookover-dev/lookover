@@ -13,7 +13,7 @@ One is enough. With both, one AI looks for problems and the other checks each on
 
 ## 2. GitHub
 
-Lookover reads pull requests and posts its reviews through **Lookover Dev**, one GitHub App for everyone who runs Lookover. You sign in to it, and Lookover posts as you. Your teammates see your review written by you, opening with “Lookover”, a summary with Lookover's badge, and a Lookover check.
+Lookover reads pull requests and posts its reviews through **Lookover Dev**, one GitHub App for everyone who runs Lookover. You sign in to it, and Lookover posts as you. Your teammates see your review written by you, each comment opening with Lookover's wordmark, its status in the pull request's description, and a Lookover check.
 
 **Sign in with GitHub.** Lookover shows a code. **Copy code and open GitHub** copies it and opens `github.com/login/device`; enter it there. GitHub then asks you to authorise Lookover Dev, by `lookover-dev`, to act on your behalf. Authorise it, and the setup tab says who is signed in. The code works for 15 minutes; past that, **Sign in with GitHub** gives a new one.
 
@@ -46,26 +46,7 @@ Settings › GitHub later shows who is signed in, with the same accounts. **Sign
 | Suspended | On an account you own, **Unsuspend it on GitHub**. Elsewhere, **Ask an owner of &lt;organisation&gt;**: Lookover names who suspended it when GitHub says |
 | SSO not authorised | **Sign in with SSO**, on the organisation's single sign-on page |
 
-### Use your own App
-
-The second way in: a GitHub App of your own, which posts the reviews as itself, under its own name. Use it when:
-
-- your organisation won't install a third-party App, or restricts them;
-- you want a bot of your own;
-- your data folder was set up with your own App before: it keeps working that way.
-
-The setup offers it beside Sign in with GitHub, and Settings › GitHub later, where it replaces the sign-in. The App asks for the same permissions, and its private key stays on your computer.
-
-**Create your App.** Choose where the App lives:
-
-- **Your GitHub account,** for the repositories you own.
-- **An organisation you're an admin of.** Lookover asks your own `gh` which organisations those are. With `gh` missing or signed out, the step says so and gives the one command to fix it.
-
-GitHub then shows the App ready to create. Confirm with your password and rename it if you like, then choose which repositories it can see. GitHub shows Lookover's own page, which says the App is installed, with **Back to setup**; the setup tab follows by itself.
-
-**Use an existing App.** For an App you already have: the one you use on another computer (generate a new key for it on GitHub), or one an admin of your organisation created for you. Give its id (on the App's page on GitHub, under "About") and its private key (the `.pem` file GitHub gave you). The key is read once and never shown. An App on an organisation needs `gh` signed in as a member; an App missing a permission is refused, naming each one it lacks.
-
-Not an admin of your organisation? Ask an admin to create the App there, then use it as above.
+**An organisation that won't install a third-party App** can't use Lookover: Lookover Dev is the only way in. [Where your code goes](/docs/security/#what-installing-lookover-dev-means) says what installing it means, so the organisation can decide.
 
 ## 3. Repositories
 

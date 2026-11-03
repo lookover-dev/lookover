@@ -96,7 +96,7 @@ export function standingOf(findings: Finding[]): Standing {
 
 /**
  * A round restated over the change's ledger as it is now (ADR 0052): after the owner dismissed findings, the round's
- * summary and check say where the change stands, while what the round raised, posted, verified and answered stays
+ * status block and check say where the change stands, while what the round raised, posted, verified and answered stays
  * the round's.
  */
 export function standing(round: Reconciled, findings: Finding[]): Reconciled {

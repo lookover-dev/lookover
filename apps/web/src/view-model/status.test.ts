@@ -22,6 +22,7 @@ const SHA = commitSha("a1f9c2e");
 const ROUND = {
   n: 1,
   sha: SHA,
+  base: null,
   reviewer: "codex" as const,
   secondFind: null,
   confirmer: null,
@@ -109,6 +110,7 @@ const FIXED: Finding = {
   rule: null,
   snippet: null,
   fix: null,
+  suggestion: null,
   status: "verified_fixed",
   posted: true,
   commented: false,
@@ -194,7 +196,7 @@ test("why a review did not run is said once, as a phrase and as a sentence", () 
     "Claude gave no review.",
   );
   expect(failureSentence({ kind: "publish_failed", detail: "too_large", engine: null })).toBe(
-    "GitHub refused the review.",
+    "GitHub refused a post.",
   );
   expect(failureSentence({ kind: "host_failed", detail: "unavailable", engine: null })).toBe(
     "GitHub did not answer.",

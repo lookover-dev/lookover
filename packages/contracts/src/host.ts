@@ -27,9 +27,9 @@ export interface ChangeRef {
 /**
  * Why a host call failed. `not_found`: no such repository or change. `unplaceable_comment`: an inline comment
  * on a line outside the diff; the host refuses the whole review and posts nothing of it. `too_large`: a check
- * output over `CHECK_OUTPUT_MAX_BYTES`, or a summary, a review's body or an inline comment over
- * `COMMENT_MAX_BYTES` (GitHub's "Body is too long"); nothing of that post is sent. `missing_marker`: a summary without `SUMMARY_MARKER`, which the next
- * round could not find; nothing is posted. `unauthorized`: the connection's credentials don't allow it.
+ * output over `CHECK_OUTPUT_MAX_BYTES`, a review's body, an inline comment or a reply over `COMMENT_MAX_BYTES`
+ * (GitHub's "Body is too long"), or a description over `DESCRIPTION_MAX_CHARACTERS`; nothing of that post is sent.
+ * `unauthorized`: the connection's credentials don't allow it.
  * `rate_limited`: the host asked to wait (until `retryAt`, when it said), its primary limit or a secondary one.
  * `unavailable`: the host could not be reached or answered with an error of its own (GitHub's 5xx, its 422 "An
  * internal error occurred"); a post may have landed all the same, and sent again it may be taken. `invalid`: the
@@ -39,7 +39,6 @@ export type HostFailure =
   | "not_found"
   | "unplaceable_comment"
   | "too_large"
-  | "missing_marker"
   | "unauthorized"
   | "rate_limited"
   | "unavailable"
@@ -79,13 +78,13 @@ export class HostError extends Error {
 
 /**
  * The connection's cause a host's refusal gives (ADR 0053): the one the adapter named, else `unreachable` for an
- * `unavailable` host and `key-refused` (GitHub naming no reason) for `unauthorized`; null for a refusal that doesn't
- * cut the connection (a rate limit, a change or a request the host refused).
+ * `unavailable` host and `signed-out` for `unauthorized` (the credentials refused: only a new sign-in mends it); null
+ * for a refusal that doesn't cut the connection (a rate limit, a change or a request the host refused).
  */
 export function connectionCauseOf(error: HostError): ConnectionCause | null {
   if (error.connectionCause !== undefined) return error.connectionCause;
   if (error.failure === "unavailable") return { kind: "unreachable" };
-  if (error.failure === "unauthorized") return { kind: "key-refused", why: null };
+  if (error.failure === "unauthorized") return { kind: "signed-out" };
   return null;
 }
 
@@ -106,7 +105,7 @@ export function utf8Bytes(text: string): number {
 export const CHECK_OUTPUT_MAX_BYTES = 65_535;
 
 /**
- * The most a summary comment, a review's body or one inline comment may hold, in UTF-8 bytes (ADR 0044, #67).
+ * The most a review's body, one inline comment or a reply may hold, in UTF-8 bytes (ADR 0044, #67).
  * GitHub's refusal says "maximum is 65536 characters", but what it counts is bytes: measured on 2026-10-08, a
  * conversation comment or a review's body is refused past 262,144 UTF-8 bytes (65,537 ASCII characters are taken,
  * 65,537 four-byte emoji are not), and an inline comment sent in a review was taken whole at 1,000,000. This budget
@@ -116,7 +115,17 @@ export const CHECK_OUTPUT_MAX_BYTES = 65_535;
 export const COMMENT_MAX_BYTES = 65_535;
 
 /**
- * The most inline comments Lookover puts in one review (ADR 0044, #67): the findings past it go to the summary.
+ * The most a pull request's description may hold, in characters (ADR 0074): GitHub's "maximum is 65536 characters".
+ * Counted in Unicode characters (`characterCount`), never more than GitHub's own count whether it counts characters
+ * or, as it does for a comment, a quarter of its bytes. The status block takes what the author's text leaves.
+ */
+export const DESCRIPTION_MAX_CHARACTERS = 65_536;
+
+/** A text's length in Unicode characters, as `DESCRIPTION_MAX_CHARACTERS` counts it: an emoji is one. */
+export const characterCount = (text: string): number => [...text].length;
+
+/**
+ * The most inline comments Lookover puts in one review (ADR 0044, #67): the findings past it go to the status block.
  * GitHub sets no number, but measured on 2026-10-08 it takes about a third of a second per comment to create a
  * review (10 in 4 s, 25 in 9 s), and a review of 50 was answered with a 502 though it was saved; each comment
  * also counts toward its secondary limit on creating content (the App was blocked after 35 in a minute). At 20,

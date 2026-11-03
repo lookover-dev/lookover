@@ -15,7 +15,6 @@ const TRANSIENT = {
   not_found: false,
   unplaceable_comment: false,
   too_large: false,
-  missing_marker: false,
   unauthorized: false,
   invalid: false,
 } satisfies Record<HostFailure, boolean>;

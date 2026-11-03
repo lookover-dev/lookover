@@ -1,17 +1,26 @@
 // The first-run setup and the repository's switch on the service (ADR 0047), through the door the app uses, on the
-// demo driver and its clock: the steps and the furthest reached, kept by the store; "Create it on GitHub" followed
-// through GitHub's fake pages (the App made and kept, installed there, found by the next check, the repository
-// listed, the step moved on only if the owner is still on it); "choose repositories"; the switch; and in live mode,
-// a fresh data folder set up at its first start and "Create it on GitHub" refused while an App is kept.
+// demo driver and its clock: the steps and the furthest reached, kept by the store; "Sign in with GitHub" followed
+// through GitHub's fake pages (the code entered, the shared App installed there, found by the next check, the
+// repository listed, the step moved on only if the owner is still on it); "choose repositories"; the switch; and in
+// live mode, a fresh data folder set up at its first start.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { changeId, commitSha, DEMO_API, repositoryId, type Setup } from "@lookover/contracts";
+import {
+  changeId,
+  commitSha,
+  DEMO_API,
+  githubLinks,
+  repositoryId,
+  type Setup,
+  SHARED_APP,
+  type State,
+} from "@lookover/contracts";
 import { openStore } from "@lookover/store";
 import {
   advance,
+  inject,
   installApp,
   load,
   logOf,
-  makeApp,
   send,
   snapshotOf,
   startScenario,
@@ -19,7 +28,7 @@ import {
 } from "./demo/demo.test-support.ts";
 import { buildDemoRoom, type DemoRoom, type Scenario } from "./index.ts";
 import {
-  BOT,
+  eventually,
   home,
   openApp,
   post,
@@ -43,13 +52,12 @@ const OWNER = { id: 1, login: "sasensi" };
 const REPO = repositoryId("sasensi/lookover-sandbox");
 const MINE = changeId("sasensi/lookover-sandbox#1");
 
-/** The owner on the GitHub step: their AI is ready, no bot exists yet. */
+/** The owner on the GitHub step: their AI is ready, nobody signed in yet. */
 const ON_GITHUB: Setup = {
   done: false,
   step: "github",
   reached: "github",
   github: "start",
-  githubRefused: null,
   firstReviewChange: null,
 };
 
@@ -64,7 +72,7 @@ function newOwner(setup: Setup): Scenario {
     path: "/setup",
     world: {
       repo: SANDBOX,
-      bot: { id: 2, login: "lookover-spike-sasensi[bot]" },
+      bot: { id: 2020, login: "lookover-dev[bot]" },
       owner: OWNER,
       engines: {
         claude: { installed: true, version: "2.4.1", signedIn: true },
@@ -72,6 +80,8 @@ function newOwner(setup: Setup): Scenario {
       },
       main: { ref: "main", sha: commitSha("5a1e9c0d7b2f4e6a8c0d1e2f3a4b5c6d7e8f9a0b") },
       setup,
+      // Nobody signed in before the GitHub step, the shared App not installed on the owner's account yet.
+      shared: { ownAccountInstalled: false, reaches: [] },
     },
     changes: [
       {
@@ -106,7 +116,7 @@ test("a new owner's start: the setup as the scenario left it, no bot, no connect
   const door = await startScenario(newOwner(ON_GITHUB));
   const state = await snapshotOf(door);
   expect(state.setup).toEqual(ON_GITHUB);
-  expect(state.connection).toMatchObject({ id: null, state: "not-connected", bot: null });
+  expect(state.connection).toMatchObject({ id: null, state: "not-connected" });
   expect(state.repos).toEqual([]);
   expect(state.changes).toEqual({});
 });
@@ -158,63 +168,75 @@ test("after the first review the owner goes to Your coding agent, and finishes f
   expect(state.service.agent.skills.every((s) => s.state === "none")).toBe(true);
 });
 
-/** "Create it on GitHub" followed to the end: the App made on GitHub's (fake) pages and installed on all repositories. */
-async function madeAndInstalled(door: Door): Promise<void> {
-  expect((await send(door, { type: "connection.createApp", organisation: null })).status).toBe(200);
-  await installApp(door, await makeApp(door));
+/** The shared App's install page on GitHub's fake (ADR 0066): where the owner installs it on their account. */
+const INSTALL_PAGE = githubLinks.install(DEMO_API.github, SHARED_APP.slug);
+
+/**
+ * "Sign in with GitHub" followed: the code asked for, entered on GitHub's (fake) device page, the next poll taking it;
+ * the setup as it is once the sign-in is kept (on disk: a moment after the poll).
+ */
+async function signedIn(door: Door): Promise<State> {
+  expect((await send(door, { type: "connection.signIn" })).status).toBe(200);
+  expect(await inject(door, "sign-in-entered")).toBe(200);
+  await advance(door, 5_000);
+  return eventually(
+    () => snapshotOf(door),
+    (s) => s.setup.github !== "start",
+  );
+}
+
+/** Signed in, then the shared App installed on all the owner's repositories from its install page. */
+async function signedInAndInstalled(door: Door): Promise<void> {
+  await signedIn(door);
+  await installApp(door, INSTALL_PAGE);
 }
 
 test("GitHub's fake pages carry the API's policy and nosniff, their referrer policy same-origin", async () => {
   const door = await startScenario(newOwner(ON_GITHUB));
-  const installPage = await makeApp(door);
-  const page = await fetch(new URL(installPage, door.service.origin), { headers: { cookie: door.cookie } });
+  const page = await fetch(new URL(INSTALL_PAGE, door.service.origin), { headers: { cookie: door.cookie } });
   expect(page.status).toBe(200);
   expect(page.headers.get("content-security-policy")).toContain("form-action 'self'");
   expect(page.headers.get("x-content-type-options")).toBe("nosniff");
   expect(page.headers.get("referrer-policy")).toBe("same-origin");
 });
 
-test("Create it on GitHub: waiting for the App, made on GitHub's page and kept, installed there, found 4 s on, the repository listed; the step stays until Continue", async () => {
+test("Sign in with GitHub: the code shown, entered on GitHub, the install waited for, found 4 s on, the repository listed; the step stays until Continue", async () => {
   const door = await startScenario(newOwner(ON_GITHUB));
   const from = (await snapshotOf(door)).seq;
-  expect((await send(door, { type: "connection.createApp", organisation: null })).status).toBe(200);
-  expect((await snapshotOf(door)).setup).toMatchObject({ github: "waiting-for-app" });
-  // Nothing more happens by itself: GitHub's page makes the App.
+  expect((await send(door, { type: "connection.signIn" })).status).toBe(200);
+  expect((await snapshotOf(door)).connection.signIn).toMatchObject({ userCode: "D054-61DC" });
+  // Nothing more happens by itself: the code waits to be entered.
   await advance(door, MIN);
-  expect((await snapshotOf(door)).setup).toMatchObject({ github: "waiting-for-app" });
+  expect((await snapshotOf(door)).setup).toMatchObject({ github: "start" });
 
-  const installPage = await makeApp(door);
-  const made = await snapshotOf(door);
-  const slug = made.connection.app?.slug ?? "";
-  expect(made.setup).toMatchObject({ github: "waiting-for-install", step: "github" });
-  expect(made.connection).toMatchObject({ state: "not-connected", bot: `${slug}[bot]` });
+  expect(await inject(door, "sign-in-entered")).toBe(200);
+  await advance(door, 5_000);
+  const signedInState = await eventually(
+    () => snapshotOf(door),
+    (s) => s.setup.github !== "start",
+  );
+  expect(signedInState.setup).toMatchObject({ github: "waiting-for-install", step: "github" });
+  expect(signedInState.connection).toMatchObject({ state: "not-connected", signIn: null, person: OWNER });
 
-  expect(await installApp(door, installPage)).toContain("Lookover is installed");
+  await installApp(door, INSTALL_PAGE);
   await advance(door, 4_000);
   const installed = await snapshotOf(door);
-  expect(installed.connection).toMatchObject({
-    state: "connected",
-    bot: `${slug}[bot]`,
-    id: `github:${slug}[bot]`,
-  });
+  expect(installed.connection).toMatchObject({ state: "connected", id: `github:${OWNER.login}` });
   expect(installed.repos.map((r) => [r.id, r.enabled])).toEqual([[REPO, true]]);
   // What was open before is listed, not reviewed.
   expect(installed.changes[MINE]).toMatchObject({ number: 1, author: "you" });
   expect(installed.reviews[MINE]?.job ?? null).toBeNull();
   // Setup waits for the owner (ADR 0058): the step stays on GitHub, the way forward open.
-  expect(installed.setup).toMatchObject({
-    github: "done",
-    step: "github",
-    reached: "repos",
-  });
+  expect(installed.setup).toMatchObject({ github: "done", step: "github", reached: "repos" });
 
-  // In this order, each once (the clock's events are the advances'): waiting for the App, the App kept, the install
-  // waited for, the install listed, and only then connected.
+  // In this order, each once (the clock's events are the advances'): the code shown, the person signed in, the
+  // install waited for, the code gone, the install listed, and only then connected.
   const sent = logOf(door).filter((e) => e.seq > from && e.type !== "clock");
   expect(sent.map((e) => e.type)).toEqual([
-    "setup.changed",
+    "connection.changed",
     "connection.changed",
     "setup.changed",
+    "connection.changed",
     "repo.added",
     "change.opened",
     "connection.changed",
@@ -226,18 +248,16 @@ test("a listing refused once the App is installed is checked again a few seconds
   const scenario = newOwner(ON_GITHUB);
   // GitHub can't be reached for 7 s from just after the load: the install's next check, 4 s on, is refused.
   const down = {
-    at: scenario.seed + 1_000,
+    at: scenario.seed + 7_000,
     move: { kind: "refuse", failure: "unavailable", forMs: 7_000 },
   } as const;
   const door = await startScenario({ ...scenario, script: [...scenario.script, down] });
-  await madeAndInstalled(door);
+  await signedInAndInstalled(door);
   await advance(door, 4_000);
   const refused = await snapshotOf(door);
   expect(refused.connection).toMatchObject({ state: "not-connected" });
   expect(refused.setup).toMatchObject({ github: "waiting-for-install", step: "github" });
   expect(refused.repos).toEqual([]);
-  // The screen says it checks every few seconds, and the button is gone: the service checks again by itself.
-  expect((await send(door, { type: "connection.createApp", organisation: null })).status).toBe(409);
 
   await advance(door, 8_000);
   const state = await snapshotOf(door);
@@ -248,9 +268,9 @@ test("a listing refused once the App is installed is checked again a few seconds
 
 test("a listing GitHub keeps refusing is logged once, and once when it answers; the room's stop ends the checks", async () => {
   const scenario = newOwner(ON_GITHUB);
-  // GitHub can't be reached for a minute from just after the load: the install's checks refused meanwhile.
+  // GitHub can't be reached for a minute from once the owner signed in: the install's checks refused meanwhile.
   const down = {
-    at: scenario.seed + 1_000,
+    at: scenario.seed + 7_000,
     move: { kind: "refuse", failure: "unavailable", forMs: MIN },
   } as const;
   const own = { ...scenario, script: [...scenario.script, down] };
@@ -264,8 +284,8 @@ test("a listing GitHub keeps refusing is logged once, and once when it answers; 
     },
   });
   const listings = () => door.logged.filter((line) => line.includes("pull requests"));
-  await madeAndInstalled(door);
-  await advance(door, 7_000 + 5 * 4_000);
+  await signedInAndInstalled(door);
+  await advance(door, 2_000 + 5 * 4_000);
   expect(listings()).toEqual(["the pull requests could not be listed: The host could not be reached"]);
   await advance(door, MIN);
   expect(listings()).toEqual([
@@ -275,12 +295,11 @@ test("a listing GitHub keeps refusing is logged once, and once when it answers; 
   expect((await snapshotOf(door)).connection.state).toBe("connected");
 
   // Refused again on a room loaded afresh, then the room stops (swapped out): nothing it armed is left to fire.
-  expect((await send(door, { type: "connection.createApp", organisation: null })).status).toBe(409);
   expect((await load(door, own.id)).status).toBe(200);
   const second = rooms[1];
   if (second === undefined) throw new Error("The load built a room");
-  await madeAndInstalled(door);
-  await advance(door, 7_000);
+  await signedInAndInstalled(door);
+  await advance(door, 4_000);
   // Its check refused: another is armed a few seconds on.
   expect(listings()).toHaveLength(3);
   expect((await snapshotOf(door)).setup).toMatchObject({ github: "waiting-for-install" });
@@ -290,39 +309,28 @@ test("a listing GitHub keeps refusing is logged once, and once when it answers; 
 
 test("the step stays where the owner went while GitHub installed the App; the furthest reached moves on", async () => {
   const door = await startScenario(newOwner(ON_GITHUB));
-  expect((await send(door, { type: "connection.createApp", organisation: null })).status).toBe(200);
+  await signedIn(door);
   expect((await send(door, { type: "setup.goto", step: "ai" })).status).toBe(200);
-  await installApp(door, await makeApp(door));
+  await installApp(door, INSTALL_PAGE);
   await advance(door, 4_000);
   const state = await snapshotOf(door);
   expect(state.connection.state).toBe("connected");
   expect(state.setup).toMatchObject({ step: "ai", reached: "repos", github: "done" });
-  // Asked again once made: refused, the App kept already.
-  const again = await send(door, { type: "connection.createApp", organisation: null });
-  expect(again.status).toBe(409);
-  expect(await again.json()).toMatchObject({ createApp: { kind: "already-made" } });
 });
 
-test("a world left waiting goes on from where it stood: the App made from the page, or the install checked with no command", async () => {
-  // Waiting for the App: asked again, it waits again, and GitHub's page makes it.
-  const waiting = await startScenario(newOwner({ ...ON_GITHUB, github: "waiting-for-app" }));
-  await madeAndInstalled(waiting);
-  await advance(waiting, 4_000);
-  expect((await snapshotOf(waiting)).connection.state).toBe("connected");
-  await stopScenarios();
-  // Waiting for the install of an App made already: the install is checked every few seconds from the start.
+test("a world left waiting for the install goes on from where it stood: the install checked with no command", async () => {
+  // Signed in, the install of the shared App waited for: checked every few seconds from the start.
   const made = await startScenario(newOwner({ ...ON_GITHUB, github: "waiting-for-install" }));
-  expect((await send(made, { type: "connection.createApp", organisation: null })).status).toBe(409);
-  await installApp(made, `${DEMO_API.github}/apps/lookover-spike-sasensi/installations/new`);
+  await installApp(made, INSTALL_PAGE);
   await advance(made, 4_000);
   const state = await snapshotOf(made);
-  expect(state.connection).toMatchObject({ state: "connected", bot: BOT.login });
+  expect(state.connection).toMatchObject({ state: "connected", person: OWNER });
   expect(state.setup).toMatchObject({ github: "done", step: "github", reached: "repos" });
 });
 
 test("the first review, as a preview, on the repository chosen: kept by the setup, nothing posted", async () => {
   const door = await startScenario(newOwner(ON_GITHUB));
-  await madeAndInstalled(door);
+  await signedInAndInstalled(door);
   await advance(door, 4_000);
   await send(door, { type: "setup.chooseRepos", enabled: [REPO] });
   const asked = await send(door, { type: "setup.firstReview", changeId: MINE, preview: true });
@@ -340,7 +348,7 @@ test("the first review, as a preview, on the repository chosen: kept by the setu
 
 test("choosing the repositories sets every switch, then goes to the first review; the switch is kept", async () => {
   const door = await startScenario(newOwner(ON_GITHUB));
-  await madeAndInstalled(door);
+  await signedInAndInstalled(door);
   await advance(door, 4_000);
 
   expect((await send(door, { type: "setup.chooseRepos", enabled: [] })).status).toBe(200);
@@ -363,7 +371,7 @@ test("in live mode, a fresh data folder is set up at its first start, and a swit
   const cookie = await openApp(first.service);
   const state = await snapshot(first.service, cookie);
   expect(state.setup).toMatchObject({ done: true, step: "background", github: "done" });
-  expect(state.connection).toMatchObject({ state: "connected", bot: BOT.login });
+  expect(state.connection).toMatchObject({ state: "connected" });
   const repo = repositoryId(`${SANDBOX.owner}/${SANDBOX.name}`);
   expect(
     (await post(first.service, cookie, { type: "repo.setEnabled", repoId: repo, enabled: false })).status,
@@ -395,15 +403,4 @@ test("a setup kept in the data folder is what the next start shows, never writte
   const state = await snapshot(service, await openApp(service));
   expect(state.setup).toEqual(onRepos);
   expect(state.setup.done).toBe(false);
-});
-
-test("in live mode with an App kept, Create it on GitHub is refused: Lookover keeps one App", async () => {
-  const { service } = await start({ live: true });
-  const cookie = await openApp(service);
-  const refused = await post(service, cookie, { type: "connection.createApp", organisation: null });
-  expect(refused.status).toBe(409);
-  expect(await refused.json()).toEqual({
-    error: "Lookover already keeps an App.",
-    createApp: { kind: "already-made" },
-  });
 });

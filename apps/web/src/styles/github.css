@@ -247,3 +247,55 @@
   margin: 0;
   white-space: pre-wrap;
 }
+.gh-link {
+  color: var(--gh-blue);
+}
+.gh-url {
+  overflow-wrap: anywhere;
+}
+/* Lookover's wordmark opening its posts (brand.md, ADR 0074): the theme's file, on the text's line as `absmiddle` */
+.gh-wordmark {
+  vertical-align: middle;
+}
+.gh-wordmark.on-light,
+:root[data-theme="light"] .gh-wordmark.on-dark {
+  display: none;
+}
+:root[data-theme="light"] .gh-wordmark.on-light {
+  display: inline;
+}
+/* the status block's heading, as GitHub's markdown sets an h3 */
+.gh-block-head {
+  margin: 0;
+  font-size: 17.5px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.gh-body li > div {
+  margin-top: 4px;
+}
+/* a permalink on its own line, as GitHub embeds it */
+.gh-embed {
+  margin-top: 8px;
+  border: 1px solid var(--gh-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.gh-embed-head {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--gh-surface);
+  border-bottom: 1px solid var(--gh-border);
+  font-size: 12px;
+}
+.gh-embed .gh-code {
+  border-bottom: none;
+}
+.gh-comment > div {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}

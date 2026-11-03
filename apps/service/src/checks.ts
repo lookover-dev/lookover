@@ -18,20 +18,40 @@
 // restart too (ADR 0043; a round's own posts are the outbox's, ADR 0044); so is a preview's end, "a preview", on a
 // check the host showed before the preview joined (ADR 0047). A check created is kept before anything
 // else is sent for it, so an end refused after its check was created completes that check, never a second one.
-// It must never know: the words on the check (`publish`'s), or the rules that change a job (the queue's, `core`).
+// The status block follows too (ADR 0074): after each change of a job is sent to its check, the change's block is
+// written (`publish`'s `status`), rendered from where the change stands then (`status`, the change's newest job), while
+// the job is the change's newest and waits (deferred, or queued behind busy engines: one taken at once is never said
+// waiting, and one behind its change's own round leaves that round's block), runs or failed; a job skipped or done
+// writes none, nor an older job's late change, nor a change the job has left since (its next change writes, after
+// its check), nor a round posting (it writes its own, after its review). A preview's job, and a job cancelled while
+// it is the change's newest (a fork pushed, the change closed), put the last posted round back over a block the job
+// wrote as it waited, after a restart too (`publish` writes nothing when the description already holds it), with
+// that round's own ledger (`status`); with no round posted, the block stays as written: no block is ever taken off
+// (I-229). It is written only when it renders other than the block the follower last sent to the change: the
+// de-duplication compares the rendered block (in the description's whole room, with no thread read), so a block
+// written unlinked (a thread read refused) or cut is not corrected while the status renders the same; each write
+// moves the listing's ETag. A round posted forgets that block, since the round wrote its own. A refused block goes
+// to the log, like a check's; one the host refused for a moment (a `HostError` thrown: `publish` only says a standing
+// refusal) is owed, in memory, and written again at every take where the change's newest job stands then, until a
+// write lands or there is none to write (a round posted owes none).
+// It must never know: the words on the check or the block (`publish`'s), or the rules that change a job (the
+// queue's, `core`).
 
-import type {
-  ChangeId,
-  Clock,
-  EngineId,
-  GitHost,
-  JobId,
-  RepositoryRef,
-  ReviewJob,
-  RunId,
+import {
+  type ChangeId,
+  type Clock,
+  DESCRIPTION_MAX_CHARACTERS,
+  type EngineId,
+  type GitHost,
+  HostError,
+  type JobId,
+  type JobState,
+  type RepositoryRef,
+  type ReviewJob,
+  type RunId,
 } from "@lookover/contracts";
 import { loopState } from "@lookover/core";
-import type { Ended, JobCheck, Publisher, Standing } from "@lookover/publish";
+import type { Ended, JobCheck, Publisher, Standing, Status } from "@lookover/publish";
 import type { JobCheckRef, Store, StoredJob, StoredJobCheck } from "@lookover/store";
 import { said } from "./said.ts";
 
@@ -58,6 +78,11 @@ export interface ChecksDeps {
   onlyCodex(changeId: ChangeId): boolean;
   /** Until when the engine's limit holds, as the UI is told (ADR 0055); null when none holds or no reset is known. */
   limitUntil(engine: EngineId): number | null;
+  /**
+   * Where the change stands, as its status block says it now (ADR 0074): its newest job's standing, or its last
+   * posted round; null when it gets no block. No thread read: the block `publish` writes reads them.
+   */
+  status(changeId: ChangeId): Status | null;
   /** Where a refused write goes; the console by default. */
   log?(line: string): void;
 }
@@ -85,7 +110,7 @@ export interface Checks {
   roundPosted(stored: StoredJob): void;
   /**
    * Sends again each check end the host refused, kept in the store (after a restart too): a job's that ended without
-   * a round, and a preview's. Never throws.
+   * a round, and a preview's; then each status block the host refused for a moment (in memory). Never throws.
    */
   resend(): void;
   /** Waits until every change sent so far is settled. */
@@ -148,6 +173,17 @@ const shownAs = (job: ReviewJob, standing: Standing | null): string =>
     standing?.kind === "waiting" ? standing.until : null,
   ]);
 
+/** The job states that write their change's status block: waiting, running, failed. */
+const WRITES_BLOCK = {
+  queued: true,
+  deferred: true,
+  running: true,
+  failed: true,
+  done: false,
+  skipped: false,
+  cancelled: false,
+} satisfies Record<JobState, boolean>;
+
 /** Whether the job waits on the engine's limit. */
 const waitsOn = (job: ReviewJob, engine: EngineId): boolean =>
   job.state === "deferred" && job.deferral?.reason === "engine-limit" && job.deferral.engine === engine;
@@ -160,6 +196,10 @@ export function createChecks(d: ChecksDeps): Checks {
   const sent = new Map<JobId, string>();
   /** The run each job's check last named, until its check is completed: a resend names it too. */
   const runs = new Map<JobId, RunFacts>();
+  /** The block the follower last sent to each change, as rendered in the description's whole room. */
+  const blocks = new Map<ChangeId, string | null>();
+  /** The changes whose block GitHub refused for a moment: written again at every take until one write lands. */
+  const owed = new Set<ChangeId>();
 
   /** What every check of the change carries. */
   const facts = (
@@ -247,11 +287,72 @@ export function createChecks(d: ChecksDeps): Checks {
     completed(job.id);
   }
 
+  /**
+   * Whether the job only puts the last posted round back over a block it wrote as it waited: a preview's, which posts
+   * nothing (ADR 0047), or one cancelled (a fork pushed, its change closed), which never reaches a round. A restart
+   * forgets which blocks it wrote: `publish` writes nothing when the description already holds that round's block.
+   */
+  const restores = (job: ReviewJob): boolean => job.state === "cancelled" || d.store.jobs.previewOf(job.id);
+
+  /** Whether the job's change is to say where the job stands, in the job's standing as the store holds it now. */
+  const describes = (job: ReviewJob): boolean => {
+    if (restores(job)) return true;
+    // Queued with no turn said yet (the take that follows starts it, or says what it waits behind), or behind its
+    // change's own round: the block says that round until it posts.
+    return WRITES_BLOCK[job.state] && !(job.state === "queued" && job.turn?.behind !== "engines");
+  };
+
+  /**
+   * Where the change stands, for its block to say, when the job is still its newest, in the standing it was followed
+   * in, and is described (`describes`); null when the job's change writes nothing.
+   */
+  function toDescribe({ changeId, job }: StoredJob): Status | null {
+    // A change sent late (an older job's, or one the job has left since) writes nothing: the newest one's does.
+    const newest = d.store.jobs.latest(changeId)?.job;
+    if (newest?.id !== job.id || newest.state !== job.state || !describes(newest)) return null;
+    const status = d.status(changeId);
+    // A round posting writes its own block, after its review: never before it (but a job putting it back).
+    if (status?.kind === "posted" && !restores(newest)) return null;
+    return status;
+  }
+
+  /**
+   * Writes the change's status block when the job's change says where it stands (`toDescribe`) and the block renders
+   * other than the one last sent. A refusal propagates; one the host may take later leaves the block owed (`resend`).
+   */
+  async function describe(stored: StoredJob): Promise<void> {
+    const status = toDescribe(stored);
+    if (status === null) return;
+    const { changeId } = stored;
+    const change = d.changeRef(changeId);
+    const block = d.publisher.statusBlock(change, status, DESCRIPTION_MAX_CHARACTERS);
+    if (blocks.get(changeId) === block) return;
+    try {
+      await d.publisher.status(change);
+    } catch (error) {
+      // A standing refusal is `publish`'s to say, never thrown: what the host refused here may pass at the next take.
+      if (error instanceof HostError) owed.add(changeId);
+      throw error;
+    }
+    owed.delete(changeId);
+    blocks.set(changeId, block);
+  }
+
+  /**
+   * Writes the block owed to the change where its newest job stands now: nothing is owed once that is settled, the
+   * block written or none to write. A refusal propagates, still owed.
+   */
+  async function owing(changeId: ChangeId): Promise<void> {
+    const newest = d.store.jobs.latest(changeId);
+    if (newest) await describe(newest);
+    owed.delete(changeId);
+  }
+
   /** Runs `step` after the job's earlier changes; what it throws goes to the log. */
-  function queue(id: JobId, step: () => Promise<void>): Promise<void> {
+  function queue(id: JobId, step: () => Promise<void>, what = "the check"): Promise<void> {
     const next = (sending.get(id) ?? Promise.resolve())
       .then(step)
-      .catch((error: unknown) => log(`the check of job ${id} was not sent: ${said(error)}`));
+      .catch((error: unknown) => log(`${what} of job ${id} was not sent: ${said(error)}`));
     sending.set(id, next);
     void next.then(() => {
       if (sending.get(id) === next) sending.delete(id);
@@ -259,9 +360,40 @@ export function createChecks(d: ChecksDeps): Checks {
     return next;
   }
 
+  /** Sends again each check end the store holds owed: a job's that ended without a round, and a preview's. */
+  function resendEnds(): void {
+    try {
+      for (const { changeId, job } of d.store.jobs.checksEnding()) {
+        // An end still being sent is not sent twice.
+        if (sending.has(job.id)) continue;
+        const at = d.clock.now();
+        void queue(job.id, () => send({ changeId, job }, {}, at));
+      }
+      for (const stored of d.store.jobs.previewsEnding()) {
+        if (sending.has(stored.job.id)) continue;
+        const at = d.clock.now();
+        void queue(stored.job.id, () => previewEnd(stored, at));
+      }
+    } catch (error) {
+      log(`the checks' ends could not be read: ${said(error)}`);
+    }
+  }
+
+  /** Writes the change's owed block again, after its newest job's changes still being sent (which may write it). */
+  function resendBlock(changeId: ChangeId): void {
+    try {
+      const newest = d.store.jobs.latest(changeId);
+      if (newest) void queue(newest.job.id, () => owing(changeId), "the status block");
+      else owed.delete(changeId);
+    } catch (error) {
+      log(`the status block owed to ${changeId} could not be read: ${said(error)}`);
+    }
+  }
+
   function follow(stored: StoredJob, followed: Followed = {}): void {
     const at = d.clock.now();
     void queue(stored.job.id, () => send(stored, followed, at));
+    void queue(stored.job.id, () => describe(stored), "the status block");
   }
 
   return {
@@ -288,6 +420,9 @@ export function createChecks(d: ChecksDeps): Checks {
       void queue(stored.job.id, () => previewEnd(stored, at));
     },
     roundPosted(stored) {
+      // The round wrote its own block: the next is written whatever it renders, and none is owed.
+      blocks.delete(stored.changeId);
+      owed.delete(stored.changeId);
       try {
         completed(stored.job.id);
       } catch (error) {
@@ -295,21 +430,8 @@ export function createChecks(d: ChecksDeps): Checks {
       }
     },
     resend() {
-      try {
-        for (const { changeId, job } of d.store.jobs.checksEnding()) {
-          // An end still being sent is not sent twice.
-          if (sending.has(job.id)) continue;
-          const at = d.clock.now();
-          void queue(job.id, () => send({ changeId, job }, {}, at));
-        }
-        for (const stored of d.store.jobs.previewsEnding()) {
-          if (sending.has(stored.job.id)) continue;
-          const at = d.clock.now();
-          void queue(stored.job.id, () => previewEnd(stored, at));
-        }
-      } catch (error) {
-        log(`the checks' ends could not be read: ${said(error)}`);
-      }
+      resendEnds();
+      for (const changeId of owed) resendBlock(changeId);
     },
     async idle() {
       while (sending.size > 0) await Promise.all(sending.values());

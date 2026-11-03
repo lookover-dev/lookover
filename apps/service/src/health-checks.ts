@@ -4,7 +4,7 @@
 // (ADR 0049), the data folder's free space, and the
 // version, never checked against a newer one before publication (`upToDate: null`).
 import { statfs } from "node:fs/promises";
-import type { CheckItem, EngineId, KeyProtection, SettingsFileError, State } from "@lookover/contracts";
+import type { CheckItem, EngineId, SettingsFileError, State } from "@lookover/contracts";
 
 /** What the items read of the UI's state. */
 type Checked = Pick<State, "engines" | "connection" | "service">;
@@ -24,20 +24,14 @@ const engineItem = (engines: State["engines"], id: EngineId): CheckItem => {
 /**
  * The checks' items, in the order the status menu lists them. `invalid`: each settings file that doesn't read, as
  * the settings writer last read them (ADR 0049). `freeGb` null when the folder's space couldn't be read (an odd
- * mount): the disk is then not reported rather than reported wrong. `key`: how the App's key is kept (ADR 0053),
- * null when Lookover keeps none (`live.json`'s is read where it is).
+ * mount): the disk is then not reported rather than reported wrong.
  */
-export function checkItems(
-  shown: Checked,
-  invalid: SettingsFileError[],
-  freeGb: number | null,
-  key: KeyProtection | null,
-): CheckItem[] {
+export function checkItems(shown: Checked, invalid: SettingsFileError[], freeGb: number | null): CheckItem[] {
   const { engines, connection, service } = shown;
   return [
     engineItem(engines, "claude"),
     engineItem(engines, "codex"),
-    { check: "connection", state: connection.state, cause: connection.cause, bot: connection.bot, key },
+    { check: "connection", state: connection.state, cause: connection.cause },
     {
       check: "service",
       state: "running",

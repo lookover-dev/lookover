@@ -5,7 +5,8 @@ import {
   REVIEW_MARKER,
   type RepositoryRef,
   type ReviewPost,
-  SUMMARY_MARKER,
+  STATUS_END_MARKER,
+  STATUS_MARKER,
 } from "@lookover/contracts";
 import {
   describeHostWriter,
@@ -18,14 +19,18 @@ import { AT_ONCE, LAG, LAGGING_PATIENCE, laggingGitHost } from "./lagging-git-ho
 
 const repo: RepositoryRef = { owner: "sasensi", name: "lookover-sandbox" };
 const sha = commitSha("5d9114c0a1b2c3d4e5f60718293a4b5c6d7e8f9a");
-const bot = { id: 338297044, login: "lookover-spike-sasensi[bot]" };
+const bot = { id: 338297045, login: "lookover-dev[bot]" };
+/** The person signed in to the shared App, who posts (ADR 0066) and owns the repository. */
+const person = { id: 11247504, login: "sasensi" };
+/** Someone else on the pull request. */
+const teammate = { id: 1234567, login: "teammate" };
 
 /** Sandbox pull request 1 as the fake holds it: one hunk, `+2,20`, on `src/invoice.ts`, which removed base line 8. */
 const change: FakeChange = {
   number: 1,
   title: "Add unpaid filter and rewrite total",
   url: "https://github.com/sasensi/lookover-sandbox/pull/1",
-  author: { login: "sasensi", id: 1234567 },
+  author: teammate,
   draft: false,
   head: { ref: "planted-bugs", sha },
   base: { ref: "main", sha: commitSha("0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3") },
@@ -36,32 +41,16 @@ const change: FakeChange = {
 };
 const ref: ChangeRef = { repo, number: 1 };
 
-/** The person signed in to the App, on the fake's person mode (ADR 0066): spike 20's. */
-const person = { id: 11247504, login: "sasensi-signed-in" };
-/** Someone else on the pull request. */
-const teammate = { id: 1234567, login: "sasensi" };
-
-const host = () => new FakeGitHost({ repo, bot, changes: [change] });
-
-/**
- * Who posts on each of the fake's modes: the App's bot, the person signed in to it, or the bot again with a person
- * known, told to post as the bot (`postAs`: demo mode's own App, beside the sign-in its setup offers).
- */
-const MODES = [
-  { name: "FakeGitHost", person: undefined, posts: "bot" },
-  { name: "FakeGitHost posting as a person", person, posts: "person" },
-  { name: "FakeGitHost with a person, posting as its bot", person, posts: "bot" },
-] as const;
+const host = () => new FakeGitHost({ repo, bot, person, changes: [change] });
 
 /**
  * A fresh fake and the suite's fixture on it, refusing every call for `failure` when one is given; with `lag`, the App's
  * reads made before a write answer stale for that many reads after it, as GitHub's do (ADR 0069).
  */
 const fixture =
-  (mode: (typeof MODES)[number], failure?: HostRefusal, lag = 0) =>
+  (failure?: HostRefusal, lag = 0) =>
   async (): Promise<HostWriterFixture> => {
-    const fake = new FakeGitHost({ repo, bot, changes: [change], ...(mode.person ? { person } : {}) });
-    fake.postAs(mode.posts);
+    const fake = new FakeGitHost({ repo, bot, person, changes: [change] });
     if (failure) fake.refuse(failure);
     const host = laggingGitHost(fake, lag).port;
     return {
@@ -72,33 +61,28 @@ const fixture =
       offDiff: { path: "src/invoice.ts", side: "head", line: 1 },
       removed: { path: "src/invoice.ts", side: "base", line: 8 },
       range: { path: "src/invoice.ts", side: "head", line: 12, endLine: 14 },
-      poster: mode.posts === "person" ? { ...person, bot: false } : { ...bot, bot: true },
+      poster: person,
       comment: (body) => Promise.resolve(host.seedComment(ref, { author: teammate, body })),
-      ...(mode.posts === "person"
-        ? {
-            commentByHand: (body: string) => Promise.resolve(host.seedComment(ref, { author: person, body })),
-          }
-        : {}),
+      editDescription: (body) => Promise.resolve(host.editDescription(ref, body)),
       observe: () => Promise.resolve(host.view(ref)),
       intake: host,
     };
   };
 
-for (const [mode, lag, patience] of [
-  ...MODES.map((mode) => [mode, 0, AT_ONCE] as const),
-  ...MODES.map((mode) => [mode, LAG, LAGGING_PATIENCE] as const),
-])
+for (const [lag, patience] of [
+  [0, AT_ONCE],
+  [LAG, LAGGING_PATIENCE],
+] as const)
   describeHostWriter(
-    lag === 0 ? mode.name : `${mode.name}, lagging as GitHub does after a write (ADR 0069)`,
+    lag === 0 ? "FakeGitHost" : "FakeGitHost, lagging as GitHub does after a write (ADR 0069)",
     {
-      open: fixture(mode, undefined, lag),
+      open: fixture(undefined, lag),
       patience,
       refusing: {
-        unauthorized: fixture(mode, "unauthorized", lag),
-        rate_limited: fixture(mode, "rate_limited", lag),
-        unavailable: fixture(mode, "unavailable", lag),
+        unauthorized: fixture("unauthorized", lag),
+        rate_limited: fixture("rate_limited", lag),
+        unavailable: fixture("unavailable", lag),
       },
-      byHand: mode.posts === "person",
     },
   );
 
@@ -112,24 +96,55 @@ describe("FakeGitHost writer on its own", () => {
       body: "1 finding.",
       comments: [{ path: "src/invoice.ts", side: "head", line: 12, endLine: null, body: "Off by one." }],
     });
-    await fake.upsertSummary(ref, `${SUMMARY_MARKER}\nRound 1: 1 open.`);
+    await fake.upsertStatus(ref, () => "One thing to fix");
     await fake.completeCheck(repo, checkId, "neutral", { ...output, title: "1 finding" });
     expect(fake.posts.map((p) => p.kind)).toEqual([
       "check.created",
       "review",
-      "summary.created",
+      "status.written",
       "check.completed",
     ]);
   });
 
-  test("the summary is the bot's by numeric id: another user with the same login is someone else", async () => {
-    const fake = host();
-    fake.seedComment(ref, { author: { id: 1, login: bot.login }, body: `${SUMMARY_MARKER}\nNot ours.` });
-    await fake.upsertSummary(ref, `${SUMMARY_MARKER}\nOurs.`);
-    expect(fake.view(ref).comments.map((c) => c.body)).toEqual([
-      `${SUMMARY_MARKER}\nNot ours.`,
-      `${SUMMARY_MARKER}\nOurs.`,
+  test("a change opens with its author's description, and each status write is a post", async () => {
+    const fake = new FakeGitHost({ repo, bot, person, changes: [{ ...change, description: "Fixes it." }] });
+    await fake.upsertStatus(ref, () => "Round 1");
+    await fake.upsertStatus(ref, () => "Round 1");
+    await fake.upsertStatus(ref, () => "One thing to fix");
+    const block = (text: string) => `Fixes it.\n\n---\n\n${STATUS_MARKER}\n${text}\n${STATUS_END_MARKER}`;
+    // The same block again leaves the description as it is: nothing written.
+    expect(fake.posts).toEqual([
+      { kind: "status.written", number: 1, description: block("Round 1") },
+      { kind: "status.written", number: 1, description: block("One thing to fix") },
     ]);
+    expect(fake.view(ref).description).toBe(block("One thing to fix"));
+  });
+
+  test("the author's edit moves the open changes' listing, as it moves a pull request's last update", async () => {
+    const fake = host();
+    await fake.listOpenChanges(repo);
+    fake.editDescription(ref, "Edited.");
+    expect((await fake.listOpenChanges(repo)).unchanged).toBe(false);
+    await fake.upsertStatus(ref, () => "Round 1");
+    expect((await fake.listOpenChanges(repo)).unchanged).toBe(false);
+    expect((await fake.listOpenChanges(repo)).unchanged).toBe(true);
+  });
+
+  test("a description the person may not edit is refused as invalid, never as signed out, and nothing is written", async () => {
+    const fake = host();
+    fake.forbidDescription(ref);
+    await expect(fake.upsertStatus(ref, () => "Round 1")).rejects.toMatchObject({ failure: "invalid" });
+    expect(fake.posts).toEqual([]);
+    expect(fake.view(ref).description).toBe("");
+  });
+
+  test("the status write refused once: the next one answers", async () => {
+    const fake = host();
+    fake.refuseNext("unavailable", { post: "status" });
+    await fake.publishReview(ref, oneFinding);
+    await expect(fake.upsertStatus(ref, () => "Round 1")).rejects.toMatchObject({ failure: "unavailable" });
+    await fake.upsertStatus(ref, () => "Round 1");
+    expect(fake.posts.map((p) => p.kind)).toEqual(["review", "status.written"]);
   });
 
   test("a push moves earlier comments with their text; one on a replaced line reads null, its original line kept", async () => {
@@ -293,14 +308,12 @@ describe("FakeGitHost writer on its own", () => {
 
   test("the next post of one kind refused once: the others before it answer", async () => {
     const fake = host();
-    fake.refuseNext("rate_limited", { post: "summary" });
+    fake.refuseNext("rate_limited", { post: "status" });
     const output = { title: "Reviewing", summary: "Round 1 in progress.", text: "" };
     await fake.createCheck(repo, sha, "in_progress", output, "job-1");
     await fake.publishReview(ref, oneFinding);
-    await expect(fake.upsertSummary(ref, `${SUMMARY_MARKER}\nRound 1.`)).rejects.toMatchObject({
-      failure: "rate_limited",
-    });
-    await expect(fake.upsertSummary(ref, `${SUMMARY_MARKER}\nRound 1.`)).resolves.toBeString();
-    expect(fake.posts.map((p) => p.kind)).toEqual(["check.created", "review", "summary.created"]);
+    await expect(fake.upsertStatus(ref, () => "Round 1")).rejects.toMatchObject({ failure: "rate_limited" });
+    await fake.upsertStatus(ref, () => "Round 1");
+    expect(fake.posts.map((p) => p.kind)).toEqual(["check.created", "review", "status.written"]);
   });
 });

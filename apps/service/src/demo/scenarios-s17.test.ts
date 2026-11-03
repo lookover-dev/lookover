@@ -47,7 +47,6 @@ test("S17 stands at setup's GitHub step, signed in, with an account in every sta
   const state = await loaded();
   expect(state.setup).toMatchObject({ done: false, step: "github", github: "done" });
   expect(state.connection).toMatchObject({
-    way: "shared",
     state: "connected",
     cause: null,
     person: { id: 1, login: "sasensi" },

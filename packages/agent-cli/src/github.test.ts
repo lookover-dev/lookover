@@ -258,7 +258,7 @@ describe("createAgentHost", () => {
       });
     });
 
-    const threads = await host.threads({ repo, number: 7 }, "lookover-spike-sasensi");
+    const threads = await host.threads({ repo, number: 7 }, "lookover-spike-sasensi", ABSENT);
     expect(asked[0]?.variables).toEqual({
       owner: "sasensi",
       name: "lookover-sandbox",
@@ -301,7 +301,7 @@ describe("createAgentHost", () => {
     ]);
   });
 
-  test("given the person the App posts as, their roots holding a marker are Lookover's too; another's never (ADR 0066)", async () => {
+  test("the roots of the person the App posts as, holding a marker, are Lookover's too; another's never (ADR 0066)", async () => {
     const PERSON = { __typename: "User", login: "signed-in", databaseId: 11247504 };
     const { host } = github({}, () =>
       json(200, {
@@ -322,11 +322,10 @@ describe("createAgentHost", () => {
       }),
     );
     const change = { repo, number: 7 };
-    const roots = async (person?: number) =>
+    const roots = async (person: number) =>
       (await host.threads(change, "lookover-spike-sasensi", person)).map((t) => t.commentId);
     expect(await roots(11247504)).toEqual([101, 301]);
-    expect(await roots()).toEqual([301]);
-    expect(await roots(5550001)).toEqual([301]);
+    expect(await roots(ABSENT)).toEqual([301]);
   });
 
   test("threads go on past 100, and so do a thread's comments", async () => {
@@ -364,7 +363,7 @@ describe("createAgentHost", () => {
         },
       });
     });
-    const threads = await host.threads({ repo, number: 7 }, "lookover-spike-sasensi");
+    const threads = await host.threads({ repo, number: 7 }, "lookover-spike-sasensi", ABSENT);
     expect(threads.map((t) => [t.threadId, t.replies.map((r) => r.body)])).toEqual([
       ["PRRT_1", []],
       ["PRRT_2", ["Second.", "Third."]],
@@ -380,7 +379,7 @@ describe("createAgentHost", () => {
     const refused = (errors: unknown[], headers: Record<string, string> = {}) =>
       github({}, () =>
         json(200, { data: { repository: { pullRequest: null } }, errors }, headers),
-      ).host.threads({ repo, number: 999_999 }, "lookover-spike-sasensi");
+      ).host.threads({ repo, number: 999_999 }, "lookover-spike-sasensi", ABSENT);
     await expect(
       refused([
         { type: "NOT_FOUND", message: "Could not resolve to a PullRequest with the number of 999999." },
@@ -398,7 +397,9 @@ describe("createAgentHost", () => {
       failure: "invalid",
     });
     const badToken = github({}, () => json(401, { message: "Bad credentials" })).host;
-    await expect(badToken.threads({ repo, number: 7 }, "lookover-spike-sasensi")).rejects.toMatchObject({
+    await expect(
+      badToken.threads({ repo, number: 7 }, "lookover-spike-sasensi", ABSENT),
+    ).rejects.toMatchObject({
       failure: "unauthorized",
     });
   });
@@ -459,6 +460,8 @@ describe("createAgentHost", () => {
 /** When every note of the GraphQL answers was written. */
 const AT = "2026-10-10T08:00:00Z";
 const OWNER = { __typename: "User", login: "sasensi", databaseId: 1234567 };
+/** A person the App posts as who wrote nothing on the change: its bot's roots alone are Lookover's. */
+const ABSENT = 5_550_001;
 /** The App's bot as GraphQL names it: no `[bot]`. */
 const APP_BOT = { __typename: "Bot", login: "lookover-spike-sasensi", databaseId: 338297044 };
 const finding = (id: string) =>

@@ -2,7 +2,7 @@
 // answer read, and GitHub's refusals turned into `HostError`s. A listing's pages are read with the ETag of the
 // last answer to the same address, so GitHub's `304` (free) gives that answer back instead of an error.
 // Payloads leave here as `unknown`: the caller parses them with the schema of what it asked for.
-import { type Clock, type ConnectionCause, HostError } from "@lookover/contracts";
+import { type Clock, HostError } from "@lookover/contracts";
 import { refusal as refusalBody } from "./schemas.ts";
 
 export type Fetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -18,24 +18,12 @@ export interface RateLimit {
   resource: string;
 }
 
-/**
- * What the connection shows for a refusal of this request, from its status and GitHub's words (ADR 0053): a refused
- * JWT names why, a refused token purchase says the installation is gone. Undefined leaves `connectionCauseOf` to
- * read the failure.
- */
-export type CauseOf = (status: number, words: string) => ConnectionCause | undefined;
-
 export interface HostRequest {
   method?: "GET" | "POST" | "PATCH";
   path: string;
-  /** The bearer: the App's JWT or an installation token; null for a request that needs none (a manifest's code). */
-  bearer: string | null;
+  /** The bearer: the person's token. */
+  bearer: string;
   body?: unknown;
-  cause?: CauseOf;
-  /**
-   * A credential the path carries (a manifest's code, ADR 0053): no message names it, `…` stands in its place.
-   */
-  secret?: string;
   /**
    * What a 422 GitHub's common words don't explain means for this request ("Body is too long" is `too_large`, "An
    * internal error occurred" `unavailable`); null, or not given, is `invalid`.
@@ -100,7 +88,7 @@ export class GitHubApi {
    * nothing of it is kept (a read made once a round, whose answer would only fill the cache). Throws `HostError`
    * for any other answer that isn't a success.
    */
-  async page(path: string, bearer: string, cached = true, cause?: CauseOf): Promise<Page> {
+  async page(path: string, bearer: string, cached = true): Promise<Page> {
     const kept = cached ? this.pages.get(path) : undefined;
     const answer = await this.send({ path, bearer }, kept?.etag);
     this.readRateLimit(answer.headers);
@@ -108,7 +96,7 @@ export class GitHubApi {
     const at = Number.isNaN(date) ? this.clock.now() : date;
     if (answer.status === 304 && kept) return { unchanged: true, body: kept.body, next: kept.next, at };
     if (answer.status < 200 || answer.status >= 300)
-      throw refusal({ path, bearer, ...(cause ? { cause } : {}) }, answer, this.clock.now());
+      throw refusal({ path, bearer }, answer, this.clock.now());
     const next = nextPage(answer.headers.get("link"));
     const etag = answer.headers.get("etag");
     if (!cached) return { unchanged: false, body: answer.body, next, at };
@@ -124,7 +112,7 @@ export class GitHubApi {
       "user-agent": "lookover",
       "x-github-api-version": "2022-11-28",
     };
-    if (bearer !== null) headers.authorization = `Bearer ${bearer}`;
+    headers.authorization = `Bearer ${bearer}`;
     if (body !== undefined) headers["content-type"] = "application/json";
     if (etag !== undefined) headers["if-none-match"] = etag;
     // The answer is read whole inside the guard: a connection that breaks off mid-body is GitHub unreachable too.
@@ -137,7 +125,7 @@ export class GitHubApi {
       const text = await response.text();
       return { status: response.status, body: parseJson(text), headers: response.headers };
     } catch (error) {
-      throw new HostError("unavailable", `GitHub could not be reached: ${redact(request, message(error))}`);
+      throw new HostError("unavailable", `GitHub could not be reached: ${message(error)}`);
     }
   }
 
@@ -259,43 +247,22 @@ export class GitHubRefusal extends HostError {
   /** The organisation's SAML SSO asked for, as the answer said; null when it asked none. */
   readonly sso: SsoAsked | null;
 
-  constructor(
-    error: HostError,
-    status: number,
-    connectionCause: ConnectionCause | undefined,
-    sso: SsoAsked | null = null,
-  ) {
-    super(error.failure, error.message, {
-      ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
-      ...(connectionCause === undefined ? {} : { connectionCause }),
-    });
+  constructor(error: HostError, status: number, sso: SsoAsked | null = null) {
+    super(error.failure, error.message, error.retryAt === undefined ? {} : { retryAt: error.retryAt });
     this.status = status;
     this.sso = sso;
   }
 }
 
-/** `text` with the request's credential, as given or as the path encodes it, put out of sight. */
-function redact(request: HostRequest, text: string): string {
-  const { secret } = request;
-  if (secret === undefined || secret === "") return text;
-  return text.replaceAll(secret, "…").replaceAll(encodeURIComponent(secret), "…");
-}
-
-/**
- * A refusal as a `HostError`, carrying the connection's cause the request reads in it, if any: never for a rate
- * limit, which cuts nothing, and a refusal whose cause is the key is `unauthorized`, whatever its status.
- */
+/** A refusal as a `HostError`, with the SAML SSO it asks for, if any: never for a rate limit. */
 function refusal(request: HostRequest, answer: Answer, now: number): GitHubRefusal {
   const read = refusalOf(request, answer, now);
-  const cause =
-    read.failure === "rate_limited" ? undefined : request.cause?.(answer.status, said(answer.body));
-  const failure = cause?.kind === "key-refused" ? "unauthorized" : read.failure;
-  const error = new HostError(failure, redact(request, read.message), {
+  const error = new HostError(read.failure, read.message, {
     ...(read.retryAt === undefined ? {} : { retryAt: read.retryAt }),
   });
   const sso =
     read.failure === "rate_limited" ? null : ssoAskedIn(answer.status, answer.headers, said(answer.body));
-  return new GitHubRefusal(error, answer.status, cause, sso);
+  return new GitHubRefusal(error, answer.status, sso);
 }
 
 function refusalOf(request: HostRequest, { status, body, headers }: Answer, now: number): HostError {

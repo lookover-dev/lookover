@@ -27,14 +27,14 @@ import {
 } from "@lookover/testkit";
 import {
   acquireLiveLock,
-  appStore,
   type Config,
   carriedWebFiles,
   diskWebFiles,
-  type GitHubSide,
   InstanceHeld,
+  type Keychain,
   type LiveConfig,
   LiveLockHeld,
+  liveAdapters,
   type MemorySkillFolders,
   memoryCommandPath,
   memoryKeychain,
@@ -48,9 +48,19 @@ import {
   runService,
   type Self,
   type System,
+  signInStore,
   VERSION,
 } from "./index.ts";
-import { BOT, fakeEngines, linkOf, SANDBOX, TEST_LIMIT_MS } from "./service.test-support.ts";
+import {
+  fakeEngines,
+  linkOf,
+  OWNER,
+  SANDBOX,
+  SHARED_BOT,
+  signedInOn,
+  signedOutOn,
+  TEST_LIMIT_MS,
+} from "./service.test-support.ts";
 
 // Each test starts a whole service in this process, some two or three: a real server, real locks and a real store
 // on the disk, which `bun run check` runs beside every other file. One start takes 0.1 to 0.5 s here, alone.
@@ -300,17 +310,16 @@ test("a port file that isn't a port is ignored", async () => {
 
 const LEDGER = { owner: "sasensi", name: "ledger" };
 
-/** The owner on the GitHub step, no App made yet. */
+/** The owner on the GitHub step, nobody signed in yet. */
 const ON_GITHUB: Setup = {
   done: false,
   step: "github",
   reached: "github",
   github: "start",
-  githubRefused: null,
   firstReviewChange: null,
 };
 
-const program = (home: string, live?: LiveConfig, asOrganisation?: string): Config => ({
+const program = (home: string, live?: LiveConfig): Config => ({
   mode: "program",
   agent: agentOf(PROGRAM_COMMAND, "binary"),
   home,
@@ -324,7 +333,6 @@ const program = (home: string, live?: LiveConfig, asOrganisation?: string): Conf
   live,
   processes: join(home, "processes.json"),
   atLogin: AT_LOGIN,
-  ...(asOrganisation === undefined ? {} : { asOrganisation }),
 });
 
 /**
@@ -337,39 +345,30 @@ const PROGRAM_COMMAND = "& 'C:\\Users\\Your Name\\lookover.exe' '--home=D:\\my d
 const AT_LOGIN = ["C:\\bun.exe", "C:\\clone\\main.ts", "start", "--no-open"];
 
 /**
- * The program's adapters on the fake GitHub holding the sandbox and the ledger: the fake's App as given, or (`noApp`)
- * none yet, the App store on a fake keychain. They guard nothing themselves: the program's wiring must.
+ * The program's adapters on the fake GitHub holding the sandbox and the ledger: the fake's person signed in to the
+ * shared App in `home`, set up at once, or (`signedOut`) nobody signed in, at the setup's GitHub step. They guard
+ * nothing themselves: the program's wiring must.
  */
 function onFakeHost(
   home: string,
-  { noApp = false, engines = fakeEngines() }: { noApp?: boolean; engines?: Engines } = {},
+  { signedOut = false, engines = fakeEngines() }: { signedOut?: boolean; engines?: Engines } = {},
 ): NonNullable<ProgramDeps["liveAdapters"]> {
   const host = new FakeGitHost({
     repo: SANDBOX,
     repositories: [LEDGER],
-    bot: BOT,
+    bot: SHARED_BOT,
+    person: OWNER,
     changes: [],
     clock: new DemoClock({ at: FROZEN_AT }),
-    ...(noApp ? { app: { made: false } } : {}),
   });
-  const side: GitHubSide = {
-    installations: host,
-    connect: ({ key }) => {
-      host.useKey(key);
-      return { intake: host, writer: host };
-    },
-    ...(noApp
-      ? { apps: appStore({ home, keychain: memoryKeychain(), userOnly: async () => {} }) }
-      : { given: host.credentials() }),
-  };
   return async () => ({
-    github: side,
+    github: signedOut ? signedOutOn(host, home) : await signedInOn(host, home),
     engines,
     selfTests: null,
     signIn: { open: async () => ({ opened: false, reason: "no terminal in a test" }) },
     retrieval: new ScriptedRetrieval(),
-    ...(noApp ? { setup: ON_GITHUB } : {}),
-    setUpAtOnce: !noApp,
+    ...(signedOut ? { setup: ON_GITHUB } : {}),
+    setUpAtOnce: !signedOut,
   });
 }
 
@@ -386,14 +385,6 @@ async function stateOf(service: RunningService, home: string): Promise<State> {
   return await res.json();
 }
 
-function createApp(service: RunningService, home: string): Promise<Response> {
-  return fetch(`${service.origin}${API.commands}`, {
-    method: "POST",
-    headers: { cookie: sessionOf(home), origin: service.origin, "content-type": "application/json" },
-    body: JSON.stringify({ type: "connection.createApp", organisation: null }),
-  });
-}
-
 const names = (state: State) => state.repos.map((r) => `${r.owner}/${r.name}`).sort();
 
 test("the program with a live.json is guarded: only its repositories are watched", async () => {
@@ -408,26 +399,137 @@ test("the program with a live.json is guarded: only its repositories are watched
   ]);
 });
 
-test("a start its live config runs as the organisation's App says so once, before its link", async () => {
+/** A Linux machine, its tools in `/usr/bin`. */
+const LINUX: System = {
+  platform: "linux",
+  homedir: "/home/ada",
+  env: { PATH: "/usr/bin" },
+  which: (tool) => `/usr/bin/${tool}`,
+};
+
+/** This clone, as `main.ts` says it. */
+const CLONE: Self = { kind: "clone", bun: process.execPath, main: join(import.meta.dir, "main.ts") };
+
+/** The person the live sign-in names in these tests. */
+const SIGNED_IN = { id: 11247504, login: "sasensi" };
+
+/**
+ * Live mode's adapters on `keychain` as they say how the data folder starts, and its sign-in store as they built it;
+ * the fake host in place of GitHub's network and the fake engines in place of the AIs, so nothing reaches either.
+ */
+const startsAsLive =
+  (home: string, keychain: Keychain): NonNullable<ProgramDeps["liveAdapters"]> =>
+  async (options) => {
+    const real = await liveAdapters({ ...options, keychain });
+    const fake = await onFakeHost(home, { signedOut: true })(options);
+    const host = new FakeGitHost({
+      repo: SANDBOX,
+      bot: SHARED_BOT,
+      person: SIGNED_IN,
+      changes: [],
+      clock: new DemoClock({ at: FROZEN_AT }),
+    });
+    const { signIns } = real.github.shared;
+    return {
+      ...fake,
+      github: {
+        ...fake.github,
+        shared: {
+          signIn: host,
+          signIns,
+          accounts: () => host,
+          connect: () => ({ intake: host, writer: host }),
+        },
+      },
+      ...(real.setup === undefined ? {} : { setup: real.setup }),
+      ...(real.setUpAtOnce === undefined ? {} : { setUpAtOnce: real.setUpAtOnce }),
+      ...(real.start === undefined ? {} : { start: real.start }),
+    };
+  };
+
+/** A sign-in to the shared App for `SIGNED_IN`, kept in `folder` on `keychain`. */
+async function keepSignIn(folder: string, keychain: Keychain): Promise<void> {
+  await signInStore({ home: folder, keychain, userOnly: async () => {} }).write({
+    token: "ghu_test",
+    expiresAt: FROZEN_AT + 8 * 3_600_000,
+    refreshToken: "ghr_test",
+    refreshExpiresAt: FROZEN_AT + 180 * 86_400_000,
+    person: SIGNED_IN,
+  });
+}
+
+test("serve --live --sign-ins=<dir> on a signed-in folder starts set up, and says who it runs as and where", async () => {
   const home = newHome();
   const run = deps(home);
-  const said =
-    "Runs as lookover-dev's App 5297673 on lookover-dev/lookover-sandbox and lookover-dev/lookover-private.";
-  const live = {
-    repositories: [
-      { owner: "lookover-dev", name: "lookover-sandbox" },
-      { owner: "lookover-dev", name: "lookover-private" },
-    ],
-  };
-  const service = await runService(program(home, live, said), {
+  // The live sign-in (ADR 0073): another folder's, kept on a keychain of the test's.
+  const signIns = mkdtempSync(join(realpathSync.native(tmpdir()), "lookover-run-sign-ins-"));
+  cleanups.push(() => rmSync(signIns, { recursive: true, force: true }));
+  const keychain = memoryKeychain();
+  await keepSignIn(signIns, keychain);
+  writeFileSync(
+    join(home, "live.json"),
+    JSON.stringify({ repositories: ["lookover-dev/lookover-private", "lookover-dev/lookover-sandbox"] }),
+  );
+  const config = readConfig(["--live", `--home=${home}`, `--sign-ins=${signIns}`], LINUX, CLONE);
+  const service = await runService(config, { ...run.given, liveAdapters: startsAsLive(home, keychain) });
+  cleanups.push(() => service.stop());
+  expect((await stateOf(service, home)).setup).toMatchObject({ done: true });
+  expect(run.out[0]).toBe(
+    `Runs on the shared App, lookover-dev, as sasensi, signed in at ${signIns}, on lookover-dev/lookover-private and lookover-dev/lookover-sandbox.`,
+  );
+});
+
+test("serve --live on a folder no one signed in to starts at the setup, saying so", async () => {
+  const home = newHome();
+  const run = deps(home);
+  writeFileSync(join(home, "live.json"), JSON.stringify({ repositories: ["lookover-dev/lookover-sandbox"] }));
+  const config = readConfig(["--live", `--home=${home}`], LINUX, CLONE);
+  const service = await runService(config, {
     ...run.given,
-    liveAdapters: onFakeHost(home),
+    liveAdapters: startsAsLive(home, memoryKeychain()),
   });
   cleanups.push(() => service.stop());
-  expect(run.out).toEqual([
-    said,
-    `\n  Lookover runs. Its live config guards it. Run \`${PROGRAM_COMMAND} open\` to open it.\n`,
-  ]);
+  expect((await stateOf(service, home)).setup).toMatchObject({ done: false });
+  expect(run.out[0]).toBe(`Not signed in to the shared App: ${home} keeps no sign-in. Sign in from the app.`);
+});
+
+test("serve --live on a sign-in that no longer opens says to sign in again", async () => {
+  const home = newHome();
+  const run = deps(home);
+  // Kept on another keychain than the one the service opens it with: its data key is gone.
+  await keepSignIn(home, memoryKeychain());
+  writeFileSync(join(home, "live.json"), JSON.stringify({ repositories: ["lookover-dev/lookover-sandbox"] }));
+  const config = readConfig(["--live", `--home=${home}`], LINUX, CLONE);
+  const service = await runService(config, {
+    ...run.given,
+    liveAdapters: startsAsLive(home, memoryKeychain()),
+  });
+  cleanups.push(() => service.stop());
+  expect(run.out[0]).toBe(
+    `Not signed in to the shared App: the sign-in ${home} keeps for sasensi no longer opens. Sign in again: bun run live --sign-in.`,
+  );
+});
+
+test("serve --live on a data folder that still holds an App of its own from an earlier version runs on its sign-in all the same", async () => {
+  const home = newHome();
+  const run = deps(home);
+  const keychain = memoryKeychain();
+  await keepSignIn(home, keychain);
+  mkdirSync(join(home, "github"), { recursive: true });
+  writeFileSync(
+    join(home, "github", "app.json"),
+    JSON.stringify({ id: 5202093, slug: "lookover-old", key: { protection: "keychain" } }),
+  );
+  writeFileSync(join(home, "live.json"), JSON.stringify({ repositories: ["lookover-dev/lookover-sandbox"] }));
+  const config = readConfig(["--live", `--home=${home}`], LINUX, CLONE);
+  const service = await runService(config, { ...run.given, liveAdapters: startsAsLive(home, keychain) });
+  cleanups.push(() => service.stop());
+  expect(run.out[0]).toBe(
+    `Runs on the shared App, lookover-dev, as sasensi, signed in at ${home}, on lookover-dev/lookover-sandbox.`,
+  );
+  expect((await stateOf(service, home)).setup).toMatchObject({ done: true });
+  // Read no more, and left where it was.
+  expect(existsSync(join(home, "github", "app.json"))).toBe(true);
 });
 
 test("the program without a live.json is unguarded: every repository the installation lists is watched", async () => {
@@ -505,6 +607,7 @@ test("only the program without a live.json registers start at login on the machi
       platform: "linux",
       live: { repositories: [SANDBOX] },
       processes: join(liveHome, "processes.json"),
+      signIns: liveHome,
     },
     { ...liveRun.given, liveAdapters: onFakeHost(liveHome) },
   );
@@ -648,11 +751,10 @@ test("the person's gh: the program, guarded or not, and live mode read the real 
   expect(demoRun.ghAsked).toEqual([]);
 });
 
-test("live mode's adapters get the person's gh, asked once: live.json's organisation App works for its person", async () => {
+test("the program asks for the person's gh once, for the room", async () => {
   const home = newHome();
   const run = deps(home);
   const made: Gh[] = [];
-  const seen: (Gh | undefined)[] = [];
   const service = await runService(program(home, { repositories: [SANDBOX] }), {
     ...run.given,
     gh: () => {
@@ -660,15 +762,10 @@ test("live mode's adapters get the person's gh, asked once: live.json's organisa
       made.push(gh);
       return gh;
     },
-    liveAdapters: (options) => {
-      seen.push(options.gh);
-      return onFakeHost(home)(options);
-    },
+    liveAdapters: onFakeHost(home),
   });
   cleanups.push(() => service.stop());
   expect(made).toHaveLength(1);
-  expect(seen).toEqual(made);
-  expect(seen[0]).toBe(made[0]);
 });
 
 test("the program is wired to the real gh, which refuses to run under bun test", async () => {
@@ -682,26 +779,6 @@ test("the program is wired to the real gh, which refuses to run under bun test",
   const demoHome = newHome();
   const shown = await runService(demo(demoHome), given);
   cleanups.push(() => shown.stop());
-});
-
-test("the program creates an App only unguarded: with a live.json, Create it on GitHub refuses", async () => {
-  const bare = newHome();
-  const unguarded = await runService(program(bare), {
-    ...deps(bare).given,
-    liveAdapters: onFakeHost(bare, { noApp: true }),
-  });
-  cleanups.push(() => unguarded.stop());
-  expect((await createApp(unguarded, bare)).status).toBe(200);
-
-  const home = newHome();
-  const guardedRun = await runService(program(home, { repositories: [SANDBOX] }), {
-    ...deps(home).given,
-    liveAdapters: onFakeHost(home, { noApp: true }),
-  });
-  cleanups.push(() => guardedRun.stop());
-  const refused = await createApp(guardedRun, home);
-  expect(refused.status).toBe(409);
-  expect(await refused.json()).toMatchObject({ createApp: { kind: "live-config" } });
 });
 
 test("the program holds the machine's live lock while it runs, and lets it go when it stops", async () => {
@@ -952,6 +1029,7 @@ test("runService refuses live mode while another live run holds the lock: prints
     platform: "linux",
     live: { repositories: [{ owner: "sasensi", name: "lookover-sandbox" }] },
     processes: join(home, "processes"),
+    signIns: home,
   };
 
   const started = runService(config, run.given);
@@ -1177,6 +1255,7 @@ test("in live mode GitHub's adapter is given the sink's secret: a value it regis
     platform: "linux",
     live: { repositories: [{ owner: "sasensi", name: "lookover-sandbox" }] },
     processes: join(home, "processes"),
+    signIns: home,
   };
   const started = runService(config, {
     ...run.given,

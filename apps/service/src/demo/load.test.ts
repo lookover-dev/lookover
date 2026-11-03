@@ -28,10 +28,10 @@ afterEach(stopAll);
 const MIN = 60_000;
 const id = (n: number) => changeId(`sasensi/lookover-sandbox#${n}`);
 /**
- * S10's seed: sixty-eight events (the start, the repository, six pull requests and their reviews, their outboxes as
+ * S10's seed: sixty-six events (the start, the account the sign-in reaches, the repository, six pull requests and their reviews, their outboxes as
  * they posted, main's rules read and counted three times).
  */
-const SEEDED = 68;
+const SEEDED = 66;
 /** The pull requests S10's seed opens. */
 const S10_CHANGES = [135, 137, 139, 141, 144, 146].map(id);
 /** What a load adds to the seed: the one `clock` event that ends it, so the UI's `now` follows. */
@@ -225,11 +225,12 @@ test("a load waits for a command already under way, and numbers the next room af
   expect(logOf(door)[0]?.seq).toBe(BRIEF_SEEDED + 2);
 });
 
-test("key-lost waits for a command already under way: commands answer 409 loading meanwhile, the held one answers from its room, then the service restarts", async () => {
+test("a restarting fault waits for a command already under way: commands answer 409 loading meanwhile, the held one answers from its room, then the service restarts", async () => {
   // The first room's `demo.advance` is held once it has begun.
   const advancing = held();
   const advanceMay = held();
-  const door = await startBrief({
+  const door = await startScenario(brief(), {
+    scenarios: [brief()],
     driver: async (o) => {
       const demo = await buildDemoRoom(o);
       const first = demo.room;
@@ -254,7 +255,7 @@ test("key-lost waits for a command already under way: commands answer 409 loadin
   const advanced = send(door, { type: "demo.advance", ms: 0 });
   await advancing.at;
   let restarted = false;
-  const lost = inject(door, "key-lost").finally(() => {
+  const lost = inject(door, "login-refused").finally(() => {
     restarted = true;
   });
   // The restart has begun: another command is refused, as during a load, until the held one has answered.
@@ -266,7 +267,8 @@ test("key-lost waits for a command already under way: commands answer 409 loadin
   advanceMay.release();
   expect((await advanced).status).toBe(200);
   expect(await lost).toBe(200);
-  expect((await snapshotOf(door)).connection).toMatchObject({ cause: { kind: "key-lost" } });
+  // The restarted service finds start at login chosen, the computer refusing it.
+  expect((await snapshotOf(door)).service).toMatchObject({ startAtLogin: true, atLogin: "none" });
 });
 
 test("what the old room sends as it stops reaches no stream: they are told to reload, and no number is given twice", async () => {

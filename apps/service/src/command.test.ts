@@ -1,18 +1,16 @@
 // The one `lookover` command (ADR 0054): `serve` runs the service, `wait`, `feedback` and `reply` are the agent's,
-// handed to `agent-cli`'s `run` with the App's slug from the data folder when neither `--app` nor `LOOKOVER_APP`
-// names it, `--version` and `help`. Here at the dispatcher's seam: what it hands on, and what it prints.
+// handed to `agent-cli`'s `run` with their arguments as they are but `--home=` (they read the shared App alone, ADR
+// 0073), `--version` and `help`. Here at the dispatcher's seam: what it hands on, and what it prints.
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  appStore,
   type Config,
   carriedWebFiles,
   type LookoverDeps,
   lookover,
   memoryCommandPath,
-  memoryKeychain,
   memoryLoginItem,
   type Printer,
   renderSkill,
@@ -40,18 +38,10 @@ const machine = (data: string, env: Record<string, string> = {}): System => ({
   which: (program) => `/usr/bin/${program}`,
 });
 
-/** The App `slug`, kept in the data folder `home` as the service keeps it. */
+/** The App `slug` an earlier version kept in the data folder `home` (`github/app.json`), which Lookover reads no more. */
 async function plantApp(home: string, slug: string): Promise<void> {
-  const apps = appStore({ home, keychain: memoryKeychain(), userOnly: async () => {} });
-  await apps.write(
-    {
-      id: 5202093,
-      slug,
-      account: { id: 1, login: "sasensi", type: "User" },
-      person: { id: 1, login: "sasensi" },
-    },
-    "-----BEGIN RSA PRIVATE KEY-----\nnot a key\n-----END RSA PRIVATE KEY-----\n",
-  );
+  mkdirSync(join(home, "github"), { recursive: true });
+  writeFileSync(join(home, "github", "app.json"), JSON.stringify({ id: 5202093, slug }));
 }
 
 /** A clone of Lookover: Bun on its `main.ts`. */
@@ -176,7 +166,7 @@ test("a word that is no verb is a usage error, with the verbs", async () => {
   expect(c.err.join("\n")).toContain("lookover serve");
 });
 
-test("wait, feedback and reply get the App's slug from the profile's data folder when nothing names it", async () => {
+test("wait, feedback and reply get their arguments as they are: no App named, whatever the data folder keeps", async () => {
   const data = folder();
   await plantApp(join(data, "lookover"), "lookover-ada");
   const c = command(machine(data));
@@ -184,61 +174,39 @@ test("wait, feedback and reply get the App's slug from the profile's data folder
   expect(await c.run("feedback")).toBe(3);
   expect(await c.run("reply", "F3", "wont-fix", "The caller checks it.")).toBe(3);
   expect(c.agent).toEqual([
-    ["wait", "--pr", "7", "--json", "--app", "lookover-ada"],
-    ["feedback", "--app", "lookover-ada"],
-    ["reply", "F3", "wont-fix", "The caller checks it.", "--app", "lookover-ada"],
+    ["wait", "--pr", "7", "--json"],
+    ["feedback"],
+    ["reply", "F3", "wont-fix", "The caller checks it."],
   ]);
 });
 
-test("--home, else LOOKOVER_HOME, names the data folder the slug is read from, and is not handed on", async () => {
+// The agent's `World` has no environment: whatever names an App here never reaches it through the command either.
+test("LOOKOVER_APP is ignored, and --home is not handed on", async () => {
   const flagged = folder();
-  const byEnv = folder();
   await plantApp(flagged, "by-flag");
-  await plantApp(byEnv, "by-env");
-  const c = command(machine(folder(), { LOOKOVER_HOME: byEnv }));
+  const c = command(machine(folder(), { LOOKOVER_APP: "lookover-xy8f5o" }));
   await c.run("wait", `--home=${flagged}`);
   await c.run("wait");
-  expect(c.agent).toEqual([
-    ["wait", "--app", "by-flag"],
-    ["wait", "--app", "by-env"],
-  ]);
+  expect(c.agent).toEqual([["wait"], ["wait"]]);
 });
 
-test("--app or LOOKOVER_APP still wins over the data folder's App", async () => {
-  const data = folder();
-  await plantApp(join(data, "lookover"), "lookover-ada");
-  const flag = command(machine(data));
-  await flag.run("wait", "--app", "other");
-  await flag.run("wait", "--app=other");
-  expect(flag.agent).toEqual([
+test("LOOKOVER_HOME's App is not handed on: no --app from the data folder it names", async () => {
+  const named = folder();
+  await plantApp(named, "lookover-ada");
+  const c = command(machine(folder(), { LOOKOVER_HOME: named }));
+  await c.run("wait", "--pr", "7");
+  await c.run("feedback");
+  expect(c.agent).toEqual([["wait", "--pr", "7"], ["feedback"]]);
+});
+
+test("--app goes on as it is, for the agent's command to refuse it", async () => {
+  const c = command(machine(folder()));
+  await c.run("wait", "--app", "other");
+  await c.run("wait", "--app=other");
+  expect(c.agent).toEqual([
     ["wait", "--app", "other"],
     ["wait", "--app=other"],
   ]);
-  const env = command(machine(data, { LOOKOVER_APP: "from-env" }));
-  await env.run("wait");
-  expect(env.agent).toEqual([["wait"]]);
-});
-
-test("with no App in the data folder, the agent's command is handed its arguments as they are, to say what's missing", async () => {
-  const c = command(machine(folder()));
-  expect(await c.run("wait", "--json")).toBe(3);
-  expect(c.agent).toEqual([["wait", "--json"]]);
-});
-
-test("a data folder whose App record is malformed, foreign or unreadable names no App: the arguments go on as they are", async () => {
-  const records: [string, (home: string) => void][] = [
-    ["not JSON", (home) => writeFileSync(join(home, "github", "app.json"), "{ not json")],
-    ["someone else's JSON", (home) => writeFileSync(join(home, "github", "app.json"), '{"name":"other"}')],
-    ["a folder", (home) => mkdirSync(join(home, "github", "app.json"))],
-  ];
-  for (const [what, plant] of records) {
-    const home = folder();
-    mkdirSync(join(home, "github"));
-    plant(home);
-    const c = command(machine(folder(), { LOOKOVER_HOME: home }));
-    expect(await c.run("wait", "--json"), what).toBe(3);
-    expect(c.agent, what).toEqual([["wait", "--json"]]);
-  }
 });
 
 test("--home with its folder as the next word is refused for every verb, with the form to use", async () => {

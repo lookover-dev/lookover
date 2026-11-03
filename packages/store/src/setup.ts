@@ -13,7 +13,6 @@ import {
   furthestReached,
   SETUP_ORDER,
   type SetupGitHub,
-  type SetupGitHubRefusal,
   type Setup as SetupState,
 } from "@lookover/contracts";
 import { z } from "zod";
@@ -40,20 +39,12 @@ const START: SetupState = {
   step: "ai",
   reached: "ai",
   github: "start",
-  githubRefused: null,
   firstReviewChange: null,
 };
 
 // The steps as contracts lists them: `z.enum` takes the list, so a step added there is read here without a word.
 const STEP = z.enum(SETUP_ORDER);
-const GITHUB = enumOf<SetupGitHub>()([
-  "start",
-  "waiting-for-app",
-  "waiting-for-install",
-  "nothing-granted",
-  "done",
-]);
-const REFUSED = enumOf<SetupGitHubRefusal>()(["unreachable", "expired", "refused", "elsewhere"]);
+const GITHUB = enumOf<SetupGitHub>()(["start", "waiting-for-install", "nothing-granted", "done"]);
 const flag = z.union([z.literal(0), z.literal(1)]).transform((f) => f === 1);
 const startRow = z.object({ enabled: flag });
 const row = z.object({
@@ -61,7 +52,6 @@ const row = z.object({
   step: STEP,
   reached: STEP,
   github: GITHUB,
-  github_refused: REFUSED.nullable(),
   first_review_change: z.string().transform(changeId).nullable(),
 });
 
@@ -72,15 +62,12 @@ const furthest = (setup: SetupState): SetupState => ({
 });
 
 export function setup(db: Database): Setup {
-  const select = db.query(
-    "SELECT done, step, reached, github, github_refused, first_review_change FROM setup WHERE id = 1",
-  );
+  const select = db.query("SELECT done, step, reached, github, first_review_change FROM setup WHERE id = 1");
   const upsert = db.query(`
-    INSERT INTO setup (id, done, step, reached, github, github_refused, first_review_change)
-    VALUES (1, ?, ?, ?, ?, ?, ?)
+    INSERT INTO setup (id, done, step, reached, github, first_review_change)
+    VALUES (1, ?, ?, ?, ?, ?)
     ON CONFLICT (id) DO UPDATE SET done = excluded.done, step = excluded.step, reached = excluded.reached,
-      github = excluded.github, github_refused = excluded.github_refused,
-      first_review_change = excluded.first_review_change
+      github = excluded.github, first_review_change = excluded.first_review_change
   `);
   const read = (): SetupState => {
     const found = select.get();
@@ -91,21 +78,13 @@ export function setup(db: Database): Setup {
       step: r.step,
       reached: r.reached,
       github: r.github,
-      githubRefused: r.github_refused,
       firstReviewChange: r.first_review_change,
     };
   };
   // Immediate: the setup is read under the write lock, so two writes never lose each other's patch.
   const write = db.transaction((patch: Partial<SetupState>): SetupState => {
     const next = furthest({ ...read(), ...patch });
-    upsert.run(
-      next.done ? 1 : 0,
-      next.step,
-      next.reached,
-      next.github,
-      next.githubRefused,
-      next.firstReviewChange,
-    );
+    upsert.run(next.done ? 1 : 0, next.step, next.reached, next.github, next.firstReviewChange);
     return next;
   });
   const selectStart = db.query("SELECT enabled FROM start_at_login WHERE id = 1");

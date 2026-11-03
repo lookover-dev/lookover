@@ -11,8 +11,10 @@ import {
   commitSha,
   type HostAccount,
   type Repository,
+  type RepositoryRef,
   type SignIn,
   type State,
+  statusOf,
 } from "@lookover/contracts";
 import { DemoClock, type FakeChange, FakeGitHost } from "@lookover/testkit";
 import { type GitHubSide, memoryKeychain, type RunningService, signInStore } from "./index.ts";
@@ -68,8 +70,6 @@ async function signedIn(host: FakeGitHost, dir: string): Promise<GitHubSide> {
   const signIns = signInStore({ home: dir, keychain: memoryKeychain(), userOnly });
   await signIns.write(signInAt(T0));
   return {
-    installations: host,
-    connect: () => ({ intake: host, writer: host }),
     shared: {
       signIn: host,
       signIns,
@@ -100,12 +100,21 @@ async function onTwoAccounts(reviews = 0) {
 const reviewOf = (service: RunningService, cookie: string, change: ChangeId) =>
   post(service, cookie, { type: "review.request", changeId: change });
 
+/**
+ * The status block on a repository's pull request #1, as a list: one once a round posted. The rounds here find
+ * nothing, so they post no review (ADR 0074): the block is what says a round posted.
+ */
+const summariesOn = (host: FakeGitHost, repo: RepositoryRef) => {
+  const block = statusOf(host.view({ repo, number: 1 }).description);
+  return block === null ? [] : [block];
+};
+
 const idsOf = (state: State): string[] => state.repos.map((r: Repository) => String(r.id));
 
 test("signed in on two accounts, both are the connection's, and their two same-named repositories are reviewed at once", async () => {
   const { service, cookie, host } = await onTwoAccounts(2);
   const state: State = await snapshot(service, cookie);
-  expect(state.connection).toMatchObject({ id: "github:sasensi", way: "shared", state: "connected" });
+  expect(state.connection).toMatchObject({ id: "github:sasensi", state: "connected" });
   expect(state.connection.accounts).toEqual([
     { account: SASENSI, installationId: 60_000_001, cause: null, owner: true },
     { account: ORG, installationId: 60_000_002, cause: null, owner: null },
@@ -121,7 +130,8 @@ test("signed in on two accounts, both are the connection's, and their two same-n
   );
   for (const repo of [SANDBOX, ORG_SANDBOX]) {
     const shown = host.view({ repo, number: 1 });
-    expect(shown.reviews).toHaveLength(1);
+    expect(shown.reviews).toEqual([]);
+    expect(summariesOn(host, repo)).toHaveLength(1);
     expect(shown.checks.map((c) => `${c.status} ${c.conclusion}`)).toEqual(["completed success"]);
   }
 });
@@ -160,7 +170,7 @@ test("the organisation suspended: its account shows it, naming who suspended it,
     state: "deferred",
     deferral: { reason: "connection" },
   });
-  expect(host.view({ repo: SANDBOX, number: 1 }).reviews).toHaveLength(1);
+  expect(summariesOn(host, SANDBOX)).toHaveLength(1);
 
   // Lifted just before the next listing of the accounts: that listing clears the cause, and what waited is done.
   await time.advance(4 * MIN);
@@ -172,7 +182,7 @@ test("the organisation suspended: its account shows it, naming who suspended it,
   );
   expect(back.connection.state).toBe("connected");
   expect(idsOf(back)).toEqual(["sasensi/lookover-sandbox", "lookover-dev/lookover-sandbox"]);
-  expect(host.view({ repo: ORG_SANDBOX, number: 1 }).reviews).toHaveLength(1);
+  expect(summariesOn(host, ORG_SANDBOX)).toHaveLength(1);
 });
 
 test("an organisation asking for SSO refuses its repository alone: the poll gives its account the cause, never the connection", async () => {
@@ -223,7 +233,7 @@ test("an organisation asking for SSO refuses its repository alone: the poll give
     cause: null,
     owner: null,
   });
-  expect(host.view({ repo: ORG_SANDBOX, number: 1 }).reviews).toHaveLength(1);
+  expect(summariesOn(host, ORG_SANDBOX)).toHaveLength(1);
 });
 
 /** A second organisation the person reaches, polled after the first. */
@@ -281,7 +291,7 @@ test("an organisation asking for SSO, polled first, never keeps the accounts aft
     state: "deferred",
     deferral: { reason: "connection" },
   });
-  expect(host.view({ repo: LABS_TOOLS, number: 1 }).reviews).toHaveLength(1);
+  expect(summariesOn(host, LABS_TOOLS)).toHaveLength(1);
 });
 
 test("an organisation no longer reached at all departs with its repository; the person's own stays", async () => {

@@ -4,33 +4,34 @@
 // GitHub alone, with its own login. `wait` takes the commit from local git (never what GitHub shows first), finds
 // the pull request (`--pr`, else the current branch's), waits about 15 s for GitHub to show that commit as its
 // head, posts `/lookover review` with a hidden marker naming the commit only when that commit has neither a
-// request naming it nor a check of its own person's from the App, then reads that commit's check from that App alone
-// (`--app`, else `LOOKOVER_APP`, else the shared App's, ADR 0066) every 10 s, and exits with a code that says what
-// to do next. Of that App's checks it reads only those of its own person: those whose external id names the agent's
-// account (GitHub's `GET /user`), else those naming nobody, never another person's; Lookover's threads are then the
-// App's bot's or, on the shared App alone, that check's person's, and its replies the bot's or that person's with a
-// reply marker (an own App's Lookover posts only as its bot). A check a skip rule completed on an automatic trigger
-// (an opening or a push: "Not your pull request" on a colleague's) answers nobody: `wait` leaves it out, so it asks
-// anyway (ADR 0043) and waits for the check its request leads to.
+// request naming it nor a check of its own person's from the App, then reads that commit's check from the one App,
+// the shared App (ADR 0066, 0073: nothing names another), every 10 s, and exits with a code that says what to do
+// next. Of the App's checks it reads only those of its own person: those whose external id names the agent's account
+// (GitHub's `GET /user`), never another person's nor one naming nobody; Lookover's threads are then the App's bot's or
+// that person's, and its replies the bot's or that person's with a reply marker. A check a skip rule completed on an
+// automatic trigger (an opening or a push: "Not your pull request" on a colleague's) answers nobody: `wait` leaves it
+// out, so it asks anyway (ADR 0043) and waits for the check its request leads to.
 // Once a round's check completes, `wait` reads Lookover's threads: when the round didn't read a person's newest reply
 // on the thread of a finding it left unsettled (the finding's claim, in GitHub's time, is older than the reply; with
 // no claim, the round started before it), it asks again on the same commit (never on a fork's pull request), its
 // request naming that reply (none posted when one names it already), and only a check that appeared since, or whose
-// round read the reply, answers it. Otherwise it resolves, with the agent's login, the open threads of
-// the findings the round verified fixed (the App can't, ADR 0052), says which on stderr, and says a refusal plainly
-// without changing the exit. `feedback` reads the newest check of the pull request's head once, and the threads;
+// round read the reply, answers it. Otherwise it resolves, with the agent's login, the open threads of the findings
+// the round verified fixed, withdrew or saw dismissed by the owner (the App can't, ADR 0052, 0074), says which and
+// why on stderr, and says a refusal plainly without changing the exit. `feedback` reads the newest check of the pull
+// request's head once, and the threads;
 // `reply <finding> <claim> <text>` posts on the finding's thread, its first line opened as Lookover reads a claim
 // (`Fixed:`, `Won't fix:`, `Disputed:`, `Deferred:`, `Question:`), and refuses a finding with no thread.
 // Interface: `run(argv, world) → exit code`, the whole program against a `World` (the host with the agent's
-// token, the local checkout, the environment, a clock and `sleep`, stdout and stderr); `realWorld(cwd, env)` is
-// the machine's (the checkout through `git`, the real clock and streams); `createAgentHost` (`AgentHost` over
-// GitHub's REST API, and its GraphQL API for the threads and resolving, with the agent's token) and `agentToken`
-// (`GH_TOKEN`, `GITHUB_TOKEN`, else `gh auth token`) are what it builds the host from, and what the live suite
-// uses; `USAGE`, what `help` prints, is part of the `lookover` command's help, and `CLAIMS` the claims' words and
-// openings `reply` takes, which the docs list. It has no program of its own: the one
-// `lookover` command (`apps/service`, ADR 0054) runs it, from a clone with `bun run lookover`, `--app` filled from
-// its data folder when nothing names the App. `SKILL_TEMPLATE` is the loop's skill, `skill/SKILL.md`, as text: the
-// service renders it into the coding agents' folders with Lookover's command (ADR 0058).
+// token, the local checkout, a clock and `sleep`, stdout and stderr); `realWorld(cwd, env)` is the machine's (the
+// checkout through `git`, the real clock and streams); `createAgentHost` (`AgentHost` over GitHub's REST API, and its
+// GraphQL API for the threads and resolving, with the agent's token) and `agentToken` (`GH_TOKEN`, `GITHUB_TOKEN`,
+// else `gh auth token`) are what it builds the host from, and what the live suite uses; `USAGE`, what `help` prints,
+// is part of the `lookover` command's help, and `CLAIMS` the claims' words and openings `reply` takes, which the docs
+// list. It has no program of its own: the one `lookover` command (`apps/service`, ADR 0054) runs it, from a clone
+// with `bun run lookover`. `SKILL_TEMPLATE` is the loop's skill, `skill/SKILL.md`, as text: the service renders it
+// into the coding agents' folders with Lookover's command (ADR 0058). `ours` is not the agent's but the merge gate's
+// (`scripts/ship-gate.ts`, owner-held): its own person's checks, else those naming nobody, a fallback the agent never
+// takes.
 // Exit codes (exploration 05 §11.3): 0 nothing to fix (`next_action` `stop`), 1 error, 2 usage, 3 something to
 // fix (`fix`, or `reply`), 4 a person is needed (`ask_human`), 5 timed out (`--timeout`, 30 minutes by default;
 // `feedback`: the newest check is still running), 6 skipped (the check's `run.state` `skipped` or `cancelled`),
@@ -49,9 +50,8 @@
 // before the timeout. The newest of the App's checks on the commit is the one read.
 // Error modes: `run` never throws. A host's refusal (`HostError`), a git that can't say, no token, no pull
 // request or a commit not pushed are exit 1, with the reason on stderr.
-// It must never know: the App's key or token (it never imports `github`, ADR 0021), the service, or Lookover's
-// rules beyond the result block's words and the claims' openings.
-import { SHARED_APP } from "@lookover/contracts";
+// It must never know: the person's sign-in token the service keeps (it never imports `github`, ADR 0021, ADR 0073),
+// the service, or Lookover's rules beyond the result block's words and the claims' openings.
 import { ask, USAGE } from "./args.ts";
 import { feedback } from "./feedback.ts";
 import { reply } from "./reply.ts";
@@ -73,11 +73,9 @@ export async function run(argv: string[], w: World): Promise<number> {
     return 0;
   }
   const json = asked.command !== "reply" && asked.args.json;
-  // Nothing naming the App: the shared App's (ADR 0066).
-  const app = asked.args.app || w.env.LOOKOVER_APP || SHARED_APP.slug;
-  if (asked.command === "reply") return reply(asked.args, app, w);
-  if (asked.command === "wait") return report(await wait(asked.args, app, w), json, w);
-  const { outcome, threads, poster } = await feedback(asked.args, app, w);
+  if (asked.command === "reply") return reply(asked.args, w);
+  if (asked.command === "wait") return report(await wait(asked.args, w), json, w);
+  const { outcome, threads, poster } = await feedback(asked.args, w);
   return reportFeedback(outcome, threads, poster, json, w);
 }
 

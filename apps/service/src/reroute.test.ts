@@ -16,7 +16,7 @@ import {
   until,
 } from "./demo/demo.test-support.ts";
 import type { Scenario } from "./index.ts";
-import { SANDBOX, TEST_LIMIT_MS } from "./service.test-support.ts";
+import { SANDBOX, SHARED_BOT, TEST_LIMIT_MS } from "./service.test-support.ts";
 
 setDefaultTimeout(TEST_LIMIT_MS);
 afterEach(stopAll);
@@ -49,7 +49,7 @@ const scenario: Scenario = {
   path: "/",
   world: {
     repo: SANDBOX,
-    bot: { id: 2, login: "lookover-spike-sasensi[bot]" },
+    bot: SHARED_BOT,
     owner: OWNER,
     engines: {
       claude: { installed: true, version: "2.4.1", signedIn: false },
@@ -98,8 +98,11 @@ const onClaude: Pick<ReviewJob, "state" | "deferral"> = {
   state: "deferred",
   deferral: { reason: "engine-signed-out", engine: "claude" },
 };
-/** The start, the repository, #1 opened, queued and deferred, #2 opened and skipped, the ask queued and deferred. */
-const SEEDED_EVENTS = 9;
+/**
+ * The start, the account the sign-in reaches, the repository, #1 opened, queued and deferred, #2 opened and skipped,
+ * the ask queued and deferred.
+ */
+const SEEDED_EVENTS = 10;
 
 /** Reads events until a `job.changed` of `change` whose job is in `state`; the events read. */
 async function untilJob(

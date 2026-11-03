@@ -1,6 +1,6 @@
 // The outbox (ADR 0044), in the run's and `publish`'s verbs: "this run reached publishing: save its round and the
 // posts it owes", "the round saved for this run, and where its posts are", "a send of this post began", "the host
-// took it, and this is its id for it", "this round's review goes with its findings in the summary".
+// took it, and this is its id for it", "this round's review goes with its findings in the status block".
 // A run that reaches publishing saves, in one transaction: its round (the commit it reviewed, when, and the ledger
 // held as it is until the review lands: the findings the review posts not posted yet), what the posts are rendered
 // from (the caller's plan, kept as given), the ledger once the review lands, the posts it owes, in order, and its
@@ -8,12 +8,15 @@
 // id, in a transaction with what that post settles: the check sent is the job's check on the run's commit (the job's
 // end completes that one if a later post is refused); the review sent lands the ledger, its findings posted; the
 // check completed completes the job's check; a reply on a thread and a comment minimized (ADR 0052), one post each,
-// settle nothing else. The run's end (`jobs.runEnded`) is written apart, once every post is
-// sent or given up. A send begun is counted before the host is asked (`tries`): one begun and never marked sent may
-// be on the host already. A round whose review goes with every finding in the summary (GitHub refused one of its
-// comments) is kept so, before the review is sent again. The rounds whose review send began and was never marked
-// sent (`unsure`) are the ones the host may hold; the findings of rounds whose review never landed are `withheld`,
-// a preview's included (its outbox is empty: its review never lands).
+// settle nothing else. The run's end (`jobs.runEnded`) is written apart, once every post is sent or given up. A
+// send begun is counted before the host is asked (`tries`): one begun and never marked sent may be on the host
+// already. Whether the round owes a review (ADR 0074: only one with a line comment does) is kept as it is saved, its
+// `review` among its posts or not. A round whose review goes with every finding in the status block (GitHub refused
+// one of its comments) is kept so, and owes no review from then on. A round that owes no review lands its ledger as
+// its status block's send begins, its findings posted whatever GitHub answers (or the block written at all), so
+// they are never sent again. The rounds whose review send began and was never marked sent (`unsure`) are the ones
+// the host may hold; the findings of rounds whose ledger never landed are `withheld`, a preview's included (its
+// outbox is empty: it never lands).
 // Programming errors, thrown: saving for a run that has ended or already saved its round; marking a post of a run
 // with no round saved, or of a kind it doesn't owe.
 import type { Database } from "bun:sqlite";
@@ -41,12 +44,12 @@ function marked(json: string, commented: readonly FindingId[]): string {
 
 /**
  * A post of a round, in `publish`'s spelling: the check, the review, a reply on a finding's thread (`reply:<finding>`),
- * the summary, the check completed, a comment minimized (`minimize:<global id>`).
+ * the status block in the description, the check completed, a comment minimized (`minimize:<global id>`).
  */
 export type PostKind = PlainPostKind | `${PerPostKind}:${string}`;
 
 /** The posts a round makes once. */
-type PlainPostKind = "check" | "review" | "summary" | "completed";
+type PlainPostKind = "check" | "review" | "status" | "completed";
 /** The posts a round makes once per thread or comment: the kind, then which. */
 type PerPostKind = "reply" | "minimize";
 
@@ -54,13 +57,13 @@ type PerPostKind = "reply" | "minimize";
 export interface RoundSaved<P> {
   /** The round's number on the change. */
   n: number;
-  /** The ledger until the round's review lands: the findings it posts held as not posted. */
+  /** The ledger until the round lands: the findings it posts held as not posted. */
   held: Finding[];
-  /** The ledger once the review lands. */
+  /** The ledger once the round lands. */
   ledger: Finding[];
   /** What the posts are rendered from, kept as given and given back as it was. */
   plan: P;
-  /** The posts the round owes, in the order they are sent. */
+  /** The posts the round owes, in the order they are sent: `review` among them only when it owes one. */
   posts: readonly PostKind[];
 }
 
@@ -77,7 +80,7 @@ export interface Posting<P> {
   job: ReviewJob;
   plan: P;
   posts: StoredPost[];
-  /** The round's review goes with every finding in the summary: GitHub refused one of its comments. */
+  /** The round's findings go in the status block, and it owes no review: GitHub refused one of its comments. */
   degraded: boolean;
   /** Where the run is: publishing, since its round was saved, and the steps before it. */
   steps: RunSteps;
@@ -91,30 +94,37 @@ export interface Posts {
   saved<P>(runId: RunId, round: RoundSaved<P>, at: number): RunSteps;
   /** The round run `runId` saved, its plan as given and its posts as they stand; null when it saved none. */
   of<P>(runId: RunId): Posting<P> | null;
-  /** A send of `kind` began: counted before the host is asked. */
+  /**
+   * A send of `kind` began: counted before the host is asked. The status block of a round that owes no review lands
+   * the ledger with it, whatever the host answers.
+   */
   sending(runId: RunId, kind: PostKind): void;
   /**
    * The host took `kind`, or already held it, as `hostId`: kept with what that post settles, in one transaction. The
    * review lands the ledger, its findings in `commented` marked `commented` (the review holds a comment on each).
    */
   sent(runId: RunId, kind: PostKind, hostId: string, commented?: readonly FindingId[]): void;
-  /** The round's review goes with every finding in the summary: kept before it is sent again. */
-  degrade(runId: RunId): void;
   /**
-   * The change's findings a round raised to post whose review never landed (its posts given up, or still under
+   * GitHub refused a comment of the round's review: its findings go with every other in the status block, and it
+   * owes no review from then on.
+   */
+  degrade(runId: RunId): void;
+  /** Whether run `runId`'s round landed its ledger: its review sent, or with none owed, its status block begun. */
+  landed(runId: RunId): boolean;
+  /**
+   * The change's findings a round raised to post whose ledger never landed (its posts given up, or still under
    * way while its change is busy, or a preview's, which owes none): the next round posts those still open. Once a
-   * round's review lands, none of its.
+   * round lands, none of its.
    */
   withheld(changeId: ChangeId): FindingId[];
   /**
-   * The change's rounds whose review send began and was never marked sent (the answer lost, or the store failed to
-   * keep it): the host may hold it. Each with its plan as given and whether its review went with every finding in
-   * the summary, in round order.
+   * The change's rounds that owe a review whose send began and was never marked sent (the answer lost, or the store
+   * failed to keep it): the host may hold it. Each with its plan as given, in round order.
    */
-  unsure<P>(changeId: ChangeId): { runId: RunId; plan: P; degraded: boolean }[];
+  unsure<P>(changeId: ChangeId): { runId: RunId; plan: P }[];
   /**
    * The change's latest round that owes posts (a preview's owes none): its run, its plan as given, whether its review
-   * went with every finding in the summary, and its check as sent once the round completed it (null before, and
+   * went with every finding in the status block, and its check as sent once the round completed it (null before, and
    * for a round that gave its posts up: its check stays as the job's end left it). What a dismissal restates (ADR
    * 0052). Null before any.
    */
@@ -127,7 +137,7 @@ export interface Posts {
   replies(changeId: ChangeId): number[];
 }
 
-const PLAIN = { check: true, review: true, summary: true, completed: true } satisfies Record<
+const PLAIN = { check: true, review: true, status: true, completed: true } satisfies Record<
   PlainPostKind,
   true
 >;
@@ -154,7 +164,8 @@ const planRow = z.object({
   ledger: z.string(),
   degraded: z.int(),
 });
-const unsureRows = z.array(z.object({ run_id: z.string(), plan: z.string(), degraded: z.int() }));
+const unsureRows = z.array(z.object({ run_id: z.string(), plan: z.string() }));
+const landedRow = z.object({ landed: z.int() });
 const unpostedRows = z.array(z.object({ ledger: z.string(), held: z.string() }));
 const latestRow = z.object({
   run_id: z.string(),
@@ -170,19 +181,28 @@ export function posts(db: Database): Posts {
   const selectJob = db.query("SELECT * FROM jobs WHERE id = ?");
   const selectPlan = db.query("SELECT change_id, n, plan, ledger, degraded FROM plans WHERE run_id = ?");
   const degradePlan = db.query("UPDATE plans SET degraded = 1 WHERE run_id = ?");
-  // The rounds whose review never landed: their ledger as reconciled, and as held.
+  const dropReview = db.query("DELETE FROM posts WHERE run_id = ? AND kind = 'review'");
+  const selectReview = db.query("SELECT 1 FROM posts WHERE run_id = ? AND kind = 'review'");
+  // The rounds whose review send began and was never marked sent.
   const selectUnsure = db.query(
-    `SELECT plans.run_id AS run_id, plans.plan AS plan, plans.degraded AS degraded FROM plans
+    `SELECT plans.run_id AS run_id, plans.plan AS plan FROM plans
      JOIN posts ON posts.run_id = plans.run_id AND posts.kind = 'review' AND posts.host_id IS NULL AND posts.tries > 0
      WHERE plans.change_id = ? ORDER BY plans.n`,
   );
-  // A round whose review never landed: its review owed and not marked sent, or none owed (a preview's empty outbox).
+  // A round that landed its ledger: its review marked sent, or with none owed, its status block begun (a preview's empty
+  // outbox never lands).
+  const LANDED = `(EXISTS (
+       SELECT 1 FROM posts WHERE posts.run_id = plans.run_id AND posts.kind = 'review' AND posts.host_id IS NOT NULL
+     ) OR (NOT EXISTS (SELECT 1 FROM posts WHERE posts.run_id = plans.run_id AND posts.kind = 'review') AND EXISTS (
+       SELECT 1 FROM posts WHERE posts.run_id = plans.run_id AND posts.kind = 'status'
+         AND (posts.tries > 0 OR posts.host_id IS NOT NULL)
+     )))`;
+  const selectLanded = db.query(`SELECT ${LANDED} AS landed FROM plans WHERE plans.run_id = ?`);
+  // The rounds whose ledger never landed: their ledger as reconciled, and as held.
   const selectUnposted = db.query(
     `SELECT plans.ledger AS ledger, rounds.findings AS held FROM plans
      JOIN rounds ON rounds.change_id = plans.change_id AND rounds.n = plans.n
-     WHERE plans.change_id = ? AND NOT EXISTS (
-       SELECT 1 FROM posts WHERE posts.run_id = plans.run_id AND posts.kind = 'review' AND posts.host_id IS NOT NULL
-     ) ORDER BY plans.n`,
+     WHERE plans.change_id = ? AND NOT ${LANDED} ORDER BY plans.n`,
   );
   // The latest round that owes posts, with its check as sent, once the round completed it: a check the round gave up
   // on (the job's end completed it as failed) is never rewritten.
@@ -252,6 +272,22 @@ export function posts(db: Database): Posts {
     return next;
   });
 
+  /** Lands the round's ledger, the findings in `commented` marked so. */
+  const land = (plan: z.infer<typeof planRow>, commented: readonly FindingId[]) =>
+    landLedger.run(marked(plan.ledger, commented), plan.change_id, plan.n);
+
+  const sending = db.transaction((id: RunId, kind: PostKind): void => {
+    const plan = planOf(id, "sending");
+    onPost("sending", id, kind, begin.run(id, kind).changes);
+    if (kind === "status" && selectReview.get(id) === null) land(plan, []);
+  });
+
+  const degrade = db.transaction((id: RunId): void => {
+    planOf(id, "degrade");
+    degradePlan.run(id);
+    dropReview.run(id);
+  });
+
   const sent = db.transaction(
     (id: RunId, kind: PostKind, hostId: string, commented: readonly FindingId[]): void => {
       const plan = planOf(id, "sent");
@@ -262,12 +298,12 @@ export function posts(db: Database): Posts {
           keepCheck.run(hostId, run.sha, run.job_id);
           return;
         case "review":
-          landLedger.run(marked(plan.ledger, commented), plan.change_id, plan.n);
+          land(plan, commented);
           return;
         case "completed":
           completeCheck.run(run.job_id);
           return;
-        case "summary":
+        case "status":
         case "reply":
         case "minimize":
         case null:
@@ -296,17 +332,13 @@ export function posts(db: Database): Posts {
         steps: stepsOf(run),
       };
     },
-    sending: (id, kind) => {
-      planOf(id, "sending");
-      onPost("sending", id, kind, begin.run(id, kind).changes);
-    },
+    sending: (id, kind) => sending(id, kind),
     sent: (id, kind, hostId, commented = []) => sent(id, kind, hostId, commented),
     unsure: (change) =>
       unsureRows.parse(selectUnsure.all(change)).map((row) => ({
         runId: runId(row.run_id),
         // Written by `saved` above from the caller's value: reading it back is reading our own JSON.
         plan: JSON.parse(row.plan),
-        degraded: row.degraded === 1,
       })),
     withheld: (change) => {
       const ids: FindingId[] = [];
@@ -331,9 +363,11 @@ export function posts(db: Database): Posts {
         checkId: latest.check_id,
       };
     },
-    degrade: (id) => {
-      planOf(id, "degrade");
-      degradePlan.run(id);
+    degrade: (id) => degrade(id),
+    landed: (id) => {
+      const row = selectLanded.get(id);
+      if (row === null) throw new Error(`landed: no round saved for run ${id}`);
+      return landedRow.parse(row).landed === 1;
     },
     // The host's ids grow with time: in their order, the oldest first.
     replies: (change) =>

@@ -45,15 +45,6 @@ const command = z.discriminatedUnion("type", [
   z.object({ type: z.literal("engine.signIn"), id: engine }),
   z.object({ type: z.literal("engine.check") }),
   z.object({ type: z.literal("engine.reroute"), from: engine }),
-  // The organisation is taken only once the person's `gh` lists it as theirs to admin (ADR 0059): any text parses.
-  z.object({ type: z.literal("connection.createApp"), organisation: z.string().min(1).nullable() }),
-  z.object({ type: z.literal("gh.check") }),
-  // The key is checked for being there only: a refusal of Zod's names the field, never its value (ADR 0053).
-  z.object({
-    type: z.literal("connection.useApp"),
-    appId: z.number().int().positive(),
-    key: z.string().min(1),
-  }),
   z.object({ type: z.literal("connection.signIn") }),
   z.object({ type: z.literal("connection.cancelSignIn") }),
   // The account is taken only once it is one `Connection.unreached` names (ADR 0067): any login parses.
@@ -122,8 +113,6 @@ const demoInject = z.object({
     "connection-lost",
     "app-uninstalled",
     "app-suspended",
-    "key-refused",
-    "key-lost",
     "nothing-granted",
     "repository-added",
     "repository-removed",
@@ -145,7 +134,6 @@ const demoInject = z.object({
     "gh-signed-in",
     "gh-uninstalled",
     "gh-signed-out",
-    "not-a-member",
   ]),
 }) satisfies z.ZodType<Extract<DemoCommand, { type: "demo.inject" }>>;
 

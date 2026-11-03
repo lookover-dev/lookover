@@ -102,6 +102,16 @@ export function startsAt(now: number, at: number, timeZone?: string): string {
   return day === "tomorrow" ? `tomorrow at ${time}` : `on ${day} at ${time}`;
 }
 
+/**
+ * "at 10:11" today, "on Wed 14 Oct at 10:11" another day, tomorrow included: a reset as the status block on GitHub
+ * says it (ADR 0074), in the browser's zone, which is the service's machine's by default.
+ */
+export function onDayAt(now: number, at: number, timeZone?: string): string {
+  const then = local(at, timeZone);
+  if (then.day === local(now, timeZone).day) return `at ${then.time}`;
+  return `on ${dayText(new Date(then.day * DAY_MS))} at ${then.time}`;
+}
+
 export function isToday(now: number, at: number): boolean {
   return now - at < 16 * 3600_000;
 }
@@ -109,10 +119,12 @@ export function isToday(now: number, at: number): boolean {
 /**
  * A sentence with a command in it: `before`, the command, `after`, joined by spaces. The UI shows the command as
  * inline code (design-system.md "Inline code"); a sentence with none is a plain string. An `after` with a command
- * of its own carries on the sentence with a second one.
+ * of its own carries on the sentence with a second one. `kind: "device-code"`: the command is a code a person types
+ * elsewhere, drawn so its look-alikes can't be taken for each other (design-system.md "Device code").
  */
 export interface WithCommand {
   before: string;
   command: string;
+  kind?: "device-code";
   after: string | WithCommand;
 }

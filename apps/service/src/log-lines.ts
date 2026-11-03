@@ -3,8 +3,8 @@
 // (`sasensi/ledger-api#151`), the engine (`Codex`) or the reviews (`reviews paused`). The events that change no review, and
 // those that change nothing a reader of the file looks for (a step, a clock, a check), write none. The phrases the app
 // and GitHub say too come from `contracts`' copy; the file's own words are here. Times are the machine's local time,
-// as the file's stamps are: "11:00" on the event's own day, else with the date. The manifest flow's lines, which no
-// event carries the words of, are here too (`flowLines`).
+// as the file's stamps are: "11:00" on the event's own day, else with the date. The installation's and the sign-in's
+// lines, which no event carries the words of, are here too (`installationLines`, `signInLines`).
 import {
   type Change,
   cancelPhrase,
@@ -15,8 +15,6 @@ import {
   engineDeferral,
   engineName,
   failureText,
-  type GhWhy,
-  type HostAccount,
   type JobFailure,
   postWaitText,
   type Review,
@@ -169,65 +167,8 @@ function engineLine(
   return `${words} until ${until === null ? "it resets" : timeOf(until, at)}`;
 }
 
-/**
- * The manifest flow's lines (ADR 0053, ADR 0059): why it stopped short, as no event says it, with GitHub's and `gh`'s
- * own words and where an App made elsewhere is; never the code or the key.
- */
-export const flowLines = {
-  /** `gh` couldn't say whether the person admins the organisation chosen. */
-  ghUnanswered: (why: GhWhy, detail: string) => `gh couldn't answer for the organisation (${why}): ${detail}`,
-  /** GitHub refused to convert the code, or couldn't be reached for it. */
-  notMade: (failure: string) => `GitHub didn't make the App: ${failure}`,
-  /** GitHub made the App on `on`, not where the flow asked (`asked`, null: your own account). */
-  elsewhere: (slug: string, on: string, asked: string | null) =>
-    `${slug} was made on ${on}, not on ${asked ?? "your GitHub account"}: it isn't kept`,
-  /** The App made, the App store refusing it. */
-  notKept: (slug: string, said: string) => `${slug} was made on GitHub but not kept: ${said}`,
-} as const;
-
-/**
- * The membership check's lines (ADR 0059): the person's membership of the App's organisation, read at start and every
- * hour from their own `gh`; when `gh` can't answer for them, why the last answer stands.
- */
-export const membershipLines = {
-  /** `gh` said `person` is no longer an active member of `organisation`. */
-  noLongerMember: (person: string, organisation: string) =>
-    `${person} is no longer a member of ${organisation}: reviews stop until an admin adds them back`,
-  /** `gh`'s first answer for the App: `person` is an active member of `organisation`. */
-  member: (person: string, organisation: string) =>
-    `${person} is a member of ${organisation}, as their gh says`,
-  /** `gh` said `person` is an active member of `organisation` again. */
-  memberAgain: (person: string, organisation: string) =>
-    `${person} is a member of ${organisation} again: reviews go on`,
-  /** `gh` couldn't answer for the person, for `why`: asking it threw, saying `why`. */
-  unanswered: (organisation: string, why: string) => notChecked(organisation, why),
-  /** `gh` couldn't answer for the person: not installed. */
-  ghMissing: (organisation: string) => notChecked(organisation, "gh is not installed"),
-  /** `gh` couldn't answer for the person: signed out. */
-  ghSignedOut: (organisation: string) => notChecked(organisation, "gh is signed out"),
-  /** `gh` couldn't answer (offline, SSO, a scope missing: `why`), saying `detail`. */
-  ghUnanswered: (organisation: string, why: GhWhy, detail: string) =>
-    notChecked(organisation, `gh couldn't answer (${why}): ${detail}`),
-  /** `gh` answered for `account`, not for the person. */
-  anotherAccount: (organisation: string, account: string, person: string) =>
-    notChecked(organisation, `gh is signed in as ${account}, not ${person}`),
-  /** The answer read, not kept with the App. */
-  notKept: (said: string) => `the membership answer was not kept with the App: ${said}`,
-  /** Why every call is refused while `person` is no longer a member of `organisation`. */
-  refused: (person: string, organisation: string) =>
-    `${person} is no longer a member of ${organisation}: an admin can add them back`,
-} as const;
-
-/** The membership of `organisation` not checked, for `why`. */
-function notChecked(organisation: string, why: string): string {
-  return `the membership of ${organisation} was not checked, ${why}: the last answer stands`;
-}
-
-/** The installation's lines (ADR 0053): what GitHub's refusal of the App's installation says. */
+/** The installation's lines (ADR 0053): what GitHub's refusal of the shared App's installations says. */
 export const installationLines = {
-  /** The App `slug` has no installation on its account, an organisation's or a person's. */
-  notInstalled: (slug: string, account: HostAccount) =>
-    `${slug} is not installed on ${account.type === "Organization" ? `the organisation ${account.login}` : `${account.login}'s account`}: install it on GitHub`,
   /** The shared App reaches no account of `person`'s sign-in (ADR 0066). */
   notReached: (person: string) =>
     `${SHARED_APP.slug} is installed on none of the accounts ${person} reaches: install it on GitHub`,

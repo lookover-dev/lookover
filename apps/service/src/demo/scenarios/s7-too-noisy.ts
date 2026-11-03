@@ -1,7 +1,7 @@
 // S7 "Too noisy?" (ADR 0046, ADR 0049): the owner opens #148's review, S2's pull request after its round 1 (three
 // findings posted), and asks "Too noisy?" on one. Here ledger-api's main holds a REVIEW.md, and the page size not
 // capped follows its rule, so that finding offers every choice: this finding is wrong (ADR 0052: dismissed here and
-// on the fake GitHub, its thread answered, the summary and the check rewritten), turn the rule off, or post only
+// on the fake GitHub, its thread answered, the status block and the check rewritten), turn the rule off, or post only
 // blocking findings in ledger-api, each of the last two with what it would have removed from the repository's last
 // reviews (this one round), written to ledger-api's settings file in the room's folder, as in live mode.
 import { on, type Scenario, type ScenarioChange } from "../scenario.ts";

@@ -21,7 +21,6 @@ import { openStore } from "@lookover/store";
 import { DemoClock, type FakeChange, FakeGitHost } from "@lookover/testkit";
 import {
   api,
-  BOT,
   fakeEngines,
   home,
   messages,
@@ -31,6 +30,7 @@ import {
   pr1,
   SANDBOX,
   SANDBOX_SETTINGS,
+  SHARED_BOT,
   snapshot,
   start,
   stopAll,
@@ -71,7 +71,7 @@ class TwoRepos extends FakeGitHost {
   everyListing: HostError | null = null;
   readonly time: DemoClock;
   constructor(time: DemoClock, changes: FakeChange[] = []) {
-    super({ repo: SANDBOX, repositories: [LEDGER], bot: BOT, changes, clock: time });
+    super({ repo: SANDBOX, repositories: [LEDGER], bot: SHARED_BOT, person: OWNER, changes, clock: time });
     this.time = time;
   }
   override listOpenChanges(repo: RepositoryRef): Promise<Listing<HostChange>> {
@@ -118,15 +118,23 @@ test("a pull request opened in each of two repositories is reviewed, and both ar
 });
 
 test("two repositories of one name on two accounts are watched together, and a change on each is reviewed under its owner", async () => {
-  const A: RepositoryRef = { owner: "a", name: "x" };
-  const B: RepositoryRef = { owner: "b", name: "x" };
+  const A: RepositoryRef = { owner: OWNER.login, name: "x" };
+  const B: RepositoryRef = { owner: "acme", name: "x" };
+  const acme = { id: 5100, login: "acme", type: "Organization" as const };
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: A, repositories: [B], bot: BOT, changes: [], clock: time });
+  const host = new FakeGitHost({
+    repo: A,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [],
+    clock: time,
+    reaches: [{ account: acme, repositories: [B] }],
+  });
   const { service } = await start({ repos: [A, B], host, time, engines: fakeEngines({ reviews: 2 }) });
   const cookie = await openApp(service);
   expect((await snapshot(service, cookie)).repos.map((r: Repository) => r.id)).toEqual([
-    repositoryId("a/x"),
-    repositoryId("b/x"),
+    repositoryId("sasensi/x"),
+    repositoryId("acme/x"),
   ]);
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
 
@@ -136,10 +144,13 @@ test("two repositories of one name on two accounts are watched together, and a c
   await until(stream, "round.finished");
   await until(stream, "round.finished");
   const state = await snapshot(service, cookie);
-  expect(state.changes[changeId("a/x#1")]).toMatchObject({ repoId: repositoryId("a/x"), number: 1 });
-  expect(state.changes[changeId("b/x#1")]).toMatchObject({ repoId: repositoryId("b/x"), number: 1 });
-  expect(state.reviews[changeId("a/x#1")]?.rounds).toHaveLength(1);
-  expect(state.reviews[changeId("b/x#1")]?.rounds).toHaveLength(1);
+  expect(state.changes[changeId("sasensi/x#1")]).toMatchObject({
+    repoId: repositoryId("sasensi/x"),
+    number: 1,
+  });
+  expect(state.changes[changeId("acme/x#1")]).toMatchObject({ repoId: repositoryId("acme/x"), number: 1 });
+  expect(state.reviews[changeId("sasensi/x#1")]?.rounds).toHaveLength(1);
+  expect(state.reviews[changeId("acme/x#1")]?.rounds).toHaveLength(1);
   expect(host.view({ repo: A, number: 1 }).checks.map((c) => c.conclusion)).toEqual(["success"]);
   expect(host.view({ repo: B, number: 1 }).checks.map((c) => c.conclusion)).toEqual(["success"]);
 });
@@ -326,7 +337,7 @@ test("a repository answering 502 at every poll, polled after one that answers, n
   expect((await snapshot(service, cookie)).connection).toMatchObject({ state: "connected", cause: null });
 });
 
-test("the service starts when its first listings are refused, logging them: one repository's, every one's (unreachable), or the key's (refused, the others not asked)", async () => {
+test("the service starts when its first listings are refused, logging them: one repository's, every one's (unreachable), or the credentials' (signed out, the others not asked)", async () => {
   const notFound = new TwoRepos(new DemoClock({ at: T0 }), [opened(LEDGER, 7)]);
   notFound.refusing = { repo: SANDBOX, error: new HostError("not_found", "Not Found (404)") };
   const logged: string[] = [];
@@ -349,16 +360,17 @@ test("the service starts when its first listings are refused, logging them: one 
     cause: { kind: "unreachable" },
   });
 
-  // The key refused is the installation's: the repositories after it are not asked, and the start says why.
-  const keyRefused = new TwoRepos(new DemoClock({ at: T0 }));
-  keyRefused.refusing = { repo: SANDBOX, error: new HostError("unauthorized", "Bad credentials (401)") };
-  const upRefused = await start({ ...both, host: keyRefused, time: keyRefused.time, log });
+  // The credentials refused are the connection's: signed out (ADR 0073), the repositories after it not asked, and the
+  // start says why.
+  const signedOut = new TwoRepos(new DemoClock({ at: T0 }));
+  signedOut.refusing = { repo: SANDBOX, error: new HostError("unauthorized", "Bad credentials (401)") };
+  const upRefused = await start({ ...both, host: signedOut, time: signedOut.time, log });
   const refusedCookie = await openApp(upRefused.service);
   expect((await snapshot(upRefused.service, refusedCookie)).connection).toMatchObject({
     state: "disconnected",
-    cause: { kind: "key-refused", why: null },
+    cause: { kind: "signed-out" },
   });
-  expect(keyRefused.listed(LEDGER)).toBe(0);
+  expect(signedOut.listed(LEDGER)).toBe(0);
 });
 
 test("Review now lists only its change's repository", async () => {

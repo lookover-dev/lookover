@@ -59,12 +59,23 @@ test("a round counts what the round raised, verified fixed and left open on the 
     { pass: "find", engine: "claude", ms: 58_000, usage: { inputTokens: 21_000, outputTokens: 1_600 } },
   ];
   const round = roundOf(
-    { n: 2, sha: SHA, reviewer: "claude", ...confirm, startedAt: 1_000, endedAt: 64_000, steps, sessions },
+    {
+      n: 2,
+      sha: SHA,
+      base: null,
+      reviewer: "claude",
+      ...confirm,
+      startedAt: 1_000,
+      endedAt: 64_000,
+      steps,
+      sessions,
+    },
     second,
   );
   expect(round).toEqual({
     n: 2,
     sha: SHA,
+    base: null,
     reviewer: "claude",
     secondFind: null,
     confirmer: "claude",

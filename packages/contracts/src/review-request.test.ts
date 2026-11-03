@@ -10,7 +10,7 @@ import {
   readRequest,
   requestedCommit,
   reviewRequest,
-  SUMMARY_MARKER,
+  STATUS_MARKER,
 } from "./index.ts";
 
 const sha = commitSha("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678");
@@ -82,7 +82,7 @@ describe("review requests", () => {
   });
 
   test("a comment holding any Lookover marker but the request's is no request, whatever its first line", () => {
-    expect(isReviewRequest(`/lookover review\n${SUMMARY_MARKER}`)).toBe(false);
+    expect(isReviewRequest(`/lookover review\n${STATUS_MARKER}`)).toBe(false);
     expect(isReviewRequest(`/lookover review\n${FINDING_MARKER}{"v":1} -->`)).toBe(false);
     expect(isReviewRequest(`/lookover review\n${reviewRequest(sha)}\n${RESULT_MARKER}{} -->`)).toBe(false);
     expect(isReviewRequest(reviewRequest(sha, { reply: 1 }))).toBe(true);

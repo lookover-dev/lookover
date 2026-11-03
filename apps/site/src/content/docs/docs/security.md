@@ -16,9 +16,17 @@ Lookover never reads your subscription's tokens, and gives the CLIs no API key a
 
 On GitHub, Lookover acts as you, through Lookover Dev: the App you sign in to with GitHub. Its token reaches only what both you and the App may reach, on the accounts where it is installed. Lookover also reads your organisations, and whether you own each, from your own `gh`, when it is signed in as you; it decides nothing from them.
 
-**Lookover Dev has no private key.** None was ever generated, and nobody holds one, Lookover's makers included: there is no server to keep it. What an organisation that installs it trusts is the `lookover-dev` account on GitHub, which could make a key. Your sign-in is yours alone: its token lasts 8 hours, Lookover renews it on your computer, and the renewal lasts about 6 months unused.
+**Lookover Dev has no private key.** None was ever generated, and nobody holds one, Lookover's makers included: there is no server to keep it. Your sign-in is yours alone: its token lasts 8 hours, Lookover renews it on your computer, and the renewal lasts about 6 months unused.
 
-With [your own App](/docs/setup/#use-your-own-app), Lookover acts as that App instead, except in two places that use your own `gh` login: the setup reads who you are and the organisations you administer, and `lookover wait` and `lookover reply` write as you.
+### What installing Lookover Dev means
+
+Lookover Dev is the only way in: an organisation that installs it trusts the `lookover-dev` account on GitHub, which owns it. That account could:
+
+- **make a private key,** and with it act as the App itself, under its name, on the repositories each account gave it: anything the App's permissions allow there. Read their code; post, edit or delete comments, anyone's; edit, close or reopen issues and pull requests; post checks;
+- **turn on a webhook** for the App, and receive those repositories' events that its permissions cover, without asking anyone: GitHub asks an account's owners only about new permissions;
+- **ask for more permissions.** GitHub applies them on an account only once one of its owners accepts.
+
+It can't act as you: your sign-in never leaves your computer. And it reaches only the repositories each account gave it, with the permissions [the setup](/docs/setup/#2-github) lists. The program that holds your sign-in comes from the same makers: [how Lookover ships](#how-lookover-ships) says how it is built and published. An organisation that won't trust it can't use Lookover.
 
 ## What the AI may do
 
@@ -30,13 +38,13 @@ With [your own App](/docs/setup/#use-your-own-app), Lookover acts as that App in
 
 ## What it posts
 
-On the pull request it reviewed: the review, its inline comments, one summary comment kept up to date, and a check on the commit. Always as a comment: it never approves, requests changes or merges.
+On the pull request it reviewed: a review a round holding its findings on their lines, its status at the end of the pull request's description, kept up to date, and a check on the commit. Always as a comment: it never approves, requests changes or merges.
 
-Your teammates see your review written by you, opening with “Lookover”, a summary with Lookover's badge, and a Lookover check. The review and each inline comment start with “Lookover ·”, so its words read as Lookover's, not yours.
+Your teammates see your review written by you, its status in the description and a Lookover check. Each line comment, each reply and the status open with Lookover's wordmark, so its words read as Lookover's, not yours.
 
-As you too, when your coding agent runs them: `lookover wait`'s `/lookover review` comment and the threads it resolves once fixed, and `lookover reply`'s answers on a thread.
+In the description, Lookover rewrites only its own part, between two hidden markers, after your text. It reads the description just before each write, but GitHub can't refuse a write over a newer edit: an edit saved in that same moment can be lost. A description rewritten whole loses the status until Lookover writes it again.
 
-With your own App, the review, its comments, the summary and the check are posted as your App, under its own name.
+As you too, when your coding agent runs them: `lookover wait`'s `/lookover review` comment and the threads it resolves once settled (fixed, withdrawn or dismissed), and `lookover reply`'s answers on a thread.
 
 Secrets in a known shape are taken out of what it posts and of its logs.
 
@@ -48,7 +56,6 @@ Everything is in one data folder on your computer ([the commands](/docs/commands
 - **Each review's raw material:** `runs/`, the prompts it sent the AI and the AI's raw output, your private code included. Kept 30 days, then deleted.
 - **Your sign-in with GitHub,** its token and the token that renews it, is encrypted there, and the key that opens it is in your system's credential store (Windows Credential Manager, macOS Keychain, or the Secret Service on Linux). With no credential store, as on some Linux systems, it is kept unencrypted in a file only you can open.
 - **The organisations you asked to install on,** and when, until Lookover Dev reaches them or you sign in as someone else.
-- **With your own App, its private key,** kept as the sign-in is.
 
 ## How Lookover ships
 

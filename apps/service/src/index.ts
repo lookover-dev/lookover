@@ -20,9 +20,8 @@
 //   (`--json` for a program).
 // - `stop`: the stop asked over the API (`API.stop`: the service answers, then stops as Ctrl+C would), then the
 //   instance lock waited for; after 30 s, only the process `instance.json` named when it was asked is killed.
-// - `wait`, `feedback` and `reply`: the agent's, handed to `agent-cli`'s `run` with `--home=` taken out and `--app
-//   <slug>` added from the data folder's `github/app.json` (`--home=`, else `LOOKOVER_HOME`, else the profile's) when
-//   neither `--app` nor `LOOKOVER_APP` names the App.
+// - `wait`, `feedback` and `reply`: the agent's, handed to `agent-cli`'s `run` with their arguments as they are but
+//   `--home=`: they read the shared App's checks alone (ADR 0073), never the data folder.
 // - `help` (also `--help`, `-h` or no word) and `--version`.
 // `start`, `open` and `stop` reach the service as the UI does: the data folder's session cookie and the exact Origin.
 // Exit codes, one table for the command: 0 done or running, 1 error (a start that failed, a service that didn't stop,
@@ -86,35 +85,33 @@
 // skill is written by one renderer (`renderSkill`), stamped with the version and the absolute command, and whose a
 // skill is (ours, another Lookover's, not Lookover's) is read from that stamp. A refused write refuses its command
 // with the machine's reason (500); a clone has no PATH offer, an agent not found no skill.
-// The person's own `gh` (ADR 0059) is a port, `Gh` (who it is signed in as, the organisations it admins, one
-// organisation's membership; every read answers: `missing`, `signed-out`, or `unanswered` with why), read only: the
+// The person's own `gh` (ADR 0059) is a port, `Gh` (who it is signed in as, its organisations with its role in each;
+// every read answers: `missing`, `signed-out`, or `unanswered` with why), read only: the
 // program and live mode run the real one (`osGh`, `ghCli`: found as `lookover` on the PATH is; `gh api`
 // with `GET`, a time limit, no prompt, the engines' allow-listed environment; refused under `bun test` unless given a
 // scripted command or only folders of the test's own to search, or for `bun run live`'s suite), demo mode testkit's `memoryGh`; `runService` wires it
-// (`ProgramDeps.gh`), the room holds it (`RoomOptions.gh`) and reads it on `gh.check` and on "Create it on GitHub" for
-// an organisation (`Connection.gh` shows the answer), and, on an organisation's App, for the person's membership at
-// start, every hour and on `gh.check` (no longer a member: the cause `not-a-member`, reviews stop); never for your
-// own account.
+// (`ProgramDeps.gh`), the room holds it (`RoomOptions.gh`) and reads it for the accounts the shared App doesn't reach
+// (ADR 0067): at start, once a sign-in is kept, and after each "Ask to install".
 // Inside, the service is a server
 // (`Bun.serve`, the session, the API and its event streams, on its own timers) over one engine room (the store,
 // the snapshot, the queue, the poller, the runs, the checks, the reactions, the owner's dismissals ("This finding is
 // wrong", ADR 0052: refused while a round of the change runs, posted outside any round, resumed after a restart),
 // the event log, and the room's clock and timers, ADR 0046): the API reaches the current room through one accessor, so a scenario load can build a
 // second room and swap it in while the server and every session stay up.
-// Interface: `startService(options)` opens the store in the data folder, reads the owner's App (`options.github`, ADR
-// 0053: `live.json`'s as given, else the data folder's App store; with none, the setup shows and nothing is listed),
-// and, once the setup says it is installed, the repositories its installation lists, cut to the allow-list when one
+// Interface: `startService(options)` opens the store in the data folder, reads the sign-in to the shared App
+// (`options.github`, ADR 0066, ADR 0073: the sign-in store's; with none, the setup's GitHub step shows and nothing is
+// listed, whatever else the folder holds, an earlier version's own App included), and, once the setup says the App is
+// installed, the repositories its installations list, cut to the allow-list when one
 // is given (two of one name are refused); checks the engines' health, records its start as the first event, forgets
 // the repositories the installation no longer lists, lists the open changes of each one it watches (one repository
 // refused is logged, the start failing only when every one is or the installation is), and serves the API on
-// 127.0.0.1. The owner is the App's owner and the bot its `<slug>[bot]`; the snapshot's connection carries the App
-// (its id, slug and owner's login) and its installation's id, and Run checks how its key is kept. While the setup
-// waits for the install, the installation is read every 4 s ("nothing granted" until it lists a repository, then
+// 127.0.0.1. The owner is the person signed in; the snapshot's connection carries them and every account reached with
+// its installation's id. While the setup waits for the install, the installations are read every 4 s ("nothing granted" until it lists a repository, then
 // every one switched on and the step moved on); once installed, its repositories are listed every 5 minutes and on
 // "Reconnect": one added is polled at once (`repo.added`, switched on), one gone leaves (`repo.removed`, its jobs
 // cancelled, a running one stopped, its unsent posts dropped; said departed in the snapshot until it is added again,
-// when it starts with no waiting job, or dismissed with `repo.dismiss`, ADR 0059). An App
-// created or given while the service runs is adopted without a restart (the room's `github.adopt`).
+// when it starts with no waiting job, or dismissed with `repo.dismiss`, ADR 0059). A sign-in finished while the
+// service runs is held without a restart ("Sign in with GitHub", `connection.signIn`).
 // `startDemoService(options)` does the same on a scenario's room (`scenarioOf(id)`): a fresh numbered folder under
 // `<home>/rooms` (the old ones swept, their last event number carried on, so a tab from before reloads), the fake
 // world built from the scenario, its seed played with the demo clock advanced through it (a seed whose review
@@ -187,11 +184,8 @@
 // then the first review's step), `setup.finish` and `repo.setEnabled` (404 for a repository not watched) are kept by the
 // store and sent as `setup.changed` / `repo.changed`, the furthest step reached kept; a start on a data folder
 // whose setup nobody wrote writes it (set up in live mode until onboarding; the scenario's in demo mode, where no bot installed means
-// no connection and no listing); `connection.createApp` only records where the App is made (your own account, or an
-// organisation the person's `gh` lists as theirs to admin, ADR 0059) and that the setup waits for it (409, why in
-// `createApp`, once an App is kept, under `live.json`, or as `gh` says): the manifest flow's pages make it (`app-flow-pages.ts` over
-// `app-flow.ts`, ADR 0053; in demo mode on GitHub's fake pages), the install then waited for every 4 s, the step
-// moved on to the repositories only if the owner is still on GitHub's; a request (`review.request` or `/lookover
+// no connection and no listing); a sign-in kept has the install waited for every 4 s, the step moved on to the
+// repositories only if the owner is still on GitHub's; a request (`review.request` or `/lookover
 // review`) in a repository switched off is recorded as a skip, "repo-off", its check saying why, unless the change
 // has a job waiting or running, which it joins (ADR 0047); `engine.signIn` opens the vendor's own login, `options.signIn` (ADR 0047: in live mode
 // `liveAdapters` wires it as a visible terminal on the command `engines` names, started outside the runner from
@@ -211,8 +205,7 @@
 // answers 400, a repository not watched 404, a file that doesn't read or can't be opened 409 with its error as
 // `invalid` (never written over; Run checks names it too, and it never stops a start), a write that failed 500 with
 // `unwritten: { file, why }` (why `held-open` when Windows refused the rename, else `other`); at start the files are
-// read, and what moved since the log's last word is sent; "Create it on GitHub" records that the setup waits for the
-// App, the page it opens making it, and is refused 409 under `live.json` or once an App is kept). It returns the URL to open the app with, which works once; the cookie it sets is the data folder's
+// read, and what moved since the log's last word is sent). It returns the URL to open the app with, which works once; the cookie it sets is the data folder's
 // and outlives the start, so an open tab catches up after a restart.
 // Invariants: the truth is in SQLite, and every change to it is sent as a numbered event, one more than the
 // last (ADR 0038, across restarts too); the snapshot is the store's events applied with `apply`, once at start
@@ -246,36 +239,36 @@
 // store throws reaches the request, which gets no answer; a command that doesn't parse answers 400; a command with no
 // row answers 501 (none today: in live mode only the demo verbs do, with nothing scripted to move). Live mode:
 // `readLiveConfig` throws a plain `Error` holding `LIVE_CONFIG_HELP` for a config that is missing or of another
-// shape (one repository listed twice, say), and takes a `watch` it no longer reads, naming it in `ignored` for the
-// start to print `WATCH_IGNORED` once (`runService`, `bun run live`), its value never read; `liveAdapters` rejects with
-// the file system's error when the key file or the process registry can't be read; `startService` never rejects for
-// GitHub (ADR 0053): the App not installed, a key it refuses, GitHub down or a key Lookover kept that no longer opens
-// start the service all the same, the connection showing the cause;
+// shape (one repository listed twice, say), and takes a `watch` or an `organisation` it no longer reads, naming them in
+// `ignored` for the start to print `WATCH_IGNORED` once (`runService`, `bun run live`; `bun run live` prints
+// `ORGANISATION_IGNORED` too), their values never read; `liveAdapters` rejects with
+// the file system's error when the process registry can't be read; `startService` never rejects for GitHub (ADR
+// 0053): the App not installed, the sign-in refused or no longer opening, or GitHub down start the service all the
+// same, the connection showing the cause;
 // `acquireLiveLock({ folder })` throws `LiveLockHeld` naming the holder and its data folder, or SQLite's error when the lock file
 // can't be opened.
 // Live mode (ADR 0039, ADR 0053), for `lookover serve --live` and `bun run live`: `readLiveConfig(path)` reads the live
 // config file (the repositories live mode may use, the allow-list cutting what the installation lists; an optional
-// `fork`, the owner's fork of the sandbox for `bun run live`, never listed there and never read by the service; an optional
-// App: its id and its key's path, the data folder then set up at once; without it, the data folder's App, or the
-// setup's first step; an optional `organisation`, an organisation's App and its sandbox, whose `repositories`, when
-// given, make `servedLiveConfig(config, path)` the organisation's App on them (ADR 0060), the key file refused when
-// missing, with the one line the start prints then; `liveConfigPath(home)` is its place in a data folder); a live
+// `fork`, the owner's fork of the sandbox for `bun run live`, never listed there and never read by the service; an
+// optional `app`, the test App whose bot is someone other than the person in `bun run live`'s suites, nothing running
+// as it; a live service (`serve --live`, the guarded program) reads only its `repositories`, ADR 0073, and runs on the
+// shared App; `liveConfigPath(home)` is its place in a data folder); a live
 // service keeps one store, one process registry
 // and the mirrors at the data folder's root, and each repository's folder keeps only its `settings.yaml`
-// (ADR 0049). `liveAdapters(options)` wires the real GitHub App, `claude`
+// (ADR 0049). `liveAdapters(options)` wires the shared App on the real GitHub, `claude`
 // and `retrieval` on it (its sign-in `terminalSignIn(engines, session, open?)`: the engine's login in a terminal
 // with the engine's allow-listed environment only, ADR 0048, the terminal given the desktop session), and `acquireLiveLock()` takes the machine-wide lock in the
 // user's home (one real review at a time across worktrees and the program; a second run gets `LiveLockHeld` naming the holder).
-// `appStore({ home, keychain })` keeps the GitHub App (ADR 0053): its record in `github/app.json`, its key in
-// `github/app.<entry>.key` encrypted under a data key in the keychain port's entry (`osKeychain(timers)` over the
-// OS's, bounded by a timeout; `memoryKeychain()` for tests and demo mode), or unencrypted in `github/app.<id>.pem`
-// when the keychain can't, which `read()` and `write()` report as the key's protection (`read()` naming that file
-// as `fallback`); each file user-only (on Windows its access list, `icacls`; tests inject `userOnly`); a key that no
-// longer opens reads as `lost`. One store per data folder, in one process: its reads and writes take turns.
-// `signInStore({ home, keychain })` keeps the sign-in to the shared App the same way, by the one sealing (ADR 0066):
-// its record `github/sign-in.json` names the person, the tokens sealed in `github/sign-in.<entry>.key`, or in
-// `github/sign-in.<id>.token` when the keychain can't; `keeper` is the adapter's `SignInKeeper` over it. Its folder is
-// the data folder unless the live options name another (`LiveOptions.signIns`).
+// `signInStore({ home, keychain })` keeps the sign-in to the shared App (ADR 0066): its record `github/sign-in.json`
+// names the person, the tokens sealed in `github/sign-in.<entry>.key` under a data key in the keychain port's entry
+// (`osKeychain(timers)` over the OS's, bounded by a timeout; `memoryKeychain()` for tests and demo mode), or in
+// `github/sign-in.<id>.token` when the keychain can't; each file user-only (on Windows its access list, `icacls`;
+// tests inject `userOnly`); a sign-in that no longer opens reads as `lost`. One store per data folder, in one
+// process: its reads and writes take turns; `keeper` is the adapter's `SignInKeeper` over it. Its folder is
+// the data folder unless the live options name another (`LiveOptions.signIns`: `serve --live --sign-ins=<dir>`, ADR
+// 0073); named, a sign-in kept there sets the data folder up at once, `LiveAdapters.start` says who the run is (the
+// sign-in kept, lost or none), and the start prints it in one line: who it runs as, where its sign-in is, and on which
+// repositories.
 // It must never know: the words the screens say (its JSON errors are for the console), the rules of `core` (it
 // calls them), or which wiring a program chose (the service itself sees only ports).
 // Exports: what `scripts/` uses (the live suites, `eval`, `build`), and what this package's own tests drive, since
@@ -286,15 +279,6 @@
 // The code inside uses each of them too, so none moves to test support (`*.test-support.ts`), which reaches nothing
 // past this entry either. `main.ts` and the binary's generated entry import their files directly.
 
-export { REFUSED_PAGES, type RefusedPage } from "./app-flow-pages.ts";
-export {
-  type AppRead,
-  type AppStore,
-  appStore,
-  type LostWhy,
-  type Membership,
-  type StoredApp,
-} from "./app-store.ts";
 export type { BackgroundPorts, ServeStarted, WebBuild } from "./background.ts";
 export { type LookoverDeps, lookover } from "./command.ts";
 export {
@@ -319,7 +303,6 @@ export {
 export { buildDemoRoom, type DemoRoom } from "./demo/driver.ts";
 export type { Scenario } from "./demo/scenario.ts";
 export { SCENARIOS, scenarioOf } from "./demo/scenarios.ts";
-export { HANDED_APP, MADE_APP } from "./demo/world.ts";
 export {
   ghCli,
   osGh,
@@ -340,15 +323,13 @@ export {
   LIVE_CONFIG_HELP,
   type LiveApp,
   type LiveConfig,
-  type LiveConfigWithApp,
-  type LiveOrganisation,
   liveConfigPath,
+  ORGANISATION_IGNORED,
   readLiveConfig,
-  servedLiveConfig,
   WATCH_IGNORED,
 } from "./live-config.ts";
 export { acquireLiveLock, type LiveLock, LiveLockHeld } from "./live-lock.ts";
-export { flowLines, logLineOf, membershipLines } from "./log-lines.ts";
+export { logLineOf } from "./log-lines.ts";
 export { type LogReader, type LogSink, openLogSink } from "./log-sink.ts";
 export {
   DEV_VALUE_PREFIX,
@@ -379,7 +360,7 @@ export { settingsChanged } from "./settings-changed.ts";
 export { diskSettingsFiles, repositorySettingsFile, SettingsUnwritten } from "./settings-files.ts";
 export { skillCommandLine } from "./shell-line.ts";
 export type { SignInOpened, SignInOpener } from "./sign-in.ts";
-export { type SignInRead, type SignInStore, signInStore } from "./sign-in-store.ts";
+export { type SignInRead, type SignInStore, signInEntryOf, signInStore } from "./sign-in-store.ts";
 export { renderSkill, skillStampOf } from "./skill.ts";
 export {
   CODING_AGENTS,
@@ -391,10 +372,8 @@ export {
   type SkillFolders,
   userSkillFolders,
 } from "./skill-folders.ts";
-// A data folder set up: `bun run live`'s shared App path starts its run folder so, as live.json's App does (ADR 0066).
+// A data folder set up: `bun run live` starts its run folder so (ADR 0066).
 export { SET_UP } from "./snapshot.ts";
 export { REAL_TIMERS, type Timers } from "./timers.ts";
-// A file made user-only (an ACL on Windows, 0600 elsewhere): the App store's own, for a key file a dev script writes.
-export { makeUserOnly } from "./user-only.ts";
 export { VERSION } from "./version.ts";
 export { carriedWebFiles, diskWebFiles, type WebFiles } from "./web-files.ts";

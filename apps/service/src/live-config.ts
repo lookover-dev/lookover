@@ -1,11 +1,10 @@
 // The live config file (ADR 0039, ADR 0041, ADR 0053, ADR 0054, ADR 0060): `live.json` in the data folder guards
 // live mode, and the program when it has one (development and agents only: the owner runs the program without one).
-// Its parts: `app` and `repositories`, the test App and the repositories it may use (`bun run live`'s personal path,
-// on the sandbox); `fork`, the owner's fork of the sandbox (`bun run live`'s pull request from a fork); `organisation`,
-// an organisation's App and its sandbox (`bun run live`'s organisation path), and its `repositories`, the
-// organisation's others, Lookover's own among them. A live service (`serve --live`, a guarded program) runs on the
-// config `servedLiveConfig` answers: the organisation's App on its sandbox and those repositories when `organisation`
-// lists some, else `app` on `repositories`; `bun run live` reads the file as written. Read here and in no package:
+// Its parts: `repositories`, the repositories a live service may use, on the shared App (ADR 0073); `app`, the test
+// App, whose bot is someone other than the person in `bun run live`'s suites (nothing runs as it there); `fork`, the
+// owner's fork of the sandbox (`bun run live`'s pull request from a fork). A live service (`serve --live`, a guarded
+// program) reads only `repositories`; `bun run live` reads the file as written. The lines the file may still have
+// that nothing reads, `watch` and `organisation`, are ignored, never refused. Read here and in no package:
 // the packages take the values as parameters (`github` is built with the list and refuses any other repository).
 // The key's text is read by the one script that needs it, never printed.
 import { existsSync, readFileSync } from "node:fs";
@@ -18,20 +17,8 @@ export interface LiveApp {
   keyPath: string;
 }
 
-/** An organisation's App and the sandbox it is installed on: `bun run live`'s organisation path. */
-export interface LiveOrganisation {
-  app: LiveApp;
-  sandbox: RepositoryRef;
-  /**
-   * The organisation's repositories live mode watches besides its sandbox (ADR 0060): given, a live service runs as
-   * this App on the sandbox and these (`servedLiveConfig`). Each is the organisation's that owns `sandbox`, not the
-   * sandbox, and not in the top-level `repositories`: the two Apps never watch one repository.
-   */
-  repositories?: RepositoryRef[];
-}
-
 export interface LiveConfig {
-  /** The App live mode runs as; absent, the data folder's own or the setup screens give it (ADR 0053). */
+  /** The test App: in `bun run live`'s suites, its bot comments as someone other than the person; nothing runs as it. */
   app?: LiveApp;
   /** The repositories live mode may use; any other is refused before a request. */
   repositories: RepositoryRef[];
@@ -41,52 +28,39 @@ export interface LiveConfig {
    */
   fork?: RepositoryRef;
   /**
-   * An organisation's App and its sandbox, where `bun run live` proves the organisation's path after the personal
-   * one (ADR 0059): never `app`, its sandbox never in `repositories` (the personal App never watches it). Its key file
-   * may be missing (that path is skipped then, saying so). Absent, that path is skipped. A live service runs on it
-   * when it lists `repositories` (ADR 0060), and ignores it otherwise.
+   * The lines the file still has that nothing reads any more: `watch` (every repository listed is watched, ADR 0053)
+   * and `organisation` (no run is on an organisation's App, ADR 0073). The owner's own file keeps them, and each
+   * autopilot cycle copies that file, so they are ignored, not refused; their values are never read. Absent when
+   * there are none.
    */
-  organisation?: LiveOrganisation;
-  /**
-   * The lines the file still has that live mode no longer reads: `watch` (every repository listed is watched, ADR
-   * 0053). The owner's own file keeps it, and each autopilot cycle copies that file, so it is ignored, not refused;
-   * its value is never read. Absent when there are none.
-   */
-  ignored?: "watch"[];
+  ignored?: ("watch" | "organisation")[];
 }
 
 /** The one line a start prints for an ignored `watch` (the service's and `bun run live`'s). */
 export const WATCH_IGNORED = "`watch` is ignored: every repository in `repositories` is watched.";
 
-/** A live config that names its App: what `bun run live` runs on, never through the setup screens. */
-export type LiveConfigWithApp = LiveConfig & { app: LiveApp };
+/** The one line `bun run live` prints for an ignored `organisation`. */
+export const ORGANISATION_IGNORED =
+  "`organisation` is ignored: bun run live runs on the shared App only, on both sandboxes.";
+
+/** The lines ignored, in the order `ignored` names them. */
+const IGNORED = ["watch", "organisation"] as const;
 
 export const liveConfigPath = (home: string) => join(home, "live.json");
 
 /** What to write when the file is missing or wrong, with the key named by its folder, never its content. */
 export const LIVE_CONFIG_HELP = `Write it as:
   {
+    "repositories": ["lookover-dev/lookover-private", "lookover-dev/lookover-sandbox"],
     "app": { "id": <the test App's id>, "keyPath": "<absolute path of its private key, PEM>" },
-    "repositories": ["sasensi/lookover-sandbox"],
-    "fork": "lookover-forks/lookover-sandbox",
-    "organisation": {
-      "app": { "id": <the organisation's App's id>, "keyPath": "<absolute path of its private key, PEM>" },
-      "sandbox": "lookover-dev/lookover-sandbox",
-      "repositories": ["lookover-dev/lookover-private"]
-    }
+    "fork": "lookover-forks/lookover-sandbox"
   }
-The test App is lookover-spike-sasensi; its id and key are in spikes/03-github/.secret/ of the main checkout.
-Without "app", the data folder's App is used; a fresh one shows the setup, where "Use an existing App" gives it.
-bun dev --live watches every repository listed that the App's installation lists: those of "repositories" as
-"app", or, when "organisation" lists "repositories", its sandbox and those as the organisation's App. bun run live
-uses sasensi/lookover-sandbox only, and needs "app". "fork", optional, is the owner's fork of the sandbox, never
-listed in "repositories": bun run live opens a pull request from it, and skips that step without it.
-"organisation", optional, is an organisation's App (never "app") and its sandbox (never listed in "repositories"):
-bun run live proves the organisation's path on it after the personal one, and skips that path, saying why, without
-it, without its key file, or when the App is not installed on its sandbox. Its "repositories", optional, are the
-organisation's others, Lookover's own among them: each the sandbox's organisation's, never the sandbox, never in
-the top-level "repositories"; with them, a live service needs its key file. bun run export-app-key writes the key of
-an App made in a data folder to a key file.`;
+A live service (serve --live, a guarded program) reads "repositories" alone, as the allow-list, and runs on the
+shared App; bun dev --live names its own repositories. bun run live runs on the shared App on both sandboxes, and
+needs "app": the test App, lookover-spike-sasensi, whose bot comments as someone other than the person in its suites
+(its id and key are in spikes/03-github/.secret/ of the main checkout). "fork", optional, is the owner's fork of
+sasensi/lookover-sandbox, never listed in "repositories": bun run live opens a pull request from it, and skips that
+step without it.`;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -137,110 +111,6 @@ function forkIn(
   return fork;
 }
 
-const ORGANISATION_SHAPE = `"organisation", when given, must be { "app": { "id": <its id>, "keyPath": "<its key>" }, "sandbox": "owner/name", "repositories": ["owner/name"] }, its "repositories" optional`;
-
-/**
- * The `organisation` line, `undefined` when absent; refused when not of its shape, when its sandbox is listed in
- * `repositories`, or when its App is `app`. Its key file is not looked for: missing, `bun run live` skips that path.
- */
-function organisationIn(
-  value: unknown,
-  repositories: RepositoryRef[],
-  app: LiveApp | undefined,
-  wrong: (what: string) => Error,
-): LiveOrganisation | undefined {
-  if (value === undefined) return undefined;
-  const line: Record<string, unknown> = isRecord(value) ? value : {};
-  const sandbox = repository(line.sandbox);
-  const given = isRecord(line.app) ? line.app : undefined;
-  const { id, keyPath } = given ?? {};
-  if (
-    !sandbox ||
-    typeof id !== "number" ||
-    !Number.isInteger(id) ||
-    typeof keyPath !== "string" ||
-    keyPath === ""
-  )
-    throw wrong(ORGANISATION_SHAPE);
-  if (repositories.some((r) => sameRepository(r, sandbox)))
-    throw wrong(
-      `"organisation.sandbox" names ${repositoryName(sandbox)}, which "repositories" lists too: the organisation's App watches it, so take it out of "repositories"`,
-    );
-  if (app?.id === id)
-    throw wrong(
-      `"organisation.app" names App ${id}, which "app" names too: the organisation's App is another one`,
-    );
-  const theirs = organisationRepositoriesIn(line.repositories, sandbox, repositories, wrong);
-  return { app: { id, keyPath }, sandbox, ...(theirs ? { repositories: theirs } : {}) };
-}
-
-const ORGANISATION_REPOSITORIES_SHAPE = `"organisation.repositories", when given, must list the organisation's repositories live mode watches besides its sandbox, each "owner/name"`;
-
-/**
- * The `organisation.repositories` line (ADR 0060), `undefined` when absent; refused when not a list of repositories,
- * when one isn't owned by the sandbox's organisation (its login ignores case), is the sandbox, is in `repositories`
- * (the two Apps never watch one repository), or shares a name with another the organisation's App is given.
- */
-function organisationRepositoriesIn(
-  value: unknown,
-  sandbox: RepositoryRef,
-  repositories: RepositoryRef[],
-  wrong: (what: string) => Error,
-): RepositoryRef[] | undefined {
-  if (value === undefined) return undefined;
-  const listed = Array.isArray(value) ? value.map(repository) : [];
-  const theirs = listed.filter((r) => r !== undefined);
-  if (theirs.length === 0 || theirs.length !== listed.length) throw wrong(ORGANISATION_REPOSITORIES_SHAPE);
-  for (const repo of theirs) {
-    const name = repositoryName(repo);
-    if (repo.owner.toLowerCase() !== sandbox.owner.toLowerCase())
-      throw wrong(
-        `"organisation.repositories" names ${name}, which ${sandbox.owner} doesn't own: the organisation's App watches the repositories of the organisation that owns "organisation.sandbox", so take it out`,
-      );
-    if (sameRepository(repo, sandbox))
-      throw wrong(
-        `"organisation.repositories" names ${name}, which is "organisation.sandbox": it is watched already, so take it out of "organisation.repositories"`,
-      );
-    if (repositories.some((r) => sameRepository(r, repo)))
-      throw wrong(
-        `"organisation.repositories" names ${name}, which "repositories" lists too: the two Apps never watch one repository, so take it out of one of them`,
-      );
-  }
-  // The list the organisation's App is given: its sandbox, then these.
-  noRepeats([sandbox, ...theirs], "organisation.repositories", wrong);
-  return theirs;
-}
-
-/** The config a live service runs on, and the one line its start says it with when that isn't the file as read. */
-export interface ServedLiveConfig {
-  live: LiveConfig;
-  said?: string;
-}
-
-/**
- * The config a live service runs on (ADR 0060): `serve --live`, and the program a live config guards. With
- * `organisation.repositories`, the organisation's App on its sandbox then those repositories, no `fork` (the owner's
- * fork is the personal sandbox's) and no `organisation`; its key file must be there. `said` names the App by its id
- * (the config has no slug; it would cost a GitHub call) and the repositories it watches. Without, the config as read.
- * `path` is the file's, for the refusal.
- */
-export function servedLiveConfig(config: LiveConfig, path: string): ServedLiveConfig {
-  const organisation = config.organisation;
-  if (organisation?.repositories === undefined) return { live: config };
-  const { keyPath } = organisation.app;
-  if (!existsSync(keyPath))
-    throw new Error(
-      `${path}: "organisation.app.keyPath" names no file: ${keyPath}. Write it with bun run export-app-key, or take "repositories" out of "organisation": with them, a live service runs as the organisation's App.\n${LIVE_CONFIG_HELP}`,
-    );
-  const repositories = [organisation.sandbox, ...organisation.repositories];
-  const names = repositories.map(repositoryName);
-  const listed = `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-  return {
-    live: { app: organisation.app, repositories, ...(config.ignored ? { ignored: config.ignored } : {}) },
-    said: `Runs as ${organisation.sandbox.owner}'s App ${organisation.app.id} on ${listed}.`,
-  };
-}
-
 /** What the file at `path` holds, parsed; `wrong` says so when it is not JSON. */
 function jsonIn(path: string, wrong: (what: string) => Error): unknown {
   try {
@@ -252,15 +122,16 @@ function jsonIn(path: string, wrong: (what: string) => Error): unknown {
 }
 
 /**
- * The live config at `path`. Throws, with the help text, when the file is missing or not of this shape; a `watch`
- * line is named in `ignored`, never refused.
+ * The live config at `path`. Throws, with the help text, when the file is missing or not of this shape; a `watch` or
+ * `organisation` line is named in `ignored`, never refused, never read.
  */
 export function readLiveConfig(path: string): LiveConfig {
   if (!existsSync(path)) throw new Error(`No live config at ${path}.\n${LIVE_CONFIG_HELP}`);
   const wrong = (what: string) => new Error(`${path}: ${what}.\n${LIVE_CONFIG_HELP}`);
   const parsed = jsonIn(path, wrong);
   if (!isRecord(parsed)) throw wrong(`it must be an object`);
-  const ignored: Pick<LiveConfig, "ignored"> = "watch" in parsed ? { ignored: ["watch"] } : {};
+  const lines = IGNORED.filter((line) => line in parsed);
+  const ignored: Pick<LiveConfig, "ignored"> = lines.length > 0 ? { ignored: lines } : {};
   const listed = Array.isArray(parsed.repositories) ? parsed.repositories.map(repository) : [];
   const repositories = listed.filter((r) => r !== undefined);
   if (repositories.length === 0 || repositories.length !== listed.length)
@@ -268,14 +139,7 @@ export function readLiveConfig(path: string): LiveConfig {
   noRepeats(repositories, "repositories", wrong);
   const fork = forkIn(parsed.fork, repositories, wrong);
   const app = appIn(parsed.app, wrong);
-  const organisation = organisationIn(parsed.organisation, repositories, app, wrong);
-  return {
-    ...(app ? { app } : {}),
-    repositories,
-    ...(fork ? { fork } : {}),
-    ...(organisation ? { organisation } : {}),
-    ...ignored,
-  };
+  return { ...(app ? { app } : {}), repositories, ...(fork ? { fork } : {}), ...ignored };
 }
 
 /** The `app` line, `undefined` when absent; refused when not of its shape or when its key file is missing. */

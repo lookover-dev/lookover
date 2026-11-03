@@ -25,32 +25,14 @@ export const pull = z.object({
 
 export const pulls = z.array(pull);
 
-export const installation = z.object({ id: z.int() });
+/**
+ * A pull request's description and head, read apart from `pull` (ADR 0074): only the status block's write and the
+ * view read it, never the review (ADR 0048). GitHub gives `null` for none.
+ */
+export const described = z.object({ body: z.string().nullable(), head: ref });
 
-export const accessToken = z.object({ token: z.string(), expires_at: z.iso.datetime() });
-
-export const app = z.object({ id: z.int(), slug: z.string() });
-
-export const botUser = user;
-
-/** An account as the App-level answers give it; its `type` is GitHub's (`User`, `Organization`, `Enterprise`…). */
+/** An account as an installation names it; its `type` is GitHub's (`User`, `Organization`, `Enterprise`…). */
 const account = user.extend({ type: z.string() });
-
-/** The App, as `GET /app` and a manifest's conversion describe it: who owns it and what it holds. */
-export const hostApp = z.object({
-  id: z.int(),
-  slug: z.string(),
-  owner: account,
-  permissions: z.record(z.string(), z.enum(["read", "write", "admin"])),
-});
-
-/** A manifest's conversion: the App and its private key. Its client and webhook secrets are not read. */
-export const conversion = hostApp.extend({ pem: z.string().min(1) });
-
-/** The App's installations, one page: on whose account each is, and whether it is suspended. */
-export const appInstallations = z.array(
-  z.object({ id: z.int(), account, suspended_at: z.string().nullable().optional() }),
-);
 
 /**
  * The installations the person's token reaches, each with its App's id, one page (`GET /user/installations`), and
@@ -158,15 +140,7 @@ export const threadComments = z.array(
 export const replyId = z.object({ id: z.int() });
 
 /** A comment in the pull request's conversation (an "issue comment" to GitHub). */
-export const issueComment = z.object({ id: z.int(), user, body: z.string() });
-
-/**
- * The conversation as the summary is looked for in it: each comment with the App a user token posted it through
- * (`performed_via_github_app`, spike 20), null or absent for one written any other way.
- */
-export const issueComments = z.array(
-  issueComment.extend({ performed_via_github_app: z.object({ id: z.int() }).nullish() }),
-);
+const issueComment = z.object({ id: z.int(), user, body: z.string() });
 
 /** The conversation as `view` reads it: each comment with GitHub's count of each of its reactions. */
 export const viewedComments = z.array(
@@ -237,10 +211,15 @@ export const deviceCode = z.object({
 });
 
 /**
- * The OAuth endpoint's answer (`POST /login/oauth/access_token`): its refusal, with status 200, is an `error` field;
- * a token for the shared App, which expires, comes with its refresh token and both lifetimes, in seconds.
+ * The OAuth endpoint's answer (`POST /login/oauth/access_token`): its refusal, with status 200, is an `error` field
+ * (a `slow_down` also carries the new `interval` to poll at, in seconds, read leniently: one that is no positive number
+ * is dropped, so the poll still slows down by 5 s); a token for the shared App, which expires,
+ * comes with its refresh token and both lifetimes, in seconds.
  */
-export const oauthRefusal = z.object({ error: z.string().min(1) });
+export const oauthRefusal = z.object({
+  error: z.string().min(1),
+  interval: z.number().positive().optional().catch(undefined),
+});
 export const oauthToken = z.object({
   access_token: z.string().min(1),
   expires_in: z.number().positive(),

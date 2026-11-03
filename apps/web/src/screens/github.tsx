@@ -1,36 +1,153 @@
-// A mock of the pull request on GitHub: the bot's summary comment, its inline comments (each with the newest reply
-// a round read on its thread, the claim) and the check run.
-// It uses GitHub's own colours on purpose, so it never reads as part of Lookover.
-import { type Change, type Finding, isCounted, shortSha } from "@lookover/contracts";
-import { Fragment } from "react";
+// A mock of the pull request on GitHub, as Lookover posts on it (ADR 0074), as the person signed in (ADR 0066, ADR
+// 0073): the status block in the description, each round's review with its line comments, each thread with the newest
+// claim a round read on it and Lookover's reply, and the check run. Every post opens with the wordmark. It uses
+// GitHub's own colours on purpose, so it never reads as part of Lookover.
+import { type Change, type CommitSha, type Finding, shortSha } from "@lookover/contracts";
+import { Fragment, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { reviewPath, useAppState } from "../store.tsx";
 import { BrandIcon } from "../ui/basics.tsx";
+import { WORDMARK_BOX } from "../ui/eyes.generated.ts";
 import { InlineCode } from "../ui/inline-code.tsx";
 import { severityLabel } from "../view-model/confirm.ts";
 import { placeText } from "../view-model/findings.ts";
 import { agoSentence, clock } from "../view-model/format.ts";
 import {
   agentLine,
+  type BlockItem,
   checkOf,
-  INLINE_OPENING,
+  postedAs,
   quotedLines,
-  summaryComment,
-  summaryFooter,
+  replyOf,
+  type StatusBlock,
+  statusBlock,
   threadOf,
+  timelineOf,
+  type Words,
 } from "../view-model/github.ts";
 import { type ChangeReview, changeReviewAt } from "../view-model/select.ts";
 import { timelineText } from "../view-model/timeline.ts";
 
-function Avatar({ bot }: { bot?: boolean }) {
-  return <span className={`gh-avatar ${bot ? "bot" : ""}`}>{bot ? <BrandIcon /> : null}</span>;
+function Avatar() {
+  return <span className="gh-avatar" />;
 }
 
-function Inline({ change, finding, bot }: { change: Change; finding: Finding; bot: string }) {
+/** The wordmark's files, one per theme (brand.md): its width from their drawing, so nothing moves as it loads. */
+const WORDMARK = { dark: "/brand/lookover-wordmark-on-dark.svg", light: "/brand/lookover-wordmark.svg" };
+const WORDMARK_RATIO = WORDMARK_BOX.width / WORDMARK_BOX.height;
+
+/** The wordmark Lookover's posts open with, `px` high, set on the text's line as GitHub's `absmiddle` sets it. */
+function Wordmark({ px }: { px: 18 | 26 }) {
+  const width = Math.round(px * WORDMARK_RATIO);
+  return (
+    <>
+      <img className="gh-wordmark on-dark" src={WORDMARK.dark} height={px} width={width} alt="Lookover" />
+      <img className="gh-wordmark on-light" src={WORDMARK.light} height={px} width={width} alt="Lookover" />
+    </>
+  );
+}
+
+/** A commit as GitHub links it in a post: its first seven characters, as code. */
+function Commit({ sha }: { sha: CommitSha }) {
+  return (
+    <span className="gh-link">
+      <code>{shortSha(sha)}</code>
+    </span>
+  );
+}
+
+function Said({ words }: { words: Words }) {
+  return (
+    <>
+      {words.map((w, i) =>
+        typeof w === "string" ? <InlineCode key={i} text={w} /> : <Commit key={i} sha={w.commit} />,
+      )}
+    </>
+  );
+}
+
+/** A permalink on its own line, as GitHub embeds it: the file and the commit over the lines it names. */
+function Embed({ item }: { item: BlockItem }) {
+  const { finding: f, permalink } = item;
+  if (permalink === null) return null;
+  const quoted = quotedLines(f);
+  if (quoted.length === 0) return <div className="gh-link gh-url">{permalink.url}</div>;
+  return (
+    <div className="gh-embed">
+      <div className="gh-embed-head">
+        <span className="gh-link">{f.file}</span>
+        <span className="gh-muted">
+          {placeText(f)} in <code>{shortSha(permalink.sha)}</code>
+        </span>
+      </div>
+      <pre className="gh-code">
+        {quoted.map(({ number, text }, i) => (
+          <Fragment key={number}>
+            {i > 0 ? "\n" : null}
+            <span>{number}</span>
+            {text}
+          </Fragment>
+        ))}
+      </pre>
+    </div>
+  );
+}
+
+/** Lookover's block in the description: the heading after the wordmark, its line, the open findings. */
+function Block({ block }: { block: StatusBlock }) {
+  return (
+    <>
+      <h3 className="gh-block-head">
+        <Wordmark px={26} /> · <Said words={block.head} />
+      </h3>
+      <p>
+        <Said words={block.line} />
+      </p>
+      {block.items.length > 0 ? (
+        <ul>
+          {block.items.map((item) => (
+            <li key={item.finding.id}>
+              <b>{item.severity}</b> ·{" "}
+              {item.linked ? (
+                <a href={`#thread-${item.finding.id}`}>
+                  <InlineCode text={item.finding.title} />
+                </a>
+              ) : (
+                <InlineCode text={item.finding.title} />
+              )}{" "}
+              · <code>{item.finding.file}</code> {item.place}
+              {item.note ? (
+                <div>
+                  <InlineCode text={item.note} />
+                </div>
+              ) : null}
+              <Embed item={item} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
+  );
+}
+
+/** One of Lookover's posts: the wordmark and its kind, then its paragraphs. */
+function Post({ kind, children }: { kind: string; children: ReactNode }) {
+  return (
+    <>
+      <p>
+        <Wordmark px={18} /> · {kind}
+      </p>
+      {children}
+    </>
+  );
+}
+
+function Inline({ change, finding, author }: { change: Change; finding: Finding; author: string }) {
   const thread = threadOf(change, finding);
+  const reply = replyOf(finding);
   const quoted = quotedLines(finding);
   return (
-    <details className="gh-box gh-thread" open={!thread.resolved}>
+    <details id={`thread-${finding.id}`} className="gh-box gh-thread" open={!thread.resolved}>
       <summary>
         <code>{finding.file}</code>
         <span className="gh-muted">{placeText(finding)}</span>
@@ -48,15 +165,27 @@ function Inline({ change, finding, bot }: { change: Change; finding: Finding; bo
         </pre>
       ) : null}
       <div className="gh-comment">
-        <Avatar bot />
-        <div>
-          <b>{bot}</b> <span className="gh-muted">bot</span>
-          <p>
-            {INLINE_OPENING}
-            <b>{severityLabel(finding)}:</b> <InlineCode text={finding.title} />.{" "}
-            <InlineCode text={finding.body} />
-          </p>
-        </div>
+        <Avatar />
+        {thread.hidden ? (
+          <div>
+            <b>{author}</b>
+            <p className="gh-muted">This comment was marked as resolved.</p>
+          </div>
+        ) : (
+          <div>
+            <b>{author}</b>
+            <Post kind={severityLabel(finding)}>
+              <p>
+                <b>
+                  <InlineCode text={finding.title} />
+                </b>
+              </p>
+              <p>
+                <InlineCode text={finding.body} />
+              </p>
+            </Post>
+          </div>
+        )}
       </div>
       {finding.claim ? (
         <div className="gh-comment">
@@ -66,6 +195,21 @@ function Inline({ change, finding, bot }: { change: Change; finding: Finding; bo
             <p>
               <InlineCode text={finding.claim.text} />
             </p>
+          </div>
+        </div>
+      ) : null}
+      {reply ? (
+        <div className="gh-comment">
+          <Avatar />
+          <div>
+            <b>{author}</b>
+            <Post kind={reply.kind}>
+              {reply.said.map((text) => (
+                <p key={text}>
+                  <InlineCode text={text} />
+                </p>
+              ))}
+            </Post>
           </div>
         </div>
       ) : null}
@@ -102,11 +246,9 @@ export function GitHubMock() {
     );
   }
   const { change, review } = it;
-  const bot = state.connection.bot ?? "sam-reviewer[bot]";
-  const posted = review.rounds.length > 0 && !review.preview;
-  const inline = review.findings.filter((f) => f.posted);
+  const author = postedAs(state.connection);
+  const block = statusBlock(it, state);
   const c = checkOf(it);
-  const open = review.findings.filter(isCounted);
   return (
     <div className="gh">
       <div className="gh-strip">
@@ -129,48 +271,43 @@ export function GitHubMock() {
           </span>
         </div>
         <div className="gh-timeline">
-          {review.timeline
-            .filter((t) => t.kind === "opened" || t.kind === "pushed")
-            .map((t) => (
-              <div className="gh-event" key={`${t.at}-${t.kind}`}>
+          <div className="gh-box">
+            <div className="gh-comment-head">
+              <Avatar />
+              <b>{change.openedBy}</b>
+              <span className="gh-muted">commented</span>
+            </div>
+            <div className="gh-body">
+              {block ? <Block block={block} /> : <p className="gh-muted">No description provided.</p>}
+            </div>
+          </div>
+          {timelineOf(review).map((t) =>
+            t.kind === "event" ? (
+              <div className="gh-event" key={`${t.at}-${t.entry.kind}`}>
                 <span className="gh-dot" />
-                <span>{timelineText(change, t)}</span>
-                {t.sha ? <code>{shortSha(t.sha)}</code> : null}
+                <span>{timelineText(change, t.entry)}</span>
+                {t.entry.sha ? <code>{shortSha(t.entry.sha)}</code> : null}
                 <span className="gh-muted">{clock(t.at)}</span>
               </div>
-            ))}
-          {posted ? (
-            <div className="gh-box">
-              <div className="gh-comment-head">
-                <Avatar bot />
-                <b>{bot}</b> <span className="gh-label">bot</span>
-                <span className="gh-muted">
-                  commented ·{" "}
-                  {review.rounds.length > 1 ? "edited" : clock(review.rounds[0]?.endedAt ?? review.updatedAt)}
-                </span>
-              </div>
-              <div className="gh-body">
-                <p>{summaryComment(it)}</p>
-                {open.length > 0 ? (
-                  <ul>
-                    {open.map((f) => (
-                      <li key={f.id}>
-                        <b>{severityLabel(f)}:</b> <InlineCode text={f.title} /> <code>{f.file}</code>{" "}
-                        {placeText(f)}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <p className="gh-muted">{summaryFooter(review)}</p>
-              </div>
-            </div>
-          ) : review.preview ? (
+            ) : (
+              <Fragment key={`round-${t.round.n}`}>
+                <div className="gh-event">
+                  <span className="gh-dot" />
+                  <b>{author}</b>
+                  <span className="gh-muted">reviewed · {clock(t.at)}</span>
+                </div>
+                {t.findings.map((f) => (
+                  <Inline key={f.id} change={change} finding={f} author={author} />
+                ))}
+              </Fragment>
+            ),
+          )}
+          {review.preview ? (
             <div className="gh-event">
               <span className="gh-dot" />
               <span className="gh-muted">Lookover ran a preview. Nothing was posted here.</span>
             </div>
           ) : null}
-          {posted ? inline.map((f) => <Inline key={f.id} change={change} finding={f} bot={bot} />) : null}
         </div>
         <div className="gh-box gh-checks">
           {c ? (

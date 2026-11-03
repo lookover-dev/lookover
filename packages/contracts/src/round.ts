@@ -36,6 +36,11 @@ export interface RoundSession {
 export interface Round {
   n: number;
   sha: CommitSha;
+  /**
+   * The merge base its diff was taken from: a base-side finding's lines are shown on it (ADR 0074's permalink); null
+   * when the round had none.
+   */
+  base: CommitSha | null;
   /** The finder: the run's `reviewer`. */
   reviewer: EngineId;
   /** Deep's second find pass, filled by the service from its run; null when the round had one find pass. */

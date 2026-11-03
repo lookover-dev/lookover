@@ -24,12 +24,14 @@ import {
 import type { FakeChange } from "@lookover/testkit";
 import {
   api,
-  BOT,
   fakeEngines,
   HeldReviews,
   heldRuns,
   home,
   messages,
+  ONE_FINDING,
+  OWNER,
+  onTheDiff,
   openApp,
   PLANTED,
   post,
@@ -38,6 +40,7 @@ import {
   SANDBOX,
   SHA1,
   SHA1_PUSHED,
+  SHARED_BOT,
   slowHealth,
   snapshot,
   start,
@@ -126,7 +129,6 @@ test("a job is taken once: a second request while the first is admitting it leav
     "run.posting",
     "run.posting",
     "run.posting",
-    "run.posting",
     "round.finished",
   ]);
   expect(events.at(-1)).toMatchObject({ job: { ...queued, state: "done" }, round: { n: 1 } });
@@ -148,7 +150,12 @@ test("signed out defers the job, its check saying why; signed in, the next reque
   await time.advance(0);
   expect(
     host.posts.map((p) => (p.kind === "check.updated" ? `${p.kind} ${p.output.title}` : p.kind)),
-  ).toEqual(["check.created", "check.updated Waiting: Claude is signed out"]);
+  ).toEqual([
+    "check.created",
+    "check.updated Waiting: Claude is signed out",
+    // The status block follows (ADR 0074): Waiting to look over.
+    "status.written",
+  ]);
 
   // Signed in: the next "Review now" puts the waiting job back in the queue (ADR 0042), the take asks the health,
   // sees Claude ready and starts it, and the round goes all the way through.
@@ -161,7 +168,6 @@ test("signed out defers the job, its check saying why; signed in, the next reque
     "run.started",
     "run.step",
     "run.step",
-    "run.posting",
     "run.posting",
     "run.posting",
     "run.posting",
@@ -196,10 +202,12 @@ test("signed out defers the job, its check saying why; signed in, the next reque
   ).toEqual([
     "check.created",
     "check.updated Waiting: Claude is signed out",
+    "status.written",
+    // Queued again, and taken at once: no block says it waited its turn.
     "check.updated Waiting for its turn",
     "check.updated Looking over a1b2c3d",
-    "review",
-    "summary.created",
+    "status.written",
+    "status.written",
     "check.completed",
   ]);
   // A tab that followed the events and one that loads the snapshot see the same thing.
@@ -381,7 +389,6 @@ test("a review deferred because Claude is signed out starts by itself once Claud
     `run.posting ${PLANTED}`,
     `run.posting ${PLANTED}`,
     `run.posting ${PLANTED}`,
-    `run.posting ${PLANTED}`,
     `round.finished ${PLANTED}`,
   ]);
   expect(events.at(-1)).toMatchObject({ job: { ...queued, state: "done" }, round: { n: 1 } });
@@ -418,7 +425,6 @@ test("'Check again' reads both engines' health now and sends what changed: Codex
     `run.started ${PLANTED}`,
     `run.step ${PLANTED}`,
     `run.step ${PLANTED}`,
-    `run.posting ${PLANTED}`,
     `run.posting ${PLANTED}`,
     `run.posting ${PLANTED}`,
     `run.posting ${PLANTED}`,
@@ -573,8 +579,19 @@ test("'Review now' while the change's review runs queues a follow-up on the newe
 });
 
 test("while a round is posted, its engine reviews another change, and the change's next review waits for the posts (ADR 0044)", async () => {
-  const host = new HeldReviews({ repo: SANDBOX, bot: BOT, changes: [pr1, numbered(9)] });
-  const { service } = await start({ host, engines: fakeEngines({ reviews: 3 }) });
+  const host = new HeldReviews({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1, numbered(9)],
+  });
+  // Round 1 finds a line of the diff, so it owes a review (ADR 0074); every pass after it answers nothing: its
+  // confirm pass, the other change's find, and round 2's.
+  const engines = fakeEngines();
+  engines.answer({ outcome: "ok", text: ONE_FINDING });
+  for (const _ of [1, 2, 3]) engines.answer({ outcome: "ok", text: '```json\n{"findings": []}\n```' });
+  const retrieval = onTheDiff();
+  const { service } = await start({ host, engines, retrieval });
   const cookie = await openApp(service);
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   expect((await review(service, cookie)).status).toBe(200);
@@ -689,7 +706,6 @@ test("a job whose start rule can't be asked fails, and the queue goes on to the 
     `run.posting ${OTHER}`,
     `run.posting ${OTHER}`,
     `run.posting ${OTHER}`,
-    `run.posting ${OTHER}`,
     `round.finished ${OTHER}`,
   ]);
   const failed: ReviewJob = {
@@ -755,7 +771,6 @@ test("a run whose folder can't be made fails its job, recorded, and the queue is
     "run.started",
     "run.step",
     "run.step",
-    "run.posting",
     "run.posting",
     "run.posting",
     "run.posting",

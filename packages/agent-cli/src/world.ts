@@ -1,5 +1,5 @@
-// What `lookover` runs against: the host with the agent's token, the local checkout, the environment, time and
-// its two output streams. The `lookover` command gives the real ones; tests give a `FakeGitHost` and a clock they move.
+// What `lookover` runs against: the host with the agent's token, the local checkout, time and its two output
+// streams. The `lookover` command gives the real ones; tests give a `FakeGitHost` and a clock they move.
 import type { AgentHost, Clock, CommitSha, RepositoryRef } from "@lookover/contracts";
 
 /** The local checkout, as git shows it. Each throws a plain `Error` when git can't say. */
@@ -19,8 +19,6 @@ export interface World {
    */
   host(): Promise<AgentHost>;
   git: LocalGit;
-  /** The environment: `LOOKOVER_APP` names the App when `--app` doesn't. */
-  env: Record<string, string | undefined>;
   clock: Clock;
   /** Resolves `ms` later by `clock`. */
   sleep(ms: number): Promise<void>;

@@ -62,7 +62,10 @@ export class ScriptedRetrieval {
   readonly prepared: JobId[] = [];
   /** The jobs whose worktree was removed, in order. */
   readonly disposed: JobId[] = [];
-  /** The diff a prepare of a commit nothing is scripted for gives: none by default, so every finding goes into the summary. */
+  /**
+   * The diff a prepare of a commit nothing is scripted for gives: none by default, so every finding goes into the
+   * status block.
+   */
   diff = "";
   private readonly root: string;
   private readonly commits = new Map<CommitSha, Scripted>();

@@ -76,8 +76,6 @@ async function signedIn(
   const signIns = signInStore({ home: dir, keychain: memoryKeychain(), userOnly });
   await signIns.write(signInOf(as));
   return {
-    installations: host,
-    connect: () => ({ intake: host, writer: host }),
     shared: {
       signIn: {
         startSignIn: () => host.startSignIn(),

@@ -110,11 +110,13 @@ export function roundOnHead(review: Review, change: Pick<Change, "headSha">): bo
 
 /**
  * "This finding is wrong" (ADR 0052): dismissed here and on GitHub, said on its thread when it has one (a finding in
- * the summary only has none), its comment hidden, the summary updated, and the check while the latest round is on
- * the head (`onHead`): one on an older commit stays as it is.
+ * the pull request's description only has none), its comment hidden, the status block in the description updated
+ * (ADR 0074), and the check while the latest round is on the head (`onHead`): one on an older commit stays as it is.
  */
 function wrongChoice(changeId: ChangeId, finding: Finding, onHead: boolean): NoiseOption {
-  const updates = onHead ? "updates the summary and the check" : "updates the summary";
+  const updates = onHead
+    ? "updates the pull request's description and the check"
+    : "updates the pull request's description";
   const where = finding.commented ? `says so on its thread, hides its comment, and ${updates}` : updates;
   const check = onHead ? "" : " The check stays: it is on an older commit.";
   return {

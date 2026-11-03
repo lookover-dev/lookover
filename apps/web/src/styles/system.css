@@ -1669,8 +1669,8 @@ dialog.dlg::backdrop {
   background: var(--code-bg);
   color: var(--ink);
 }
-/* inline code read as one where it is typed elsewhere (a device code, the App's slug), in the band, the status menu
-   and the setup's lines: never broken at its hyphen */
+/* inline code read as one where it is typed elsewhere (a device code), in the band, the status menu, setup and
+   Settings: never broken at its hyphen */
 .code-whole code {
   white-space: nowrap;
 }
@@ -1694,44 +1694,10 @@ dialog.dlg::backdrop {
   background: var(--muted);
 }
 
-/* ---- added with onboarding for real (design-system.md): a fix that is a page, the key file, a value to copy ---- */
+/* ---- added with onboarding for real (design-system.md): a fix that is a page, a value to copy ---- */
 /* a link button: the button it stands for, the external icon at its start; never underlined */
 a.btn {
   text-decoration: none;
-}
-/* the key file input: an input-high field holding "Choose a file" and the file's name; the key is never shown */
-.keyfile {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  padding: 0 var(--s-1);
-  min-width: 0;
-}
-.keyfile input[type="file"] {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-.keyfile .kf-name {
-  font: 400 var(--t-13) / 1.2 var(--mono);
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.keyfile .kf-name.none {
-  font-family: var(--body);
-  color: var(--faint);
-}
-/* "Use an existing App": its two fields and its button, one under the other, never wider than a reading line */
-.use-app {
-  display: grid;
-  gap: var(--s-4);
-  max-width: 480px;
-  margin-top: var(--s-3);
 }
 /* a refusal said where it was asked, outside a field: pink text, as a field's error; always there, two lines tall,
    empty until something is refused, so nothing under it moves when it is said or cleared */
@@ -1773,9 +1739,8 @@ a.btn {
 .try-it .try-next {
   min-height: 2lh;
 }
-/* Where the App lives (design-system.md, ADR 0059): under "Create your App"'s title and detail, as wide as them and
-   the action, so the action going moves nothing: a radio list, then one line held as tall as the tallest it can say,
-   with Check again on its right */
+/* what a sub-step holds below (setup's accounts list): under its title and detail, as wide as them and the action,
+   so the action going moves nothing */
 .substep-below {
   grid-column: 2 / -1;
 }
@@ -1794,39 +1759,16 @@ a.btn {
     max-width: 100%;
   }
 }
-.app-place {
-  display: grid;
-  gap: var(--s-2);
-}
-.app-place .check {
-  align-items: flex-start;
-}
-.app-place .check > span {
-  display: grid;
-  gap: 2px;
-}
-.app-place .check b {
-  color: var(--ink);
-}
-/* the room kept for the organisations `gh` may list: as tall as an option, seen nowhere */
-.app-place-spare {
-  visibility: hidden;
-}
-.app-place-line {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: var(--s-3);
-  align-items: center;
-  margin-top: var(--s-1);
-}
-/* Sign in with GitHub (design-system.md "Sign in with GitHub", ADR 0066): the code in the row's detail as inline
-   code, in the mono face at its line's size, a little apart and never broken (`.code-whole`), so it reads as typed;
-   the row's two actions side by side, their place as wide as both whether a code waits or not */
-.sign-in-detail code {
-  font-family: var(--mono);
+/* a device code (design-system.md "Device code", #476): inline code in the face drawn to tell 0 from D and O, 1 from
+   I, at its line's size, a little apart, wherever it shows (setup, Settings, the band, the status menu) */
+code.device-code {
+  font-family: var(--mono-code);
   font-weight: 600;
+  font-variant-numeric: slashed-zero;
   letter-spacing: 0.04em;
 }
+/* Sign in with GitHub (design-system.md "Sign in with GitHub", ADR 0066): the row's two actions side by side, their
+   place as wide as both whether a code waits or not */
 .code-actions {
   display: inline-flex;
   align-items: center;
@@ -2008,50 +1950,4 @@ a.btn {
 .copyline code {
   font-size: var(--t-13);
   overflow-wrap: anywhere;
-}
-/* Settings › GitHub's line for an agent on another computer: one plain sentence, the value to copy under it */
-.agent-app {
-  display: grid;
-  justify-items: start;
-  gap: var(--s-1);
-  margin-top: var(--s-2);
-}
-.agent-app p {
-  margin: 0;
-}
-/* not redundant with .copyline's own: `.setrow span` (more specific) makes every span in a row a block */
-.setrow .agent-app .copyline {
-  display: inline-flex;
-}
-/* a stand-alone page (design-system.md "Stand-alone page", ADR 0058): what the service serves without the app, the
-   tab GitHub returns to and its refusals. The eyes on their tile, one heading, one or two sentences, then its one
-   button, centred in a column no wider than a reading line. The service inlines this file whole, under the page's
-   own policy: classes only. Tokens throughout but the column's 480px and the mark's 48px, which design-system.md
-   names for this page. */
-.standalone {
-  min-height: 100vh;
-  max-width: 480px;
-  margin: 0 auto;
-  padding: var(--s-6) var(--s-5);
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: var(--s-4);
-  text-align: center;
-}
-.standalone-mark svg {
-  display: block;
-  width: 48px;
-  height: 48px;
-}
-.standalone h1,
-.standalone p,
-.standalone form {
-  margin: 0;
-}
-.standalone p {
-  color: var(--ink-2);
-}
-.standalone .btn {
-  margin-top: var(--s-4);
 }

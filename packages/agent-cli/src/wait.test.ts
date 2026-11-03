@@ -1,19 +1,8 @@
 // `lookover wait` through the package's entry, on a `FakeGitHost`: the App's moves are scheduled on a clock the
 // command's own sleeps move, so a 30-minute wait takes milliseconds. One test per exit code, then the rules.
 import { describe, expect, test } from "bun:test";
-import { REQUEST_MARKER, reviewRequest } from "@lookover/contracts";
-import {
-  APP,
-  BRANCH,
-  earlier,
-  finding,
-  newer,
-  owner,
-  ref,
-  result,
-  sha,
-  world,
-} from "./agent-cli.test-support.ts";
+import { checkExternalId, REQUEST_MARKER, reviewRequest } from "@lookover/contracts";
+import { BRANCH, earlier, finding, newer, owner, ref, result, sha, world } from "./agent-cli.test-support.ts";
 
 const someone = { id: 99, login: "someone" };
 /** A fork's pull request skipped when it opened (ADR 0048). */
@@ -221,11 +210,17 @@ describe("lookover wait: asking", () => {
     expect(w.comments().map((c) => c.body)).toEqual([reviewRequest(sha)]);
   });
 
-  test("the App named by --app is the one read; LOOKOVER_APP's is not", async () => {
-    const w = world({ env: { LOOKOVER_APP: "someone-elses-app" } });
-    w.at(10_000, () => w.check("round", "queued"));
-    w.at(20_000, () => w.complete("round", "success", result({})));
-    expect(await w.lookover("wait", "--app", APP)).toBe(0);
+  test("2: --app names no App any more, on any command: nothing is asked (ADR 0073)", async () => {
+    const w = world();
+    expect(await w.lookover("wait", "--app", "lookover-xy8f5o")).toBe(2);
+    expect(await w.lookover("feedback", "--app=lookover-xy8f5o")).toBe(2);
+    expect(await w.lookover("reply", "F1", "fixed", "Done.", "--app", "lookover-xy8f5o")).toBe(2);
+    expect(w.err.filter((l) => !l.startsWith("Usage:") && !l.startsWith(" "))).toEqual([
+      'lookover wait has no option "--app".',
+      'lookover feedback has no option "--app".',
+      'lookover reply has no option "--app".',
+    ]);
+    expect(w.comments()).toEqual([]);
   });
 
   test("a check of an earlier commit is not this one's", async () => {
@@ -491,7 +486,7 @@ describe("lookover wait: what it says", () => {
       sha,
       "queued",
       { title: "Waiting", summary: "", text: "" },
-      "job-1",
+      checkExternalId("job-1", owner.id),
     );
     await w.fake.completeCheck(ref.repo, id, "neutral", { title: "Done", summary: "", text: "No block." });
     expect(await w.lookover("wait")).toBe(1);

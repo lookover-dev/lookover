@@ -8,7 +8,6 @@ import { join } from "node:path";
 import { DAY_MS } from "./index.ts";
 import {
   api,
-  BOT,
   daysOnly,
   fakeEngines,
   HeldReviews,
@@ -16,10 +15,14 @@ import {
   home,
   lastEvent,
   messages,
+  ONE_FINDING,
+  OWNER,
+  onTheDiff,
   openApp,
   pr1,
   review,
   SANDBOX,
+  SHARED_BOT,
   sinceStart,
   snapshot,
   start,
@@ -95,9 +98,16 @@ test("a run's folder is kept 30 days, and goes at the day's prune after them", a
 
 test("a run resumed at start keeps its folder, its posts held a day and more; then it is a recent one", async () => {
   const dir = home();
-  const host = new HeldReviews({ repo: SANDBOX, bot: BOT, changes: [pr1] });
-  const engines = fakeEngines({ reviews: 1 });
-  const first = await start({ home: dir, host, engines });
+  const host = new HeldReviews({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
+  // Its one finding is on a line of the diff, so the round owes a review (ADR 0074); its confirm pass answers nothing
+  // more.
+  const engines = fakeEngines();
+  engines.answer(
+    { outcome: "ok", text: ONE_FINDING },
+    { outcome: "ok", text: '```json\n{"findings": []}\n```' },
+  );
+  const retrieval = onTheDiff();
+  const first = await start({ home: dir, host, engines, retrieval });
   await review(first.service, await openApp(first.service));
   // The round's review is begun, and the service stops before GitHub answers it.
   await host.asked;

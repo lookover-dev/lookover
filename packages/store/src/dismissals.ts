@@ -3,7 +3,9 @@
 // are", "a send of this post began", "the host took it, and this is its id for it", "its posts are over".
 // A dismissal is saved in one transaction, refused while a run of its change goes (a round would reconcile and post
 // over it): the change's ledger with the finding dismissed (its last round's, and that round's plan's ledger too, so a
-// review that lands late lands it dismissed), the dismissal, and the posts it owes, in order, under its own key.
+// review that lands late lands it dismissed; and the latest round that owes posts when a preview's came after it, so
+// the ledger that round's status block says holds it too), the dismissal, and the posts it owes, in order, under its
+// own key.
 // Until it ends, its change is busy for the take (`jobs.take`): a round never posts while it does. Its posts are
 // rendered from the round it names (that run's plan, kept as the run gave it).
 // Programming errors, thrown: marking a post of a dismissal never saved, that has ended, or of a kind it doesn't owe.
@@ -19,8 +21,11 @@ import {
 } from "@lookover/contracts";
 import { z } from "zod";
 
-/** A post of a dismissal, in `publish`'s spelling: the reply, the summary, the round's check, the root minimized. */
-export type DismissalPostKind = "reply" | "summary" | "completed" | "minimize";
+/**
+ * A post of a dismissal, in `publish`'s spelling: the reply, the status block in the description, the round's check,
+ * the root minimized.
+ */
+export type DismissalPostKind = "reply" | "status" | "completed" | "minimize";
 
 /** What the service saves as the owner dismisses a finding. */
 export interface DismissalSaved {
@@ -53,7 +58,7 @@ export interface Dismissal<P> {
   findingId: FindingId;
   /** The plan of the round it restates, as its run gave it. */
   plan: P;
-  /** That round's review went with every finding in the summary. */
+  /** That round's review went with every finding in the status block. */
   degraded: boolean;
   checkId: string | null;
   posts: StoredDismissalPost[];
@@ -89,7 +94,7 @@ const dismissalRow = z.object({
 });
 const postRows = z.array(
   z.object({
-    kind: enumOf<DismissalPostKind>()(["reply", "summary", "completed", "minimize"]),
+    kind: enumOf<DismissalPostKind>()(["reply", "status", "completed", "minimize"]),
     host_id: z.string().nullable(),
     tries: z.int(),
   }),
@@ -101,7 +106,14 @@ const ledgerRow = z.object({ ledger: z.string() });
 export function dismissals(db: Database): Dismissals {
   const selectRunning = db.query("SELECT 1 FROM jobs WHERE change_id = ? AND state = 'running' LIMIT 1");
   const selectLast = db.query("SELECT n, findings FROM rounds WHERE change_id = ? ORDER BY n DESC LIMIT 1");
-  const updateLast = db.query("UPDATE rounds SET findings = ? WHERE change_id = ? AND n = ?");
+  const updateRound = db.query("UPDATE rounds SET findings = ? WHERE change_id = ? AND n = ?");
+  // The latest round that owes posts (a preview's owes none): the rule `posts.latest` holds, kept the same.
+  const selectPosted = db.query(
+    `SELECT rounds.n AS n, rounds.findings AS findings FROM rounds
+     JOIN plans ON plans.change_id = rounds.change_id AND plans.n = rounds.n
+     WHERE rounds.change_id = ? AND EXISTS (SELECT 1 FROM posts WHERE posts.run_id = plans.run_id)
+     ORDER BY rounds.n DESC LIMIT 1`,
+  );
   const selectPlanLedger = db.query("SELECT ledger FROM plans WHERE change_id = ? AND n = ?");
   const updatePlanLedger = db.query("UPDATE plans SET ledger = ? WHERE change_id = ? AND n = ?");
   const insert = db.query(
@@ -139,11 +151,18 @@ export function dismissals(db: Database): Dismissals {
     const last = lastRow.parse(selectLast.get(d.changeId));
     // Written by the rounds and posts from typed values: reading them back is reading our own JSON.
     const ledger = d.dismiss(JSON.parse(last.findings));
-    updateLast.run(JSON.stringify(ledger), d.changeId, last.n);
+    updateRound.run(JSON.stringify(ledger), d.changeId, last.n);
     const planned = selectPlanLedger.get(d.changeId, last.n);
     if (planned !== null) {
       const landing: Finding[] = JSON.parse(ledgerRow.parse(planned).ledger);
       updatePlanLedger.run(JSON.stringify(d.dismiss(landing)), d.changeId, last.n);
+    }
+    const posted = selectPosted.get(d.changeId);
+    if (posted !== null) {
+      const round = lastRow.parse(posted);
+      if (round.n !== last.n) {
+        updateRound.run(JSON.stringify(d.dismiss(JSON.parse(round.findings))), d.changeId, round.n);
+      }
     }
     insert.run(d.id, d.changeId, d.findingId, d.runId, d.checkId, d.at);
     d.posts.forEach((kind, seq) => {

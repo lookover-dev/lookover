@@ -43,8 +43,16 @@ export const COPIES: readonly Copy[] = [
   { path: "apps/web/public/favicon.svg", render: () => icon(ink, paper, accent, true) },
   { path: EYES_MODULE, render: (_, format) => eyesModule(format) },
   { path: STYLESHEET, render: appStylesheet },
+  // The wordmark opening Lookover's posts on the app's simulated GitHub page (brand.md), one per theme.
+  { path: "apps/web/public/brand/lookover-wordmark.svg", render: () => wordmark(ink, accent) },
+  {
+    path: "apps/web/public/brand/lookover-wordmark-on-dark.svg",
+    render: () => wordmark(paper, accent, true),
+  },
   { path: SHEET, render: sheet },
   { path: SITE_FAVICON, render: siteIcon },
+  // Served at contracts' `WORDMARK_URLS`, which every post Lookover writes on GitHub draws (ADR 0074): they never
+  // move, and the site's tests and `site:check` fail without them.
   { path: "apps/site/public/brand/lookover-wordmark.svg", render: () => wordmark(ink, accent) },
   {
     path: "apps/site/public/brand/lookover-wordmark-on-dark.svg",

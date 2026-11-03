@@ -61,7 +61,10 @@ export interface Finding {
    * the location fingerprint hashes it. Null when the finder gave none (a review before `line_text`).
    */
   lineText: string | null;
-  /** How `review` anchored it by `lineText`: `unmatched` goes to the summary. `reported` for a finding without text. */
+  /**
+   * How `review` anchored it by `lineText`: `unmatched` goes to the status block. `reported` for a finding without
+   * text.
+   */
   anchoring: Anchoring;
   body: string;
   /** The engine whose find pass proposed it (ADR 0044): the round's finder, or either one in a Deep round. */
@@ -74,6 +77,8 @@ export interface Finding {
   rule: CitedRule | null;
   snippet: { start: number; lines: string[]; mark: number } | null;
   fix: { del: string; add: string } | null;
+  /** The finder's replacement code for its lines, kept from the round that raised it; null when it offered none. */
+  suggestion: string | null;
   status: FindingStatus;
   /**
    * False when strictness or the later-round rule (no new Consider from round 2) kept it off the pull request
@@ -83,8 +88,8 @@ export interface Finding {
   posted: boolean;
   /**
    * Whether the review that posted it holds an inline comment on it (#67): false while it is not posted, and when it
-   * went into the summary instead (outside the diff, past the review's most comments, or refused by the host). Set
-   * when that review lands; a later round lists a finding with no comment in the summary, never as commented.
+   * went into the status block instead (outside the diff, past the review's most comments, or refused by the host).
+   * Set when that review lands; a later round lists a finding with no comment in the block as not in the diff.
    */
   commented: boolean;
   raisedIn: number;

@@ -1,13 +1,11 @@
-// What `lookover` was asked, read from its arguments: `wait [--pr N] [--app SLUG] [--timeout 30m]
-// [--appear-timeout 3m] [--json]`, `feedback [--pr N] [--app SLUG] [--json]`, `reply <finding> <claim> <text>
-// [--pr N] [--app SLUG]`, or `help`. A flag takes its value as the next argument or after `=`.
+// What `lookover` was asked, read from its arguments: `wait [--pr N] [--timeout 30m] [--appear-timeout 3m]
+// [--json]`, `feedback [--pr N] [--json]`, `reply <finding> <claim> <text> [--pr N]`, or `help`. A flag takes its
+// value as the next argument or after `=`. No flag names the App: there is one, the shared App (ADR 0073).
 import type { ClaimKind } from "@lookover/contracts";
 
 export interface WaitArgs {
   /** The pull request's number, or null to find the current branch's. */
   pr: number | null;
-  /** The App's slug, or null to take `LOOKOVER_APP`. */
-  app: string | null;
   timeoutMs: number;
   appearMs: number;
   json: boolean;
@@ -15,7 +13,6 @@ export interface WaitArgs {
 
 export interface FeedbackArgs {
   pr: number | null;
-  app: string | null;
   json: boolean;
 }
 
@@ -33,7 +30,6 @@ export const CLAIMS = {
 
 export interface ReplyArgs {
   pr: number | null;
-  app: string | null;
   /** The finding's id, `F3`. */
   finding: string;
   claim: ClaimKind;
@@ -47,20 +43,19 @@ export type Asked =
   | { command: "reply"; args: ReplyArgs }
   | { usage: string; json?: boolean };
 
-export const USAGE = `Usage: lookover wait [--pr N] [--app SLUG] [--timeout 30m] [--appear-timeout 3m] [--json]
-       lookover feedback [--pr N] [--app SLUG] [--json]
-       lookover reply <finding> <claim> <text> [--pr N] [--app SLUG]
+export const USAGE = `Usage: lookover wait [--pr N] [--timeout 30m] [--appear-timeout 3m] [--json]
+       lookover feedback [--pr N] [--json]
+       lookover reply <finding> <claim> <text> [--pr N]
 
 wait      Asks Lookover to review the commit you pushed, if nobody has, waits for its check and says what to
           do next. Asks again on the same commit when you replied on a thread since its last round, and
-          resolves the threads of the findings it verified fixed.
+          resolves the threads of the findings it verified fixed or withdrew.
 feedback  The findings waiting on you in the newest round, each with its thread, your claim and Lookover's
           last reply.
 reply     Answers a finding on its thread: claim fixed, wont-fix, disputed, deferred or question. Then run
           lookover wait to have it answered.
 
   --pr N                the pull request; the current branch's by default
-  --app SLUG            the Lookover App's slug; LOOKOVER_APP, else the data folder's App, else the shared App
   --timeout 30m         how long wait waits for the result
   --appear-timeout 3m   how long wait waits for Lookover to pick the request up
   --json                one JSON document on stdout
@@ -83,7 +78,6 @@ function duration(text: string): number | null {
 /** Every option any command takes, read into one bag; each command says which it takes. */
 interface Options {
   pr: number | null;
-  app: string | null;
   timeoutMs: number;
   appearMs: number;
   json: boolean;
@@ -106,10 +100,6 @@ const OPTIONS: Record<string, (o: Options, value: string) => string | null> = {
     o.pr = Number(value);
     return null;
   },
-  "--app": (o, value) => {
-    o.app = value;
-    return null;
-  },
   "--timeout": durationOf("--timeout", (o, ms) => {
     o.timeoutMs = ms;
   }),
@@ -122,9 +112,9 @@ type Command = "wait" | "feedback" | "reply";
 
 /** The flags each command takes. */
 const TAKES = {
-  wait: new Set(["--pr", "--app", "--timeout", "--appear-timeout", "--json"]),
-  feedback: new Set(["--pr", "--app", "--json"]),
-  reply: new Set(["--pr", "--app"]),
+  wait: new Set(["--pr", "--timeout", "--appear-timeout", "--json"]),
+  feedback: new Set(["--pr", "--json"]),
+  reply: new Set(["--pr"]),
 } satisfies Record<Command, Set<string>>;
 
 const isCommand = (word: string): word is Command => word in TAKES;
@@ -149,7 +139,7 @@ export function ask(argv: string[]): Asked {
   if (command === "reply") return replyAsked(o, words);
   if (words.length > 0) return { usage: `lookover ${command} takes no "${words[0]}".`, json };
   if (command === "wait") return { command, args: o };
-  return { command, args: { pr: o.pr, app: o.app, json: o.json } };
+  return { command, args: { pr: o.pr, json: o.json } };
 }
 
 /** `--flag=value` as two arguments, as `--flag value` is. */
@@ -163,7 +153,7 @@ function readOptions(
   command: Command,
   rest: string[],
 ): { options: Options; words: string[] } | { help: true } | { usage: string } {
-  const options: Options = { pr: null, app: null, timeoutMs: 30 * 60_000, appearMs: 3 * 60_000, json: false };
+  const options: Options = { pr: null, timeoutMs: 30 * 60_000, appearMs: 3 * 60_000, json: false };
   const words: string[] = [];
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i] ?? "";
@@ -208,6 +198,6 @@ function replyAsked(o: Options, words: string[]): Asked {
   if (text.trim() === "") return { usage: "The reply needs a text: why, in a sentence." };
   return {
     command: "reply",
-    args: { pr: o.pr, app: o.app, finding: finding.toUpperCase(), claim, text: text.trim() },
+    args: { pr: o.pr, finding: finding.toUpperCase(), claim, text: text.trim() },
   };
 }

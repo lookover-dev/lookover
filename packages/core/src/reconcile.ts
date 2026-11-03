@@ -94,6 +94,7 @@ function raise(
     rule: c.rule ?? null,
     snippet: null,
     fix: null,
+    suggestion: c.suggestion,
     status: "open",
     posted,
     commented: false,
@@ -164,7 +165,7 @@ interface Settled {
   reply: ThreadReply | null;
 }
 
-/** A finding reported again with its line's text, `again`, takes that line, range and text (ADR 0044). */
+/** A finding reported again with its line's text, `again`, takes that line, range, text and suggestion (ADR 0044). */
 function movedBy(finding: Finding, again: CandidateFinding | undefined, round: number): Finding {
   if (again?.lineText == null) return finding;
   return {
@@ -175,6 +176,8 @@ function movedBy(finding: Finding, again: CandidateFinding | undefined, round: n
     endLine: again.location.endLine,
     lineText: again.lineText,
     anchoring: again.anchoring,
+    // A replacement is for the lines it was offered on: on new lines, only the new report's holds.
+    suggestion: again.suggestion,
     // The location hashes the line's text: it follows the text taken, the meaning stays the finding's.
     fingerprints: { ...finding.fingerprints, location: again.fingerprints.location },
     // Lines of this round's commit now.

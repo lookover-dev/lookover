@@ -134,14 +134,8 @@ test("S8, pause and resume: two pull requests arrive while paused and wait; resu
       unusable: null,
       detail: "",
     },
-    // The App's key as demo mode keeps it: in the room's keychain (ADR 0053).
-    {
-      check: "connection",
-      state: "connected",
-      cause: null,
-      bot: "lookover-spike-sasensi[bot]",
-      key: "keychain",
-    },
+    // Signed in to the shared App (ADR 0066).
+    { check: "connection", state: "connected", cause: null },
   ]);
 });
 
@@ -195,7 +189,7 @@ test("S10, a quiet day: six pull requests seen since early morning, more than Ho
   expect(state.service.paused).toBeNull();
   expect(state.engines.claude).toMatchObject({ state: "ready", version: "2.4.1" });
   expect(state.engines.codex).toMatchObject({ state: "ready", version: "0.162.1" });
-  expect(state.connection).toMatchObject({ state: "connected", bot: "lookover-spike-sasensi[bot]" });
+  expect(state.connection).toMatchObject({ state: "connected", person: { login: "sasensi" } });
   expect(state.repos.map((r) => r.id)).toEqual([repositoryId("sasensi/lookover-sandbox")]);
 
   // #141, the owner's own, opened 39 minutes ago: one clean round, Claude finding, nothing to confirm.

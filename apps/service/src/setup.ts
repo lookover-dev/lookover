@@ -2,15 +2,14 @@
 // repositories pages ask, kept by the store (`setup`, `repos`) and each change sent as the UI's event, `setup.changed`
 // with the whole setup as it now is, `repo.changed` with the switch. The furthest step reached is the store's rule
 // and `apply`'s: going back never loses the way forward. Leaving the AI step sets nothing (the `reviewers` default is
-// the settings writer's, row 4). The GitHub step (ADR 0053): an App created or given (`appGiven`) is waited for until
-// installed (`waiting-for-install`, the installation's wait reading it every few seconds); the install found
-// (`installed`) shows the connection, with the App's installation, and marks the step "nothing granted" or done, the
-// repositories reached; the step itself moves only by the owner's `goto` (ADR 0058). "Create it on GitHub" only says
-// the setup waits for the App (`waitForApp`): the manifest flow (`app-flow.ts`) makes it, and says here why it
-// stopped short (`flowRefused`), until the owner tries again. The first review is the queue's request (trigger
+// the settings writer's, row 4). The GitHub step (ADR 0053, ADR 0073): once the person signed in to the shared App
+// (`signedIn`), its install is waited for (`waiting-for-install`, the installation's wait reading it every few
+// seconds); the install found (`installed`) shows the connection, with the accounts reached, and marks the step
+// "nothing granted" or done, the repositories reached; the step itself moves only by the owner's `goto` (ADR 0058).
+// The first review is the queue's request (trigger
 // "first-review", a preview when the owner said "preview here only"); the setup keeps the change it was asked for,
 // once the queue knows it.
-// It must never know: the host (the installation is read by `installation.ts`, the App made by the flow), or
+// It must never know: the host (the installations are read by `installation.ts`), or
 // what a switch turned off does to a review (`core.intake`'s, through the queue).
 import type {
   ChangeId,
@@ -19,14 +18,13 @@ import type {
   RepositoryId,
   RepositoryRef,
   SetupGitHub,
-  SetupGitHubRefusal,
   Setup as SetupState,
   SetupStep,
 } from "@lookover/contracts";
 import { furthestReached } from "@lookover/contracts";
 import type { Store } from "@lookover/store";
 import type { Installation } from "./installation.ts";
-import { appInstalled, appMade, repoIdOf } from "./snapshot.ts";
+import { appInstalled, repoIdOf } from "./snapshot.ts";
 
 export interface SetupDeps {
   store: Pick<Store, "setup" | "repos">;
@@ -52,18 +50,13 @@ export interface SetupFlow {
   finish(): void;
   /** The owner turned a repository's switch on or off; refused for a repository the service doesn't watch. */
   setEnabled(repoId: RepositoryId, enabled: boolean): "ok" | "no_such_repository";
-  /** "Create it on GitHub" (ADR 0053): the setup waits for the App, nothing refused shown; nothing once it is made. */
-  waitForApp(): void;
-  /** The manifest flow stopped short: why, shown on the GitHub step until the owner tries again. */
-  flowRefused(why: SetupGitHubRefusal): void;
   /**
-   * An App created or given (ADR 0053), or a sign-in to the shared App made (ADR 0066), kept by the service, the
-   * connection showing its way already (the installation's `adopt` or `signedIn` sent it): unless it is installed
-   * already, the install is waited for.
+   * A sign-in to the shared App made (ADR 0066), kept by the service, the connection naming the person already (the
+   * installation's `signedIn` sent it): unless it is installed already, the install is waited for.
    */
-  appGiven(): void;
+  signedIn(): void;
   /**
-   * The App's installation found (ADR 0053), granting repositories or none: the connection shown connected (once),
+   * The shared App's installation found (ADR 0053), granting repositories or none: the connection shown connected (once),
    * with the installation; the GitHub step done, the repositories reached but not gone to (ADR 0058), or "nothing
    * granted". Nothing when the setup says so already.
    */
@@ -100,14 +93,9 @@ export function createSetup(d: SetupDeps): SetupFlow {
       switched(repo, enabled);
       return "ok";
     },
-    waitForApp: () => {
-      if (appMade(d.store.setup.read())) return;
-      write({ github: "waiting-for-app", githubRefused: null });
-    },
-    flowRefused: (why) => write({ githubRefused: why }),
-    appGiven: () => {
+    signedIn: () => {
       if (appInstalled(d.store.setup.read())) return;
-      write({ github: "waiting-for-install", githubRefused: null });
+      write({ github: "waiting-for-install" });
       d.github.waitForInstall();
     },
     installed: (granted) => {
@@ -116,7 +104,7 @@ export function createSetup(d: SetupDeps): SetupFlow {
       if (kept.github === github) return;
       const at = now();
       if (!appInstalled(kept)) {
-        // The bot's on `own`, the person's on `shared` (ADR 0066).
+        // The person's (ADR 0066).
         const id = d.github.connectionId();
         d.emit({
           type: "connection.changed",

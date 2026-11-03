@@ -37,7 +37,7 @@ export type LookoversReply = (reply: HostThreadReply) => boolean;
 
 /**
  * Lookover's reply (ADR 0066): one whose id it kept for the change, in any round, else one by who posts (`poster`: the
- * App's bot, or the person signed in on the shared App) holding a reply marker, for a post a crash kept no id of. A
+ * person signed in on the shared App) holding a reply marker, for a post a crash kept no id of. A
  * teammate's copied marker never passes: they can't write as who posts; a person's own reply holds no marker. With no
  * `poster` (null: not asked, there being no thread to read), only the kept ids.
  */

@@ -6,7 +6,7 @@
 // No git, no `claude`, no `codex`.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { basename, dirname } from "node:path";
-import { type Depth, type Event, readResult, SUMMARY_MARKER } from "@lookover/contracts";
+import { type Depth, type Event, readResult, statusOf } from "@lookover/contracts";
 import type { FakeEngines, ScriptedRun } from "@lookover/testkit";
 import {
   api,
@@ -104,7 +104,9 @@ async function reviewed(
   if (finished?.type !== "round.finished") throw new Error("no round");
   const steps = events.flatMap((e: Event) => (e.type === "run.step" ? [e.step] : []));
   const view = started.host.view(PR);
-  const summary = view.comments.find((c) => c.body.startsWith(SUMMARY_MARKER))?.body ?? "";
+  // What the pull request says of the round: its status block (ADR 0074), and the check's summary, which alone
+  // says how its passes went.
+  const summary = `${statusOf(view.description) ?? ""}\n${view.checks[0]?.output.summary ?? ""}`;
   const result = readResult(view.checks[0]?.output.text ?? "");
   return { engines, finished, steps, summary, result, events };
 }
@@ -150,7 +152,7 @@ test("Codex not installed, a Standard round confirms on the finder in a new sess
       },
     ],
   ]);
-  // The result names the confirmer, how many it ruled out and each finding's confirmation; the summary says which
+  // The result names the confirmer, how many it ruled out and each finding's confirmation; the block says which
   // one is unconfirmed.
   expect(result?.run.engine).toEqual({ finder: "claude", confirmer: "claude" });
   expect(result?.run.ruled_out).toBe(1);

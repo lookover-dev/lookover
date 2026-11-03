@@ -2,10 +2,13 @@
 // each wait GitHub makes it take go to the app as `run.posting`, and the log file says a wait and a round given up.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import type { Event, RunPosting } from "@lookover/contracts";
+import { CONFIRMED } from "./claims.test-support.ts";
 import {
   api,
   fakeEngines,
   messages,
+  ONE_FINDING,
+  onTheDiff,
   openApp,
   PLANTED,
   pr1,
@@ -27,16 +30,27 @@ function local(at: number): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+/**
+ * Engines that find `ONE_FINDING`, on a line of `onTheDiff`, and confirm it: the round has a line comment, so it owes
+ * a review.
+ */
+function findingOnce() {
+  const engines = fakeEngines();
+  engines.answer({ outcome: "ok", text: ONE_FINDING }, CONFIRMED);
+  return engines;
+}
+
 const postings = (events: Event[]): RunPosting[] =>
   events.flatMap((e) => (e.type === "run.posting" && e.changeId === PLANTED ? [e.posting] : []));
 
 test("a post GitHub asks to wait shows the round's outbox: sent of owed, until when and why, then each post sent", async () => {
-  const engines = fakeEngines({ reviews: 1 });
-  const { service, host, time, logged } = await start({ engines, changes: [pr1] });
+  const engines = findingOnce();
+  const { service, host, time, logged } = await start({ engines, retrieval: onTheDiff(), changes: [pr1] });
   const cookie = await openApp(service);
   const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
-  // The check and the review land; GitHub's secondary limit refuses the summary once: a minute's wait.
-  host.refuseNext("rate_limited", { post: "summary" });
+  // The check and the review land; GitHub's secondary limit refuses the round's status block once (after the one
+  // the job wrote as it ran): a minute's wait.
+  host.refuseNext("rate_limited", { post: "status", skip: 1 });
   expect((await review(service, cookie)).status).toBe(200);
   const seen = await until(events, "run.posting");
   while (postings(seen).at(-1)?.wait == null) seen.push(...(await until(events, "run.posting")));
@@ -57,12 +71,12 @@ test("a post GitHub asks to wait shows the round's outbox: sent of owed, until w
   expect(logged).toContain(
     `sasensi/lookover-sandbox#1 round 1 posts wait: GitHub asked to wait, trying again at ${local(until1)} (2 of 4 sent)`,
   );
-  expect(logged.at(-1)).toBe("sasensi/lookover-sandbox#1 round 1 posted: no open findings");
+  expect(logged.at(-1)).toBe("sasensi/lookover-sandbox#1 round 1 posted: 1 open finding");
 });
 
 test("a post GitHub refuses for good is given up at once: no wait shown, and the log says the round's posts were given up", async () => {
-  const engines = fakeEngines({ reviews: 1 });
-  const { service, host, logged } = await start({ engines, changes: [pr1] });
+  const engines = findingOnce();
+  const { service, host, logged } = await start({ engines, retrieval: onTheDiff(), changes: [pr1] });
   const cookie = await openApp(service);
   const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   host.refuseNext("unauthorized", { post: "review" });
@@ -76,13 +90,13 @@ test("a post GitHub refuses for good is given up at once: no wait shown, and the
   expect(seen.at(-1)).toMatchObject({ job: { state: "failed", failure: { kind: "publish_failed" } } });
   expect(logged.filter((line) => line.includes("posts wait"))).toEqual([]);
   expect(logged.at(-1)).toMatch(
-    /^sasensi\/lookover-sandbox#1 round 1 kept, its posts given up: GitHub refused the review/,
+    /^sasensi\/lookover-sandbox#1 round 1 kept, its posts given up: GitHub refused a post/,
   );
 });
 
 test("an hour of GitHub not answering says each wait in the log, then the round given up", async () => {
-  const engines = fakeEngines({ reviews: 1 });
-  const { service, host, time, logged } = await start({ engines, changes: [pr1] });
+  const engines = findingOnce();
+  const { service, host, time, logged } = await start({ engines, retrieval: onTheDiff(), changes: [pr1] });
   const cookie = await openApp(service);
   const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   host.refuseNext("unavailable", { post: "review" });

@@ -29,7 +29,6 @@ const LAST_STEP: Setup = {
   step: "background",
   reached: "background",
   github: "done",
-  githubRefused: null,
   firstReviewChange: null,
 };
 

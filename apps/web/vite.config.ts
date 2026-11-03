@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { fontLicences } from "./scripts/font-licences.ts";
 
 // The dev launcher (scripts/dev.ts) picks the port per worktree and passes it in LOOKOVER_UI_PORT. In service
 // mode it also passes the service's origin in LOOKOVER_API: `/api` is proxied there, so the app and the service
@@ -25,8 +26,20 @@ function programMarker(): Plugin {
   };
 }
 
+/** Every build carries the licence of each face it bundles, under `fonts/` (`scripts/font-licences.ts`). */
+function fontLicenceFiles(): Plugin {
+  return {
+    name: "lookover-font-licences",
+    apply: "build",
+    generateBundle() {
+      for (const { fileName, source } of fontLicences(import.meta.dirname))
+        this.emitFile({ type: "asset", fileName, source });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), programMarker()],
+  plugins: [react(), programMarker(), fontLicenceFiles()],
   server: {
     host: "127.0.0.1",
     port: Number(process.env.LOOKOVER_UI_PORT ?? 5173),

@@ -9,6 +9,7 @@ import {
   fakeEngines,
   OWNER,
   pr1,
+  roundWritten,
   SANDBOX,
   SHA1,
   start,
@@ -81,7 +82,12 @@ async function world() {
     host,
     engines,
     ask,
-    /** The rounds posted: one review each. */
+    /**
+     * The rounds posted: one status block write each. A round with no new line comment posts no review (ADR 0074), so
+     * the reviews count only the rounds that put a finding on a line. Not the block the job writes as it runs.
+     */
+    rounds: () => host.posts.filter(roundWritten).length,
+    /** The reviews posted. */
     reviews: () => host.posts.filter((p) => p.kind === "review").length,
     /** The round the last check completed says it was. */
     round: () => {
@@ -101,6 +107,7 @@ async function world() {
 test("a request on a commit already reviewed makes a new round, the agent's naming its reply as the owner's plain one", async () => {
   const w = await world();
   await w.ask("/lookover review", [found(12, "blocking", "The total skips the last invoice")]);
+  expect(w.rounds()).toBe(1);
   expect(w.reviews()).toBe(1);
   expect(w.round()).toBe(1);
 
@@ -109,13 +116,15 @@ test("a request on a commit already reviewed makes a new round, the agent's nami
   if (!thread) throw new Error("round 1 posted no thread");
   const reply = w.host.seedReply(PR1, thread.commentId, { author: OWNER, body: "Won't fix: a sentinel." });
   await w.ask(reviewRequest(SHA1, { reply }), [NOTHING]);
-  expect(w.reviews()).toBe(2);
+  expect(w.rounds()).toBe(2);
   expect(w.round()).toBe(2);
 
   // And once more by the owner, by hand.
   await w.ask("/lookover review", [NOTHING]);
-  expect(w.reviews()).toBe(3);
+  expect(w.rounds()).toBe(3);
   expect(w.round()).toBe(3);
+  // Rounds 2 and 3 found nothing new: no line comment, so no review of their own.
+  expect(w.reviews()).toBe(1);
   expect(w.engines.queued).toBe(0);
 });
 

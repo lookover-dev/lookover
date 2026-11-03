@@ -1,41 +1,33 @@
-// Live mode's adapters (ADR 0039, ADR 0041, ADR 0053): GitHub at the App level and the repository ports its key
-// signs, both built with the live config's allow-list so they refuse any other repository; the real `claude` and
-// `codex` through the real `engines` module (each found where it is installed, ADR 0044), each version self-tested
-// before it reviews (ADR 0044), the confirm pass on a second build of them at its own effort (Codex `medium`, ADR
-// 0044), and `retrieval` fetching from GitHub with the App's short-lived token. The App is `live.json`'s when it names
-// one: its key's text read here from the path it gives, passed to the adapters and never logged, never stored, and
-// the data folder set up at once. Without one, the data folder's (its App store, its key in the OS keychain), and a
-// fresh data folder starts at the setup's first step. The shared App is offered beside it (ADR 0066): its device flow,
-// and the sign-in kept sealed in the data folder (or the folder `signIns` names) on the same keychain, used only when
-// no App is: `live.json`'s or the data folder's own wins. The owner and the bot are the App's, asked of GitHub when the
-// room opens; `live.json`'s App owned by an organisation works for the person their own `gh` names (ADR 0059). No scripted push: a live push is the owner's, or `bun run live`'s through `gh`. The machine-wide lock
-// is the program's to take (`acquireLiveLock`), since `bun run live` holds it around more than the service.
-import { readFileSync } from "node:fs";
+// Live mode's adapters (ADR 0039, ADR 0041, ADR 0053, ADR 0073): GitHub through the shared App (its device flow, and
+// the sign-in kept sealed in the data folder, or the folder `signIns` names, on the OS keychain) and the repository
+// ports as the person signed in, both built with the live config's allow-list so they refuse any other repository; the
+// real `claude` and `codex` through the real `engines` module (each found where it is installed, ADR 0044), each
+// version self-tested before it reviews (ADR 0044), the confirm pass on a second build of them at its own effort
+// (Codex `medium`, ADR 0044), and `retrieval` fetching from GitHub with the person's token. A fresh data folder starts
+// at the setup's first step; in live mode (`signIns` named, ADR 0073), a sign-in kept there sets the data folder up at
+// once, and `LiveAdapters.start` says what the run is on. A data folder holding an App of its own from an earlier
+// version (`github/app.json`) is read as one with none: its setup's GitHub step asks for a sign-in. No scripted push:
+// a live push is the owner's, or `bun run live`'s through `gh`. The machine-wide lock is the program's to take
+// (`acquireLiveLock`), since `bun run live` holds it around more than the service.
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Gh, HostLogin } from "@lookover/contracts";
 import { createEngines, type SignIn } from "@lookover/engines";
-import {
-  createGitHub,
-  createHostAccounts,
-  createHostInstallations,
-  createHostSignIn,
-} from "@lookover/github";
+import { createGitHub, createHostAccounts, createHostSignIn } from "@lookover/github";
 import { createProcessRunner } from "@lookover/process";
 import { openTerminal } from "@lookover/process/terminal";
 import { createRetrieval } from "@lookover/retrieval";
-import { appStore } from "./app-store.ts";
 import type { GitHubSide } from "./installation.ts";
 import { type Keychain, osKeychain } from "./keychain.ts";
 import type { LiveConfig } from "./live-config.ts";
 import type { ServiceOptions } from "./service.ts";
 import type { SignInOpener } from "./sign-in.ts";
-import { signInStore } from "./sign-in-store.ts";
+import { type SignInStore, signInStore } from "./sign-in-store.ts";
 import { NEW_OWNER, SET_UP } from "./snapshot.ts";
 import { REAL_TIMERS } from "./timers.ts";
 
 export interface LiveOptions {
-  /** The data folder: the mirrors, the worktrees, the runs and the App store live under it. */
+  /** The data folder: the mirrors, the worktrees and the runs live under it. */
   home: string;
   /**
    * The process registry: the service records every process it starts there, and sweeps what a crashed start left
@@ -47,28 +39,24 @@ export interface LiveOptions {
   /** The git program, by absolute path. */
   git: string;
   /**
-   * The live config: the repositories it may use (the allow-list), and the App, when it names one. None (the program
-   * unguarded, ADR 0054): every repository the installation lists, and the setup may create the App.
+   * The live config: the repositories it may use (the allow-list). None (the program unguarded, ADR 0054): every
+   * repository the installations list.
    */
   config: LiveConfig | undefined;
-  /** Given every secret GitHub's adapter comes to hold (its key, JWTs, tokens), for the log to remove (ADR 0054). */
+  /** Given every secret GitHub's adapter comes to hold (its tokens), for the log to remove (ADR 0054). */
   secret?(value: string): void;
   /**
-   * The folder whose sign-in to the shared App the service reads and renews (ADR 0066): `home` unless given. `bun run
-   * live` gives the live data folder, so every run's fresh folder shares the one sign-in, never a copy of it.
+   * The folder whose sign-in to the shared App the service reads and renews (ADR 0066): `home` unless given. Live mode
+   * gives it (`serve --live`, its `--sign-ins` or its data folder; `bun run live`, the live data folder, ADR 0073), so
+   * every run's fresh folder shares the one sign-in, never a copy of it; given, a sign-in kept there sets the data
+   * folder up at once. The program never gives it: its setup goes on from where it was.
    */
   signIns?: string;
-  /**
-   * The person's own `gh` (ADR 0059): who `live.json`'s App works for when an organisation owns it, asked at start.
-   * Absent: such an App is refused at start.
-   */
-  gh?: Gh;
+  /** The keychain the sign-in store keeps its data key in: the OS's by default; a test's own. */
+  keychain?: Keychain;
 }
 
-/**
- * The person `gh` is signed in as, for an organisation's App named by `live.json` (ADR 0059); throws, saying why,
- * when it names nobody: never the organisation in their place.
- */
+/** The person `gh` is signed in as; throws, saying why, when it names nobody. */
 export const ghPerson = (gh: Gh) => async (): Promise<HostLogin> => {
   const read = await gh.person();
   if (read.kind === "signed-in") return { id: read.account.id, login: read.account.login };
@@ -78,14 +66,25 @@ export const ghPerson = (gh: Gh) => async (): Promise<HostLogin> => {
       : read.kind === "signed-out"
         ? "gh is signed out (gh auth login)"
         : `gh gave no answer (${read.why}: ${read.detail})`;
-  throw new Error(`An organisation's App works for the person gh is signed in as, and ${why}.`);
+  throw new Error(`The person is the one gh is signed in as, and ${why}.`);
 };
 
 export type LiveAdapters = Pick<
   ServiceOptions,
   "github" | "engines" | "confirmEngines" | "selfTests" | "signIn" | "retrieval" | "setup" | "setUpAtOnce"
->;
+> & {
+  /** How live mode starts, when `LiveOptions.signIns` was given: who it runs as (ADR 0073). */
+  start?: LiveStart;
+};
 
+/**
+ * Who live mode runs as at start (ADR 0073): the person signed in to the shared App in `signIns`'s folder, one whose
+ * sign-in no longer opens, or nobody.
+ */
+export type LiveStart =
+  | { as: "signed-in"; person: HostLogin }
+  | { as: "lost"; person: HostLogin }
+  | { as: "signed-out" };
 /**
  * "Sign in" in live mode (ADR 0047): the vendor's own login, as `engines` names it, in a visible terminal the user
  * signs in at, started from their home folder with the engine's allow-listed environment and nothing else of the
@@ -109,46 +108,35 @@ export const terminalSignIn = (
 });
 
 /**
- * What a live config guards (ADR 0053, ADR 0054): with one, only its repositories are watched and no App is ever
- * created ("Create it on GitHub" and its page refuse, ADR 0045); without one (the program unguarded), every
- * repository the installation lists, and the setup may create the App. Whatever `side` said of either is replaced.
+ * What a live config guards (ADR 0053, ADR 0054): with one, only its repositories are watched; without one (the
+ * program unguarded), every repository the installations list. Whatever `side` said of it is replaced.
  */
 export function guarded(side: GitHubSide, config: LiveConfig | undefined): GitHubSide {
-  const { allowed: _allowed, liveConfig: _liveConfig, ...rest } = side;
-  if (config === undefined) return { ...rest, liveConfig: false };
-  return { ...rest, allowed: config.repositories, liveConfig: true };
+  const { allowed: _allowed, ...rest } = side;
+  return config === undefined ? rest : { ...rest, allowed: config.repositories };
 }
 
 /**
- * GitHub for a real run (ADR 0053, ADR 0066): the App level and the repository ports, each built with the live config's
- * allow-list when there is one, and guarded by it, each given `secret` for the log; the App the live config names,
- * else the data folder's App store over the OS keychain; and the shared App, its sign-in kept in `signIns`'s sign-in
- * store on the same keychain (the App, when there is one, wins over it).
+ * GitHub for a real run (ADR 0066, ADR 0073): the shared App, its sign-in kept in `signIns`, its accounts and the
+ * repository ports as the person, each built with the live config's allow-list when there is one, and guarded by it,
+ * each given `secret` for the log.
  */
 function liveGitHub(
-  home: string,
   config: LiveConfig | undefined,
   secret: ((value: string) => void) | undefined,
-  gh: Gh | undefined,
-  signIns: string,
+  signIns: SignInStore,
 ): GitHubSide {
   const repositories = config?.repositories;
   const told = {
     ...(repositories === undefined ? {} : { repositories }),
     ...(secret === undefined ? {} : { secret }),
   };
-  const keychain: Keychain = osKeychain(REAL_TIMERS);
   // Guarded here for `bun run live`, which starts on these adapters alone; the program's wiring guards them again.
-  const side: GitHubSide = guarded(
+  return guarded(
     {
-      installations: createHostInstallations(told),
-      connect: ({ id, key }) => {
-        const github = createGitHub({ app: { id, privateKey: key }, ...told });
-        return { intake: github.intake, writer: github.writer };
-      },
       shared: {
         signIn: createHostSignIn(told),
-        signIns: signInStore({ home: signIns, keychain }),
+        signIns,
         accounts: (keeper) => createHostAccounts({ keeper, ...told }),
         connect: (keeper) => {
           const github = createGitHub({ keeper, ...told });
@@ -158,10 +146,6 @@ function liveGitHub(
     },
     config,
   );
-  const app = config?.app;
-  if (app === undefined) return { ...side, apps: appStore({ home, keychain }) };
-  const person = gh === undefined ? {} : { person: ghPerson(gh) };
-  return { ...side, given: { id: app.id, key: readFileSync(app.keyPath, "utf8") }, ...person };
 }
 
 export async function liveAdapters({
@@ -171,16 +155,19 @@ export async function liveAdapters({
   git,
   config,
   secret,
-  gh,
   signIns,
+  keychain = osKeychain(REAL_TIMERS),
 }: LiveOptions): Promise<LiveAdapters> {
   const runner = createProcessRunner({ registryFile: processes });
   await runner.sweepOrphans();
   const engines = createEngines({ runner, env });
-  // With `live.json`'s App, set up at once; without, the setup's first step on a fresh data folder (ADR 0053).
-  const given = config?.app !== undefined;
+  const store = signInStore({ home: signIns ?? home, keychain });
+  // Live mode's start, when its sign-in's folder is named: who it runs as (ADR 0073).
+  const start = signIns === undefined ? undefined : await startOf(store);
+  // With live mode's sign-in kept, set up at once; else the setup's first step on a fresh data folder (ADR 0053).
+  const given = start?.as === "signed-in";
   return {
-    github: liveGitHub(home, config, secret, gh, signIns ?? home),
+    github: liveGitHub(config, secret, store),
     engines,
     // The confirm pass at its own effort (ADR 0044): Codex at medium.
     confirmEngines: createEngines({ runner, env, codexEffort: "medium" }),
@@ -189,5 +176,14 @@ export async function liveAdapters({
     retrieval: createRetrieval({ root: join(home, "repos"), runner, env, git }),
     setup: given ? SET_UP : NEW_OWNER,
     setUpAtOnce: given,
+    ...(start === undefined ? {} : { start }),
   };
+}
+
+/** Who live mode runs as (`LiveStart`): the sign-in `signIns` keeps, kept, lost or none. */
+async function startOf(signIns: SignInStore): Promise<LiveStart> {
+  const read = await signIns.read();
+  if (read.state === "none") return { as: "signed-out" };
+  const { id, login } = read.state === "kept" ? read.signIn.person : read.person;
+  return { as: read.state === "kept" ? "signed-in" : "lost", person: { id, login } };
 }

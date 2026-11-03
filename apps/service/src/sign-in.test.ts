@@ -88,7 +88,7 @@ test("while the sign-in is pending the engine's health is asked every 5 s; signe
 
   expect((await signIn(service, cookie)).status).toBe(200);
   expect(await until(stream, "engine.changed")).toEqual([
-    { type: "engine.changed", seq: 7, at: T0, id: "claude", patch: { signingIn: true } },
+    { type: "engine.changed", seq: 8, at: T0, id: "claude", patch: { signingIn: true } },
   ]);
   const before = asked.claude;
   await time.advance(4_999);
@@ -139,7 +139,7 @@ test("nothing happening for ten minutes ends the watch: the engine stays signed 
   });
   await time.advance(1);
   expect(await until(stream, "engine.changed")).toEqual([
-    { type: "engine.changed", seq: 6, at: T0 + 10 * 60_000, id: "claude", patch: { signingIn: false } },
+    { type: "engine.changed", seq: 7, at: T0 + 10 * 60_000, id: "claude", patch: { signingIn: false } },
   ]);
   // 120 looks, one every 5 s, the last at the end; then none.
   expect(asked.claude).toBe(before + 120);

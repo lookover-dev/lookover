@@ -44,6 +44,7 @@ function finding(status: FindingStatus, posted = true): Finding {
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: null,
     status,
     posted,
     commented: false,

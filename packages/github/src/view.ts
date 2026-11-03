@@ -1,4 +1,5 @@
-// What GitHub shows for a change now, as contracts' `HostView`: the `Lookover` check runs of a commit, the
+// What GitHub shows for a change now, as contracts' `HostView`: its description (the status block in it, ADR 0074,
+// "" for GitHub's null), the `Lookover` check runs of a commit, the
 // reviews with their inline comments, and the conversation's comments, each oldest first and every page GitHub's
 // `Link` header gives (a busy pull request has more than 100 comments). The live run reads
 // it back after each post; polling will read it later. GitHub names a range by its last line and `start_line`,
@@ -20,9 +21,9 @@ import type { GitHubApi } from "./api.ts";
 import { graphql } from "./graphql.ts";
 import {
   checkRuns,
+  described,
   minimizedNodes,
   parse,
-  pull,
   reviewComments,
   reviews,
   viewedComments,
@@ -96,7 +97,8 @@ export function createView(api: GitHubApi, session: Session, allowed: Allowed) {
         return items;
       };
 
-      const head = commit ?? (await get(`/pulls/${number}`, pull)).head.sha;
+      const read = await get(`/pulls/${number}`, described);
+      const head = commit ?? read.head.sha;
       // Lookover's runs only, and all of them: GitHub's default, `latest`, hides every run but the newest.
       const query = `check_name=${encodeURIComponent(CHECK_NAME)}&filter=all&per_page=100`;
       const runs = await get(`/commits/${head}/check-runs?${query}`, checkRuns);
@@ -115,6 +117,7 @@ export function createView(api: GitHubApi, session: Session, allowed: Allowed) {
       }
 
       return {
+        description: read.body ?? "",
         checks: byId(runs.check_runs).map((run) => ({
           id: String(run.id),
           name: run.name,

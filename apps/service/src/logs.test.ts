@@ -9,18 +9,19 @@ import { DemoClock, FakeGitHost } from "@lookover/testkit";
 import { buildDemoRoom, openLogSink, type RunningService, scenarioOf, startDemoService } from "./index.ts";
 import {
   api,
-  BOT,
   fakeEngines,
   home,
   linkOf,
   messages,
   next,
-  onFakeGitHub,
+  OWNER,
   openApp,
   PLANTED,
   pr1,
   review,
   SANDBOX,
+  SHARED_BOT,
+  signedInOn,
   snapshot,
   start,
   stopAll,
@@ -95,22 +96,26 @@ test("in live mode's wiring the room logs to the sink: GitHub's refusal echoing 
   const dir = home();
   const sink = await sinkIn(dir);
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  const side = onFakeGitHub(host);
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+  });
+  const side = await signedInOn(host, dir);
+  const refused = () =>
+    Promise.reject(
+      new HostError("unavailable", `GitHub answered ${INSTALLATION_TOKEN} for ${JWT} signed with ${KEY}`),
+    );
   const github = {
     ...side,
-    installations: {
-      ...side.installations,
-      app: () =>
-        Promise.reject(
-          new HostError("unavailable", `GitHub answered ${INSTALLATION_TOKEN} for ${JWT} signed with ${KEY}`),
-        ),
-    },
+    shared: { ...side.shared, accounts: () => ({ person: refused, accounts: refused }) },
   };
   await start({ home: dir, host, time, github, logSink: sink, live: true });
   const file = logOf(dir);
   expect(file).toContain(
-    "the GitHub App could not be read: GitHub answered [redacted] for [redacted] signed with [redacted]",
+    "the installation's repositories could not be listed: GitHub answered [redacted] for [redacted] signed with [redacted]",
   );
   for (const secret of [INSTALLATION_TOKEN, JWT, "MIIEowIBAAKCAQEAplanted"])
     expect(file).not.toContain(secret);
@@ -124,7 +129,7 @@ class RefusingPosts extends FakeGitHost {
   override publishReview(): Promise<string> {
     return Promise.reject(new HostError("unauthorized", `Bad credentials for ${INSTALLATION_TOKEN}`));
   }
-  override upsertSummary(): Promise<string> {
+  override upsertStatus(): Promise<void> {
     return Promise.reject(new HostError("unauthorized", `Bad credentials for ${INSTALLATION_TOKEN}`));
   }
 }
@@ -134,7 +139,13 @@ test("a review's lines reach the file (ADR 0055), a token in a pull request's ti
   const sink = await sinkIn(dir);
   const time = new DemoClock({ at: T0 });
   const titled = { ...pr1, title: `Rotate the deploy key ${PAT}` };
-  const host = new RefusingPosts({ repo: SANDBOX, bot: BOT, changes: [titled], clock: time });
+  const host = new RefusingPosts({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [titled],
+    clock: time,
+  });
   const engines = fakeEngines({ reviews: 1 });
   const { service } = await start({ home: dir, host, time, engines, logSink: sink, live: true });
   const cookie = await openApp(service);
@@ -149,7 +160,7 @@ test("a review's lines reach the file (ADR 0055), a token in a pull request's ti
     "sasensi/lookover-sandbox#1 opened by sasensi: Rotate the deploy key [redacted]",
     "sasensi/lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
     "sasensi/lookover-sandbox#1 round 1 started on a1b2c3d, standard: Claude finds, Claude double-checks",
-    "sasensi/lookover-sandbox#1 round 1 kept, its posts given up: GitHub refused the review (unauthorized: Bad credentials for [redacted])",
+    "sasensi/lookover-sandbox#1 round 1 kept, its posts given up: GitHub refused a post (unauthorized: Bad credentials for [redacted])",
   ]);
   expect(logOf(dir)).not.toContain(PAT);
   expect(logOf(dir)).not.toContain(INSTALLATION_TOKEN);
@@ -162,7 +173,13 @@ test("a review's line that can't be written is printed filtered: a token in a pu
   const shown = await stderrOf(async () => {
     const time = new DemoClock({ at: T0 });
     const titled = { ...pr1, title: `Rotate the deploy key ${PAT}` };
-    const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [titled], clock: time });
+    const host = new FakeGitHost({
+      repo: SANDBOX,
+      bot: SHARED_BOT,
+      person: OWNER,
+      changes: [titled],
+      clock: time,
+    });
     const engines = fakeEngines({ reviews: 1 });
     const { service } = await start({ home: dir, host, time, engines, logSink: sink });
     const cookie = await openApp(service);
@@ -179,7 +196,13 @@ test("a line the room's own log refuses is printed as a fixed message, never the
   const shown = await stderrOf(async () => {
     const time = new DemoClock({ at: T0 });
     const titled = { ...pr1, title: `Rotate the deploy key ${PAT}` };
-    const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [titled], clock: time });
+    const host = new FakeGitHost({
+      repo: SANDBOX,
+      bot: SHARED_BOT,
+      person: OWNER,
+      changes: [titled],
+      clock: time,
+    });
     const refusing = () => {
       throw new Error("ENOSPC: no space left on device");
     };

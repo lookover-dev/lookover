@@ -375,7 +375,7 @@
   column-gap: 12px;
   align-items: start;
 }
-/* the person signed in: a round with their initial; Lookover's badge, the icon file, on what GitHub badges */
+/* the person signed in: a round with their initial */
 .ts-person {
   position: relative;
   display: flex;
@@ -389,38 +389,25 @@
   font: 600 15px / 1 var(--body);
   color: var(--gh-muted);
 }
-.ts-badge {
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  width: 12px;
-  height: 12px;
-  display: flex;
-}
-.ts-badge svg {
-  width: 100%;
-  height: 100%;
-}
 .ts-rvhead {
   font-size: 15px;
+  line-height: 34px;
 }
 .ts-rvhead b {
   font-weight: 600;
 }
-.ts-rvslot {
-  position: relative;
-  height: 48px;
-  margin-top: 2px;
+/* Lookover's wordmark opening each post (ADR 0074): the theme's file, on the text's line as GitHub's `absmiddle` */
+.ts-wm {
+  height: 1.15em;
+  width: auto;
+  vertical-align: middle;
 }
-.ts-rvtext {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  font: 400 15.5px / 1.45 var(--body);
-  color: var(--gh-text);
-  text-wrap: pretty;
-  opacity: 0;
+.ts-wm.on-light,
+:root[data-theme="light"] .ts-wm.on-dark {
+  display: none;
+}
+:root[data-theme="light"] .ts-wm.on-light {
+  display: inline;
 }
 .ts-finding {
   border: var(--line-w) solid var(--gh-border);
@@ -474,10 +461,9 @@
   flex-direction: column;
   gap: 3px;
 }
-.ts-sevslot {
-  position: relative;
-  height: 14px;
-  margin-bottom: 2px;
+.ts-fopen {
+  font-size: 14px;
+  color: var(--gh-text);
 }
 .ts-fbody b {
   font: 700 17.5px / 1.3 var(--display);
@@ -490,17 +476,7 @@
   margin-top: 2px;
 }
 .ts-sev {
-  position: absolute;
-  left: 0;
-  top: 0;
-  font: 500 11px / 1 var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--acc-text);
-  opacity: 0;
-}
-.ts-sev.ok {
-  color: var(--ok-text);
+  font-weight: 600;
 }
 .ts-thread {
   border-top: var(--line-w) solid var(--gh-border);
@@ -520,34 +496,42 @@
   font-style: normal;
   color: var(--ok);
 }
-/* the summary comment, on one line: the badged avatar and its words, which change with the review's */
-.ts-summary {
-  display: grid;
-  grid-template-columns: 34px 1fr;
-  column-gap: 12px;
-  align-items: center;
-}
-.ts-summary .ts-person {
-  width: 22px;
-  height: 22px;
-  font-size: 11px;
-  justify-self: center;
-}
-.ts-sumslot {
+/* the status block, in the description: its heading, then its lines, which change with the check's */
+.ts-stslot {
   position: relative;
-  height: 22px;
+  display: block;
+  height: 66px;
 }
-.ts-sumtext {
+.ts-sttext {
   position: absolute;
-  left: 0;
-  top: 0;
-  font: 400 15px / 22px var(--body);
-  color: var(--gh-text);
-  white-space: nowrap;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   opacity: 0;
 }
-.ts-sumtext b {
+.ts-sthead {
+  font: 600 16.5px / 24px var(--body);
+  color: var(--gh-text);
+  white-space: nowrap;
+}
+.ts-sthead .ts-wm {
+  height: 1.4em;
+}
+.ts-stline {
+  font-size: 13.5px;
+  line-height: 19px;
+  color: var(--gh-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ts-stline b {
+  color: var(--gh-text);
   font-weight: 600;
+}
+.ts-stline a {
+  color: var(--gh-blue);
 }
 .ts-merge {
   margin-top: 2px;
@@ -567,11 +551,9 @@
   font-size: 14px;
   color: var(--gh-muted);
 }
-/* the last frame: the second verdict, the check clear, the finding verified fixed */
+/* the last frame: the check clear, the status block with nothing to fix */
 .ts-chktext[data-chk="clear"],
-.ts-rvtext[data-verdict="2"],
-.ts-sumtext[data-verdict="2"],
-.ts-sev[data-sev="fixed"] {
+.ts-sttext[data-st="clear"] {
   opacity: 1;
 }
 
@@ -971,24 +953,17 @@
 .ts-card .ts-layer {
   position: static;
 }
-.ts-card
-  :is(
-    .ts-empty,
-    .ts-chktext:not([data-chk="clear"]),
-    .ts-rvtext[data-verdict="1"],
-    .ts-sumtext[data-verdict="1"],
-    .ts-sev[data-sev="blocking"]
-  ) {
+.ts-card :is(.ts-empty, .ts-chktext:not([data-chk="clear"]), .ts-sttext:not([data-st="clear"])) {
   display: none;
 }
-.ts-card :is(.ts-rvslot, .ts-sumslot, .ts-sevslot, .ts-chkslot) {
+.ts-card :is(.ts-stslot, .ts-chkslot) {
   height: auto;
 }
-.ts-card :is(.ts-rvtext, .ts-sumtext, .ts-chktext, .ts-sev) {
+.ts-card :is(.ts-sttext, .ts-chktext) {
   position: static;
-  display: block;
 }
-.ts-card :is(.ts-chktext, .ts-sumtext) {
+.ts-card .ts-chktext {
+  display: block;
   white-space: normal;
 }
 .ts-card .ts-fcode {
@@ -1012,9 +987,8 @@
       [data-gh="pr"],
       .ts-chktext,
       [data-review],
-      .ts-rvtext,
-      [data-summary],
-      .ts-sumtext,
+      [data-status],
+      .ts-sttext,
       [data-finding],
       .ts-sev,
       .ts-thread,

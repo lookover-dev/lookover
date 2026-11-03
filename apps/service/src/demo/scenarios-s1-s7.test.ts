@@ -6,17 +6,13 @@ import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { changeId, DEMO_API, type RunActivity, repositoryId, type State } from "@lookover/contracts";
-import { memoryGh } from "@lookover/testkit/demo";
-import { HANDED_APP, REFUSED_PAGES, type RefusedPage, scenarioOf } from "../index.ts";
-import { TEST_LIMIT_MS } from "../service.test-support.ts";
+import { scenarioOf } from "../index.ts";
+import { eventually, TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
   advance,
   brief,
   inject,
-  installApp,
   load,
-  makeApp,
-  onGitHub,
   send,
   snapshotOf,
   startScenario,
@@ -62,12 +58,31 @@ const findingsOf = (state: State, n: number) =>
 /** What S1's App is granted: every repository of the owner's. */
 const S1_REPOS = ["sasensi/ledger-api", "sasensi/ledger-web", "sasensi/invoice-pdf"].map(repositoryId);
 
+/**
+ * "Sign in with GitHub" on the setup's GitHub step: the code entered on GitHub's fake page (the drawer's fault), the
+ * sign-in kept, then the install's next check finding the accounts; the snapshot once the step is done.
+ */
+async function signedInWithGitHub(): Promise<State> {
+  expect(await sent({ type: "connection.signIn" })).toBe(200);
+  expect(await inject(door, "sign-in-entered")).toBe(200);
+  await advance(door, 5_000);
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.connection.person !== null,
+  );
+  await advance(door, 4_000);
+  return eventually(
+    () => snapshotOf(door),
+    (s) => s.setup.github === "done",
+  );
+}
+
 /** A command posted as the app posts it; the status it answered. */
 async function sent(body: Parameters<typeof send>[1]): Promise<number> {
   return (await send(door, body)).status;
 }
 
-test("S1, first run: Codex signed in, the App made and installed on three repositories, ledger-api kept on, #148 previewed with nothing posted", async () => {
+test("S1, first run: Codex signed in, signed in with GitHub, three repositories reached, ledger-api kept on, #148 previewed with nothing posted", async () => {
   const start = await loaded("S1");
   expect(start.setup).toMatchObject({ done: false, step: "ai", github: "start" });
   expect(start.connection).toMatchObject({ state: "not-connected", cause: null, web: DEMO_API.github });
@@ -80,21 +95,11 @@ test("S1, first run: Codex signed in, the App made and installed on three reposi
   const signedIn = await after(5_000);
   expect(signedIn.engines.codex).toMatchObject({ state: "ready", signingIn: false });
 
-  // GitHub, on its fake pages: the App made from the manifest page and kept, then installed on all the owner's
-  // repositories; the three listed, #148 shown and not reviewed.
+  // GitHub, on its fake pages: signed in with the code entered there, the shared App installed on all the owner's
+  // repositories already; the three listed, #148 shown and not reviewed.
   expect(await sent({ type: "setup.goto", step: "github" })).toBe(200);
-  expect(await sent({ type: "connection.createApp", organisation: null })).toBe(200);
-  expect((await snapshotOf(door)).setup).toMatchObject({ github: "waiting-for-app" });
-  const installPage = await makeApp(door);
-  const made = await snapshotOf(door);
-  expect(made.setup).toMatchObject({ github: "waiting-for-install", githubRefused: null });
-  const slug = made.connection.app?.slug ?? "";
-  expect(slug).toBe("lookover-k3x9q2");
-  expect(installPage).toBe(`${DEMO_API.github}/apps/${slug}/installations/new`);
-  expect(await installApp(door, installPage)).toContain("Lookover is installed");
-  const installed = await after(4_000);
-  expect(installed.connection.bot).toBe(`${slug}[bot]`);
-  expect(installed.connection.state).toBe("connected");
+  const installed = await signedInWithGitHub();
+  expect(installed.connection).toMatchObject({ state: "connected", id: "github:sasensi" });
   expect(installed.setup).toMatchObject({ step: "github", reached: "repos", github: "done" });
   expect(installed.repos.map((r) => r.id)).toEqual(S1_REPOS);
   expect(installed.changes[id(148)]).toMatchObject({ author: "you", writtenBy: "claude" });
@@ -158,9 +163,7 @@ test("S1, the agent opens #152 while setup shows Repositories: listed at once, w
   expect(await sent({ type: "engine.signIn", id: "codex" })).toBe(200);
   await after(5_000);
   expect(await sent({ type: "setup.goto", step: "github" })).toBe(200);
-  expect(await sent({ type: "connection.createApp", organisation: null })).toBe(200);
-  expect(await installApp(door, await makeApp(door))).toContain("Lookover is installed");
-  await after(4_000);
+  await signedInWithGitHub();
   expect(await sent({ type: "setup.goto", step: "repos" })).toBe(200);
   const onRepos = await after(0);
   expect(Object.keys(onRepos.changes)).toEqual([id(148), id(131)]);
@@ -182,69 +185,6 @@ test("S1, the agent opens #152 while setup shows Repositories: listed at once, w
   expect(posted(picked, 152)).toEqual([1]);
   expect(picked.reviews[id(152)]).toMatchObject({ run: null, job: { trigger: "opened", state: "done" } });
   expect(picked.setup.firstReviewChange).toBe(id(152));
-});
-
-test("S1, an existing App: the one made on another computer, given its id and a new key from its page; the refusals first", async () => {
-  await loaded("S1");
-  expect(await sent({ type: "setup.goto", step: "github" })).toBe(200);
-  // GitHub's Apps page lists it; its page gives its id, and a new key as a file.
-  const apps = await onGitHub(door, "/settings/apps");
-  const href = new URL(/href="([^"]+)"/.exec(apps)?.[1] ?? "").pathname;
-  expect(href).toBe(`${DEMO_API.github}/settings/apps/lookover-spike-sasensi`);
-  const page = href.slice(DEMO_API.github.length);
-  expect(await onGitHub(door, page)).toContain("App ID: 1");
-  const key = await onGitHub(door, page, [["action", "generate-key"]]);
-
-  // A file that isn't a key, then the wrong id: refused with why, nothing kept.
-  const notAKey = await send(door, { type: "connection.useApp", appId: 1, key: "my notes" });
-  expect([notAKey.status, await notAKey.json()]).toEqual([
-    409,
-    { error: "the App was refused: not-a-key", useApp: { kind: "not-a-key" } },
-  ]);
-  const wrongId = await send(door, { type: "connection.useApp", appId: 99, key });
-  expect([wrongId.status, (await wrongId.json()).useApp]).toEqual([409, { kind: "key-refused" }]);
-  expect((await snapshotOf(door)).connection.app).toBeNull();
-
-  // The right pair: kept, and its installation found at once, on every repository.
-  expect(await sent({ type: "connection.useApp", appId: 1, key })).toBe(200);
-  const installed = await snapshotOf(door);
-  expect(installed.connection).toMatchObject({
-    state: "connected",
-    app: {
-      id: 1,
-      slug: "lookover-spike-sasensi",
-      account: { login: "sasensi", type: "User" },
-      person: { login: "sasensi" },
-    },
-    bot: "lookover-spike-sasensi[bot]",
-  });
-  expect(installed.setup).toMatchObject({ step: "github", reached: "repos", github: "done" });
-  expect(installed.repos.map((r) => r.id)).toEqual(S1_REPOS);
-});
-
-test("S1, an organisation's App an admin handed over: refused while gh is signed out, then as gh's account is no member (ADR 0059)", async () => {
-  const gh = memoryGh();
-  const own = await startScenario(scenarioOf("S1"), { gh });
-  const useApp = (appId: number, key: string) =>
-    send(own, { type: "connection.useApp", appId, key }).then(async (r) => [
-      r.status,
-      (await r.json()).useApp,
-    ]);
-  expect(await send(own, { type: "setup.goto", step: "github" }).then((r) => r.status)).toBe(200);
-
-  expect(await useApp(HANDED_APP.id, HANDED_APP.key)).toEqual([409, { kind: "gh-signed-out" }]);
-
-  // The drawer's "You sign in to gh": as the scenario's owner, who isn't a member of the organisation.
-  expect(await inject(own, "gh-signed-in")).toBe(200);
-  expect(await useApp(HANDED_APP.id, HANDED_APP.key)).toEqual([
-    409,
-    { kind: "not-a-member", organisation: "ledger-co", person: "sasensi", invited: false },
-  ]);
-  expect((await snapshotOf(own)).connection.app).toBeNull();
-
-  // The next load starts with gh signed out again.
-  expect((await load(own, "S1")).status).toBe(200);
-  expect(await useApp(HANDED_APP.id, HANDED_APP.key)).toEqual([409, { kind: "gh-signed-out" }]);
 });
 
 test("S2, the happy loop: #148 by the agent, round 1 posted, the fix and its request, a Consider kept in the app, settled in round 3", async () => {
@@ -401,11 +341,16 @@ test("S6, new commits after a review: round 1 posted, the owner pushes two commi
   expect(findingsOf(start, 153)).toEqual([
     ["F1", "should_fix", "open", true],
     ["F2", "should_fix", "open", true],
+    ["F3", "should_fix", "open", true],
   ]);
-  // F2 sits on removed lines, the old file's 11 to 13, its text found there in the diff (#61).
-  expect(start.reviews[id(153)]?.findings.map((f) => [f.side, f.line, f.endLine, f.anchoring])).toEqual([
-    ["head", 6, null, "reported"],
-    ["base", 11, 13, "reported"],
+  // F2 sits on removed lines, the old file's 11 to 13, its text found there in the diff (#61). F3's file isn't in the
+  // diff, so its text isn't either (`unmatched`): no line comment, the description lists it with its lines (ADR 0074).
+  expect(
+    start.reviews[id(153)]?.findings.map((f) => [f.side, f.line, f.endLine, f.anchoring, f.commented]),
+  ).toEqual([
+    ["head", 6, null, "reported", true],
+    ["base", 11, 13, "reported", true],
+    ["head", 9, null, "unmatched", false],
   ]);
   expect(start.changes[id(153)]).toMatchObject({ author: "you", writtenBy: null, newCommits: 0 });
 
@@ -416,7 +361,7 @@ test("S6, new commits after a review: round 1 posted, the owner pushes two commi
   expect(pushed.reviews[id(153)]?.job).toMatchObject({ state: "done" });
   expect(pushed.reviews[id(153)]?.run).toBeNull();
 
-  // Review again: round 2 finds F1 and F2 fixed and settles.
+  // Review again: round 2 finds F1, F2 and F3 fixed and settles.
   expect(await sent({ type: "review.request", changeId: id(153) })).toBe(200);
   const two = await after(3 * MIN);
   expect(posted(two, 153)).toEqual([1, 2]);
@@ -424,6 +369,7 @@ test("S6, new commits after a review: round 1 posted, the owner pushes two commi
   expect(findingsOf(two, 153)).toEqual([
     ["F1", "should_fix", "verified_fixed", true],
     ["F2", "should_fix", "verified_fixed", true],
+    ["F3", "should_fix", "verified_fixed", true],
   ]);
   expect(two.reviews[id(153)]?.loop).toBe("settled");
   expect(two.changes[id(153)]).toMatchObject({ newCommits: 0 });
@@ -522,32 +468,4 @@ test("S5, skipped on purpose: dependabot's #150 skipped as not yours, Mira's #15
   const reviewed = await after(3 * MIN);
   expect(reviewed.reviews[id(152)]?.job).toMatchObject({ trigger: "manual", state: "done" });
   expect(reviewed.reviews[id(152)]?.rounds.map((r) => [r.n, r.reviewer])).toEqual([[1, "claude"]]);
-});
-
-test("each refusal's page, as GitHub's redirect would get it, shown in demo mode for proof; no other page there", async () => {
-  const pages = {
-    unknown: [400, "This page ran out"],
-    expired: [400, "This page ran out"],
-    refused: [400, "GitHub refused to make the App"],
-    unreachable: [502, "GitHub couldn't be reached"],
-    "not-kept": [500, "Lookover couldn't keep the App's key"],
-    "live-config": [409, "Live runs use the test App"],
-    "already-made": [409, "Lookover already keeps an App"],
-    "no-place": [409, "Choose where to make the App"],
-    elsewhere: [400, "GitHub made lookover-demo on sam, not on acme."],
-  } as const satisfies Record<RefusedPage, readonly [number, string]>;
-  const shown = (name: string) =>
-    fetch(`${door.service.origin}${DEMO_API.listing}/pages/${name}`, { headers: { cookie: door.cookie } });
-  for (const name of REFUSED_PAGES) {
-    const [status, words] = pages[name];
-    const res = await shown(name);
-    expect([name, res.status]).toEqual([name, status]);
-    expect(res.headers.get("content-security-policy")).toStartWith("default-src 'none'; style-src 'nonce-");
-    const html = await res.text();
-    expect(html).toContain(words);
-    // the door's setup is done (S10's world): the page leads back to Lookover, not to setup.
-    expect(html).toContain(">Back to Lookover</a>");
-  }
-  for (const name of ["installed", "toString", "constructor"]) expect((await shown(name)).status).toBe(404);
-  expect((await fetch(`${door.service.origin}${DEMO_API.listing}/pages/expired`)).status).toBe(401);
 });

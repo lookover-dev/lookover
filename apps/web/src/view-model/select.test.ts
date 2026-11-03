@@ -97,7 +97,6 @@ function calm(): State {
       step: "background",
       reached: "background",
       github: "done",
-      githubRefused: null,
       firstReviewChange: null,
     },
     engines: { claude: engine("claude", "Claude", "claude"), codex: engine("codex", "Codex", "codex") },
@@ -105,17 +104,13 @@ function calm(): State {
       id: null,
       state: "connected",
       cause: null,
-      bot: "sam-reviewer[bot]",
-      app: null,
       accounts: [],
       unreached: [],
-      way: "own",
       signIn: null,
-      person: null,
+      person: { id: 7, login: "sam" },
       web: GITHUB_WEB,
       since: NOW - 3 * HOUR,
       limitUntil: null,
-      gh: null,
     },
     service: {
       state: "running",
@@ -179,6 +174,7 @@ function levels(status: Status, at: number): Partial<Review> {
   const round = {
     n: 1,
     sha: SHA,
+    base: null,
     reviewer: "claude" as const,
     secondFind: null,
     confirmer: null,
@@ -328,7 +324,7 @@ test("each problem comes with the one command that fixes it, GitHub first", () =
   ]);
 });
 
-/** Disconnected for `cause`, with the App and its installation known, on `web`. */
+/** Disconnected for `cause`, sam signed in and the App installed on their account, on `web`. */
 function down(cause: ConnectionCause, web: string = GITHUB_WEB): State {
   const st = calm();
   return {
@@ -339,12 +335,6 @@ function down(cause: ConnectionCause, web: string = GITHUB_WEB): State {
       cause,
       since: NOW - 5 * MIN,
       web,
-      app: {
-        id: 424242,
-        slug: "lookover-q7x2ka",
-        account: { id: 7, login: "sam", type: "User" },
-        person: { id: 7, login: "sam" },
-      },
       accounts: [
         { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
       ],
@@ -352,10 +342,14 @@ function down(cause: ConnectionCause, web: string = GITHUB_WEB): State {
   };
 }
 
-/** A refused or lost key's one fix (ADR 0070): Settings' GitHub group, where "Add a new key" and its form are. */
-const OPEN_SETTINGS_KEY = { label: "Open Settings", path: "/settings#github" };
+const SIGNED_OUT: Partial<Problem> = {
+  short: "GitHub signed out",
+  title: "You're signed out of GitHub",
+  detail: "GitHub no longer takes your sign-in. Reviews cannot be read or posted until you sign in again.",
+  fix: { label: "Sign in again", command: { type: "connection.signIn" } },
+};
 
-test("each connection cause is said with its one fix: a command, a link that opens GitHub, or Settings (ADR 0053, 0070)", () => {
+test("each connection cause is said with its one fix: a command, or a link that opens GitHub (ADR 0053, ADR 0067)", () => {
   const cases: [ConnectionCause, Partial<Problem>][] = [
     [
       { kind: "uninstalled", suspended: false },
@@ -363,11 +357,8 @@ test("each connection cause is said with its one fix: a command, a link that ope
         short: "GitHub App uninstalled",
         title: "Lookover's App is no longer installed",
         detail:
-          "lookover-q7x2ka was removed from your GitHub account. Reviews cannot be read or posted until it is installed again.",
-        fix: {
-          label: "Install it on GitHub",
-          href: "https://github.com/apps/lookover-q7x2ka/installations/new",
-        },
+          "lookover-dev is installed on none of your GitHub accounts. Reviews cannot be read or posted until it is installed again.",
+        fix: { label: "Install on sam", href: "https://github.com/apps/lookover-dev/installations/new" },
       },
     ],
     [
@@ -379,47 +370,7 @@ test("each connection cause is said with its one fix: a command, a link that ope
         fix: { label: "Unsuspend it on GitHub", href: "https://github.com/settings/installations/77" },
       },
     ],
-    [
-      { kind: "key-refused", why: "revoked" },
-      {
-        short: "GitHub key refused",
-        title: "GitHub refused the App's key",
-        detail: "The key was revoked on GitHub. Give the App a new key in Settings.",
-        fix: OPEN_SETTINGS_KEY,
-      },
-    ],
-    [
-      { kind: "key-refused", why: "app-deleted" },
-      {
-        detail: "GitHub says the App was deleted. If it still is on GitHub, give it a new key in Settings.",
-        fix: OPEN_SETTINGS_KEY,
-      },
-    ],
-    [
-      { kind: "key-refused", why: null },
-      {
-        detail: "It may have been revoked, or the App deleted. Give the App a new key in Settings.",
-        fix: OPEN_SETTINGS_KEY,
-      },
-    ],
-    [
-      // A clock that is off is fixed on this computer, not with a new key.
-      { kind: "key-refused", why: "clock" },
-      {
-        detail:
-          "This computer's clock is off, so GitHub can't trust the key. Set the clock right, then reconnect.",
-        fix: { label: "Reconnect GitHub", command: { type: "connection.reconnect" } },
-      },
-    ],
-    [
-      { kind: "key-lost" },
-      {
-        short: "GitHub key lost",
-        title: "Lookover can't open the App's key",
-        detail: "Its entry in this computer's keychain is gone. Give the App a new key in Settings.",
-        fix: OPEN_SETTINGS_KEY,
-      },
-    ],
+    [{ kind: "signed-out" }, SIGNED_OUT],
   ];
   for (const [cause, expected] of cases) {
     const [p, ...rest] = problems(down(cause));
@@ -428,6 +379,7 @@ test("each connection cause is said with its one fix: a command, a link that ope
       cause,
       expect.objectContaining({ id: "connection", tone: "need", ...expected }),
     ]);
+    expect(JSON.stringify(p)).not.toMatch(/own App|existing App|key|Settings/);
   }
 });
 
@@ -459,69 +411,12 @@ test("in demo mode a cause's link opens the service's fake of GitHub, never gith
     return fix && "href" in fix ? fix.href : null;
   });
   expect(hrefs).toEqual([
-    "/api/v1/demo/github/apps/lookover-q7x2ka/installations/new",
+    "/api/v1/demo/github/apps/lookover-dev/installations/new",
     "/api/v1/demo/github/settings/installations/77",
   ]);
 });
 
-test("an organisation's App: a cause's link opens the organisation's pages (ADR 0059)", () => {
-  const causes: ConnectionCause[] = [
-    { kind: "uninstalled", suspended: false },
-    { kind: "uninstalled", suspended: true },
-  ];
-  const acme = { id: 900, login: "acme", type: "Organization" } as const;
-  const hrefs = causes.map((c) => {
-    const st = down(c);
-    const app = st.connection.app && { ...st.connection.app, account: acme };
-    const fix = problems({ ...st, connection: { ...st.connection, app } })[0]?.fix;
-    return fix && "href" in fix ? fix.href : null;
-  });
-  expect(hrefs).toEqual([
-    "https://github.com/apps/lookover-q7x2ka/installations/new",
-    "https://github.com/organizations/acme/settings/installations/77",
-  ]);
-});
-
-test("an organisation's App: each cause names the organisation and its admins; not a member is checked again (ADR 0059)", () => {
-  const acme = { id: 900, login: "acme", type: "Organization" } as const;
-  const onAcme = (cause: ConnectionCause) => {
-    const st = down(cause);
-    const app = st.connection.app && { ...st.connection.app, account: acme };
-    const [p, ...rest] = problems({ ...st, connection: { ...st.connection, app } });
-    expect(rest).toEqual([]);
-    return p;
-  };
-  expect(onAcme({ kind: "uninstalled", suspended: false })).toMatchObject({
-    title: "Lookover's App is no longer installed",
-    detail:
-      "lookover-q7x2ka was removed from the acme organisation. Reviews cannot be read or posted until an admin of acme installs it again.",
-  });
-  expect(onAcme({ kind: "uninstalled", suspended: true })).toMatchObject({
-    title: "Lookover's App is suspended on GitHub",
-    detail: "Reviews cannot be read or posted until an admin of acme unsuspends it on GitHub.",
-  });
-  // Who can make a new key is said in Settings, beside "Add a new key" (ADR 0070): the band says only where.
-  expect(onAcme({ kind: "key-refused", why: "revoked" })).toMatchObject({
-    detail: "The key was revoked on GitHub. Give the App a new key in Settings.",
-    fix: OPEN_SETTINGS_KEY,
-  });
-  expect(onAcme({ kind: "key-lost" })).toMatchObject({
-    detail: "Its entry in this computer's keychain is gone. Give the App a new key in Settings.",
-    fix: OPEN_SETTINGS_KEY,
-  });
-  expect(onAcme({ kind: "not-a-member", organisation: "acme" })).toEqual({
-    id: "connection",
-    tone: "need",
-    busy: false,
-    short: "GitHub membership lost",
-    title: "You're no longer a member of acme",
-    detail:
-      "Your gh says you aren't an active member of acme, so Lookover stopped reviewing. Once an admin adds you back, check again.",
-    fix: { label: "Check again", command: { type: "gh.check" } },
-  });
-});
-
-test("signed out of the shared App says only a new sign-in brings GitHub back (ADR 0066)", () => {
+test("signed out says only a new sign-in brings GitHub back (ADR 0066)", () => {
   const [p, ...rest] = problems(down({ kind: "signed-out" }));
   expect(rest).toEqual([]);
   expect(p).toEqual({
@@ -535,10 +430,27 @@ test("signed out of the shared App says only a new sign-in brings GitHub back (A
   });
 });
 
+test("signed out, once Sign in again gave a code, shows the code and its one button (ADR 0073)", () => {
+  const st = down({ kind: "signed-out" });
+  const signIn = {
+    userCode: "D054-61DE",
+    verificationUri: "https://github.com/login/device",
+    expiresAt: NOW + 15 * MIN,
+  };
+  const [p, ...rest] = problems({ ...st, connection: { ...st.connection, signIn } });
+  expect(rest).toEqual([]);
+  expect(p).toMatchObject({
+    short: "GitHub signed out",
+    title: "You're signed out of GitHub",
+    detail: { before: "Enter", command: "D054-61DE", after: "on GitHub. It works until 10:15." },
+    fix: { label: "Copy code and open GitHub", href: "https://github.com/login/device", copy: "D054-61DE" },
+  });
+});
+
 test("signed out, once Sign in again gave a code, the problem says the code and its fix copies it and opens GitHub (ADR 0066)", () => {
   const st = down({ kind: "signed-out" });
   const signIn = {
-    userCode: "FAKE-0003",
+    userCode: "D054-61DE",
     verificationUri: "https://github.com/login/device",
     expiresAt: NOW + 15 * MIN,
   };
@@ -550,11 +462,16 @@ test("signed out, once Sign in again gave a code, the problem says the code and 
     busy: false,
     short: "GitHub signed out",
     title: "You're signed out of GitHub",
-    detail: { before: "Enter", command: "FAKE-0003", after: "on GitHub. It works until 10:15." },
+    detail: {
+      before: "Enter",
+      command: "D054-61DE",
+      kind: "device-code",
+      after: "on GitHub. It works until 10:15.",
+    },
     fix: {
       label: "Copy code and open GitHub",
       href: "https://github.com/login/device",
-      copy: "FAKE-0003",
+      copy: "D054-61DE",
     },
   });
   // Past its expiry and still shown, the code was taken: the sign-in finishes, its button waiting.
@@ -589,10 +506,6 @@ function onAccounts(cause: ConnectionAccount["cause"], owner: boolean | null = f
     ...st,
     connection: {
       ...st.connection,
-      way: "shared",
-      bot: null,
-      app: null,
-      person: { id: 7, login: "sam" },
       accounts: [
         { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
         {
@@ -630,17 +543,7 @@ test("one account asking for SSO on the shared App is that account's problem, th
 
 test("the shared App installed on none of the person's accounts any more: installed again from its page, not Reconnect", () => {
   const st = down({ kind: "uninstalled", suspended: false });
-  const [p, ...rest] = problems({
-    ...st,
-    connection: {
-      ...st.connection,
-      way: "shared",
-      bot: null,
-      app: null,
-      person: { id: 7, login: "sam" },
-      accounts: [],
-    },
-  });
+  const [p, ...rest] = problems({ ...st, connection: { ...st.connection, accounts: [] } });
   expect(rest).toEqual([]);
   expect(p).toMatchObject({
     id: "connection",
@@ -743,7 +646,7 @@ test("the status menu's GitHub line: connected and nothing held, its dot on; a w
   const limited = { ...calm(), connection: { ...calm().connection, limitUntil: NOW + 5 * MIN } };
   expect(githubStatus(limited)).toMatchObject({ ok: true, problems: [{ id: "connection", tone: "warn" }] });
   const st = down({ kind: "signed-out" });
-  const out = githubStatus({ ...st, connection: { ...st.connection, way: "shared", app: null, bot: null } });
+  const out = githubStatus(st);
   expect(out.ok).toBe(false);
   expect(out.text).toBe("signed out");
   expect(out.problems.map((p) => p.fix?.label)).toEqual(["Sign in again"]);
@@ -767,57 +670,6 @@ test("the status menu's GitHub line takes the band's colour: amber when it only 
 test("an organisation asking for SSO with no page from GitHub opens the organisation's SSO page", () => {
   const [p] = problems(down({ kind: "sso", organisation: "acme", url: null }));
   expect(p?.fix).toEqual({ label: "Sign in with SSO", href: "https://github.com/orgs/acme/sso" });
-});
-
-test("a refused or lost key's fix is in one place: Settings' GitHub group, no button once there (ADR 0070)", () => {
-  for (const cause of [{ kind: "key-refused", why: "revoked" }, { kind: "key-lost" }] as const) {
-    const [p] = problems(down(cause));
-    if (p === undefined) throw new Error("expected the key's problem");
-    expect(bandOn(p, "/")).toBe(p);
-    expect(bandOn(p, "/")).toMatchObject({ fix: OPEN_SETTINGS_KEY });
-    expect(bandOn(p, "/settings").fix).toBeNull();
-  }
-});
-
-test("on Settings the key's band sends nowhere else: no button, no “in Settings” (ADR 0070)", () => {
-  const said = (cause: ConnectionCause) => {
-    const [p] = problems(down(cause));
-    if (p === undefined) throw new Error("expected the key's problem");
-    return bandOn(p, "/settings").detail;
-  };
-  expect(said({ kind: "key-refused", why: "revoked" })).toBe(
-    "The key was revoked on GitHub. Give the App a new key.",
-  );
-  expect(said({ kind: "key-refused", why: "app-deleted" })).toBe(
-    "GitHub says the App was deleted. If it still is on GitHub, give it a new key.",
-  );
-  expect(said({ kind: "key-lost" })).toBe(
-    "Its entry in this computer's keychain is gone. Give the App a new key.",
-  );
-});
-
-test("a cause whose page isn't known yet (no App) falls back to Reconnect, and says so", () => {
-  const st = down({ kind: "key-lost" });
-  const [p] = problems({ ...st, connection: { ...st.connection, app: null, accounts: [] } });
-  expect(p).toMatchObject({
-    detail: "Its entry in this computer's keychain is gone. Reconnect to set up GitHub again.",
-    fix: { label: "Reconnect GitHub", command: { type: "connection.reconnect" } },
-  });
-  expect(p?.detailHere).toBeUndefined();
-});
-
-test("a refused key on the shared App, which has no key of its own to give (ADR 0066): Reconnect, never Settings", () => {
-  for (const cause of [{ kind: "key-refused", why: "revoked" }, { kind: "key-lost" }] as const) {
-    const st = down(cause);
-    const [p] = problems({ ...st, connection: { ...st.connection, way: "shared" } });
-    expect([cause, p]).toEqual([
-      cause,
-      expect.objectContaining({
-        detail: expect.stringMatching(/ Reconnect to set up GitHub again\.$/),
-        fix: { label: "Reconnect GitHub", command: { type: "connection.reconnect" } },
-      }),
-    ]);
-  }
 });
 
 test("an AI at its limit is a warning with nothing to do", () => {
@@ -1189,6 +1041,7 @@ function finding(id: string, severity: Severity, status: Finding["status"]): Fin
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: null,
     status,
     posted: true,
     commented: false,
@@ -1508,6 +1361,7 @@ test("the chip says where a review stands; round counts have no limit", () => {
   expect(chipOf("settled")).toEqual({ tone: "ok", label: "Settled" });
   const sixRounds = Array.from({ length: 6 }, (_, i) => ({
     n: i + 1,
+    base: null,
     confirmer: null,
     confirmFallback: null,
     confirmFailure: null,

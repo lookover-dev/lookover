@@ -1,17 +1,17 @@
 // Port: writing to the Git host (ADR 0006, ADR 0023, ADR 0033, ADR 0039, ADR 0043). The `github` package posts
-// as who posts (ADR 0066): the App's bot, or the person signed in to the shared App, the check always under the
-// App; `testkit`'s `FakeGitHost` records. "The bot" below is who posts. Shaped by the check following a review job
+// as who posts (ADR 0066, ADR 0073): the person signed in to the shared App, the check always under the App;
+// `testkit`'s `FakeGitHost` records. "The bot" below is who posts. Shaped by the check following a review job
 // and by what one round posts. The check is created when the job is recorded (`queued`, or `in_progress`), updated
 // as the job changes (its status and text), and completed: by the round, after one review holding every inline
-// comment and the summary comment (created once, then edited); or without a round. The bot's own comments are told
-// by its numeric user id, never by its login; a person's summary also by the App that posted it. Apart from a
-// round, it reacts to a review request (ADR 0043): 👀 when the request is recorded, 🚀 when its round is posted.
-// Each post can be sent again safely (ADR 0044): the check carries its external id (`checkExternalId`: the job's
-// id and the person's, found with `findCheck` before a re-send), the review its round's `REVIEW_MARKER` (found
-// with `findReview` before a re-send), and
-// the summary its `SUMMARY_MARKER`. On its threads (ADR 0052) it replies, one reply per conversation, and it
-// minimizes the comments a round settled, since it can't resolve a thread. Every body is budgeted in bytes: the
-// limits are in `host.ts`.
+// comment (only when it has one, ADR 0074) and the status block in the description; or without a round. The bot's
+// own comments are told by its numeric user id, never by its login. Apart from a round, it reacts to a review
+// request (ADR 0043): 👀 when the request is recorded, 🚀 when its round is posted. Each post can be sent again
+// safely (ADR 0044): the check carries its external id (`checkExternalId`: the job's id and the person's, found with
+// `findCheck` before a re-send), and the review its round's `REVIEW_MARKER` (found with `findReview` before a
+// re-send). The status block (ADR 0074) is the description's part between `STATUS_MARKER` and `STATUS_END_MARKER`,
+// rewritten whole each time (`upsertStatus`), the author's text around it kept. On its threads (ADR 0052) it
+// replies, one reply per conversation, and it minimizes the comments a round settled, since it can't resolve a
+// thread. Every body is budgeted in bytes: the limits are in `host.ts`.
 import type { DiffLocation } from "./diff.ts";
 import type { ChangeRef, RepositoryRef } from "./host.ts";
 import type { CommitSha } from "./ids.ts";
@@ -62,7 +62,7 @@ export interface ReviewPost {
   sha: CommitSha;
   /** Markdown, `COMMENT_MAX_BYTES` at most, holding the round's `REVIEW_MARKER` line. */
   body: string;
-  /** `REVIEW_MAX_COMMENTS` at most: the rest go to the summary. */
+  /** `REVIEW_MAX_COMMENTS` at most: the rest go to the status block. */
   comments: InlineComment[];
 }
 
@@ -123,13 +123,19 @@ export interface HostWriter {
    */
   findReview(change: ChangeRef, marker: string): Promise<string | null>;
   /**
-   * Creates the summary comment, or edits the bot's existing one: the one holding `SUMMARY_MARKER`, written by
-   * the bot (a marker in someone else's comment is not the summary), looked for among every comment of the
-   * change, past the host's first page. Editing sends no notification (ADR 0023). Returns the host's id for the
-   * comment. A `body` without the marker is `HostError("missing_marker")`, one over `COMMENT_MAX_BYTES` is
-   * `HostError("too_large")`, and nothing is posted.
+   * Writes Lookover's status block into the change's description (ADR 0074), between `STATUS_MARKER` and
+   * `STATUS_END_MARKER`, as `spliceStatus` places it: the author's text kept byte for byte, the block replacing the
+   * one there or written at the end. The host reads the description fresh right before the write (never a cached
+   * read); when it doesn't show the last block this writer sent (`showsStatus`: the host's reads lag its writes, ADR
+   * 0069), it reads again, for up to 30 s, then writes on the last read. `render` is given the characters the block
+   * may take (`statusRoom`: `DESCRIPTION_MAX_CHARACTERS` less the rest, below zero when the author's text alone
+   * is past it) and gives the block, or null to write nothing. Idempotent: nothing to keep, the change names the
+   * block; a description already holding the spliced text is not written again. A refusal is a standing one, never a
+   * sign-out: `HostError("too_large")` for a block past its room (nothing sent) or the host's own "too long";
+   * `HostError("invalid")` when the person may not edit this description; `HostError("not_found")` for a change the
+   * host doesn't have.
    */
-  upsertSummary(change: ChangeRef, body: string): Promise<string>;
+  upsertStatus(change: ChangeRef, render: (room: number) => string | null): Promise<void>;
   /**
    * Puts the bot's `reaction` on a conversation comment of the repository. Idempotent, as GitHub answers a
    * repeat with `200`: a reaction the bot already put there stays one. Throws `HostError("not_found")` for a

@@ -102,6 +102,7 @@ function raised(
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: c.suggestion,
     status: "open",
     posted,
     commented: false,
@@ -224,6 +225,23 @@ test("a raised finding keeps who found it and its line's text; with no confirm, 
   expect(r.findings.map((f) => [f.id, f.foundBy, f.lineText, f.confirmation])).toEqual([
     ["F1", "codex", "while (!done) {", { verdict: "not_checked", demoted: false }],
     ["F2", "claude", null, confirmed],
+  ]);
+});
+
+test("a raised finding keeps the finder's suggested fix, or none", () => {
+  const fix = "return items.reduce((a, b) => a + b, 0);";
+  const r = round(
+    [],
+    outcome({
+      candidates: [
+        candidate("sum_off", "blocking", { line: 12, suggestion: fix }),
+        candidate("no_test", "should_fix", { line: 30 }),
+      ],
+    }),
+  );
+  expect(r.findings.map((f) => [f.id, f.suggestion])).toEqual([
+    ["F1", fix],
+    ["F2", null],
   ]);
 });
 
@@ -890,6 +908,56 @@ test("an earlier finding reported again with its line's text names the line it i
   });
   // The one not reported again stays where it was.
   expect(r.findings[1]).toEqual(TWO_OF_A_KIND[1]);
+});
+
+/** F1 of `TWO_OF_A_KIND`, raised with a suggestion for its line. */
+const SUGGESTED = [
+  raised(1, "missing_null_check", "blocking", true, 1, {
+    line: 3,
+    text: "return user.name;",
+    suggestion: "return user?.name;",
+  }),
+];
+
+test("a finding re-anchored on a new range takes the suggestion it is reported with now", () => {
+  const r = round(
+    SUGGESTED,
+    outcome({
+      sha: SHA_2,
+      candidates: [
+        candidate("missing_null_check", "blocking", {
+          text: "return user.name;",
+          location: { path: "src/app.ts", side: "head", line: 13, endLine: 14 },
+          suggestion: "return user?.name ?? '';\n",
+        }),
+      ],
+      earlier: [{ id: findingId("F1"), verdict: "present", why: "Still unchecked." }],
+    }),
+  );
+  expect(r.findings[0]).toMatchObject({ line: 13, endLine: 14, suggestion: "return user?.name ?? '';\n" });
+});
+
+test("a finding re-anchored with no suggestion drops its old one; reported again without its line's text, it keeps it", () => {
+  const present = [{ id: findingId("F1"), verdict: "present" as const, why: "Still unchecked." }];
+  const moved = round(
+    SUGGESTED,
+    outcome({
+      sha: SHA_2,
+      candidates: [candidate("missing_null_check", "blocking", { line: 13, text: "return user.name;" })],
+      earlier: present,
+    }),
+  );
+  // The old replacement was for lines 3 to 3: on line 13 it would replace the wrong text.
+  expect(moved.findings[0]).toMatchObject({ line: 13, suggestion: null });
+  const byMeaning = round(
+    SUGGESTED,
+    outcome({
+      sha: SHA_2,
+      candidates: [candidate("missing_null_check", "blocking", { line: 3 })],
+      earlier: present,
+    }),
+  );
+  expect(byMeaning.findings[0]).toMatchObject({ line: 3, suggestion: "return user?.name;" });
 });
 
 /** Two lines holding the same text, each with its own null check missing. */

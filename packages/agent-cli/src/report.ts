@@ -61,6 +61,12 @@ const SAID = {
 } satisfies Record<ClaimKind, string>;
 
 const oneLine = (text: string) => text.replace(/\s*\n\s*/g, " ").trim();
+
+/** Lookover's reply on one line: its kind, on a paragraph of its own ("Kept\n\nwhy"), joined to why ("Kept: why"). */
+function spoken(reply: string): string {
+  const [kind = "", ...why] = reply.split(/\n\s*\n/);
+  return why.length > 0 && !kind.includes("\n") ? `${kind}: ${oneLine(why.join(" "))}` : oneLine(reply);
+}
 const times = (n: number) => (n === 1 ? "once" : `${n} times`);
 
 /**
@@ -76,7 +82,9 @@ function conversation(
   last: { body: string } | null,
 ): string[] {
   if (thread === undefined && f.placement !== "inline")
-    return ["Thread: none, it is in the summary only. Fix it, or ask the owner to dismiss it."];
+    return [
+      "Thread: none, it is in the status block only, in the pull request's description. Fix it, or ask the owner to dismiss it.",
+    ];
   const lines = thread ? [`Thread: ${thread.url}${thread.resolved ? " (resolved)" : ""}`] : [];
   if (f.claim) {
     // The claim's text is the whole reply, its opening ("Won't fix:") included: it says the claim once.
@@ -84,7 +92,7 @@ function conversation(
     const { by, kind, text } = f.claim;
     lines.push(text ? `Claim: ${by}${kept}: ${oneLine(text)}` : `Claim: ${by} ${SAID[kind]}${kept}`);
   }
-  if (last) lines.push(`Lookover: ${oneLine(last.body)}`);
+  if (last) lines.push(`Lookover: ${spoken(last.body)}`);
   return lines;
 }
 
@@ -92,13 +100,13 @@ function conversation(
 export function reportFeedback(
   outcome: Outcome,
   threads: AgentThread[],
-  poster: Poster,
+  poster: Poster | null,
   json: boolean,
   w: Pick<World, "out" | "err">,
 ): number {
   const joined = forTheAgent(outcome.result).map((f) => {
     const thread = newestThread(threads, f.id);
-    return { f, thread, last: thread ? lookoverReply(thread, poster) : null };
+    return { f, thread, last: thread && poster ? lookoverReply(thread, poster) : null };
   });
   w.err(outcome.message);
   if (json) {

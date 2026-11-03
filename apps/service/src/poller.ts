@@ -57,20 +57,20 @@
 //   another answers. A listing that answers shows it `connected` again, since now; a poll that brought it back counts
 //   as one that saw something, so the loop takes and what waited on the host starts, and the installation's
 //   repositories are listed again (`discover`: a reinstall gives a new installation). A rate limit is no
-//   disconnection. A connection not made yet (no bot) is left alone, and the loop doesn't poll: the setup flow
-//   reports it, and lists once the bot is installed. What a listing of the installation's repositories met is told
-//   too (`reached`): a refusal that is the installation's (uninstalled, suspended, the key refused) shows the
+//   disconnection. A connection not made yet (nothing installed) is left alone, and the loop doesn't poll: the setup
+//   flow reports it, and lists once the App is installed. What a listing of the installations' repositories met is
+//   told too (`reached`): a refusal that is the connection's (uninstalled everywhere, the sign-in refused) shows the
 //   connection down even while it was up, GitHub unreachable only when no repository is watched or it is down already;
 //   an answer shows it back when no repository is watched, so a service that started while GitHub refused it comes
 //   back, and one with nothing to poll never stays connected to an installation that is gone.
 // - Every account at once (ADR 0066): a listing refused with the cause `uninstalled` or `sso`, the rule by kind, is
-//   the repository's account's when the installation takes it (`accountRefused`, on the shared App): that account
+//   the repository's account's when the installation takes it (`accountRefused`): that account
 //   shows the cause, the connection stays as it is, and the poll goes on to the repositories after it, its other
 //   accounts still used. A listing that answers clears its account's cause (`accountAnswered`), and counts as one
 //   that saw something then, as the connection back does. A refusal of a repository whose account holds a cause
 //   already (a suspension discovery read, refused with no cause of its own) is that account's too. Such a repository
-//   is polled at the cadence of one with nothing asked: what it waits for waits on its account. On an own App every
-//   cause stays the connection's.
+//   is polled at the cadence of one with nothing asked: what it waits for waits on its account. A repository whose
+//   owner is no account listed takes no cause: its refusal is the connection's.
 // - A repository's listing refused as not found with no cause (its token refused: it may have left the installation)
 //   has the installation's repositories listed again at once (`discover`), not at the next 5-minute listing; once a
 //   minute at most, as a repository the installation still lists is refused so at every poll of it.
@@ -187,12 +187,12 @@ export interface PollerDeps {
    * most, the connection back's at once.
    */
   discover(why: "refused" | "regained"): void;
-  /** Which sign-in or App is held now (ADR 0066), as a number that moves when another is: what a listing began under. */
+  /** Which sign-in is held now (ADR 0066), as a number that moves when another is: what a listing began under. */
   holding(): number;
   /**
    * A listing of `repo` begun under the holding `at` refused with an account's cause (ADR 0066): true when its
-   * account holds it (the shared App), or when it was an earlier holding's (nothing to say of the one held now);
-   * false when it is the connection's (an own App).
+   * account holds it, or when it was an earlier holding's (nothing to say of the one held now); false when it is the
+   * connection's (no account listed is the repository's owner).
    */
   accountRefused(repo: RepositoryRef, cause: AccountCause, at: number): boolean;
   /** A listing of `repo` begun under the holding `at` answered: true when that cleared its account's cause. */
@@ -213,8 +213,8 @@ export interface Poller {
    */
   first(): Promise<void>;
   /**
-   * What a listing of the installation's repositories met (ADR 0053): refused for the installation (the App
-   * uninstalled or suspended, its key refused), the connection shows it down with that cause, connected or not;
+   * What a listing of the installations' repositories met (ADR 0053): refused for the connection (the App installed
+   * nowhere, the sign-in refused), the connection shows it down with that cause, connected or not;
    * GitHub unreachable, only when no repository is watched (otherwise their listings say) or it is down already, for
    * another cause; answered, the connection shows back when no repository is watched.
    */
@@ -309,7 +309,7 @@ export function createPoller(d: PollerDeps): Poller {
     if (d.holding() !== at) throw new Superseded();
   };
 
-  /** Whether the account `repo` is on holds a cause of its own (ADR 0066): never on an own App. */
+  /** Whether the account `repo` is on holds a cause of its own (ADR 0066). */
   const accountHeld = (repo: RepositoryRef): boolean =>
     (accountOf(d.connection().accounts, repo.owner)?.cause ?? null) !== null;
 

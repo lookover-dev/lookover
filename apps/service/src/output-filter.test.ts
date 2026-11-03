@@ -4,7 +4,7 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readResult } from "@lookover/contracts";
+import { readResult, withoutWordmark } from "@lookover/contracts";
 import { DemoClock, ScriptedRetrieval, type ScriptedRun } from "@lookover/testkit";
 import { openLogSink } from "./index.ts";
 import {
@@ -95,8 +95,8 @@ test("a secret the service knows and a mention in a finding never reach GitHub; 
 
   const { reviews, comments } = host.view({ repo: SANDBOX, number: pr1.number });
   const comment = reviews[0]?.comments[0]?.body ?? "";
-  expect(comment).toStartWith(
-    "Lookover · **The session [redacted] is logged** · Blocking\n\nAsk @\u{200B}dana before !\u{200B}[x](https://evil.example/p.png) ships.",
+  expect(withoutWordmark(comment)).toStartWith(
+    "Blocking\n\n**The session [redacted] is logged**\n\nAsk @\u{200B}dana before !\u{200B}[x](https://evil.example/p.png) ships.",
   );
   const check = host.posts.findLast((p) => p.kind === "check.completed");
   const posted = [comment, comments[0]?.body ?? "", JSON.stringify(check)];

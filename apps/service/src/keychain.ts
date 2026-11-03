@@ -1,5 +1,5 @@
 // The keychain port (ADR 0053): one secret by name in the OS's secure store (Windows Credential Manager, macOS
-// Keychain, Secret Service). The App store keeps only its data key there. Three adapters: the real one over Bun's
+// Keychain, Secret Service). The sign-in store keeps only its data key there. Three adapters: the real one over Bun's
 // secret store, every call bounded by a timeout so a prompt nobody answers can't hold the service; a fake in memory
 // for tests and demo mode; and the bound itself, which wraps any of them. A call that fails or doesn't answer in
 // time rejects with `KeychainUnavailable`, never with the secret in its words.
@@ -26,7 +26,7 @@ export class KeychainUnavailable extends Error {
 /** Long enough for the OS store, short enough that a prompt nobody sees doesn't hold the service. */
 const KEYCHAIN_MS = 5_000;
 
-/** The service name Lookover's entries are filed under; each entry's own name is the App store's. */
+/** The service name Lookover's entries are filed under; each entry's own name is the sign-in store's. */
 export const KEYCHAIN_SERVICE = "lookover";
 
 /**

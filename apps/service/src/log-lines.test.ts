@@ -20,7 +20,7 @@ import {
   runId,
   type State,
 } from "@lookover/contracts";
-import { flowLines, logLineOf } from "./index.ts";
+import { logLineOf } from "./index.ts";
 
 /** Sunday 11 October 2026, 10:00 in the machine's own zone. */
 const AT = new Date(2026, 9, 11, 10, 0).getTime();
@@ -87,6 +87,7 @@ function round(n: number, extra: Partial<Round> = {}): Round {
   return {
     n,
     sha: SHA,
+    base: null,
     reviewer: "codex",
     secondFind: null,
     confirmer: "claude",
@@ -118,7 +119,6 @@ function before(
     unusable: null,
     since: AT - 60_000,
     limitUntil: null,
-    gh: null,
     signingIn: false,
   });
   return {
@@ -129,7 +129,6 @@ function before(
       step: "background",
       reached: "background",
       github: "done",
-      githubRefused: null,
       firstReviewChange: null,
     },
     engines: { claude: engine("claude"), codex: engine("codex") },
@@ -137,17 +136,13 @@ function before(
       id: null,
       state: "connected",
       cause: null,
-      bot: null,
-      app: null,
       accounts: [],
       unreached: [],
-      way: null,
       signIn: null,
       person: null,
       web: GITHUB_WEB,
       since: AT,
       limitUntil: null,
-      gh: null,
     },
     service: {
       state: "running",
@@ -335,7 +330,7 @@ test("a round finished says posted with its open findings and what failed, kept 
       before(),
     ),
   ).toBe(
-    "sasensi/ledger-api#151 round 1 kept, its posts given up: GitHub refused the review (GitHub answered 422)",
+    "sasensi/ledger-api#151 round 1 kept, its posts given up: GitHub refused a post (GitHub answered 422)",
   );
 });
 
@@ -420,20 +415,4 @@ test("what changes no review writes no line", () => {
     logLineOf({ type: "connection.changed", at: AT, patch: { state: "connected" } }, before()),
   ).toBeNull();
   expect(logLineOf({ type: "rule.changed", at: AT, ruleId: "r", enabled: false }, before())).toBeNull();
-});
-
-test("the manifest flow says why it stopped short and where an App made elsewhere is", () => {
-  expect(flowLines.ghUnanswered("offline", "error connecting to api.github.com")).toBe(
-    "gh couldn't answer for the organisation (offline): error connecting to api.github.com",
-  );
-  expect(flowLines.notMade("not_found")).toBe("GitHub didn't make the App: not_found");
-  expect(flowLines.elsewhere("lookover-sam", "sam", "acme")).toBe(
-    "lookover-sam was made on sam, not on acme: it isn't kept",
-  );
-  expect(flowLines.elsewhere("lookover-acme", "acme", null)).toBe(
-    "lookover-acme was made on acme, not on your GitHub account: it isn't kept",
-  );
-  expect(flowLines.notKept("lookover-sam", "the keychain is locked")).toBe(
-    "lookover-sam was made on GitHub but not kept: the keychain is locked",
-  );
 });

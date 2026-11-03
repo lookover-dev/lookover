@@ -22,8 +22,6 @@ const FAULT_IDS = [
   "connection-lost",
   "app-uninstalled",
   "app-suspended",
-  "key-refused",
-  "key-lost",
   "nothing-granted",
   "repository-added",
   "repository-removed",
@@ -45,7 +43,6 @@ const FAULT_IDS = [
   "gh-signed-in",
   "gh-uninstalled",
   "gh-signed-out",
-  "not-a-member",
 ] as const;
 
 export type FaultId = (typeof FAULT_IDS)[number];
@@ -70,14 +67,12 @@ const LABELS: Record<FaultId, string> = {
   "organisation-suspended": "An owner suspends the App on an organisation",
   "owner-installs": "An owner installs the App where you asked",
   "connection-lost": "GitHub can't be reached",
-  "app-uninstalled": "Your App is uninstalled on GitHub",
-  "app-suspended": "Your App is suspended on GitHub",
-  "key-refused": "GitHub refuses your App's key",
-  "key-lost": "Lookover restarts without your App's key",
-  "nothing-granted": "Your App is installed on no repository",
-  "repository-added": "A repository is added to your App",
-  "repository-removed": "A repository is removed from your App",
-  "repository-back": "A removed repository is added back to your App",
+  "app-uninstalled": "The App is uninstalled from all your accounts",
+  "app-suspended": "The App is suspended on your account",
+  "nothing-granted": "The App is installed on no repository",
+  "repository-added": "A repository is added to the App",
+  "repository-removed": "A repository is removed from the App",
+  "repository-back": "A removed repository is added back to the App",
   "github-limit": "GitHub asks to wait",
   "agent-opens-change": "Your agent opens a pull request",
   "other-opens-change": "Someone else opens a pull request",
@@ -95,7 +90,6 @@ const LABELS: Record<FaultId, string> = {
   "gh-signed-in": "You sign in to gh",
   "gh-uninstalled": "gh is uninstalled",
   "gh-signed-out": "You sign out of gh",
-  "not-a-member": "An admin removes you from the organisation",
 };
 
 /** Every fault with its label, as the listing answers them. */

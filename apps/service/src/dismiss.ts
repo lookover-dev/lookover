@@ -2,14 +2,15 @@
 // Refused while a round of its change runs (the store's transaction says so), else saved in one write: the ledger with
 // the finding dismissed (`core.findingsAfterDismissal`, the change's last round as the round it closes), and the posts
 // it owes under its own key (`publish`'s `dismissalPostsOf`): the latest round's check is among them only while that
-// round is on the change's head and completed its check (one it gave up on keeps its failure). The UI hears `finding.dismissed` at once; the posts follow, one dismissal of a change
-// at a time, in the order they were saved (a later one's summary is the last word), each change's apart from the
-// others' (a dismissal GitHub keeps waiting on one pull request holds no other's). Each is rendered as it is sent,
-// from the round restated over the ledger as it then is (`core.standing`), so a late resend never says less than the
-// ledger. While its posts are owed the change is busy for the take; once they end (sent, or given up at a host
-// refusal, which goes to the log) the queue takes again. A dismissal a stopped service left owing is resumed at the
-// next start (`resume`). It must never know: the loop's rules (`core`), the words on GitHub (`publish`), or which job
-// is next (the queue).
+// round is on the change's head and completed its check (one it gave up on keeps its failure). The UI hears
+// `finding.dismissed` at once; the posts follow, one dismissal of a change at a time, in the order they were saved
+// (a later one's status block is the last word), each change's apart from the others' (a dismissal GitHub keeps
+// waiting on one pull request holds no other's). Each is rendered as it is sent: the status block from where the
+// change stands then (ADR 0074), the check from the round restated over the ledger as it then is (`core.standing`),
+// so a late resend never says less than the ledger. While its posts are owed the change is busy for the take; once
+// they end (sent, or given up at a host refusal, which goes to the log) the queue takes again. A dismissal a stopped
+// service left owing is resumed at the next start (`resume`). It must never know: the loop's rules (`core`), the
+// words on GitHub (`publish`), or which job is next (the queue).
 import {
   type ChangeId,
   type Clock,
@@ -62,8 +63,8 @@ interface SavedPlan {
 export function createDismissals(d: DismissDeps): Dismissing {
   const controller = new AbortController();
   /**
-   * The sends of each change, one dismissal at a time, in the order they were saved: a later one's summary is the
-   * last word. Changes apart: their summaries and checks are their own.
+   * The sends of each change, one dismissal at a time, in the order they were saved: a later one's status block is
+   * the last word. Changes apart: their blocks and checks are their own.
    */
   const chains = new Map<ChangeId, Promise<void>>();
 
@@ -86,8 +87,9 @@ export function createDismissals(d: DismissDeps): Dismissing {
     if (dismissal === null) return;
     const { signal } = controller;
     try {
-      // The ledger as it is now: the summary and the check say where the change stands at the send.
-      const findings = d.store.rounds.ledger(dismissal.changeId);
+      // The round's ledger as it is now (never a preview's after it, which posts nothing): the check says where the
+      // change stands at the send (the block reads it itself).
+      const findings = d.store.rounds.ledger(dismissal.changeId, dismissal.plan.post.round);
       const round = {
         ...dismissal.plan.post,
         reconciled: standing(dismissal.plan.post.reconciled, findings),

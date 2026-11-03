@@ -1,6 +1,6 @@
 // "This finding is wrong" (ADR 0052), through the service's entry, on fakes only: round 1 posts a blocking finding
 // and a should-fix one; the owner dismisses the blocking one from "Too noisy?". Lookover says so on its thread,
-// rewrites the summary and, when the round is on the change's head, its check (the verdict and the result included),
+// rewrites the status block and, when the round is on the change's head, its check (the verdict and the result included),
 // then minimizes the thread's root; a later round never raises it again.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
@@ -8,12 +8,14 @@ import {
   changeId,
   type ReviewResult,
   readResult,
+  repositoryId,
   reviewResultV1,
   type State,
+  statusOf,
+  withoutWordmark,
 } from "@lookover/contracts";
 import { type FakeEngines, ScriptedRetrieval, type ScriptedRun } from "@lookover/testkit";
 import {
-  BOT,
   fakeEngines,
   home,
   OWNER,
@@ -153,11 +155,10 @@ const sentSince = (posts: { kind: string }[], from: number) =>
     .map((p) => p.kind)
     .filter((kind) => kind !== "reaction" && kind !== "check.created" && kind !== "check.updated");
 
-/** The summary comment as the host shows it. */
-const summaryOf = (w: Awaited<ReturnType<typeof roundOne>>) =>
-  w.host.view(PR1).comments.find((c) => c.author.id === BOT.id)?.body ?? "";
+/** The status block in the description as the host shows it (ADR 0074). */
+const blockOf = (w: Awaited<ReturnType<typeof roundOne>>) => statusOf(w.host.view(PR1).description) ?? "";
 
-test("a finding dismissed as wrong is said on its thread, the summary and the round's check say so, and its root is minimized", async () => {
+test("a finding dismissed as wrong is said on its thread, the status block and the round's check say so, and its root is minimized", async () => {
   const w = await roundOne();
   const check = w.host.posts.findLast((p) => p.kind === "check.completed");
   expect(w.result().verdict).toMatchObject({ value: "blocking", conclusion: "neutral" });
@@ -168,16 +169,17 @@ test("a finding dismissed as wrong is said on its thread, the summary and the ro
 
   expect(sentSince(w.host.posts, before)).toEqual([
     "reply",
-    "summary.edited",
+    "status.written",
     "check.completed",
     "minimized",
   ]);
   const reply = w.host.posts.find((p) => p.kind === "reply");
   expect(reply).toMatchObject({ commentId: w.root.commentId });
-  expect(reply?.kind === "reply" && reply.body).toStartWith(
-    "Dismissed by the owner.\n\nIt won't be raised again on this pull request.\n\n",
+  expect(reply?.kind === "reply" && withoutWordmark(reply.body)).toStartWith(
+    "Dismissed by the owner\n\nIt won't be raised again on this pull request.\n\n",
   );
-  expect(summaryOf(w)).toContain("F1 · The total skips the last invoice · dismissed by the owner");
+  expect(blockOf(w)).toContain(" · 1 withdrawn\n\n- **Should fix** · ");
+  expect(blockOf(w)).not.toContain("The total skips the last invoice");
   // The round's own check, rewritten: F2 alone is open, below blocking.
   const rewritten = w.host.posts.findLast((p) => p.kind === "check.completed");
   expect(rewritten?.kind === "check.completed" && check?.kind === "check.completed").toBe(true);
@@ -205,6 +207,22 @@ test("a finding dismissed as wrong is said on its thread, the summary and the ro
   ]);
   expect(review?.loop).toBe("open");
   expect(review?.timeline.at(-1)).toMatchObject({ kind: "dismissed", findingIds: ["F1"] });
+});
+
+test("a dismissal after a preview rewrites the round's check from that round's ledger, never the preview's", async () => {
+  const w = await roundOne();
+  // A preview of the same commit says F1 is gone: it posts nothing, so the round's check still has F1 to fix.
+  w.engines.answer(answered({ findings: [], earlier: [{ id: "F1", present: false, why: "Not there." }] }));
+  const preview = await post(w.service, w.cookie, { type: "setup.firstReview", changeId: ID, preview: true });
+  expect(preview.status).toBe(200);
+  await w.time.advance(MIN);
+  expect((await w.state()).reviews[ID]).toMatchObject({ preview: true, job: { state: "done" } });
+  expect((await w.state()).reviews[ID]?.findings.find((f) => String(f.id) === "F1")?.status).not.toBe("open");
+
+  expect(await w.wrong("F2")).toEqual({ status: 200, body: { ok: true } });
+  await w.time.advance(1_000);
+  expect(w.result().verdict).toMatchObject({ value: "blocking", conclusion: "neutral" });
+  expect(blockOf(w)).toContain("The total skips the last invoice");
 });
 
 test("a dismissed finding is never raised again: the next round's finder isn't given it, and its candidate counts for nothing", async () => {
@@ -259,7 +277,7 @@ test("a finding settled, kept off the pull request or not the change's is refuse
   });
 });
 
-test("once the head moved, the round's check is left as it was: the thread and the summary say it", async () => {
+test("once the head moved, the round's check is left as it was: the thread and the status block say it", async () => {
   const w = await roundOne();
   // A push the owner doesn't review: the round's check is on a commit that is no longer the head.
   w.host.push(PR1, SHA1_PUSHED, pr1.diff);
@@ -267,7 +285,26 @@ test("once the head moved, the round's check is left as it was: the thread and t
   const before = w.host.posts.length;
   await w.wrong();
   await w.time.advance(1_000);
-  expect(sentSince(w.host.posts, before)).toEqual(["reply", "summary.edited", "minimized"]);
+  expect(sentSince(w.host.posts, before)).toEqual(["reply", "status.written", "minimized"]);
+});
+
+test("a dismissal after a later job was skipped still rewrites the status block: the finding gone, counted withdrawn", async () => {
+  const w = await roundOne();
+  // "Review now" while the repository is off: the change's newest job is a skip, round 1 still its last posted.
+  const repoId = repositoryId(`${SANDBOX.owner}/${SANDBOX.name}`);
+  await post(w.service, w.cookie, { type: "repo.setEnabled", repoId, enabled: false });
+  await post(w.service, w.cookie, { type: "review.request", changeId: ID });
+  await w.time.advance(0);
+  expect((await w.state()).reviews[ID]?.job).toMatchObject({ state: "skipped", skip: "repo-off" });
+  await post(w.service, w.cookie, { type: "repo.setEnabled", repoId, enabled: true });
+  const before = w.host.posts.length;
+
+  expect(await w.wrong()).toEqual({ status: 200, body: { ok: true } });
+  await w.time.advance(1_000);
+
+  expect(sentSince(w.host.posts, before)).toContain("status.written");
+  expect(blockOf(w)).toContain(" · 1 withdrawn\n\n- **Should fix** · ");
+  expect(blockOf(w)).not.toContain("The total skips the last invoice");
 });
 
 test("after a round whose review GitHub refused, a dismissal leaves that round's failed check as it is", async () => {
@@ -314,16 +351,16 @@ test("after a round whose review GitHub refused, a dismissal leaves that round's
   expect(await w.wrong()).toEqual({ status: 200, body: { ok: true } });
   await w.time.advance(1_000);
 
-  // The thread and the summary say it; round 2's check still says its posts failed.
-  expect(sentSince(w.host.posts, before)).toEqual(["reply", "summary.edited", "minimized"]);
+  // The thread and the status block say it; round 2's check still says its posts failed.
+  expect(sentSince(w.host.posts, before)).toEqual(["reply", "status.written", "minimized"]);
   expect(w.host.posts.findLast((p) => p.kind === "check.completed")).toBe(failed);
 });
 
 test("a service stopped while a dismissal waits to be sent again resumes its posts after the restart: each once", async () => {
   const dir = home();
   const w = await roundOne({ home: dir });
-  // GitHub refuses the summary's edit for a moment; the service stops during the wait.
-  w.host.refuseNext("unavailable", { post: "summary" });
+  // GitHub refuses the status block's write for a moment; the service stops during the wait.
+  w.host.refuseNext("unavailable", { post: "status" });
   const before = w.host.posts.length;
   await w.wrong();
   await w.time.advance(1_000);
@@ -342,7 +379,7 @@ test("a service stopped while a dismissal waits to be sent again resumes its pos
   await w.time.advance(MIN);
   expect(sentSince(w.host.posts, before)).toEqual([
     "reply",
-    "summary.edited",
+    "status.written",
     "check.completed",
     "minimized",
   ]);
@@ -351,8 +388,8 @@ test("a service stopped while a dismissal waits to be sent again resumes its pos
 
 test("a round asked while a dismissal's posts are owed waits until they end, then posts after them", async () => {
   const w = await roundOne();
-  // GitHub asks to wait a minute before the summary's edit: the dismissal's posts are owed that long.
-  w.host.refuseNext("rate_limited", { post: "summary" });
+  // GitHub asks to wait a minute before the status block's write: the dismissal's posts are owed that long.
+  w.host.refuseNext("rate_limited", { post: "status" });
   const before = w.host.posts.length;
   await w.wrong();
   await w.time.advance(1_000);
@@ -367,6 +404,7 @@ test("a round asked while a dismissal's posts are owed waits until they end, the
   await w.time.advance(20_000);
   const waiting = (await w.state()).reviews[ID];
   expect([waiting?.job?.state, waiting?.run, w.engines.runs.length]).toEqual(["queued", null, runs]);
+  // Behind the change's own posts, it writes no block (ADR 0074): the dismissal's is still owed.
   expect(sentSince(w.host.posts, before)).toEqual(["reply"]);
 
   // The wait over, the dismissal's posts end; round 2 runs and posts after them.
@@ -374,12 +412,14 @@ test("a round asked while a dismissal's posts are owed waits until they end, the
   expect(w.engines.runs.length).toBe(runs + 1);
   expect(sentSince(w.host.posts, before)).toEqual([
     "reply",
-    "summary.edited",
+    "status.written",
     "check.completed",
     "minimized",
-    // Round 2: its review, the summary, its check, and the `/lookover review` it answered minimized.
-    "review",
-    "summary.edited",
+    // Round 2: Looking over as it runs (ADR 0074).
+    "status.written",
+    // Round 2: no new line comment, so no review (ADR 0074); the status block, its check, and the `/lookover review` it
+    // answered minimized.
+    "status.written",
     "check.completed",
     "minimized",
   ]);
@@ -405,10 +445,10 @@ test("a dismissal stuck on one change doesn't hold another change's", async () =
     });
   /** The summaries of `n` edited since `from`. */
   const summariesOf = (n: number, from: number) =>
-    host.posts.slice(from).filter((p) => p.kind === "summary.edited" && p.number === n).length;
+    host.posts.slice(from).filter((p) => p.kind === "status.written" && p.number === n).length;
   const before = host.posts.length;
-  // #1's summary waits a minute at GitHub's word; #3's dismissal, saved after, is sent meanwhile.
-  host.refuseNext("rate_limited", { post: "summary" });
+  // #1's status block waits a minute at GitHub's word; #3's dismissal, saved after, is sent meanwhile.
+  host.refuseNext("rate_limited", { post: "status" });
   expect((await wrong("sasensi/lookover-sandbox#1")).status).toBe(200);
   expect((await wrong("sasensi/lookover-sandbox#3")).status).toBe(200);
   await time.advance(1_000);

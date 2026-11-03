@@ -70,7 +70,7 @@ test("S14: #1 left running by two restarts runs again once, then fails; the log 
   await advance(door, 5_000);
   expect(await inject(door, "login-refused")).toBe(200);
   await advance(door, 5_000);
-  expect(await inject(door, "key-lost")).toBe(200);
+  expect(await inject(door, "npm-install")).toBe(200);
   expect(about("sasensi/lookover-sandbox#1 ")).toEqual([
     "sasensi/lookover-sandbox#1 opened by sasensi: Add unpaid filter and rewrite total",
     "sasensi/lookover-sandbox#1 review queued (on opening) for 703205d",

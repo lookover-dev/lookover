@@ -4,7 +4,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { carriedWebFiles, readConfig as readOn, type System } from "./index.ts";
+import { carriedWebFiles, type LiveConfig, readConfig as readOn, type System } from "./index.ts";
 
 /** How this clone runs `lookover`: Bun and its `main.ts`, as `main.ts` says it. */
 const SELF = { kind: "clone", bun: process.execPath, main: join(import.meta.dir, "main.ts") } as const;
@@ -186,60 +186,58 @@ test("the program is unguarded without a live.json, and guarded by the data fold
   });
 });
 
-test("live mode and the guarded program run as the organisation's App on its repositories when live.json lists them", () => {
+test("live mode and the guarded program run on live.json's repositories alone: its app, organisation and watch ignored", () => {
   const home = folder();
   const key = join(home, "app.pem");
   const orgKey = join(home, "org.pem");
   for (const file of [key, orgKey]) writeFileSync(file, "not a key");
-  const app = { id: 5202093, keyPath: key };
-  const orgApp = { id: 5297673, keyPath: orgKey };
-  const personal = {
-    app,
-    repositories: ["sasensi/lookover-sandbox"],
-    fork: "lookover-forks/lookover-sandbox",
-  };
-  const organisation = { app: orgApp, sandbox: "lookover-dev/lookover-sandbox" };
-  const machine = system("linux", "/home/ada");
-  const served = {
-    live: {
-      app: orgApp,
-      repositories: [
-        { owner: "lookover-dev", name: "lookover-sandbox" },
-        { owner: "lookover-dev", name: "lookover-private" },
-      ],
-    },
-    asOrganisation:
-      "Runs as lookover-dev's App 5297673 on lookover-dev/lookover-sandbox and lookover-dev/lookover-private.",
-  };
-
-  // The owner's file: the guard's allow-list and the App given agree, with no fork and no organisation left.
+  // The owner's file as it is (ADR 0073): the test App, the fork, the organisation's App and an old `watch`.
   writeFileSync(
     join(home, "live.json"),
     JSON.stringify({
-      ...personal,
-      organisation: { ...organisation, repositories: ["lookover-dev/lookover-private"] },
+      app: { id: 5202093, keyPath: key },
+      repositories: ["sasensi/lookover-sandbox"],
+      fork: "lookover-forks/lookover-sandbox",
+      organisation: {
+        app: { id: 5297673, keyPath: orgKey },
+        sandbox: "lookover-dev/lookover-sandbox",
+        repositories: ["lookover-dev/lookover-private"],
+      },
+      watch: ["sasensi/lookover-sandbox"],
     }),
   );
+  const machine = system("linux", "/home/ada");
+  const served: LiveConfig = {
+    repositories: [{ owner: "sasensi", name: "lookover-sandbox" }],
+    // Both old lines, named and never read: the service prints only `watch`'s line.
+    ignored: ["watch", "organisation"],
+  };
+  // Live mode, and the program its data folder's live.json guards: neither runs on live.json's App any more.
   const live = readConfig(["--live", `--home=${home}`], machine);
-  expect(live).toMatchObject({ mode: "live", ...served });
-  expect(live.mode === "live" && live.live).toEqual(served.live);
+  expect(live.mode === "live" && live.live).toEqual(served);
   const program = readConfig([`--home=${home}`], machine);
-  expect(program).toMatchObject({ mode: "program", ...served });
-  expect(program.mode === "program" && program.live).toEqual(served.live);
+  expect(program.mode === "program" && program.live).toEqual(served);
+});
 
-  // Without the organisation's repositories, nothing changes: the config as read, nothing said.
-  writeFileSync(join(home, "live.json"), JSON.stringify({ ...personal, organisation }));
-  for (const argv of [["--live", `--home=${home}`], [`--home=${home}`]]) {
-    const config = readConfig(argv, machine);
-    expect(config).toMatchObject({
-      live: {
-        app,
-        repositories: [{ owner: "sasensi", name: "lookover-sandbox" }],
-        fork: { owner: "lookover-forks", name: "lookover-sandbox" },
-      },
-    });
-    expect(config).not.toHaveProperty("asOrganisation");
-  }
+test("live mode reads the shared App's sign-in from --sign-ins' folder, else its data folder's; nothing else takes it", () => {
+  const home = folder();
+  const signIns = folder();
+  writeFileSync(join(home, "live.json"), SANDBOX_ONLY);
+  const machine = system("linux", "/home/ada");
+  expect(readConfig(["--live", `--home=${home}`, `--sign-ins=${signIns}`], machine)).toMatchObject({
+    mode: "live",
+    signIns,
+  });
+  expect(readConfig(["--live", `--home=${home}`], machine)).toMatchObject({ mode: "live", signIns: home });
+  expect(() => readConfig([`--home=${home}`, `--sign-ins=${signIns}`], machine)).toThrow(
+    "--sign-ins is for live mode: the program keeps its sign-in in its data folder. Usage: lookover serve",
+  );
+  expect(() => readConfig(["--demo", `--home=${home}`, `--sign-ins=${signIns}`], machine)).toThrow(
+    "--sign-ins is for live mode: demo mode signs in on its fake GitHub.",
+  );
+  expect(() => readConfig(["--live", `--home=${home}`, "--sign-ins", signIns], machine)).toThrow(
+    "Pass --sign-ins as --sign-ins=<dir>, in one word.",
+  );
 });
 
 test("a live config named but missing refuses the program rather than run it unguarded", () => {

@@ -22,8 +22,6 @@ export const S17: Scenario = {
   path: "/setup",
   world: {
     ...LEDGER_API,
-    // The shared App's bot: on the shared App it never posts, the owner does.
-    bot: { id: 2020, login: "lookover-dev[bot]" },
     gh: "signed-in",
     memberships: [
       { organisation: LEDGER_DEV, role: "owner" },
@@ -47,7 +45,6 @@ export const S17: Scenario = {
       step: "github",
       reached: "repos",
       github: "done",
-      githubRefused: null,
       firstReviewChange: null,
     },
   },

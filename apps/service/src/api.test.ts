@@ -8,13 +8,12 @@ import { openStore } from "@lookover/store";
 import { diskSettingsFiles } from "./index.ts";
 import {
   api,
-  BOT,
   expectedChange1,
   home,
   linkOf,
   messages,
+  OWNER,
   openApp,
-  personalApp,
   post,
   SANDBOX_SETTINGS,
   SHA1,
@@ -50,8 +49,8 @@ test("the one-time token becomes a cookie, and the snapshot lists the sandbox's 
   expect((await fetch(linkOf(service), { redirect: "manual" })).status).toBe(403);
 
   const state = await snapshot(service, cookie);
-  // The start, the repository, two pull requests.
-  expect(state.seq).toBe(4);
+  // The start, the account the sign-in reaches, the repository, two pull requests.
+  expect(state.seq).toBe(5);
   expect(state.now).toBe(T0);
   // Lookover's defaults, nothing of the owner's yet.
   const lookoverDefault = (value: unknown) => ({ value, origin: "lookover-default", overrode: null });
@@ -90,32 +89,27 @@ test("the one-time token becomes a cookie, and the snapshot lists the sandbox's 
   expect(state.reviews["sasensi/lookover-sandbox#1"]).toEqual(expectedReview1);
   expect(state.setup.done).toBe(true);
   expect(state.connection).toEqual({
-    id: "github:lookover-spike-sasensi[bot]",
+    // The person signed in to the shared App (ADR 0066): Lookover posts as them, no bot or App of its own.
+    id: "github:sasensi",
     state: "connected",
     cause: null,
-    bot: BOT.login,
-    // The fake's App (its first id) and its first installation, on the owner's account (ADR 0053).
-    app: personalApp(1, "lookover-spike-sasensi"),
+    // The shared App's first installation, on the person's own account, which they own (ADR 0067).
     accounts: [
       {
-        account: { id: 1, login: "sasensi", type: "User" },
+        account: { id: OWNER.id, login: "sasensi", type: "User" },
         installationId: 60_000_001,
         cause: null,
-        // On the own App, whether the person owns its account is nobody's to say (ADR 0067).
-        owner: null,
+        owner: true,
       },
     ],
-    // The accounts the shared App doesn't reach: none on the own App.
+    // The accounts the shared App doesn't reach: none here.
     unreached: [],
-    way: "own",
     signIn: null,
-    // Nobody signed in to the shared App: the own App's person is its.
-    person: null,
+    person: { id: OWNER.id, login: "sasensi" },
     web: "https://github.com",
     since: T0,
     limitUntil: null,
     // The person's own `gh`, read only when the setup's GitHub step asks (ADR 0059).
-    gh: null,
   });
   expect(state.engines.claude).toMatchObject({ state: "ready", version: "2.4.1" });
   expect(state.engines.codex).toMatchObject({ state: "missing", version: null });
@@ -378,40 +372,23 @@ test("commands are checked, and the ones the skeleton doesn't do say so", async 
   expect((await post(service, cookie, "not even an object")).status).toBe(400);
 });
 
-test("Use an existing App refused answers why as `useApp` beside `error`, and nothing answers, logs or keeps its key (ADR 0053)", async () => {
+test("the own App's commands are no commands any more (ADR 0073): each refused at the door, a key sent never echoed", async () => {
   const lines: string[] = [];
-  const said: string[] = [];
-  const console_ = { log: console.log, error: console.error, warn: console.warn };
-  const hear = (...args: unknown[]) => said.push(args.map(String).join(" "));
-  console.log = hear;
-  console.error = hear;
-  console.warn = hear;
-  try {
-    const { service } = await start({ log: (line) => lines.push(line) });
-    const cookie = await openApp(service);
-    const key =
-      "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0secret0key0text\n-----END RSA PRIVATE KEY-----\n";
-
-    // The service runs as live.json's App: any App is refused, in the shape the web reads (`answer.useApp`).
-    const given = await post(service, cookie, { type: "connection.useApp", appId: 4242, key });
-    expect(given.status).toBe(409);
-    const answer = await given.text();
-    expect(JSON.parse(answer)).toEqual({
-      error: "the App was refused: live-config",
-      useApp: { kind: "live-config" },
-    });
-    // Sent malformed, the parse's refusal names what is wrong, never the key.
-    const malformed = await post(service, cookie, { type: "connection.useApp", appId: "4242", key });
-    expect(malformed.status).toBe(400);
-    const refusal = await malformed.text();
-    const empty = await post(service, cookie, { type: "connection.useApp", appId: 4242, key: "" });
-    expect(empty.status).toBe(400);
-
-    const state = JSON.stringify(await snapshot(service, cookie));
-    for (const text of [answer, refusal, state, ...lines, ...said]) expect(text).not.toContain("secret0key");
-  } finally {
-    Object.assign(console, console_);
+  const { service } = await start({ log: (line) => lines.push(line) });
+  const cookie = await openApp(service);
+  const key =
+    "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0secret0key0text\n-----END RSA PRIVATE KEY-----\n";
+  const answers: string[] = [];
+  for (const command of [
+    { type: "connection.useApp", appId: 4242, key },
+    { type: "connection.createApp", organisation: null },
+    { type: "gh.check" },
+  ]) {
+    const answer = await post(service, cookie, command);
+    expect([command.type, answer.status]).toEqual([command.type, 400]);
+    answers.push(await answer.text());
   }
+  for (const text of [...answers, ...lines]) expect(text).not.toContain("secret0key");
 });
 
 test("in live mode, every dev verb answers 501 with the reason (a load, a fault, the clock verbs), and the demo listing 404: nothing scripted touches a real repository", async () => {
@@ -437,5 +414,5 @@ test("in live mode, every dev verb answers 501 with the reason (a load, a fault,
     expect(await refused.json()).toEqual({ error: "no demo clock in live mode" });
   }
   // The clock stood where it was: nothing moved, nothing was sent.
-  expect(await snapshot(service, cookie)).toMatchObject({ seq: 4, now: T0 });
+  expect(await snapshot(service, cookie)).toMatchObject({ seq: 5, now: T0 });
 });

@@ -16,18 +16,18 @@ import { DemoClock, type FakeChange, FakeGitHost, type ScriptedRun } from "@look
 import {
   ACME_WEB,
   api,
-  BOT,
   fakeEngines,
   home,
   messages,
   OWNER,
   onAcmeWeb,
-  onOrganisationApp,
   openApp,
   organisationHost,
   post,
   pr1,
   SANDBOX,
+  SHARED_BOT,
+  signedInOn,
   snapshot,
   start,
   stopAll,
@@ -117,7 +117,7 @@ test("another author's pull request written by Claude is found by Claude, when t
   expect((await snapshot(service, cookie)).changes[idOf(6)]).toMatchObject({ writtenBy: "claude" });
 });
 
-test("on an organisation's App, the person's change written by Claude is found by Codex; a teammate's by Claude, when the person asks", async () => {
+test("on an organisation's repository, the person's change written by Claude is found by Codex; a teammate's by Claude, when the person asks", async () => {
   const engines = bothEngines();
   const time = new DemoClock({ at: T0 });
   const host = organisationHost(time, [onAcmeWeb(pr1)]);
@@ -127,12 +127,12 @@ test("on an organisation's App, the person's change written by Claude is found b
     host,
     time,
     engines,
-    github: await onOrganisationApp(host, dir),
+    github: await signedInOn(host, dir),
   });
   const cookie = await openApp(service);
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
 
-  // The person's own, though the App's account is the organisation's.
+  // The person's own, though the repository's account is the organisation's.
   host.open(onAcmeWeb(opened(3, { messages: [CLAUDE_CODE] })));
   await time.advance(MIN);
   expect(startedBy(await until(stream, "round.finished"))).toEqual(["codex"]);
@@ -206,7 +206,8 @@ test("a compare GitHub refuses as rate limited makes the poll wait, as a listing
 test("a first listing of many pull requests compares a few at a time", async () => {
   const host = new CompareCountingHost({
     repo: SANDBOX,
-    bot: BOT,
+    bot: SHARED_BOT,
+    person: OWNER,
     changes: Array.from({ length: 12 }, (_, i) => opened(20 + i, { messages: [CLAUDE_CODE] })),
   });
   const { service } = await start({ host, engines: bothEngines() });

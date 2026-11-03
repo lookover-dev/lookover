@@ -50,27 +50,18 @@ const CONNECTED: Connection = {
   id: null,
   state: "connected",
   cause: null,
-  bot: "sam-reviewer[bot]",
-  app: {
-    id: 4242,
-    slug: "sam-reviewer",
-    account: { id: 7, login: "sam", type: "User" },
-    person: { id: 7, login: "sam" },
-  },
   accounts: [
     { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
   ],
   unreached: [],
-  way: "own",
   signIn: null,
-  person: null,
+  person: { id: 7, login: "sam" },
   web: GITHUB_WEB,
   since: NOW,
   limitUntil: null,
-  gh: null,
 };
 
-/** The own App's one account, sam's, as `CONNECTED` holds it. */
+/** sam's own account, the one `CONNECTED` reaches. */
 const SAM = {
   account: { id: 7, login: "sam", type: "User" },
   installationId: 77,
@@ -95,7 +86,6 @@ function snapshot(review: Partial<Review> = {}, change: Partial<Change> = {}): S
       step: "background",
       reached: "background",
       github: "done",
-      githubRefused: null,
       firstReviewChange: null,
     },
     engines: {
@@ -220,6 +210,7 @@ function finding(id: string, status: Finding["status"]): Finding {
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: null,
     status,
     posted: true,
     commented: false,
@@ -443,6 +434,7 @@ test("a finished round, its job and the change's new commits are recorded as the
   const round: Round = {
     n: 1,
     sha: SHA,
+    base: null,
     reviewer: "codex",
     secondFind: null,
     confirmer: null,
@@ -672,6 +664,7 @@ test("a change sent again takes the event's opened time, the host's (ADR 0068); 
 const ROUND_1: Round = {
   n: 1,
   sha: SHA,
+  base: null,
   reviewer: "claude",
   secondFind: null,
   confirmer: null,
@@ -944,17 +937,17 @@ test("a departed repository dismissed is no longer said; the others still are", 
   ]);
 });
 
-test("a connection lost records its cause and keeps the App it knows; connected again, the cause is gone", () => {
+test("a connection lost records its cause and keeps the person it knows; connected again, the cause is gone", () => {
   const lost = apply(snapshot(), {
     type: "connection.changed",
     at: NOW + 1_000,
     seq: 1,
-    patch: { state: "disconnected", cause: { kind: "key-refused", why: "clock" }, since: NOW + 1_000 },
+    patch: { state: "disconnected", cause: { kind: "signed-out" }, since: NOW + 1_000 },
   });
   expect(lost.connection).toEqual({
     ...CONNECTED,
     state: "disconnected",
-    cause: { kind: "key-refused", why: "clock" },
+    cause: { kind: "signed-out" },
     since: NOW + 1_000,
   });
   const suspended = apply(lost, {
@@ -982,12 +975,12 @@ test("a connection lost records its cause and keeps the App it knows; connected 
   });
 });
 
-test("a sign-in to the shared App shows its code until it ends, then the connection is the person's, with no bot (ADR 0066)", () => {
+test("a sign-in to the shared App shows its code until it ends, then the connection is the person's (ADR 0066)", () => {
   const none = apply(snapshot(), {
     type: "connection.changed",
     at: NOW,
     seq: 1,
-    patch: { id: null, state: "not-connected", way: null, bot: null, app: null, accounts: [] },
+    patch: { id: null, state: "not-connected", person: null, accounts: [] },
   });
   const code = {
     userCode: "WDJB-MJHT",
@@ -1001,12 +994,12 @@ test("a sign-in to the shared App shows its code until it ends, then the connect
     patch: { signIn: code },
   });
   expect(waiting.connection.signIn).toEqual(code);
-  expect(waiting.connection.way).toBeNull();
+  expect(waiting.connection.person).toBeNull();
   const signedIn = apply(waiting, {
     type: "connection.changed",
     at: NOW + 6_000,
     seq: 3,
-    patch: { signIn: null, way: "shared" },
+    patch: { signIn: null, person: { id: 7, login: "sam" } },
   });
   const installed = apply(signedIn, {
     type: "connection.changed",
@@ -1022,10 +1015,7 @@ test("a sign-in to the shared App shows its code until it ends, then the connect
   expect(installed.connection).toEqual({
     ...CONNECTED,
     id: connectionId("github:sam"),
-    way: "shared",
     signIn: null,
-    bot: null,
-    app: null,
     accounts: [ON_SAM, ON_ACME],
     since: NOW + 7_000,
   });
@@ -1044,7 +1034,7 @@ test("a sign-in to the shared App shows its code until it ends, then the connect
 
 test("the accounts the shared App doesn't reach follow the service: named, asked, then reached and gone from the list", () => {
   const ledger = { id: 338, login: "ledger-dev" };
-  const shared = { ...snapshot(), connection: { ...CONNECTED, way: "shared" as const, accounts: [ON_SAM] } };
+  const shared = { ...snapshot(), connection: { ...CONNECTED, accounts: [ON_SAM] } };
   const named = apply(shared, {
     type: "connection.changed",
     at: NOW,
@@ -1115,29 +1105,25 @@ test("your coding agent follows the service: the PATH reached and Lookover's com
   expect(installed.seq).toBe(2);
 });
 
-test("the setup's GitHub step moves as the service says, and keeps the flow's refusal until it is cleared", () => {
+test("the setup's GitHub step moves as the service says", () => {
   const start = {
     ...snapshot(),
     setup: { ...snapshot().setup, done: false, step: "github" as const, github: "start" as const },
   };
-  const refused = apply(start, {
+  const waiting = apply(start, {
     type: "setup.changed",
     at: NOW,
     seq: 1,
-    setup: { github: "waiting-for-app", githubRefused: "unreachable" },
+    setup: { github: "waiting-for-install" },
   });
-  expect(refused.setup).toMatchObject({
-    github: "waiting-for-app",
-    githubRefused: "unreachable",
-    step: "github",
-  });
-  const granted = apply(refused, {
+  expect(waiting.setup).toMatchObject({ github: "waiting-for-install", step: "github" });
+  const granted = apply(waiting, {
     type: "setup.changed",
     at: NOW + 1_000,
     seq: 2,
-    setup: { github: "nothing-granted", githubRefused: null },
+    setup: { github: "nothing-granted" },
   });
-  expect(granted.setup).toMatchObject({ github: "nothing-granted", githubRefused: null });
+  expect(granted.setup).toMatchObject({ github: "nothing-granted", step: "github" });
 });
 
 // ---- sequence numbers (ADR 0038) ----

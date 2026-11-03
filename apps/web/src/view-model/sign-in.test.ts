@@ -1,4 +1,4 @@
-// What the setup's GitHub step says on its first way, Sign in with GitHub (ADR 0066), for a given snapshot: the code,
+// What the setup's GitHub step says, Sign in with GitHub (ADR 0066, ADR 0073: the one way in), for a given snapshot: the code,
 // the wait, how a sign-in ended, then who you are and the accounts reached. Snapshots are built by hand: the view
 // model reads state only.
 import { expect, test } from "bun:test";
@@ -16,17 +16,13 @@ import {
   type SetupGitHub,
   type State,
 } from "@lookover/contracts";
-import { githubStep } from "./onboarding.ts";
 import {
-  bothWays,
   codeToast,
   GITHUB_SETTINGS_TEXT,
   githubSettings,
-  OWN_APP_LINK,
   SIGN_IN_TEXT,
   signInEnd,
   signInStep,
-  wayShown,
 } from "./sign-in.ts";
 
 test("a code copied as GitHub's page opens says so, and one the clipboard didn't take is to be typed", () => {
@@ -85,7 +81,6 @@ function at(github: SetupGitHub, connection: Partial<Connection> = {}, repos: Re
       step: "github",
       reached: "github",
       github,
-      githubRefused: null,
       firstReviewChange: null,
     },
     engines: { claude: engine("claude", "Claude"), codex: engine("codex", "Codex") },
@@ -93,17 +88,13 @@ function at(github: SetupGitHub, connection: Partial<Connection> = {}, repos: Re
       id: null,
       state: "not-connected",
       cause: null,
-      way: null,
       signIn: null,
       person: null,
-      bot: null,
-      app: null,
       accounts: [],
       unreached: [],
       web: GITHUB_WEB,
       since: NOW,
       limitUntil: null,
-      gh: null,
       ...connection,
     },
     service: {
@@ -132,31 +123,20 @@ function at(github: SetupGitHub, connection: Partial<Connection> = {}, repos: Re
 const step = (state: State, o: Parameters<typeof signInStep>[1] = {}) =>
   signInStep(state, { timeZone: UTC, ...o });
 
-// ---- which way shows ----
-
-test("the step starts on Sign in with GitHub; Use your own App, an App being made, or one kept show today's flow", () => {
-  expect(wayShown(at("start"), null)).toBe("shared");
-  expect(wayShown(at("start"), "own")).toBe("own");
-  expect(wayShown(at("waiting-for-app"), null)).toBe("own");
-  expect(wayShown(at("waiting-for-install", { way: "own" }), null)).toBe("own");
-  // Signed in, the sign-in shows, whatever was chosen here before.
-  expect(wayShown(at("waiting-for-install", { way: "shared" }), "own")).toBe("shared");
-});
-
 // ---- the start ----
 
-test("at the start: Sign in with GitHub starts it, Use your own App is offered, the accounts come after", () => {
+test("at the start: Sign in with GitHub is the one way in, the accounts come after", () => {
   const view = step(at("start"));
   expect(view.signIn).toMatchObject({
     state: "current",
-    text: "You enter a code on GitHub. No App to create, no key to keep.",
+    text: "You enter a code on GitHub, then authorise Lookover there.",
     code: null,
   });
   expect(view.accounts).toMatchObject({ state: "later", text: "Right after you sign in." });
   expect(view.primary).toEqual({ label: "Sign in with GitHub", enabled: true, starts: true });
-  expect(view.ownApp).toBe(true);
   expect(view.refused).toBeNull();
   expect(view.done).toBe(false);
+  expect(JSON.stringify(view)).not.toMatch(/own App|existing App|key/i);
 });
 
 // ---- the code ----
@@ -173,8 +153,12 @@ test("a code waiting: shown with until when it works, copied and opened by one b
     code: CODE,
   });
   expect(view.primary).toEqual({ label: "Continue", enabled: false, starts: false });
-  // Use your own App stays: taking it gives the sign-in up.
-  expect(view.ownApp).toBe(true);
+});
+
+test("the code carries the device code's class (#476), in setup and in Settings", () => {
+  const device = { before: "Enter", command: "WDJB-MJHT", kind: "device-code" };
+  expect(step(at("start", { signIn: CODE })).signIn.text).toMatchObject(device);
+  expect(settings(connected({ signIn: CODE })).signIn.text).toMatchObject(device);
 });
 
 test("a code still shown past its expiry is being finished, not expired: GitHub took it and the service asks who", () => {
@@ -195,6 +179,7 @@ test("every text the sign-in row can show is held, the code's with a code as lon
   expect(start.signIn.held).toContainEqual({
     before: "Enter",
     command: "XXXX-XXXX",
+    kind: "device-code",
     after: "on GitHub. It works until 10:15.",
   });
 });
@@ -208,7 +193,7 @@ test("the code gone without a sign-in: ran out at its expiry, else GitHub didn't
   expect(signInEnd(CODE, out.connection, NOW + 2 * MIN, true)).toBeNull();
   // Still waiting, signed in, or no code seen: nothing ended.
   expect(signInEnd(CODE, at("start", { signIn: CODE }).connection, NOW, false)).toBeNull();
-  expect(signInEnd(CODE, at("waiting-for-install", { way: "shared" }).connection, NOW, false)).toBeNull();
+  expect(signInEnd(CODE, at("waiting-for-install", { person: SASENSI }).connection, NOW, false)).toBeNull();
   expect(signInEnd(null, out.connection, NOW, false)).toBeNull();
 });
 
@@ -225,16 +210,12 @@ test("an ended sign-in is said on the refusal line, and Sign in with GitHub star
 test("a start refused says why on the refusal line", () => {
   expect(step(at("start"), { refusal: "github" }).refused).toBe("GitHub didn't give a code. Try again.");
   expect(step(at("start"), { refusal: "pending" }).refused).toBe("A sign-in already waits for its code.");
-  expect(step(at("start"), { refusal: "own-app" }).refused).toBe("Lookover already uses your own App here.");
-  expect(step(at("start"), { refusal: "unavailable" }).refused).toBe(
-    "Signing in with GitHub isn't offered here.",
-  );
 });
 
 // ---- signed in ----
 
 test("signed in, the accounts looked for: who you are already, the list offering the installs; nothing else to choose", () => {
-  const view = step(at("waiting-for-install", { way: "shared", person: SASENSI }));
+  const view = step(at("waiting-for-install", { person: SASENSI }));
   expect(view.signIn).toMatchObject({ state: "done", text: "Signed in as sasensi.", code: null });
   expect(view.accounts).toMatchObject({
     state: "busy",
@@ -245,19 +226,17 @@ test("signed in, the accounts looked for: who you are already, the list offering
     href: "https://github.com/apps/lookover-dev/installations/new",
   });
   expect(view.primary).toEqual({ label: "Continue", enabled: false, starts: false });
-  expect(view.ownApp).toBe(false);
 });
 
 test("the lead says what teammates see of a review posted as you", () => {
   expect(SIGN_IN_TEXT.lead).toBe(
-    "Sign in with GitHub, and Lookover posts its reviews as you. Your teammates see your review written by you, opening with “Lookover”, a summary with Lookover's badge, and a Lookover check. Or use an App of your own.",
+    "Sign in with GitHub, and Lookover posts its reviews as you. Your teammates see your review written by you, each comment opening with Lookover's wordmark, its status in the pull request's description, and a Lookover check.",
   );
 });
 
 test("the accounts list: none before a sign-in; signed in, your accounts not reached with their install, Install on another account last", () => {
   expect(step(at("start")).accounts.list.rows).toEqual([]);
   const looking = at("waiting-for-install", {
-    way: "shared",
     person: SASENSI,
     unreached: [
       { account: SASENSI, kind: "user", owner: true, askedAt: null },
@@ -276,24 +255,22 @@ test("the accounts list: none before a sign-in; signed in, your accounts not rea
 /** Signed in before the install, then the sign-in lost (the keychain) or revoked: the install's check says so. */
 const signedOut = (connection: Partial<Connection> = {}) =>
   at("waiting-for-install", {
-    way: "shared",
     person: SASENSI,
     cause: { kind: "signed-out" },
     ...connection,
   });
 
-test("signed out before the install: both ways again, why said plainly, never “Signed in”", () => {
+test("signed out before the install: the step at its start again, why said plainly, never “Signed in”", () => {
   const view = step(signedOut());
   expect(view.signIn).toMatchObject({
     state: "current",
-    text: "You enter a code on GitHub. No App to create, no key to keep.",
+    text: "You enter a code on GitHub, then authorise Lookover there.",
     code: null,
   });
   expect(view.accounts).toMatchObject({ state: "later", text: "Right after you sign in." });
   expect(view.accounts.list.rows).toEqual([]);
   expect(view.primary).toEqual({ label: "Sign in with GitHub", enabled: true, starts: true });
-  expect(view.ownApp).toBe(true);
-  expect(view.refused).toBe("You're signed out of GitHub. Sign in again, or use your own App.");
+  expect(view.refused).toBe("You're signed out of GitHub. Sign in again.");
   expect(view.done).toBe(false);
 });
 
@@ -305,23 +282,6 @@ test("signed out before the install: a new code shows as at the start, and how i
   expect(signInEnd(CODE, signedOut().connection, CODE.expiresAt, false)).toBe("expired");
   expect(step(signedOut(), { end: "ended" }).refused).toBe(
     "GitHub didn't sign you in. Sign in with GitHub to try again.",
-  );
-});
-
-test("signed out before the install: Use your own App shows today's flow from its start, and Back offers both ways", () => {
-  expect(wayShown(signedOut(), null)).toBe("shared");
-  expect(wayShown(signedOut(), "own")).toBe("own");
-  expect(bothWays(signedOut())).toBe(true);
-  expect(bothWays(at("start"))).toBe(true);
-  expect(bothWays(at("waiting-for-app"))).toBe(false);
-  expect(bothWays(at("waiting-for-install", { way: "shared", person: SASENSI }))).toBe(false);
-  const own = githubStep(signedOut());
-  expect(own.create).toMatchObject({ state: "current", text: githubStep(at("start")).create.text });
-  expect(own.access.state).toBe("later");
-  expect(own.done).toBe(false);
-  // Its App asked of GitHub, today's flow goes on, the sign-in lost beside it.
-  expect(wayShown({ ...signedOut(), setup: { ...signedOut().setup, github: "waiting-for-app" } }, null)).toBe(
-    "own",
   );
 });
 
@@ -355,7 +315,6 @@ test("signed in and installed: who you are, then the list, each account reached 
     },
   ];
   const connection = {
-    way: "shared",
     id: connectionId("github:sasensi"),
     state: "connected",
     person: SASENSI,
@@ -377,9 +336,7 @@ test("signed in and installed: who you are, then the list, each account reached 
 });
 
 test("installed with no repository: said, GitHub's page in the list", () => {
-  const view = step(
-    at("nothing-granted", { way: "shared", person: SASENSI, id: connectionId("github:sasensi") }),
-  );
+  const view = step(at("nothing-granted", { person: SASENSI, id: connectionId("github:sasensi") }));
   expect(view.accounts).toMatchObject({
     state: "current",
     text: "Installed, with no repository. On GitHub, pick the ones it may see.",
@@ -390,7 +347,7 @@ test("installed with no repository: said, GitHub's page in the list", () => {
 });
 
 test("every link is built on the connection's web address: demo mode's stays on GitHub's fake", () => {
-  const view = step(at("waiting-for-install", { way: "shared", person: SASENSI, web: DEMO_API.github }));
+  const view = step(at("waiting-for-install", { person: SASENSI, web: DEMO_API.github }));
   expect(view.accounts.list.rows.at(-1)?.fix?.href).toBe(
     `${DEMO_API.github}/apps/lookover-dev/installations/new`,
   );
@@ -403,7 +360,6 @@ const settings = (state: State) => githubSettings(state, { timeZone: UTC });
 /** Signed in to the shared App and connected, with one account reached. */
 const connected = (connection: Partial<Connection> = {}) =>
   at("done", {
-    way: "shared",
     id: connectionId("github:sasensi"),
     state: "connected",
     person: SASENSI,
@@ -411,24 +367,16 @@ const connected = (connection: Partial<Connection> = {}) =>
     ...connection,
   });
 
-test("Settings › GitHub on the shared App: who is signed in, Sign in again, the accounts list; never “No App yet”", () => {
+test("Settings › GitHub: who is signed in, Sign in again, the accounts list; nothing else offered", () => {
   const view = settings(connected());
-  if (view.way !== "shared") throw new Error("expected the shared App's settings");
   expect(view.signIn).toMatchObject({ text: "Signed in as sasensi.", code: null });
   expect(view.list.rows.map((r) => r.account)).toEqual(["sasensi", null]);
   expect(JSON.stringify(view)).not.toContain("No App yet");
-  expect(GITHUB_SETTINGS_TEXT).toEqual({
-    title: "Signed in with GitHub",
-    again: "Sign in again",
-    own: "Use your own App",
-    ownBody:
-      "Your own App replaces the sign-in: Lookover then posts as the App, not as you. Give its id and its private key.",
-  });
+  expect(GITHUB_SETTINGS_TEXT).toEqual({ title: "Signed in with GitHub", again: "Sign in again" });
 });
 
 test("Sign in again while connected: the code in place, the accounts still listed; cancelled, signed in as before", () => {
   const waiting = settings(connected({ signIn: CODE }));
-  if (waiting.way !== "shared") throw new Error("expected the shared App's settings");
   expect(waiting.signIn).toMatchObject({
     text: { before: "Enter", command: "WDJB-MJHT", after: "on GitHub. It works until 10:15." },
     code: CODE,
@@ -436,11 +384,9 @@ test("Sign in again while connected: the code in place, the accounts still liste
   expect(waiting.list.rows).toHaveLength(2);
   // Past its expiry and still shown, GitHub took it: the service asks who signed in.
   const finishing = settings({ ...connected({ signIn: CODE }), now: CODE.expiresAt + MIN });
-  if (finishing.way !== "shared") throw new Error("expected the shared App's settings");
   expect(finishing.signIn.text).toBe("Finishing the sign-in with GitHub…");
   // Cancel clears the code only: the sign-in kept is said again, and every text was held, so nothing moved.
   const cancelled = settings(connected());
-  if (cancelled.way !== "shared") throw new Error("expected the shared App's settings");
   expect(cancelled.signIn.text).toBe("Signed in as sasensi.");
   for (const view of [waiting, finishing, cancelled]) {
     expect(view.signIn.held).toContainEqual(view.signIn.text);
@@ -449,107 +395,21 @@ test("Sign in again while connected: the code in place, the accounts still liste
   }
 });
 
-test("Settings › GitHub signed out of the shared App: said, Sign in again offered, no list", () => {
+test("Settings › GitHub signed out: said, Sign in again offered, no list", () => {
   const view = settings(connected({ cause: { kind: "signed-out" }, state: "disconnected" }));
-  if (view.way !== "shared") throw new Error("expected the shared App's settings");
   expect(view.signIn).toMatchObject({ text: "You're signed out of GitHub.", code: null });
   expect(view.list.rows).toEqual([]);
 });
 
-test("Settings › GitHub before either way: no App, no link, nothing to open", () => {
-  expect(settings(at("start"))).toEqual({
-    way: "own",
-    text: "No App yet.",
-    held: ["No App yet."],
-    link: null,
-    newKey: false,
-  });
+test("Settings › GitHub before a sign-in: signed out, Sign in again offered, no list; never an App of its own", () => {
+  const view = settings(at("start"));
+  expect(view.signIn).toMatchObject({ text: "You're signed out of GitHub.", code: null });
+  expect(view.list.rows).toEqual([]);
+  expect(JSON.stringify(view)).not.toMatch(/own App|existing App|No App yet|key/i);
 });
 
-// ---- Settings › GitHub on your own App: a refused or lost key's fix (ADR 0070) ----
-
-/** Your own App on your personal account, connected. */
-const OWN_APP = {
-  id: 424242,
-  slug: "lookover-q7x2ka",
-  account: { id: 7, login: "sam", type: "User" },
-  person: { id: 7, login: "sam" },
-} as const;
-const APP_LINE =
-  "lookover-q7x2ka, on your GitHub account. Pull requests opened by you or your agents are reviewed.";
-const APP_PAGE = "https://github.com/settings/apps/lookover-q7x2ka";
-const own = (connection: Partial<Connection> = {}, app: Connection["app"] = OWN_APP) =>
-  settings(at("done", { way: "own", state: "connected", app, ...connection }));
-const refused = (cause: Connection["cause"], app: Connection["app"] = OWN_APP) =>
-  own({ state: "disconnected", cause }, app);
-
-test("Settings › GitHub on your own App: its line and Open on GitHub, the key's form closed", () => {
-  expect(own()).toMatchObject({
-    way: "own",
-    text: APP_LINE,
-    link: { href: APP_PAGE, shown: "open" },
-    newKey: false,
-  });
-  expect(OWN_APP_LINK).toEqual({ open: "Open on GitHub", newKey: "Add a new key" });
-});
-
-test("a refused or lost key: Settings says it in the band's words, with Add a new key, the key's form open", () => {
-  const cases: [Connection["cause"], string][] = [
-    [
-      { kind: "key-refused", why: "revoked" },
-      "The key was revoked on GitHub. Add a new key, then give it below.",
-    ],
-    [
-      { kind: "key-refused", why: "app-deleted" },
-      "GitHub says the App was deleted. If it still is on GitHub, add a new key, then give it below.",
-    ],
-    [
-      { kind: "key-refused", why: null },
-      "GitHub refused the App's key. It may have been revoked, or the App deleted. Add a new key, then give it below.",
-    ],
-    [
-      { kind: "key-lost" },
-      "Lookover can't open the App's key: its entry in this computer's keychain is gone. Add a new key, then give it below.",
-    ],
-  ];
-  for (const [cause, text] of cases) {
-    const view = refused(cause);
-    expect([cause, view]).toEqual([
-      cause,
-      expect.objectContaining({ way: "own", text, link: { href: APP_PAGE, shown: "newKey" }, newKey: true }),
-    ]);
-  }
-});
-
-test("a refused key's help holds every text it can say, so a cause coming or going moves nothing", () => {
-  const calm = own();
-  const lost = refused({ kind: "key-lost" });
-  if (calm.way !== "own" || lost.way !== "own") throw new Error("expected your own App's settings");
-  expect(calm.held).toEqual(lost.held);
-  expect(calm.held).toContain(APP_LINE);
-  expect(calm.held).toContain(lost.text);
-  expect(calm.held).toHaveLength(5);
-});
-
-test("an organisation's App: who can make a new key is said in Settings, beside Add a new key (ADR 0059)", () => {
-  const acme = { ...OWN_APP, account: { id: 900, login: "acme", type: "Organization" } } as const;
-  expect(refused({ kind: "key-refused", why: "revoked" }, acme)).toMatchObject({
-    text: "The key was revoked on GitHub. Add a new key (an admin of acme can), then give it below.",
-    link: { href: "https://github.com/organizations/acme/settings/apps/lookover-q7x2ka", shown: "newKey" },
-  });
-});
-
-test("a clock that is off, or another cause: the App's line and Open on GitHub, the key's form closed", () => {
-  for (const cause of [
-    { kind: "key-refused", why: "clock" },
-    { kind: "uninstalled", suspended: false },
-    { kind: "unreachable" },
-  ] as const)
-    expect(refused(cause)).toMatchObject({ text: APP_LINE, link: { shown: "open" }, newKey: false });
-});
-
-test("on the shared App nothing changes: it has no key", () => {
-  const view = settings(connected({ cause: { kind: "key-lost" }, state: "disconnected" }));
-  expect(view.way).toBe("shared");
-  expect(JSON.stringify(view)).not.toMatch(/new key|newKey|Use an existing App/);
+test("Settings › GitHub with nobody signed in and the connection down: signed out, Sign in again", () => {
+  const view = settings(connected({ person: null, cause: { kind: "signed-out" }, state: "disconnected" }));
+  expect(view.signIn.text).toBe("You're signed out of GitHub.");
+  expect(JSON.stringify(view)).not.toMatch(/new key|Use an existing App/);
 });

@@ -1,8 +1,9 @@
-// The connection's causes (ADR 0053), through the room on the held demo clock and the fake GitHub, which owns the App
-// and its installation: each fault the owner can meet shows as the connection's cause (GitHub down, the App
-// uninstalled or its installation suspended, its key revoked), "Reconnect" clears it once the fault is gone, a
-// reinstall heals by itself, and a service that starts while GitHub refuses it stays up and says why. A repository
-// whose token is refused (it left the installation) has the installation listed again at once.
+// The connection's causes (ADR 0053), through the room on the held demo clock and the fake GitHub, the owner signed in
+// to the shared App installed on their own account: GitHub down shows as the connection's cause, "Reconnect" clears
+// it once GitHub answers; the App uninstalled from the one account reached is the connection's too; a restart shows the
+// installation GitHub holds now; and a service that starts while GitHub refuses it stays up and says why. A repository
+// whose token is refused (it left the installation) has the installation listed again at once. An account's own
+// causes, suspended or asking for SSO, are `every-account.test.ts`'s.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   type ConnectionCause,
@@ -16,16 +17,15 @@ import {
   repositoryId,
 } from "@lookover/contracts";
 import { DemoClock, FakeGitHost } from "@lookover/testkit";
-import { type AppStore, appStore, memoryKeychain, type Room } from "./index.ts";
+import type { Room } from "./index.ts";
 import {
-  BOT,
-  eventually,
   fakeEngines,
   home,
-  onFakeGitHub,
-  personalApp,
+  OWNER,
   pr1,
   SANDBOX,
+  SHARED_BOT,
+  signedInOn,
   startRoom,
   stopAll,
   T0,
@@ -38,7 +38,6 @@ afterEach(stopAll);
 const MIN = 60_000;
 const LEDGER: RepositoryRef = { owner: SANDBOX.owner, name: "ledger-api" };
 const idOf = (repo: RepositoryRef) => repositoryId(`${repo.owner}/${repo.name}`);
-const APP = personalApp(1, "lookover-spike-sasensi");
 const PLANTED = changeId("sasensi/lookover-sandbox#1");
 
 /**
@@ -54,9 +53,9 @@ class Counting extends FakeGitHost {
     const refusal = this.refusing.get(repo.name);
     return refusal === undefined ? super.listOpenChanges(repo) : Promise.reject(refusal);
   }
-  override installation(...args: Parameters<FakeGitHost["installation"]>) {
+  override accounts(...args: Parameters<FakeGitHost["accounts"]>) {
     this.reads++;
-    return super.installation(...args);
+    return super.accounts(...args);
   }
 }
 
@@ -91,25 +90,23 @@ const FAULTS: Fault[] = [
     cause: { kind: "unreachable" },
     fix: (host) => host.refuse(null),
   },
-  {
-    name: "the App uninstalled",
-    meet: (host) => host.uninstall(),
-    cause: { kind: "uninstalled", suspended: false },
-    fix: (host) => host.install(),
-  },
-  {
-    name: "its installation suspended",
-    meet: (host) => host.suspend(),
-    cause: { kind: "uninstalled", suspended: true },
-    fix: (host) => host.unsuspend(),
-  },
 ];
 
 for (const fault of FAULTS)
   test(`${fault.name}: the connection shows its cause; Reconnect keeps it while the fault lasts, and clears it once fixed`, async () => {
     const time = new DemoClock({ at: T0 });
-    const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-    const { room } = await startRoom({ host, time, log: () => {} });
+    const host = new FakeGitHost({
+      repo: SANDBOX,
+      bot: SHARED_BOT,
+      person: OWNER,
+      changes: [pr1],
+      clock: time,
+    });
+    const { room } = await startRoom({
+      host,
+      time,
+      log: () => {},
+    });
 
     fault.meet(host);
     await time.advance(MIN);
@@ -132,22 +129,26 @@ for (const fault of FAULTS)
   });
 
 const INSTALLATION_FAULTS: Fault[] = [
-  ...FAULTS.filter((fault) => fault.cause.kind !== "unreachable"),
   {
-    name: "the key revoked",
-    meet: (host) => host.revokeKey(),
-    cause: { kind: "key-refused", why: "revoked" },
-    fix: () => {},
+    name: "the App uninstalled",
+    meet: (host) => host.uninstall(),
+    cause: { kind: "uninstalled", suspended: false },
+    fix: (host) => host.install(),
   },
 ];
 
 for (const fault of INSTALLATION_FAULTS)
   test(`${fault.name} with no repository watched: the installation's listing disconnects the connection`, async () => {
     const time = new DemoClock({ at: T0 });
-    const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
+    const host = new FakeGitHost({
+      repo: SANDBOX,
+      bot: SHARED_BOT,
+      person: OWNER,
+      changes: [pr1],
+      clock: time,
+    });
     // The allow-list leaves out every repository the installation grants: nothing for the loop to poll.
-    const github = onFakeGitHub(host, { allowed: [LEDGER] });
-    const { room } = await startRoom({ host, time, github, log: () => {} });
+    const { room } = await startRoom({ host, time, repos: [LEDGER], log: () => {} });
     expect(room.snapshot().connection).toMatchObject({ state: "connected", cause: null });
     expect(room.snapshot().repos).toEqual([]);
 
@@ -161,123 +162,58 @@ for (const fault of INSTALLATION_FAULTS)
     });
   });
 
-test("the key revoked on GitHub: the connection says so, and a new key for the App kept clears it", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  const dir = home();
-  const apps = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
-  await apps.write(APP, host.credentials().key);
-  const { given: _, ...side } = onFakeGitHub(host);
-  const { room } = await startRoom({ home: dir, host, time, github: { ...side, apps }, log: () => {} });
-
-  host.revokeKey();
-  await time.advance(MIN);
-  const refused = { kind: "key-refused", why: "revoked" };
-  expect(room.snapshot().connection).toMatchObject({ state: "disconnected", cause: refused, app: APP });
-  expect(await reconnected(room)).not.toBeNull();
-  expect(room.snapshot().connection).toMatchObject({ state: "disconnected", cause: refused });
-
-  await room.github.adopt(APP, host.generateKey());
-  expect(room.snapshot().connection).toMatchObject({ state: "connected", cause: null });
-});
-
-test("a reinstall heals without a restart: the loop's next listing shows the connection back, with the new installation", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  const { room } = await startRoom({ host, time, log: () => {} });
-
-  host.uninstall();
-  await time.advance(MIN);
-  expect(room.snapshot().connection).toMatchObject({
-    state: "disconnected",
-    cause: { kind: "uninstalled", suspended: false },
-  });
-
-  const installation = host.install();
-  await time.advance(MIN);
-  await time.advance(0);
-  expect(room.snapshot().connection).toMatchObject({
-    state: "connected",
-    cause: null,
-    accounts: [{ installationId: installation }],
-  });
-});
-
 test("uninstalled and installed again while the service was stopped: the restart shows the new installation, not the one its events last said", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  const dir = home();
-  const first = await startRoom({ home: dir, host, time, log: () => {} });
-  // A reinstall healed while running: the event log now says the second installation.
-  host.uninstall();
-  await time.advance(MIN);
-  const healed = host.install();
-  await time.advance(MIN);
-  await time.advance(0);
-  expect(first.room.snapshot().connection).toMatchObject({
-    state: "connected",
-    accounts: [{ installationId: healed }],
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
   });
+  const dir = home();
+  const first = await startRoom({
+    home: dir,
+    host,
+    time,
+    log: () => {},
+  });
+  // The event log says the first installation.
+  const before = host.onGitHub().installation?.id;
+  expect(first.room.snapshot().connection).toMatchObject({ accounts: [{ installationId: before }] });
   await first.room.stop();
 
   host.uninstall();
   const fresh = host.install();
-  expect(fresh).not.toBe(healed);
-  const { room } = await startRoom({ home: dir, host, time, idsFrom: 100, log: () => {} });
+  expect(fresh).not.toBe(before);
+  const { room } = await startRoom({
+    home: dir,
+    host,
+    time,
+    idsFrom: 100,
+    log: () => {},
+  });
   expect(room.snapshot().connection).toMatchObject({
     state: "connected",
     cause: null,
-    app: APP,
     accounts: [{ installationId: fresh }],
   });
 });
 
-test("started with the key refused: the service is up and says so, the repositories kept from the last start, nothing listed", async () => {
+test("started while GitHub is down: up and unreachable; once GitHub answers, the loop lists by itself", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new Counting({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  host.revokeKey();
-  const { room } = await startRoom({ host, time, log: () => {} });
-
-  expect(room.snapshot().connection).toMatchObject({
-    state: "disconnected",
-    cause: { kind: "key-refused", why: "revoked" },
-    since: T0,
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
   });
-  expect(host.lists.size).toBe(0);
-  await time.advance(10 * MIN);
-  expect(room.snapshot().connection).toMatchObject({
-    state: "disconnected",
-    cause: { kind: "key-refused", why: "revoked" },
-  });
-  expect(await reconnected(room)).not.toBeNull();
-});
-
-test("started with the key kept refused: up, the App shown with its cause; a new key lists", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new Counting({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
   const dir = home();
-  const apps = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
-  await apps.write(APP, host.credentials().key);
-  host.revokeKey();
-  const { given: _, ...side } = onFakeGitHub(host);
-  const { room } = await startRoom({ home: dir, host, time, github: { ...side, apps }, log: () => {} });
-
-  expect(room.snapshot().connection).toMatchObject({
-    state: "disconnected",
-    cause: { kind: "key-refused", why: "revoked" },
-    app: APP,
-    bot: BOT.login,
-  });
-  await room.github.adopt(APP, host.generateKey());
-  expect(room.snapshot().connection).toMatchObject({ state: "connected", cause: null });
-  expect(room.snapshot().changes[PLANTED]).toMatchObject({ author: "you" });
-});
-
-test("started while GitHub is down: up and unreachable; once GitHub answers, the loop describes the App and lists by itself", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
+  // Signed in before GitHub went down.
+  const github = await signedInOn(host, dir);
   host.refuse("unavailable");
-  const { room } = await startRoom({ host, time, log: () => {} });
+  const { room } = await startRoom({ home: dir, host, time, github, log: () => {} });
   expect(room.snapshot().connection).toMatchObject({
     state: "disconnected",
     cause: { kind: "unreachable" },
@@ -289,101 +225,26 @@ test("started while GitHub is down: up and unreachable; once GitHub answers, the
   expect(room.snapshot().connection).toMatchObject({
     state: "connected",
     cause: null,
-    bot: BOT.login,
-    app: APP,
     accounts: [{ installationId: host.onGitHub().installation?.id }],
   });
   expect(room.snapshot().changes[PLANTED]).toMatchObject({ author: "you" });
 });
 
-test("started while the keychain didn't answer: unreachable, a wait; once it answers, the loop reads the App again and lists within a minute, nobody pressing anything (ADR 0070)", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  const dir = home();
-  const kept = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
-  await kept.write(APP, host.credentials().key);
-  // The keychain silent at start, as a prompt nobody sees: the App read as lost for now, its record kept.
-  let silent = true;
-  const apps: AppStore = {
-    read: async () => {
-      const read = await kept.read();
-      if (!silent || read.state !== "kept") return read;
-      const { privateKey: _, ...rest } = read;
-      return { ...rest, state: "lost", why: "keychain" };
-    },
-    write: (app, key, membership) => kept.write(app, key, membership),
-    keepMembership: (membership) => kept.keepMembership(membership),
-  };
-  const { given: _, ...side } = onFakeGitHub(host);
-  const { room } = await startRoom({ home: dir, host, time, github: { ...side, apps }, log: () => {} });
-  expect(room.snapshot().connection).toMatchObject({
-    state: "disconnected",
-    cause: { kind: "unreachable" },
-  });
-
-  silent = false;
-  await time.advance(MIN);
-  // The minute's retry reads the App store (files on disk): its answer lands without the clock moving again.
-  const back = await eventually(
-    async () => room.snapshot(),
-    (st) => st.connection.state === "connected",
-  );
-  expect(back.connection).toMatchObject({ state: "connected", cause: null, app: APP });
-  expect(room.snapshot().changes[PLANTED]).toMatchObject({ author: "you" });
-});
-
-test("the keychain still silent at the first retry: the next comes a minute on, not five, so it lists within a minute of answering (ADR 0070)", async () => {
-  const time = new DemoClock({ at: T0 });
-  const host = new Counting({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
-  const dir = home();
-  const kept = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
-  await kept.write(APP, host.credentials().key);
-  const read = await kept.read();
-  if (read.state !== "kept") throw new Error("the App was not kept");
-  const { privateKey: _, ...rest } = read;
-  // While silent, the store answers from memory, so the clock's move settles each retry it fires, re-arming included.
-  let silent = true;
-  let reads = 0;
-  const apps: AppStore = {
-    read: async () => {
-      reads++;
-      return silent ? { ...rest, state: "lost", why: "keychain" } : kept.read();
-    },
-    write: (app, key, membership) => kept.write(app, key, membership),
-    keepMembership: (membership) => kept.keepMembership(membership),
-  };
-  const { given: _given, ...side } = onFakeGitHub(host);
-  const { room } = await startRoom({ home: dir, host, time, github: { ...side, apps }, log: () => {} });
-  const atStart = reads;
-
-  await time.advance(MIN);
-  // The first retry read the App store, still silent: the App still lost, the connection still waiting.
-  expect(reads).toBeGreaterThan(atStart);
-  expect(room.snapshot().connection).toMatchObject({ state: "disconnected", cause: { kind: "unreachable" } });
-
-  silent = false;
-  await time.advance(MIN);
-  const back = await eventually(
-    async () => room.snapshot(),
-    (st) => st.connection.state === "connected",
-  );
-  expect(back.connection).toMatchObject({ state: "connected", cause: null, app: APP });
-
-  // Connected, the cadence is five minutes again: no discovery a minute on, one at five.
-  await time.advance(0);
-  const listed = host.reads;
-  await time.advance(MIN);
-  await time.advance(0);
-  expect(host.reads).toBe(listed);
-  await time.advance(4 * MIN);
-  await time.advance(0);
-  expect(host.reads).toBe(listed + 1);
-});
-
 test("started with the App uninstalled: up and uninstalled; installed again, the loop lists by itself", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time, installed: false });
-  const { room } = await startRoom({ host, time, log: () => {} });
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+    installed: false,
+  });
+  const { room } = await startRoom({
+    host,
+    time,
+    log: () => {},
+  });
   expect(room.snapshot().connection).toMatchObject({
     state: "disconnected",
     cause: { kind: "uninstalled", suspended: false },
@@ -402,7 +263,14 @@ test("started with the App uninstalled: up and uninstalled; installed again, the
 
 test("a repository's token refused (it left the installation): the installation is listed again at once, and it leaves", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new Counting({ repo: SANDBOX, repositories: [LEDGER], bot: BOT, changes: [], clock: time });
+  const host = new Counting({
+    repo: SANDBOX,
+    repositories: [LEDGER],
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [],
+    clock: time,
+  });
   const lines: string[] = [];
   const { room } = await startRoom({
     host,
@@ -434,8 +302,20 @@ const refreshed = (room: Room): Promise<void> => room.refresh().catch(() => {});
 
 test("a repository refused as not found while the installation still lists it: the installation is listed again once a minute at most", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new Counting({ repo: SANDBOX, repositories: [LEDGER], bot: BOT, changes: [], clock: time });
-  const { room } = await startRoom({ host, time, repos: [SANDBOX, LEDGER], log: () => {} });
+  const host = new Counting({
+    repo: SANDBOX,
+    repositories: [LEDGER],
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [],
+    clock: time,
+  });
+  const { room } = await startRoom({
+    host,
+    time,
+    repos: [SANDBOX, LEDGER],
+    log: () => {},
+  });
   const before = host.reads;
 
   host.refusing.set(LEDGER.name, new HostError("not_found", "Not Found (404)"));
@@ -455,8 +335,20 @@ test("a repository refused as not found while the installation still lists it: t
 
 test("a repository refused unavailable, then not found, no longer counts toward GitHub unreachable", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new Counting({ repo: SANDBOX, repositories: [LEDGER], bot: BOT, changes: [], clock: time });
-  const { room } = await startRoom({ host, time, repos: [SANDBOX, LEDGER], log: () => {} });
+  const host = new Counting({
+    repo: SANDBOX,
+    repositories: [LEDGER],
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [],
+    clock: time,
+  });
+  const { room } = await startRoom({
+    host,
+    time,
+    repos: [SANDBOX, LEDGER],
+    log: () => {},
+  });
 
   host.refusing.set(LEDGER.name, new HostError("unavailable", "Bad Gateway (502)"));
   await refreshed(room);

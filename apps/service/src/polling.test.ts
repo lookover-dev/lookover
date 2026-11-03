@@ -19,20 +19,22 @@ import { openStore } from "@lookover/store";
 import { type FakeChange, FakeGitHost } from "@lookover/testkit";
 import {
   api,
-  BOT,
   fakeEngines,
   heldRuns,
   home,
   lastEvent,
   messages,
+  OWNER,
   openApp,
   PLANTED,
   post,
   pr1,
   review,
+  roundWritten,
   SANDBOX,
   SHA1,
   SHA1_PUSHED,
+  SHARED_BOT,
   sinceStart,
   snapshot,
   start,
@@ -98,7 +100,6 @@ test("a pull request opened is reviewed with nobody asking; those open at the fi
     `run.started ${idOf(3)}`,
     `run.step ${idOf(3)}`,
     `run.step ${idOf(3)}`,
-    `run.posting ${idOf(3)}`,
     `run.posting ${idOf(3)}`,
     `run.posting ${idOf(3)}`,
     `run.posting ${idOf(3)}`,
@@ -255,8 +256,10 @@ test("a pull request closed while its review runs leaves the list; the review fi
   held.release();
   expect((await until(stream, "round.finished")).at(-1)).toMatchObject({ job: { state: "done" } });
   await time.advance(0);
-  // Posted on GitHub, its check completed by the round; kept by the store for the next round.
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  // Posted on GitHub (its status block; no review, it found nothing: ADR 0074), its check completed by the round; kept
+  // by the store for the next round.
+  expect(host.posts.filter(roundWritten)).toHaveLength(1);
+  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(0);
   expect(host.view(ref(1)).checks.map((c) => `${c.status} ${c.conclusion}`)).toEqual(["completed success"]);
   await service.stop();
   const store = openStore({ home: dir, durable: false });
@@ -332,7 +335,12 @@ test("a pull request's age is when GitHub opened it: a data folder that kept ano
   const last = lastEvent(dir);
   // GitHub says it was opened 19 days before.
   const opened19DaysAgo = Date.UTC(2026, 8, 17, 14, 25, 9);
-  const host = new FakeGitHost({ repo: SANDBOX, bot: BOT, changes: [{ ...pr1, openedAt: opened19DaysAgo }] });
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [{ ...pr1, openedAt: opened19DaysAgo }],
+  });
   const { service } = await start({ home: dir, host, time: first.time });
   const cookie = await openApp(service);
   const events = await until(await sinceStart(service, cookie, last), "change.opened");
@@ -354,7 +362,7 @@ test("a pull request from a fork is shown as one, from the first listing and acr
 });
 
 test("polling runs every minute when nothing is going on, every 10 s while a review waits", async () => {
-  const host = new CountingHost({ repo: SANDBOX, bot: BOT, changes: [pr1] });
+  const host = new CountingHost({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
   const engines = fakeEngines({ signedIn: false, reviews: 1 });
   const { service, time } = await start({ host, engines });
   const cookie = await openApp(service);
@@ -390,7 +398,7 @@ test("polling runs every minute when nothing is going on, every 10 s while a rev
 });
 
 test("a reset time already past still waits 10 s between listings: GitHub is never hammered", async () => {
-  const host = new CountingHost({ repo: SANDBOX, bot: BOT, changes: [pr1] });
+  const host = new CountingHost({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
   const { time } = await start({ host });
   host.refuse("rate_limited", { retryAt: time.now() - MIN });
   await time.advance(MIN);
@@ -400,7 +408,7 @@ test("a reset time already past still waits 10 s between listings: GitHub is nev
 });
 
 test("a listing rate limited at start still starts the service: it waits for the reset, then lists", async () => {
-  const host = new CountingHost({ repo: SANDBOX, bot: BOT, changes: [pr1] });
+  const host = new CountingHost({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
   const resetAt = T0 + 5 * MIN;
   host.listingsLimitedUntil = resetAt;
   const { service, time } = await start({ host });
@@ -421,7 +429,7 @@ test("a listing rate limited at start still starts the service: it waits for the
 });
 
 test("a rate-limited listing waits until GitHub's reset time, and the connection says so until then", async () => {
-  const host = new CountingHost({ repo: SANDBOX, bot: BOT, changes: [pr1] });
+  const host = new CountingHost({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
   const { service, time } = await start({ host });
   const cookie = await openApp(service);
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));

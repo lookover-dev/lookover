@@ -1,10 +1,9 @@
 ---
-// The setup as a vertical timeline. Five minutes was measured on 0.1.0 with "Use an existing App" (from
-// `npm install -g lookover` to the first review posted, 5 min 07 s); Sign in with GitHub is not timed yet (ADR 0067's
-// timed run is the owner's), so the page says "a few minutes", as the docs do. The terminal shows what npm and
+// The setup as a vertical timeline. The owner's timed runs with Sign in with GitHub took 2 min 15 s to 3 min 11 s
+// (#424, #457, #472), so the page says "a few minutes", as the docs do. The terminal shows what npm and
 // `lookover start` print (facts.ts); the setup, not the command, checks the AIs. GitHub is the shared App, Lookover
-// Dev (ADR 0065, 0067): the person signs in with a code and Lookover posts as them, each review opening with
-// "Lookover".
+// Dev, the only way in (ADR 0065, 0067, 0073): the person signs in with a code and Lookover posts as them, each comment
+// opening with Lookover's wordmark (ADR 0074).
 import { eyes, mark } from "../../brand/eyes.generated.ts";
 import { COMMANDS, START_LINES } from "../../landing/facts.ts";
 
@@ -46,7 +45,7 @@ const [install, start] = COMMANDS;
           <h3 class="h3">Connect GitHub</h3>
           <p>
             Sign in with GitHub: one code, entered on GitHub's page. Install Lookover Dev on your account or an
-            organisation's, and pick the repositories it reviews. It posts as you, each review opening with “Lookover”.
+            organisation's, and pick the repositories it reviews. It posts as you, each comment opening with Lookover's wordmark.
           </p>
         </div>
         <div class="shot">
@@ -63,7 +62,7 @@ const [install, start] = COMMANDS;
                   stroke-linejoin="round"
                   aria-hidden="true"><path d="M3 8.5l3 3 7-7"></path></svg
                 ></span
-              ><span>Signed in as mira<span class="sub">Reviews post as you, opening with “Lookover”.</span></span>
+              ><span>Signed in as mira<span class="sub">Reviews post as you, opening with Lookover's wordmark.</span></span>
             </div>
             <div class="sc-row">
               <span class="sq ok"

@@ -145,6 +145,7 @@ function resultFinding(
     body: finding.body,
     location: locationOf(finding, on.anchored),
     placed: placedOf(placed),
+    suggestion: finding.suggestion === null ? null : { replacement: finding.suggestion },
     rule: finding.rule ? { id: finding.rule.id, source: finding.rule.file, line: finding.rule.line } : null,
     raised: { round: finding.raisedIn, sha: on.raised },
     ...(checkedThisRound ? { last_checked: { round: round.round, sha: round.sha } } : {}),

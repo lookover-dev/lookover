@@ -12,10 +12,9 @@ import {
   SETUP_ORDER,
   type SetupStep,
 } from "@lookover/contracts";
-import { type MouseEvent, type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { tabWhenTaken } from "../app-tab.ts";
-import { isLocked, useApp, useAppState, useSend, useStoreStatus } from "../store.tsx";
+import { useApp, useAppState, useSend, useStoreStatus } from "../store.tsx";
 import {
   Button,
   Card,
@@ -23,14 +22,13 @@ import {
   Chip,
   Disclosure,
   Icon,
-  LinkButton,
   Mark,
   Notice,
   Radio,
   Said,
   SameWidth,
 } from "../ui/basics.tsx";
-import { type AppPlaceView, appPlace } from "../view-model/app-place.ts";
+import { signedIn } from "../view-model/accounts.ts";
 import { AGENT_INTRO } from "../view-model/coding-agent.ts";
 import {
   type FirstReviewRow,
@@ -49,9 +47,6 @@ import {
   chosenRepos,
   engineSetupNext,
   engineSetupText,
-  GITHUB_STEP_TEXT,
-  githubStep,
-  type StepLink,
 } from "../view-model/onboarding.ts";
 import {
   authorLabel,
@@ -62,18 +57,11 @@ import {
   problems,
 } from "../view-model/select.ts";
 import { SETUP_REVIEWERS_TEXT } from "../view-model/settings.ts";
-import {
-  bothWays,
-  SIGN_IN_TEXT,
-  signedInNow,
-  signInEnd,
-  signInStep,
-  wayShown,
-} from "../view-model/sign-in.ts";
+import { SIGN_IN_TEXT, signInEnd, signInStep } from "../view-model/sign-in.ts";
 import { BACKGROUND_TEXT, backgroundLine, backgroundLines } from "../view-model/start-at-login.ts";
 import { AgentRows } from "./coding-agent.tsx";
 import { HeldDetail, roundDuration, Sentence, StateSquare, StepList, SubStep } from "./common.tsx";
-import { AccountsList, CodeActions, FixButton, GitHubButton, UseAppForm } from "./github-app.tsx";
+import { AccountsList, CodeActions, FixButton, GitHubButton } from "./github-app.tsx";
 
 const STEPS: { id: SetupStep; label: string }[] = [
   { id: "ai", label: "Your AI" },
@@ -223,114 +211,12 @@ function StepAi() {
   );
 }
 
-/** The key of no action shown: a sub-step done keeps its action's place, empty. */
-const NO_ACTION = "";
-
 /**
- * What a sub-step offers: GitHub's page (or the service's, which posts to it) in a new tab, in a place as wide as every
- * label it can show (`labels`), none shown too, so its detail wraps the same in every state. One that makes the App
- * opens its tab at once, blank, while the click may still open one, and sends it to the page only once the service
- * took the place chosen (`organisation`, ADR 0059): refused, the tab closes and the step says why (`tabWhenTaken`).
- */
-function SubStepLink({
-  link,
-  labels,
-  organisation,
-}: {
-  link: StepLink | null;
-  labels: string[];
-  organisation: string | null;
-}) {
-  const send = useSend();
-  const createApp = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (!link) return;
-    event.preventDefault();
-    const tab = tabWhenTaken(window.open.bind(window), new URL(link.href, window.location.href).href);
-    send({ type: "connection.createApp", organisation }, tab.sent, tab.refused);
-  };
-  const slots: Record<string, ReactNode> = { [NO_ACTION]: null };
-  for (const label of labels)
-    slots[label] =
-      link?.label === label ? (
-        <LinkButton href={link.href} {...(link.createApp ? { onClick: createApp } : {})}>
-          {label}
-        </LinkButton>
-      ) : (
-        // Seen nowhere, never focused nor clicked: it only holds the place's width.
-        <LinkButton href={link?.href ?? "about:blank"}>{label}</LinkButton>
-      );
-  return <SameWidth shown={link?.label ?? NO_ACTION} labels={slots} />;
-}
-
-/**
- * Where the App is made (design-system.md "Where the App lives"): your own account or an organisation `gh` lists you
- * as an admin of, and the line under them with Check again.
- */
-function AppPlace({ place, pick }: { place: AppPlaceView; pick: (organisation: string | null) => void }) {
-  const send = useSend();
-  return (
-    <div className="app-place">
-      {place.options.map((option) => (
-        <Radio
-          key={option.organisation ?? ""}
-          name="app-place"
-          checked={option.organisation === place.chosen}
-          disabled={!place.enabled}
-          onChange={() => pick(option.organisation)}
-        >
-          <b>{option.label}</b>
-          <span className="t-small">{option.detail}</span>
-        </Radio>
-      ))}
-      {/* The room kept for the organisations gh may list: seen nowhere, as tall as an option. */}
-      {Array.from({ length: place.spare }, (_, i) => {
-        const [own] = place.options;
-        return (
-          <div key={`spare-${i}`} className="check app-place-spare" aria-hidden="true">
-            <span>
-              <b>{own?.label}</b>
-              <span className="t-small">{own?.detail}</span>
-            </span>
-          </div>
-        );
-      })}
-      <div className="app-place-line code-whole">
-        <span className="t-small">
-          <HeldDetail shown={place.line} details={place.held} />
-        </span>
-        {/* Its place kept once the App is made: nothing is left to check, and nothing beside it moves. */}
-        <Button
-          size="sm"
-          className={place.enabled ? "" : "hidden"}
-          aria-hidden={!place.enabled}
-          tabIndex={place.enabled ? 0 : -1}
-          onClick={() => send({ type: "gh.check" })}
-        >
-          Check again
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The GitHub step (ADR 0066): Sign in with GitHub first, Use your own App beside it, today's flow. The way shown
- * follows the connection's; before either, what was chosen here.
+ * The GitHub step, Sign in with GitHub, the one way in (ADR 0066, ADR 0073): the code, copied and GitHub's page opened
+ * by one button, the wait, Cancel; then who you are and the accounts reached. The step's one primary starts it, then
+ * is its Continue. How a code went without a sign-in is remembered here: the connection only says one waits.
  */
 function StepGitHub() {
-  const state = useAppState();
-  const [chosen, setChosen] = useState<"own" | null>(null);
-  if (wayShown(state, chosen) === "shared") return <StepSignIn useOwnApp={() => setChosen("own")} />;
-  // Back to the two ways while nothing was asked of GitHub on this one; else to the AI step, as before.
-  return <StepOwnApp back={bothWays(state) ? () => setChosen(null) : null} />;
-}
-
-/**
- * Sign in with GitHub (ADR 0066): the code, copied and GitHub's page opened by one button, the wait, Cancel; then who
- * you are and the accounts reached. The step's one primary starts it, then is its Continue. How a code went without
- * a sign-in is remembered here: the connection only says one waits.
- */
-function StepSignIn({ useOwnApp }: { useOwnApp: () => void }) {
   const state = useAppState();
   const send = useSend();
   const { store } = useApp();
@@ -344,7 +230,7 @@ function StepSignIn({ useOwnApp }: { useOwnApp: () => void }) {
     setCancelled(false);
   }, [connection.signIn]);
   // The code that signed the person in ended nothing: signed out later, the step says that, not how it went.
-  const inNow = signedInNow(connection);
+  const inNow = signedIn(connection);
   useEffect(() => {
     if (inNow) setLast(null);
   }, [inNow]);
@@ -366,7 +252,7 @@ function StepSignIn({ useOwnApp }: { useOwnApp: () => void }) {
         title={T.signIn}
         action={<CodeActions code={step.signIn.code} onCancel={cancel} />}
       >
-        <span className="sign-in-detail code-whole">
+        <span className="code-whole">
           <HeldDetail shown={step.signIn.text} details={step.signIn.held} />
         </span>
       </SubStep>
@@ -385,19 +271,6 @@ function StepSignIn({ useOwnApp }: { useOwnApp: () => void }) {
         <span className="t-small">{step.done ? T.done : ""}</span>
         <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "ai" })}>
           Back
-        </Button>
-        {/* Its place kept once signed in: nothing beside it moves. Taken while a code waits, it gives that up. */}
-        <Button
-          variant="ghost"
-          className={step.ownApp ? "" : "hidden"}
-          aria-hidden={!step.ownApp}
-          tabIndex={step.ownApp ? 0 : -1}
-          onClick={() => {
-            if (connection.signIn !== null) cancel();
-            useOwnApp();
-          }}
-        >
-          {T.own}
         </Button>
         {/* One primary, as wide as both its labels: Sign in with GitHub starts it, then it is the step's Continue. */}
         <SameWidth
@@ -425,74 +298,6 @@ function StepSignIn({ useOwnApp }: { useOwnApp: () => void }) {
             ),
           }}
         />
-      </div>
-    </>
-  );
-}
-
-/** Use your own App (ADR 0053, ADR 0059): today's flow, make the App and install it, or use one made before. */
-function StepOwnApp({ back }: { back: (() => void) | null }) {
-  const state = useAppState();
-  const send = useSend();
-  const { store } = useApp();
-  // "Create it on GitHub" refused: the service sends `answer.createApp` beside `error` (refusal.ts reads it).
-  const { refusal } = useStoreStatus(store);
-  const step = githubStep(state, refusal?.createApp ?? null);
-  const [picked, setPicked] = useState<string | null>(null);
-  const place = appPlace(state.connection, picked);
-  // The person's `gh` read as the step shows (ADR 0059): the places it offers. Never the unlock dialog's first ask.
-  useEffect(() => {
-    if (!isLocked(store.get())) void store.send({ type: "gh.check" });
-  }, [store]);
-  const T = GITHUB_STEP_TEXT;
-  const [otherComputer, existing] = T.disclosures;
-  return (
-    <>
-      <Sentence title={T.title} small={T.lead} />
-      <SubStep
-        state={step.create.state}
-        title={T.create}
-        action={
-          <SubStepLink link={step.create.action} labels={step.create.labels} organisation={place.chosen} />
-        }
-        below={<AppPlace place={place} pick={setPicked} />}
-      >
-        <HeldDetail shown={step.create.text} details={step.create.held} />
-      </SubStep>
-      <SubStep
-        state={step.access.state}
-        title={T.access}
-        action={
-          <SubStepLink link={step.access.action} labels={step.access.labels} organisation={place.chosen} />
-        }
-      >
-        <HeldDetail shown={step.access.text} details={step.access.held} />
-      </SubStep>
-      {/* Always there, empty until a refusal: nothing under it moves when one is said or cleared. */}
-      <p className="refused-line" role="status">
-        {step.refused}
-      </p>
-      <div className="disc-group">
-        <Disclosure summary={otherComputer.summary}>{otherComputer.body}</Disclosure>
-        <Disclosure summary={existing.summary}>
-          <p>{existing.body}</p>
-          <UseAppForm appId={state.connection.app?.id ?? null} />
-        </Disclosure>
-      </div>
-      <div className="setup-acts">
-        <span className="t-small">{step.done ? T.done : ""}</span>
-        <Button variant="ghost" onClick={() => (back ? back() : send({ type: "setup.goto", step: "ai" }))}>
-          Back
-        </Button>
-        {/* Always there, enabled once the step is done: setup waits for it (ADR 0058), and nothing beside it moves. */}
-        <Button
-          variant="primary"
-          size="lg"
-          disabled={!step.done}
-          onClick={() => send({ type: "setup.goto", step: "repos" })}
-        >
-          Continue
-        </Button>
       </div>
     </>
   );

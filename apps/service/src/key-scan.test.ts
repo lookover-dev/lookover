@@ -1,14 +1,10 @@
 // The key scanner (ADR 0053, spec #187 story 33): private-key text in a folder or in given text, for the checks that
-// no key leaks outside where the App store keeps it.
+// no secret leaks outside the sign-in store's sealed files.
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appStore, memoryKeychain } from "./index.ts";
 import { filesWithKeyText, hasKeyText } from "./key-scan.test-support.ts";
-
-/** The App store's files are made user-only by its own tests; here, nothing (`icacls` is slow). */
-const userOnly = async () => {};
 
 const homes: string[] = [];
 afterAll(() => {
@@ -25,12 +21,6 @@ const BODY = [
   "VTLw7onLRnrq0/IzW7yWR7QkrmBL7jTKEn5u+qKhbwKfBstIs+bMY2Zkp18gnTxK",
 ];
 const KEY = `-----BEGIN RSA PRIVATE KEY-----\n${BODY.join("\n")}\n-----END RSA PRIVATE KEY-----\n`;
-const APP = {
-  id: 4242,
-  slug: "lookover-x7k2qa",
-  account: { id: 77, login: "sasensi", type: "User" as const },
-  person: { id: 77, login: "sasensi" },
-};
 
 test("a private key's armour is key text, whatever its kind, even escaped in JSON", () => {
   expect(hasKeyText(KEY)).toBe(true);
@@ -39,6 +29,10 @@ test("a private key's armour is key text, whatever its kind, even escaped in JSO
   expect(hasKeyText(JSON.stringify({ key: KEY }))).toBe(true);
   expect(hasKeyText("-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----")).toBe(false);
   expect(hasKeyText("the App's key was refused")).toBe(false);
+  for (const kind of ["RSA ", "", "EC ", "ENCRYPTED ", "OPENSSH ", "DSA "])
+    expect(hasKeyText(`x\n-----BEGIN ${kind}PRIVATE KEY-----\nabc`)).toBe(true);
+  for (const text of ["-----BEGIN CERTIFICATE-----", "BEGIN RSA PRIVATE KEY", ""])
+    expect(hasKeyText(text)).toBe(false);
 });
 
 test("a known key's body is found without its armour, one line of it is enough", () => {
@@ -48,25 +42,10 @@ test("a known key's body is found without its armour, one line of it is enough",
   expect(hasKeyText("log: nothing secret", [KEY])).toBe(false);
 });
 
-test("after a write, no file of the data folder holds key text but the declared ones", async () => {
+test("a data folder with no key text has no file found", async () => {
   const home = folder();
-  await appStore({ home, keychain: memoryKeychain(), userOnly }).write(APP, KEY);
   writeFileSync(join(home, "settings.yaml"), "depth: deep\n");
   expect(await filesWithKeyText(home, { known: [KEY] })).toEqual([]);
-
-  const fallback = folder();
-  const store = appStore({ home: fallback, keychain: memoryKeychain({ refuse: true }), userOnly });
-  await store.write(APP, KEY);
-  const read = await store.read();
-  const declared = read.state === "kept" && read.protection === "user-file" ? read.fallback : "";
-  expect(declared).toMatch(/^github\/app\.[0-9a-f]{24}\.pem$/);
-  expect(await filesWithKeyText(fallback, { known: [KEY] })).toEqual([declared]);
-  expect(await filesWithKeyText(fallback, { known: [KEY], except: [declared] })).toEqual([]);
-  // Only the declared file is skipped: another one like it is found.
-  writeFileSync(join(fallback, "github", "app.000000000000000000000000.pem"), KEY);
-  expect(await filesWithKeyText(fallback, { known: [KEY], except: [declared] })).toEqual([
-    "github/app.000000000000000000000000.pem",
-  ]);
 });
 
 test("a key anywhere in the folder is found, by its path from the root", async () => {

@@ -5,15 +5,17 @@
 // person owns it, else Ask to install on it, which keeps the ask (`connection.askToInstall`) as GitHub's page opens;
 // each one asked, waiting for an owner, hedged, since GitHub tells only the App whether a request was sent; and
 // Install on another account last, GitHub's own page listing every account. An organisation nobody said the person
-// owns gets a member's fix. GitHub's word for an organisation's role is used: owner, never admin. On `own`, before a
-// sign-in and once signed out, there is no list: the App's one installation, or the sign-in, is the connection's.
-// Every link is built on `Connection.web`, so demo mode stays on GitHub's fake.
+// owns gets a member's fix. GitHub's word for an organisation's role is used: owner, never admin. Before a sign-in and
+// once signed out, there is no list. Signed in is the person kept and not signed out since (`signedIn`): the shared
+// App is the one way in (ADR 0073), so nothing else of the connection says it. Every link is built on
+// `Connection.web`, so demo mode stays on GitHub's fake.
 import {
   type AccountCause,
   accountOf,
   type Command,
   type Connection,
   type ConnectionAccount,
+  type ConnectionCause,
   githubLinks,
   type HostLogin,
   type Repository,
@@ -297,18 +299,28 @@ export const ACCOUNT_FIX_LABELS: readonly string[] = [
   ANOTHER,
 ];
 
-/** Whether the person is signed in to the shared App now: the list's accounts are theirs. */
-export const signedInToShared = ({ way, person, cause }: Pick<Connection, "way" | "person" | "cause">) =>
-  way === "shared" && person !== null && cause?.kind !== "signed-out";
+/** The cause said as signed out (ADR 0073). */
+export type SignedOutCause = Extract<ConnectionCause, { kind: "signed-out" }>;
+
+/**
+ * Whether the person is signed out: a sign-in is the one way back (ADR 0073). The list, the band, the status menu and
+ * the sign-in's code all ask this one.
+ */
+export const saidSignedOut = (cause: ConnectionCause | null): cause is SignedOutCause =>
+  cause?.kind === "signed-out";
+
+/** Whether the person is signed in now: kept, and not signed out since. The list's accounts are theirs. */
+export const signedIn = ({ person, cause }: Pick<Connection, "person" | "cause">): boolean =>
+  person !== null && !saidSignedOut(cause);
 
 /**
  * The accounts list at the state the service says: reached first in GitHub's order, then the ones not reached in
- * the order the service gave, then Install on another account; empty off the shared App, before a sign-in and once
- * signed out. `timeZone`, the zone a time is said in (the browser's by default).
+ * the order the service gave, then Install on another account; empty before a sign-in and once signed out.
+ * `timeZone`, the zone a time is said in (the browser's by default).
  */
 export function accountRows(state: State, o: { timeZone?: string } = {}): AccountsList {
   const { connection } = state;
-  if (!signedInToShared(connection)) return { rows: [] };
+  if (!signedIn(connection)) return { rows: [] };
   const another: AccountRow = {
     key: "another",
     account: null,
@@ -345,10 +357,9 @@ export interface RepositoryGroupHead {
 }
 
 export interface RepositoryGroup {
-  /** The account's login, or `all` for the one group on `own`. */
+  /** The account's login. */
   key: string;
-  /** Null on `own`: its one group has no head. */
-  head: RepositoryGroupHead | null;
+  head: RepositoryGroupHead;
   repos: Repository[];
 }
 
@@ -373,14 +384,12 @@ function groupHead(
 }
 
 /**
- * Repositories' rows by account (ADR 0067). On `shared`, one group per account with a repository, in the accounts
- * list's order (GitHub's), then any repository on no account reached, under its owner, each group's repositories in
- * Repositories' order; on `own`, one group without a head. No repository, no group.
+ * Repositories' rows by account (ADR 0067): one group per account with a repository, in the accounts list's order
+ * (GitHub's), then any repository on no account reached, under its owner, each group's repositories in Repositories'
+ * order. No repository, no group.
  */
 export function repositoryGroups(state: State): RepositoryGroup[] {
   const { connection, repos } = state;
-  if (repos.length === 0) return [];
-  if (connection.way !== "shared") return [{ key: "all", head: null, repos }];
   const groups = new Map<string, RepositoryGroup>();
   for (const a of connection.accounts) {
     const login = a.account.login;

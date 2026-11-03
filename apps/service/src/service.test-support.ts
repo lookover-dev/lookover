@@ -3,7 +3,8 @@
 // of a concern (`api`, `events`, `queue`, `reads`, `rounds`, `recovery`) starts its own services and stops them
 // after each test. `recordedStore` is the store a test watches the service use: every call to its handles, and a
 // long event log written in no time; `refusingEnds` one that can't record a run's end, as a full disk.
-// By default the service runs on in-process fakes only (spec #69): `FakeGitHost`, `FakeEngines` (Claude signed
+// By default the service runs on in-process fakes only (spec #69): `FakeGitHost`, the owner signed in to the shared App
+// on it (ADR 0066, `onFakeGitHub`), `FakeEngines` (Claude signed
 // in, every run answered as scripted, its durations on the held clock), `ScriptedRetrieval` (no git) and a
 // `DemoClock` standing still at `T0` (the clock and the timers, moved by hand; one can serve two starts on one
 // data folder, `start({ time })`, so a restart goes on from the time the first reached). No process is spawned and git never runs, so a test of the queue takes milliseconds. Real git
@@ -14,6 +15,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   type Change,
+  type ChangeRef,
   changeId,
   commitSha,
   type EngineHealth,
@@ -28,6 +30,7 @@ import {
   type Setup,
   SSE,
   type State,
+  statusOf,
 } from "@lookover/contracts";
 import { createEngines, type SelfTestReport, type SelfTests } from "@lookover/engines";
 import { createProcessRunner } from "@lookover/process";
@@ -51,7 +54,6 @@ import {
   type ScriptedRun,
 } from "@lookover/testkit";
 import {
-  appStore,
   type BackgroundPorts,
   buildRoom,
   DAY_MS,
@@ -63,7 +65,7 @@ import {
   type RoomOptions,
   type RunningService,
   type SignInOpener,
-  type StoredApp,
+  signInStore,
   startService,
   type Timers,
   type WebFiles,
@@ -80,18 +82,11 @@ export const TEST_LIMIT_MS = 15_000;
 export const T0 = Date.UTC(2026, 9, 6, 8, 52);
 export const SANDBOX = SANDBOX_REPOSITORY;
 export const OWNER = { id: 1234, login: "sasensi" };
-export const BOT = { id: 2001, login: "lookover-spike-sasensi[bot]" };
+/** Another App's bot than the shared App's: one whose comments are someone else's. */
+export const OTHER_BOT = { id: 2001, login: "lookover-spike-sasensi[bot]" };
+/** The shared App's bot (ADR 0066), a test's by default: on the shared App it never posts, the person does. */
+export const SHARED_BOT = { id: 2020, login: "lookover-dev[bot]" };
 
-/**
- * The App `id`, `slug` on `owner`'s personal account, as the service keeps it and the connection shows it: the person
- * is the account.
- */
-export const personalApp = (id: number, slug: string, owner = OWNER): StoredApp => ({
-  id,
-  slug,
-  account: { ...owner, type: "User" },
-  person: { ...owner },
-});
 export const SHA1 = commitSha("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678");
 export const SHA1_PUSHED = commitSha("c3d4e5f60718293a4b5c6d7e8f9012345678a1b2");
 export const SHA2 = commitSha("b2c3d4e5f60718293a4b5c6d7e8f9012345678a1");
@@ -124,24 +119,6 @@ export const pr2: FakeChange = {
 const homes: string[] = [];
 /** The services and rooms a test started, stopped after it. */
 const running: { stop(): Promise<void> }[] = [];
-
-/**
- * A meeting point for two calls to GitHub: each waits there until the other has come too, or `ms` of real time
- * passed (the other never comes while the first is under way), so two requests that could race are both under way.
- */
-export function meeting(ms = 300) {
-  let came = 0;
-  let met = () => {};
-  const both = new Promise<void>((resolve) => {
-    met = resolve;
-  });
-  return async <T>(work: () => Promise<T>): Promise<T> => {
-    came++;
-    if (came >= 2) met();
-    await Promise.race([both, new Promise((resolve) => setTimeout(resolve, ms))]);
-    return work();
-  };
-}
 
 export function home(): string {
   const dir = mkdtempSync(join(realpathSync.native(tmpdir()), "lookover-service-"));
@@ -359,11 +336,12 @@ const counter = (from = 0): IdGen => {
 };
 
 /**
- * The fake GitHub holding the sandbox's pull requests (`pr1` and `pr2` unless given). Its clock is the service's:
- * a comment is stamped at the time the test has moved to.
+ * The fake GitHub holding the sandbox's pull requests (`pr1` and `pr2` unless given), the shared App's, `person` the
+ * one who signs in to it. Its clock is the service's: a comment is stamped at the time the test has moved to.
  */
 const fakeHost = (
   clock: DemoClock,
+  person: { id: number; login: string },
   changes = [pr1, pr2],
   cloneUrl?: string,
   [repo, ...repositories]: RepositoryRef[] = [SANDBOX],
@@ -371,7 +349,8 @@ const fakeHost = (
   new FakeGitHost({
     repo: repo ?? SANDBOX,
     repositories,
-    bot: BOT,
+    bot: SHARED_BOT,
+    person,
     changes,
     clock,
     ...(cloneUrl === undefined ? {} : { cloneUrl }),
@@ -384,34 +363,33 @@ export function pushFix(host: FakeGitHost, sandboxDir: string): void {
 }
 
 /**
- * GitHub as the fake plays it (ADR 0053): its App, the one the service runs as (as `live.json`'s would be), owned by
- * `owner` (the test's world names the owner), its installation and its repositories, cut to `allowed`; the repository
- * ports the fake itself, signing with the key the service gives it.
+ * GitHub as the fake plays it for a person signed in to the shared App (ADR 0066), a test's by default: the fake's
+ * person (`person` given to it) signed in through its own device flow before the service starts, the sign-in kept in
+ * `dir`'s sign-in store (a keychain of the start's own: a restart signs in again), its installations cut to
+ * `allowed`; the repository ports the fake itself, posting as the person.
  */
-export function onFakeGitHub(
+async function onFakeGitHub(
   host: FakeGitHost,
-  { owner = OWNER, allowed }: { owner?: { id: number; login: string }; allowed?: RepositoryRef[] } = {},
-): GitHubSide {
+  dir: string,
+  { allowed }: { allowed?: RepositoryRef[] } = {},
+): Promise<GitHubSide> {
+  const signIns = signInStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
+  const grant = await host.startSignIn();
+  host.enterCode(grant.userCode);
+  const polled = await host.pollSignIn(grant);
+  if (polled.kind !== "issued") throw new Error(`The fake didn't sign the person in: ${polled.kind}`);
+  await signIns.write({ ...polled.tokens, person: await host.person(polled.tokens.token) });
+  const ports = { intake: host, writer: host };
   return {
-    installations: {
-      convertManifest: (code) => host.convertManifest(code),
-      app: async (credentials) => ({ ...(await host.app(credentials)), owner: { ...owner, type: "User" } }),
-      installation: (credentials) => host.installation(credentials),
-      repositories: (credentials, id) => host.repositories(credentials, id),
-    },
-    connect: ({ key }) => {
-      host.useKey(key);
-      return { intake: host, writer: host };
-    },
-    given: host.credentials(),
+    shared: { signIn: host, signIns, accounts: () => host, connect: () => ports },
     ...(allowed === undefined ? {} : { allowed }),
   };
 }
 
-/** An organisation on GitHub: the account of an organisation's App, never the person it works for (ADR 0059). */
+/** An organisation on GitHub the person is in, the shared App installed there (ADR 0066), never the person. */
 export const ACME = { id: 9000, login: "acme", type: "Organization" } as const;
 
-/** ACME's repositories, where its App is installed (`organisationHost`): `web` first. */
+/** ACME's repositories, where the shared App is installed (`organisationHost`): `web` first. */
 export const ACME_WEB: RepositoryRef = { owner: ACME.login, name: "web" };
 const ACME_API: RepositoryRef = { owner: ACME.login, name: "api" };
 
@@ -422,42 +400,48 @@ export const onAcmeWeb = (change: FakeChange): FakeChange => ({
   url: change.url.replace("sasensi/lookover-sandbox", "acme/web"),
 });
 
-/** GitHub as the fake plays it for ACME: its App, installed on its repositories `web` and `api`, holding `changes`. */
+/**
+ * GitHub as the fake plays it for the owner signed in to the shared App, installed on ACME (`web` and `api`) and on
+ * nothing of their own, holding `changes`.
+ */
 export const organisationHost = (clock: DemoClock, changes: FakeChange[] = []) =>
   new FakeGitHost({
-    repo: ACME_WEB,
-    repositories: [ACME_API],
-    bot: BOT,
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
     changes,
     clock,
-    app: { owner: ACME },
+    installed: false,
+    reaches: [{ account: ACME, repositories: [ACME_WEB, ACME_API] }],
   });
 
 /**
- * The fake's App, which must be ACME's on the fake (`app: { owner: ACME }`), put straight into `dir`'s App store,
- * working for `person` (the owner unless given), and the GitHub side a test's service runs on with it: `start({
- * home: dir, github })`. GitHub describes the App, its installation and its repositories as the fake holds them.
+ * The owner signed in to the shared App on `host` in `dir` (`onFakeGitHub`), every repository its installations list
+ * watched: ACME's on `organisationHost`. `start({ home: dir, host, github })`.
  */
-export async function onOrganisationApp(host: FakeGitHost, dir: string, person = OWNER): Promise<GitHubSide> {
-  const made = host.onGitHub().app;
-  if (made?.owner.id !== ACME.id) throw new Error("The fake's App must be ACME's: `app: { owner: ACME }`");
-  const apps = appStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
-  await apps.write({ id: made.id, slug: made.slug, account: ACME, person }, host.credentials().key);
-  const { given: _, ...side } = onFakeGitHub(host);
-  // The fake's own description of the App: ACME's, never made a person's account.
-  return { ...side, installations: host, apps };
-}
+export const signedInOn = (host: FakeGitHost, dir: string): Promise<GitHubSide> => onFakeGitHub(host, dir);
 
 /**
- * The App a test's service runs as and the setup it starts at: the fake's App, as `live.json`'s would be, owned by
- * the test's owner and cut to its repositories, unless the test brings its own GitHub; set up unless it says.
+ * The shared App on `host` with `dir`'s sign-in store as it is (on a keychain of its own), nobody signed in by the test:
+ * what a data folder with no sign-in kept, or another computer's, starts with.
  */
-const appOf = (
-  o: { github?: GitHubSide; owner?: { id: number; login: string }; setup?: Setup; setUpAtOnce?: boolean },
+export const signedOutOn = (host: FakeGitHost, dir: string): GitHubSide => {
+  const signIns = signInStore({ home: dir, keychain: memoryKeychain(), userOnly: async () => {} });
+  const ports = { intake: host, writer: host };
+  return { shared: { signIn: host, signIns, accounts: () => host, connect: () => ports } };
+};
+
+/**
+ * How a test's service reaches GitHub and the setup it starts at: the fake's person signed in to the shared App, cut
+ * to the test's repositories, unless the test brings its own GitHub; set up unless it says.
+ */
+const appOf = async (
+  o: { github?: GitHubSide; setup?: Setup; setUpAtOnce?: boolean },
   host: FakeGitHost,
+  dir: string,
   repos: RepositoryRef[],
 ) => ({
-  github: o.github ?? onFakeGitHub(host, { owner: o.owner ?? OWNER, allowed: repos }),
+  github: o.github ?? (await onFakeGitHub(host, dir, { allowed: repos })),
   ...(o.setup === undefined ? {} : { setup: o.setup }),
   ...(o.setUpAtOnce === undefined ? {} : { setUpAtOnce: o.setUpAtOnce }),
 });
@@ -489,7 +473,10 @@ export interface StartOptions {
   idsFrom?: number;
   /** The clock and timers of an earlier start on the same data folder: a restart goes on from its time. */
   time?: DemoClock;
-  /** Who the owner is, `OWNER` by default: the planted sandbox's author makes its change the owner's. */
+  /**
+   * Who the owner is, `OWNER` by default, the person signed in to the shared App on the default host: the planted
+   * sandbox's author makes its change the owner's.
+   */
   owner?: { id: number; login: string };
   /**
    * The owner's own values for the sandbox (its depth, say), written to its settings file in `home` before the
@@ -514,11 +501,11 @@ export interface StartOptions {
   live?: boolean;
   /** The setup a fresh data folder starts at: set up by default. */
   setup?: Setup;
-  /** `live.json` names the App: the data folder set up at once, whatever setup it kept. */
+  /** Live mode's sign-in kept: the data folder set up at once, whatever setup it kept. */
   setUpAtOnce?: boolean;
   /**
-   * GitHub at the App level, in place of the fake's App given as `live.json`'s (`onFakeGitHub`): the App store's,
-   * say.
+   * GitHub, in place of the owner signed in to the shared App beforehand (`onFakeGitHub`): a sign-in store of the
+   * test's own, nobody signed in yet, say.
    */
   github?: GitHubSide;
   /** The built web app the service serves beside its API; none by default, as in development. */
@@ -549,12 +536,16 @@ const machineOf = (options: StartOptions): { platform: NodeJS.Platform } => ({
   platform: options.platform ?? "linux",
 });
 
+/** The test's fake GitHub, else one holding its changes, its owner the person signed in. */
+const hostOf = (options: StartOptions, time: DemoClock, repos: RepositoryRef[]): FakeGitHost =>
+  options.host ?? fakeHost(time, options.owner ?? OWNER, options.changes, options.cloneUrl, repos);
+
 /** The room's options for a test's start, its fakes and its data folder. */
-function roomOf(options: StartOptions) {
+async function roomOf(options: StartOptions) {
   const dir = options.home ?? home();
   const time = options.time ?? new DemoClock({ at: T0 });
   const repos = watchedOf(options);
-  const host = options.host ?? fakeHost(time, options.changes, options.cloneUrl, repos);
+  const host = hostOf(options, time, repos);
   const retrieval = options.retrieval ?? new ScriptedRetrieval();
   writeOwn(dir, options.repositorySettings);
   const logged: string[] = [];
@@ -565,7 +556,7 @@ function roomOf(options: StartOptions) {
     // Demo mode's clock verbs move the held clock too, through the commands endpoint.
     ...(options.live ? {} : { demoClock: time }),
     ids: counter(options.idsFrom),
-    ...appOf(options, host, repos),
+    ...(await appOf(options, host, dir, repos)),
     engines: options.engines ?? fakeEngines({ time }),
     // No self-test unless the test is of it: the tests of other concerns run on versions that passed.
     selfTests: options.selfTests ?? null,
@@ -588,7 +579,7 @@ function roomOf(options: StartOptions) {
 }
 
 export async function start(options: StartOptions = {}) {
-  const { room, host, retrieval, time, logged } = roomOf(options);
+  const { room, host, retrieval, time, logged } = await roomOf(options);
   // The server's keepalive and its minted links' ages on the same held clock: a test that moves time by a minute sees four.
   const service = await startService({
     ...room,
@@ -602,7 +593,7 @@ export async function start(options: StartOptions = {}) {
 
 /** The room alone, as `start` builds it, with no server: for a test of what the API doesn't reach yet. */
 export async function startRoom(options: StartOptions = {}) {
-  const { room: o, host, time, logged } = roomOf(options);
+  const { room: o, host, time, logged } = await roomOf(options);
   const room = await buildRoom(o);
   running.push(room);
   return { room, host, time, logged };
@@ -679,7 +670,6 @@ export function recordedStore(dir: string, past: number): { store: Store; calls:
       requests: recorded("requests", real.requests, calls),
       selfTests: recorded("selfTests", real.selfTests, calls),
       setup: recorded("setup", real.setup, calls),
-      appFlows: recorded("appFlows", real.appFlows, calls),
       installAsks: recorded("installAsks", real.installAsks, calls),
       close: () => real.close(),
     },
@@ -923,9 +913,64 @@ export const PLANTED = changeId("sasensi/lookover-sandbox#1");
 /** The fix commit `pushSandboxFix` pushes on pull request #1 (fixed dates: the same sha everywhere). */
 export const FIXED = commitSha("4700cffcc191fa0290cc7d91340f924a74c7f803");
 
+/** The status block in a pull request's description as the fake host shows it (ADR 0074); "" while none. */
+export const blockOn = (host: FakeGitHost, change: ChangeRef): string =>
+  statusOf(host.view(change).description) ?? "";
+
+/**
+ * Whether a write of the status block says a round posted (ADR 0074), not where a job stands (Looking over, Waiting
+ * to look over, Couldn't look over: the check follower's).
+ */
+export const roundWritten = (post: { kind: string; description?: string }): boolean =>
+  post.kind === "status.written" &&
+  !/ · (Looking over|Waiting to look over|Couldn't look over) \[/.test(post.description ?? "");
+
 /** "Review now" on the planted pull request. */
 export const review = (service: RunningService, cookie: string) =>
   post(service, cookie, { type: "review.request", changeId: PLANTED });
+
+/** A find pass that answers one blocking finding on line 3 of `src/total.ts`, the line `onTheDiff` holds. */
+export const ONE_FINDING = [
+  "```json",
+  JSON.stringify({
+    findings: [
+      {
+        severity: "blocking",
+        category: "security",
+        title: "The key is logged",
+        body: "When the total is computed, the API key is printed, because the debug line was left in.",
+        path: "src/total.ts",
+        side: "head",
+        line: 3,
+        end_line: null,
+        line_text: null,
+        defect_key: "secret-logged",
+      },
+    ],
+  }),
+  "```",
+].join("\n");
+
+/**
+ * Retrieval whose diff is pull request #1's as the worktree gives it, head lines 1 to 4, line 3 the logging line
+ * `ONE_FINDING` is on: a round finding it has a line comment, so it owes a review (ADR 0074). The scripted
+ * retrieval's own diff is empty: every finding off it.
+ */
+export function onTheDiff(): ScriptedRetrieval {
+  const retrieval = new ScriptedRetrieval();
+  retrieval.diff = [
+    "diff --git a/src/total.ts b/src/total.ts",
+    "--- a/src/total.ts",
+    "+++ b/src/total.ts",
+    "@@ -1,2 +1,4 @@",
+    " export function total(items: Item[]) {",
+    "+  const key = process.env.API_KEY;",
+    "+  console.log(key);",
+    " }",
+    "",
+  ].join("\n");
+  return retrieval;
+}
 
 /**
  * Engines whose health, once held, answers only when released (an engine slow to say whether it is ready), or

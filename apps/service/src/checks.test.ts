@@ -10,12 +10,12 @@ import {
   HostError,
   readCheckExternalId,
   readResult,
+  statusOf,
 } from "@lookover/contracts";
 import { RetrievalError } from "@lookover/retrieval";
 import { DemoClock, FakeGitHost, type HostPost, ScriptedRetrieval } from "@lookover/testkit";
 import {
   api,
-  BOT,
   fakeEngines,
   heldRuns,
   home,
@@ -30,6 +30,7 @@ import {
   SANDBOX,
   SHA1,
   SHA1_PUSHED,
+  SHARED_BOT,
   start,
   startRoom,
   stopAll,
@@ -69,7 +70,7 @@ class Flaky extends FakeGitHost {
   private roundCreated = false;
   private readonly roundOnly: boolean;
   constructor(time: DemoClock, roundOnly = false) {
-    super({ repo: SANDBOX, bot: BOT, changes: [pr1, pr2], clock: time });
+    super({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1, pr2], clock: time });
     this.roundOnly = roundOnly;
   }
   override createCheck(...args: Parameters<FakeGitHost["createCheck"]>): Promise<string> {
@@ -117,8 +118,10 @@ test('"Review now" creates a queued check on the head commit before the run star
   expect(host.posts.map((p) => p.kind)).toEqual([
     "check.created",
     "check.updated",
-    "review",
-    "summary.created",
+    // The status block follows the job (ADR 0074): Looking over, after its check went in progress.
+    "status.written",
+    // No line comment, so no review (ADR 0074): the status block, then the check completed.
+    "status.written",
     "check.completed",
   ]);
   // One check on the commit, the job's, completed by the round with the result: what asked was "Review now".
@@ -227,7 +230,8 @@ test("a review waiting on an engine's limit whose reset moves has its check say 
   const { room, host, time } = await startRoom({ engines });
   const summary = () => host.view(PR).checks[0]?.output.summary;
   expect(await room.review(PLANTED)).toBe("ok");
-  for (let i = 0; i < 20 && summary()?.includes("10:11") !== true; i++) await time.advance(0);
+  const block = () => statusOf(host.view(PR).description) ?? "";
+  for (let i = 0; i < 20 && !block().includes("10:11"); i++) await time.advance(0);
   expect(summary()).toBe(
     "Lookover looks over a1b2c3d once the limit resets, on Thu 8 Oct 2026 at 10:11 (UTC).",
   );
@@ -243,7 +247,9 @@ test("a review waiting on an engine's limit whose reset moves has its check say 
   expect(summary()).toBe(
     "Lookover looks over a1b2c3d once the limit resets, on Fri 9 Oct 2026 at 07:30 (UTC).",
   );
-  expect(host.posts.length).toBe(before + 1);
+  // The status block follows it too (ADR 0074): one write each.
+  expect(block()).toContain("The review starts when it resets, on Fri 9 Oct at 07:30.");
+  expect(host.posts.slice(before).map((p) => p.kind)).toEqual(["check.updated", "status.written"]);
 });
 
 test("a review asked for while paused says so on its check, and the resume moves it in progress", async () => {
@@ -525,5 +531,5 @@ test("a round that created its check, refused before it completed it, completes 
     round: { n: 1 },
   });
   await time.advance(0);
-  expect(shown(host)).toEqual(["completed neutral: The review failed: GitHub refused the review"]);
+  expect(shown(host)).toEqual(["completed neutral: The review failed: GitHub refused a post"]);
 });

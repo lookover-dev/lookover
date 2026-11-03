@@ -6,9 +6,10 @@
 // the next round reads (ADR 0052). The lines the fake host accepts a comment
 // on are read from each commit's diff (`@lookover/diff`), never written twice. Who wrote a change is read as the
 // service reads it (`core.writerOf` over the commits' messages), so the drawer's "your agent opens a pull
-// request" and the round plan agree. Signed in to the shared App (`World.shared`, ADR 0066), the host's App stands for
-// its installation on the owner's account, and each organisation the world reaches has its own, its repositories
-// beside the owner's: a change is named by its repository and number, so two repositories of one name each have theirs.
+// request" and the round plan agree. The owner is signed in to the shared App (ADR 0066) unless the setup is before
+// its GitHub step; `World.shared` says which accounts the sign-in reaches. Signed in,
+// the host's App stands for its installation on the owner's account, and each organisation the world reaches has its
+// own, its repositories beside the owner's: a change is named by its repository and number, so two repositories of one name each have theirs.
 import {
   type ChangeRef,
   type CommitSha,
@@ -33,7 +34,7 @@ import {
   ScriptedRetrieval,
 } from "@lookover/testkit/demo";
 import type { Room } from "../room.ts";
-import { appInstalled, appMade } from "../snapshot.ts";
+import { appInstalled, signedInAtSetup } from "../snapshot.ts";
 import type { Account, Move, Scenario, ScenarioChange, World } from "./scenario.ts";
 
 /** The removed lines of a hunk on `base`, as runs of consecutive lines of `path`. */
@@ -60,29 +61,6 @@ function commentableOf(diff: string): CommentableRange[] {
     }),
   );
 }
-
-/**
- * The App ledger-co's admin made and handed to the owner (ADR 0059), in every world: an organisation's, which "Use an
- * existing App" takes only for an active member of ledger-co, as the person's own `gh` says: its id and the key file
- * handed over with it, which the demo's tests and proof shots give. Every scenario refuses it (the owner is no member
- * of ledger-co); the organisation's App taken is S15's `MADE_APP`, on ledger-dev.
- */
-export const HANDED_APP = {
-  id: 7,
-  slug: "lookover-ledger-co",
-  owner: { id: 4242, login: "ledger-co", type: "Organization" },
-  key: "-----BEGIN RSA PRIVATE KEY-----\nledger-co's App, handed over\n-----END RSA PRIVATE KEY-----\n",
-} as const;
-
-/**
- * The App every world's GitHub holds before Lookover keeps one (made on another computer, or by an admin of S15's
- * organisation): its id and the key file downloaded when it was made, which "Use an existing App" is given in S15's
- * test and proof shot.
- */
-export const MADE_APP = {
-  id: 1,
-  key: "-----BEGIN RSA PRIVATE KEY-----\nthe App made before, its key downloaded then\n-----END RSA PRIVATE KEY-----\n",
-} as const;
 
 /** Who wrote the change, as the service reads it: an engine, or nobody known. */
 const writtenBy = (change: ScenarioChange): EngineId | null =>
@@ -139,20 +117,15 @@ const reachOf = ({
   owners: owners.map((o) => o.login),
 });
 
-/** GitHub as the world says it at the start: the App, its installations, the shared App's organisations. */
+/** GitHub as the world says it at the start: the shared App's installations, its organisations. */
 function hostOf(world: World, clock: DemoClock): FakeGitHost {
-  // The App is on GitHub (ADR 0047, ADR 0053), installed once the setup says so; one the setup says isn't made yet
-  // was made on another computer, installed there on every repository (the driver keeps it only once the setup says
-  // it was made). The fake's pages make a new one as GitHub's do (the manifest flow), which replaces it.
+  // The shared App is on GitHub (ADR 0047, ADR 0066), installed on the owner's account once the setup says so; before
+  // the setup's sign-in, installed there already (nobody signed in here sees it). The owner signs in on GitHub's fake
+  // device page: its installation is what the sign-in reaches, with its installations on the organisations the world
+  // reaches, and the organisations it doesn't (ADR 0067). The fake's ports post as the owner.
   const installed =
     world.shared?.ownAccountInstalled !== false &&
-    (world.setup === undefined || !appMade(world.setup) || appInstalled(world.setup));
-  // The App is the owner's (ADR 0053), or the organisation's they work in (ADR 0059): the bot the snapshot shows is
-  // its. Beside it, an App an organisation's admin made and handed over (ADR 0059), for "Use an existing App": its id
-  // and key file are what the owner was given.
-  // The owner may sign in to the shared App instead (ADR 0066), on GitHub's fake device page: the App on GitHub
-  // stands for it, so its installation is what the sign-in reaches, with the shared App's on the organisations the
-  // world reaches, and the organisations it doesn't (ADR 0067). The bot posts until the service signs in.
+    (world.setup === undefined || !signedInAtSetup(world.setup) || appInstalled(world.setup));
   const host = new FakeGitHost({
     repo: world.repo,
     repositories: world.repositories ?? [],
@@ -164,17 +137,7 @@ function hostOf(world: World, clock: DemoClock): FakeGitHost {
     installed,
     reaches: (world.shared?.reaches ?? []).map(reachOf),
     unreached: (world.shared?.unreached ?? []).map(reachOf),
-    app: {
-      owner:
-        world.organisation === undefined
-          ? { ...world.owner, type: "User" }
-          : { ...world.organisation.account, type: "Organization" },
-      id: MADE_APP.id,
-      key: MADE_APP.key,
-    },
-    handed: [HANDED_APP],
   });
-  host.postAs("bot");
   for (const { organisation, sso } of world.shared?.reaches ?? [])
     if (sso === true) host.askSso(organisation.login);
   return host;

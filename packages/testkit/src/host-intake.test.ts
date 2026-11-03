@@ -5,14 +5,14 @@ import {
   FINDING_MARKER,
   type HostChange,
   type RepositoryRef,
-  SUMMARY_MARKER,
 } from "@lookover/contracts";
 import { describeHostIntake, FakeGitHost, type HostRefusal } from "./index.ts";
 import { AT_ONCE, LAG, LAGGING_PATIENCE, laggingGitHost } from "./lagging-git-host.test-support.ts";
 
 const repo: RepositoryRef = { owner: "sasensi", name: "lookover-sandbox" };
-const owner = { login: "sasensi", id: 1234567 };
-const bot = { id: 338297044, login: "lookover-spike-sasensi[bot]" };
+/** Someone else on the repository, who opens the changes and comments: not the person. */
+const teammate = { login: "teammate", id: 1234567 };
+const bot = { id: 338297045, login: "lookover-dev[bot]" };
 const ref: ChangeRef = { repo, number: 1 };
 
 const change: HostChange = {
@@ -20,7 +20,7 @@ const change: HostChange = {
   number: 1,
   title: "Add unpaid filter and rewrite total",
   url: "https://github.com/sasensi/lookover-sandbox/pull/1",
-  author: owner,
+  author: teammate,
   draft: false,
   fork: false,
   // 2026-10-07 12:00:00 UTC: opened as the suite's host starts, by its clock (`T0`).
@@ -81,24 +81,18 @@ const DIFF = [{ path: "src/invoice.ts", side: "head" as const, from: 2, to: 21 }
 /** The line the suite's finding is on, which `outdate` replaces. */
 const FINDING_LINE = { path: "src/invoice.ts", side: "head" as const, line: 12, endLine: null };
 
-/** The person signed in to the App, on the fake's person mode (ADR 0066): someone other than the owner. */
-const person = { id: 11247504, login: "signed-in" };
+/** The person signed in to the shared App, who posts (ADR 0066) and owns the repository. */
+const person = { id: 11247504, login: "sasensi" };
 
-const host = (clock = heldClock(), signedIn?: typeof person) =>
+const host = (clock = heldClock()) =>
   new FakeGitHost({
     repo,
     bot,
+    person,
     clock,
     defaultBranch: DEFAULT_BRANCH,
     changes: [{ ...change, diff: DIFF }],
-    ...(signedIn ? { person: signedIn } : {}),
   });
-
-/** Who posts on each of the fake's modes: the App's bot, or the person signed in to it. */
-const MODES = [
-  { name: "FakeGitHost", person: undefined },
-  { name: "FakeGitHost posting as a person", person },
-] as const;
 
 /** Fresh commits, one per push. */
 let pushed = 0;
@@ -110,18 +104,18 @@ const refusing = (failure: HostRefusal) => () => {
   return Promise.resolve({ intake: fake, repo, open: change });
 };
 
-// Each mode as GitHub would be if it showed a write at once, then lagging as it does (ADR 0069): the App's reads made
-// before a write answer stale for a few reads after it.
-for (const [mode, lag, patience] of [
-  ...MODES.map((mode) => [mode, 0, AT_ONCE] as const),
-  ...MODES.map((mode) => [mode, LAG, LAGGING_PATIENCE] as const),
-])
+// GitHub as it would be if it showed a write at once, then lagging as it does (ADR 0069): the App's reads made before a
+// write answer stale for a few reads after it.
+for (const [lag, patience] of [
+  [0, AT_ONCE],
+  [LAG, LAGGING_PATIENCE],
+] as const)
   describeHostIntake(
-    lag === 0 ? mode.name : `${mode.name}, lagging as GitHub does after a write (ADR 0069)`,
+    lag === 0 ? "FakeGitHost" : "FakeGitHost, lagging as GitHub does after a write (ADR 0069)",
     {
       open: () => {
         const clock = heldClock();
-        const fake = laggingGitHost(host(clock, mode.person), lag).port;
+        const fake = laggingGitHost(host(clock), lag).port;
         // A second passes between two moves of the world, as it would on GitHub between two calls.
         const tick = <T>(value: T) => {
           clock.advance(1_000);
@@ -132,9 +126,9 @@ for (const [mode, lag, patience] of [
           repo,
           open: change,
           defaultBranch: DEFAULT_BRANCH,
-          owner,
+          owner: teammate,
           before: T0,
-          comment: (body) => tick(fake.seedComment(ref, { author: owner, body })),
+          comment: (body) => tick(fake.seedComment(ref, { author: teammate, body })),
           edit: (id, body) => tick(fake.editComment(id, body)),
           later: () => tick(undefined),
           push: (commits, rewrite = false, messages) => {
@@ -154,7 +148,7 @@ for (const [mode, lag, patience] of [
           },
           markReady: (number) => tick(fake.markReady({ repo, number })),
           close: () => tick(fake.close(ref)),
-          poster: mode.person ?? bot,
+          poster: person,
           postFinding: async (finding) => {
             const { head } = await fake.getChange(repo, 1);
             const body = `**Off by one** · Should fix\n\n${FINDING_MARKER}${JSON.stringify({ v: 1, id: finding })} -->`;
@@ -166,8 +160,8 @@ for (const [mode, lag, patience] of [
             const root = fake.view(ref).reviews.find((r) => r.id === reviewId)?.comments[0]?.id;
             return tick(Number(root));
           },
-          commentInline: (body) => tick(fake.seedInline(ref, owner, { ...FINDING_LINE, line: 14, body })),
-          reply: (commentId, body) => tick(fake.seedReply(ref, commentId, { author: owner, body })),
+          commentInline: (body) => tick(fake.seedInline(ref, teammate, { ...FINDING_LINE, line: 14, body })),
+          reply: (commentId, body) => tick(fake.seedReply(ref, commentId, { author: teammate, body })),
           outdate: () =>
             tick(
               fake.push(ref, nextSha(), DIFF, [{ path: FINDING_LINE.path, line: 12, removed: 1, added: 1 }]),
@@ -182,7 +176,13 @@ for (const [mode, lag, patience] of [
       },
       notInstalled: () =>
         Promise.resolve({
-          intake: new FakeGitHost({ repo, bot, changes: [{ ...change, diff: [] }], installed: false }),
+          intake: new FakeGitHost({
+            repo,
+            bot,
+            person,
+            changes: [{ ...change, diff: [] }],
+            installed: false,
+          }),
           repo,
           open: change,
         }),
@@ -200,7 +200,7 @@ describe("FakeGitHost intake on its own", () => {
   test("a change opened with no time is opened by the host's clock, to the second; one given its time keeps it", async () => {
     const clock = heldClock();
     clock.advance(2_750);
-    const fake = new FakeGitHost({ repo, bot, clock, changes: [] });
+    const fake = new FakeGitHost({ repo, bot, person, clock, changes: [] });
     const { openedAt: _, ...untimed } = change;
     fake.open({ ...untimed, diff: [] });
     // Weeks before the host's clock: 2026-09-16 08:30:05 UTC.
@@ -223,7 +223,7 @@ describe("FakeGitHost intake on its own", () => {
   });
 
   test("its fetch spec can point at a local bare repository, so retrieval runs real git on it", async () => {
-    const local = new FakeGitHost({ repo, bot, changes: [], cloneUrl: "C:/lookover/sandbox.git" });
+    const local = new FakeGitHost({ repo, bot, person, changes: [], cloneUrl: "C:/lookover/sandbox.git" });
 
     const spec = await local.fetchSpec(repo);
 
@@ -231,7 +231,9 @@ describe("FakeGitHost intake on its own", () => {
   });
 
   test("its fetch spec names `main` as the default branch unless told another", async () => {
-    expect((await new FakeGitHost({ repo, bot, changes: [] }).fetchSpec(repo)).defaultBranch).toBe("main");
+    expect((await new FakeGitHost({ repo, bot, person, changes: [] }).fetchSpec(repo)).defaultBranch).toBe(
+      "main",
+    );
   });
 
   test("its fetch spec reads the repository as GitHub's does: refused, it is refused itself", async () => {
@@ -266,7 +268,7 @@ describe("FakeGitHost intake on its own", () => {
   });
 
   test("not installed, every listing and post is refused as not found, the App uninstalled, as GitHub finds no installation; installed, it answers", async () => {
-    const fake = new FakeGitHost({ repo, bot, changes: [{ ...change, diff: [] }], installed: false });
+    const fake = new FakeGitHost({ repo, bot, person, changes: [{ ...change, diff: [] }], installed: false });
     const uninstalled = { failure: "not_found", connectionCause: { kind: "uninstalled", suspended: false } };
     await expect(fake.listOpenChanges(repo)).rejects.toMatchObject(uninstalled);
     await expect(fake.listComments(repo, T0)).rejects.toMatchObject(uninstalled);
@@ -299,13 +301,14 @@ describe("FakeGitHost intake on its own", () => {
       repo,
       repositories: [ledger],
       bot,
+      person,
       changes: [
         { ...change, diff: [] },
         { ...inLedger, repo: ledger, diff: [] },
       ],
     });
     await fake.listOpenChanges(repo);
-    fake.seedComment({ repo: ledger, number: 1 }, { author: owner, body: "/lookover review" });
+    fake.seedComment({ repo: ledger, number: 1 }, { author: teammate, body: "/lookover review" });
 
     expect(await fake.getChange(ledger, 1)).toEqual(inLedger);
     expect(await fake.getChange(repo, 1)).toEqual(change);
@@ -323,7 +326,7 @@ describe("FakeGitHost intake on its own", () => {
 
   test("a reaction changes the comments' listing, as GitHub lists each comment with its reactions' counts", async () => {
     const fake = host();
-    const id = fake.seedComment(ref, { author: owner, body: "/lookover review" });
+    const id = fake.seedComment(ref, { author: teammate, body: "/lookover review" });
     await fake.listComments(repo, T0);
     await fake.react(repo, id, "eyes");
     expect((await fake.listComments(repo, T0)).unchanged).toBe(false);
@@ -333,30 +336,30 @@ describe("FakeGitHost intake on its own", () => {
   test("the open changes' listing changes with a comment or a review, as a pull request's last update does on GitHub", async () => {
     const fake = host();
     await fake.listOpenChanges(repo);
-    fake.seedComment(ref, { author: owner, body: "A comment." });
+    fake.seedComment(ref, { author: teammate, body: "A comment." });
     expect((await fake.listOpenChanges(repo)).unchanged).toBe(false);
     await fake.publishReview(ref, { sha: change.head.sha, body: "No finding.", comments: [] });
     expect((await fake.listOpenChanges(repo)).unchanged).toBe(false);
     expect((await fake.listOpenChanges(repo)).unchanged).toBe(true);
   });
 
-  test("comments are stamped to the second by the injected clock, and the bot's summary is listed too", async () => {
+  test("comments are stamped to the second by the injected clock, and the person's are listed too", async () => {
     const clock = heldClock();
     const fake = host(clock);
     clock.advance(1_500);
-    const id = fake.seedComment(ref, { author: owner, body: "/lookover review" });
+    const id = fake.seedComment(ref, { author: teammate, body: "/lookover review" });
     clock.advance(1_000);
-    const summary = await fake.upsertSummary(ref, `${SUMMARY_MARKER}\nRound 1.`);
+    const theirs = fake.seedComment(ref, { author: person, body: "Pushed a fix." });
 
     const { items } = await fake.listComments(repo, T0);
 
     expect(items).toEqual([
       {
-        id: summary,
-        nodeId: `IC_${summary}`,
+        id: theirs,
+        nodeId: `IC_${theirs}`,
         change: 1,
-        author: bot,
-        body: `${SUMMARY_MARKER}\nRound 1.`,
+        author: person,
+        body: "Pushed a fix.",
         createdAt: T0 + 2_000,
         updatedAt: T0 + 2_000,
       },
@@ -364,7 +367,7 @@ describe("FakeGitHost intake on its own", () => {
         id,
         nodeId: `IC_${id}`,
         change: 1,
-        author: owner,
+        author: teammate,
         body: "/lookover review",
         createdAt: T0 + 1_000,
         updatedAt: T0 + 1_000,
@@ -402,6 +405,7 @@ describe("FakeGitHost intake on its own", () => {
     const fake = new FakeGitHost({
       repo,
       bot,
+      person,
       changes: [{ ...change, diff: [], messages: ["Start the filter", signed] }],
     });
     fake.open({ ...wip, diff: [], messages: ["One more"] });

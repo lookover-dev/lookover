@@ -7,7 +7,9 @@ import {
   CHECK_OUTPUT_MAX_BYTES,
   COMMENT_MAX_BYTES,
   type Confirmation,
+  characterCount,
   commitSha,
+  DESCRIPTION_MAX_CHARACTERS,
   FINDING_MARKER,
   type Finding,
   type FindingCounts,
@@ -26,8 +28,10 @@ import {
   readResult,
   reviewResultV1,
   runId,
-  SUMMARY_MARKER,
+  statusOf,
+  type ThreadReply,
   utf8Bytes,
+  wordmark,
 } from "@lookover/contracts";
 import { FakeGitHost, type HostPost } from "@lookover/testkit";
 import {
@@ -38,10 +42,20 @@ import {
   dismissalPostsOf,
   type Outbox,
   type PostKind,
+  postsOf,
   type RoundToPost,
   type SavedDismissalPost,
   type SavedPost,
+  type Status,
+  type StatusRound,
 } from "./index.ts";
+
+/** `value`, asserted to be there: a test that finds none fails at once. */
+function present<T>(value: T | null): T {
+  expect(value).not.toBeNull();
+  if (value === null) throw new Error("expected a value, got null");
+  return value;
+}
 
 /** The check's final output, as the host received it. */
 function completed(posts: HostPost[]) {
@@ -53,6 +67,9 @@ function completed(posts: HostPost[]) {
 const repo: RepositoryRef = { owner: "sasensi", name: "demo-app" };
 const change = { repo, number: 42 };
 const URL = "https://github.com/sasensi/demo-app/pull/42";
+
+/** The status block in the change's description as the host shows it (ADR 0074); "" while none is written. */
+const blockOn = (github: FakeGitHost) => statusOf(github.view(change).description) ?? "";
 
 /** Counts with nothing in them; a test sets what its round has. */
 const NO_COUNTS: FindingCounts = {
@@ -70,6 +87,8 @@ const bot = { id: 9001, login: "lookover-demo[bot]" };
 /** The person Lookover posts for: their id is in each check's external id (ADR 0066). */
 const PERSON = 1;
 const person = () => PERSON;
+/** The person signed in on the shared App (ADR 0066): Lookover's posts are theirs. */
+const SIGNED_IN = { id: PERSON, login: "sasensi" };
 const BASE = commitSha("0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3");
 const ROUND_1 = commitSha("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0");
 
@@ -93,11 +112,12 @@ const COMMENTABLE_1 = [
   { path: "src/queue/send.ts", side: "base" as const, from: 42, to: 42 },
 ];
 
-function host(commentable = COMMENTABLE_1, signedIn?: { id: number; login: string }): FakeGitHost {
+/** The host as the shared App's person signed in sees it: Lookover posts as them (ADR 0066). */
+function host(commentable = COMMENTABLE_1): FakeGitHost {
   return new FakeGitHost({
     repo,
     bot,
-    ...(signedIn === undefined ? {} : { person: signedIn }),
+    person: SIGNED_IN,
     changes: [
       {
         number: 42,
@@ -112,9 +132,6 @@ function host(commentable = COMMENTABLE_1, signedIn?: { id: number; login: strin
     ],
   });
 }
-
-/** The host as the shared App's person signed in sees it: Lookover posts as them (ADR 0066). */
-const hostAs = (signedIn: { id: number; login: string }) => host(COMMENTABLE_1, signedIn);
 
 function finding(id: string, overrides: Partial<Finding>): Finding {
   return {
@@ -135,6 +152,7 @@ function finding(id: string, overrides: Partial<Finding>): Finding {
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: null,
     status: "open",
     posted: true,
     commented: true,
@@ -214,6 +232,10 @@ const round1: RoundToPost = {
   checkId: null,
 };
 
+/** The wordmark every post opens with, 18 px high: the owner's prototype's markup (ADR 0074). */
+const MARK =
+  '<a href="https://lookover.dev"><picture><source media="(prefers-color-scheme: dark)" srcset="https://lookover.dev/brand/lookover-wordmark-on-dark.svg"><img src="https://lookover.dev/brand/lookover-wordmark.svg" height="18" alt="Lookover" align="absmiddle"></picture></a>';
+
 /** The last line of round 1's review: the hidden marker naming its run and number (ADR 0044). */
 const MARKED_1 = `${REVIEW_MARKER}{"v":1,"run":"run-1","n":1} -->`;
 
@@ -268,9 +290,9 @@ const round2: RoundToPost = {
     startedAt: Date.UTC(2026, 8, 30, 10, 40, 0),
     completedAt: Date.UTC(2026, 8, 30, 10, 42, 30),
   },
-  // F1 verified fixed; F2 still open; F4 new and blocking, posted.
+  // F1 verified fixed; F2 still open, with no comment since round 1 (off the diff); F4 new and blocking, posted.
   reconciled: {
-    findings: [F1_FIXED, F2, F3, F4],
+    findings: [F1_FIXED, { ...F2, commented: false }, F3, F4],
     raised: [F4],
     post: [F4],
     loop: "open",
@@ -291,7 +313,7 @@ const round2: RoundToPost = {
   },
 };
 
-test("round 2 edits the summary comment instead of adding one, and posts its own review", async () => {
+test("round 2 rewrites the status block, and posts its own review", async () => {
   const github = host();
   const publisher = createPublisher({ writer: github, person });
   await publisher.publish(round1);
@@ -300,20 +322,22 @@ test("round 2 edits the summary comment instead of adding one, and posts its own
   expect(github.posts.map((p) => p.kind)).toEqual([
     "check.created",
     "review",
-    "summary.created",
+    "status.written",
     "check.completed",
     "check.created",
     "review",
-    "summary.edited",
+    "status.written",
     "check.completed",
   ]);
   const { reviews, comments } = github.view(change);
   expect(reviews).toHaveLength(2);
   expect(reviews[1]?.sha).toBe(ROUND_2);
   expect(reviews[1]?.comments.map((c) => c.line)).toEqual([44]);
-  expect(comments).toHaveLength(1);
-  expect(comments[0]?.body).toContain("verified fixed in c3d4e5f");
-  expect(comments[0]?.body).toContain("Fix drops the last batch item");
+  expect(comments).toEqual([]);
+  expect(blockOn(github)).toContain(`Round 2 · [\`c3d4e5f\`](${URL}/commits/${ROUND_2}) · 1 fixed`);
+  expect(blockOn(github)).toContain(
+    "- **Blocking** · Fix drops the last batch item · `src/queue/send.ts` line 44",
+  );
 });
 
 test("a round given its job's check completes that check: no other is created", async () => {
@@ -336,7 +360,7 @@ test("a round given its job's check completes that check: no other is created", 
   expect(github.posts.map((p) => p.kind)).toEqual([
     "check.created",
     "review",
-    "summary.created",
+    "status.written",
     "check.completed",
   ]);
   expect(github.view(change).checks).toMatchObject([
@@ -344,7 +368,7 @@ test("a round given its job's check completes that check: no other is created", 
   ]);
 });
 
-test("one review per round holds every inline comment; a finding outside the diff goes into the summary", async () => {
+test("one review per round holds every inline comment; a finding outside the diff goes into the status block", async () => {
   const github = host();
   await createPublisher({ writer: github, person }).publish(round1);
   const { reviews, comments } = github.view(change);
@@ -353,12 +377,14 @@ test("one review per round holds every inline comment; a finding outside the dif
     ["src/queue/send.ts", "head", 43],
   ]);
   expect(reviews[0]?.comments[0]?.body).toContain("Retry loop never stops on 4xx");
-  expect(reviews[0]?.body).toContain("One finding is on a line outside the diff");
-  expect(comments).toHaveLength(1);
-  expect(comments[0]?.body).toContain("Missing timeout on fetch");
-  expect(comments[0]?.body).toContain("the file is not in the diff");
+  // The review has no words of its own: its marker alone (ADR 0074).
+  expect(reviews[0]?.body).toBe(MARKED_1);
+  expect(comments).toEqual([]);
+  expect(blockOn(github)).toContain(
+    "- **Should fix** · Missing timeout on fetch · `src/http/client.ts` line 12\n  Not in the diff: when the upstream hangs",
+  );
   // Kept off the pull request: nowhere on it.
-  expect(JSON.stringify([reviews, comments])).not.toContain("Magic number");
+  expect(JSON.stringify([reviews, github.view(change).description])).not.toContain("Magic number");
 });
 
 /** Round 1 posting exactly `findings`, all open on the pull request for the agent. */
@@ -399,15 +425,11 @@ test("a finding on a removed line goes inline on the base side, and a range cove
     ["src/queue/send.ts", "base", 42, null],
     ["src/queue/send.ts", "head", 42, 44],
   ]);
-  expect(review?.body).toBe(
-    `Lookover · Looked over a1b2c3d. 2 things to fix, starting with send.ts old line 42. The rest can go.\n\n${MARKED_1}`,
-  );
-  const summary = github.view(change).comments[0]?.body;
-  expect(summary).toContain(
-    "- F1 · Blocking · `src/queue/send.ts` old line 42 · The removed send acked the message",
-  );
-  expect(summary).toContain(
-    "- F2 · Blocking · `src/queue/send.ts` lines 42 to 44 · Retry loop never stops on 4xx",
+  expect(blockOn(github)).toContain(
+    [
+      "- **Blocking** · The removed send acked the message · `src/queue/send.ts` old line 42",
+      "- **Blocking** · Retry loop never stops on 4xx · `src/queue/send.ts` lines 42 to 44",
+    ].join("\n"),
   );
   // The result read back says where each finding is, its side and its range, and where its comment went.
   const read = readResult(completed(github.posts).output.text);
@@ -421,7 +443,7 @@ test("a finding on a removed line goes inline on the base side, and a range cove
   ]);
 });
 
-test("a range the host would refuse goes on its first line, else its last; an old line the diff doesn't show goes into the summary", async () => {
+test("a range the host would refuse goes on its first line, else its last; an old line the diff doesn't show goes into the status block", async () => {
   const github = host();
   // Head lines 44 to 47 and 38 to 41: the hunk holds head lines 40 to 45. Base line 41: a line both sides
   // keep, not a removed one.
@@ -429,35 +451,114 @@ test("a range the host would refuse goes on its first line, else its last; an ol
   const kept = finding("F2", { side: "base", line: 41, title: "Loop flag never reset" });
   const entering = finding("F3", { line: 38, endLine: 41, title: "Flag set before the loop" });
   await createPublisher({ writer: github, person }).publish(posting([leaving, kept, entering]));
-  const { reviews, comments } = github.view(change);
+  const { reviews } = github.view(change);
   expect(reviews[0]?.comments.map((c) => [c.side, c.line, c.endLine])).toEqual([
     ["head", 44, null],
     ["head", 41, null],
   ]);
-  expect(comments[0]?.body).toContain(
-    "- F2 · Blocking · `src/queue/send.ts` old line 41 · Loop flag never reset",
+  // Its lines are shown on the base commit.
+  expect(blockOn(github)).toContain(
+    `- **Blocking** · Loop flag never reset · \`src/queue/send.ts\` old line 41\n  Not in the diff: when the upstream returns a 4xx, \`sendWithRetry\` retries forever, because only a 5xx is skipped and \`res.ok\` is false.\n\n  https://github.com/sasensi/demo-app/blob/${BASE}/src/queue/send.ts#L41`,
   );
-  expect(comments[0]?.body).toContain("No comment on the line: the line is not in the diff.");
   // The result keeps each finding's range as `review` anchored it; an inline one's `placed` says where its
-  // comment went, the one line the host took. A finding in the summary went on no line.
+  // comment went, the one line the host took. A finding in the status block went on no line.
   const read = readResult(completed(github.posts).output.text);
   const lines = (at: { start_line: number; end_line: number } | null | undefined) =>
     at ? `${at.start_line}-${at.end_line}` : null;
   expect(read?.findings.map((f) => [f.id, f.placement, lines(f.location), lines(f.placed)])).toEqual([
     ["F1", "inline", "44-47", "44-44"],
-    ["F2", "summary", "41-41", null],
+    ["F2", "status", "41-41", null],
     ["F3", "inline", "38-41", "41-41"],
   ]);
 });
 
-test("a finding whose line's text is in no line of the diff goes into the summary, even on a line the diff shows (ADR 0044)", async () => {
+test("the result carries a finding's suggested fix as its replacement, and none when the finder offered none", async () => {
+  const github = host();
+  const fix = "    if (res.status >= 400) break;";
+  await createPublisher({ writer: github, person }).publish(
+    posting([finding("F1", { suggestion: fix }), finding("F2", { line: 44, title: "No test" })]),
+  );
+  const read = readResult(completed(github.posts).output.text);
+  expect(read?.findings.map((f) => [f.id, f.suggestion])).toEqual([
+    ["F1", { replacement: fix }],
+    ["F2", null],
+  ]);
+});
+
+/** The line comments of a round posting `findings`, with the service's secrets filter standing in. */
+async function commentsOf(findings: Finding[]): Promise<string[]> {
+  const github = host();
+  await createPublisher({ writer: github, person, secretsRemoved: tokenRemoved }).publish(posting(findings));
+  return github.view(change).reviews[0]?.comments.map((c) => c.body) ?? [];
+}
+
+const findingMarker = (id: string) =>
+  `${FINDING_MARKER}{"v":1,"id":"${id}","fingerprints":{"location":"loc:${id}","meaning":"sem:${id}"},"severity":"blocking","sha":"${ROUND_1}"} -->`;
+
+test("a finding's suggestion is posted after its body, on a comment covering exactly its lines (ADR 0074)", async () => {
+  const fix = "    if (res.status >= 400) break;\n    done = res.ok;";
+  const [one, range] = await commentsOf([
+    finding("F1", { suggestion: "    if (res.status >= 400) break;" }),
+    { ...RANGE, suggestion: fix },
+  ]);
+  expect(one).toBe(
+    `${MARK} · Blocking\n\n**Retry loop never stops on 4xx**\n\n${F1.body}\n\n\`\`\`suggestion\n    if (res.status >= 400) break;\n\`\`\`\n\n${findingMarker("F1")}`,
+  );
+  expect(range).toContain(`${RANGE.body}\n\n\`\`\`suggestion\n${fix}\n\`\`\`\n\n${FINDING_MARKER}`);
+});
+
+test("a suggestion holding backticks is fenced longer than any run of them", async () => {
+  const fix = "    const md = '```ts';";
+  const [comment] = await commentsOf([finding("F1", { suggestion: fix })]);
+  expect(comment).toContain(`\n\n\`\`\`\`suggestion\n${fix}\n\`\`\`\`\n\n${FINDING_MARKER}`);
+});
+
+test("no suggestion where applying it would touch other lines: a range on one of its lines, a removed line", async () => {
+  const leaving = finding("F1", { line: 44, endLine: 47, suggestion: "x" });
+  const removed = { ...REMOVED, suggestion: "x" };
+  for (const comment of await commentsOf([leaving, removed])) expect(comment).not.toContain("suggestion");
+});
+
+test("a suggestion the filter would change, or one that doesn't fit whole, is not offered", async () => {
+  const secret = finding("F1", { suggestion: `    const token = "${TOKEN}";` });
+  const huge = finding("F2", { line: 44, suggestion: "y".repeat(COMMENT_MAX_BYTES) });
+  const [withSecret, tooBig] = await commentsOf([secret, huge]);
+  expect(withSecret).toBe(
+    `${MARK} · Blocking\n\n**Retry loop never stops on 4xx**\n\n${F1.body}\n\n${findingMarker("F1")}`,
+  );
+  expect(tooBig).not.toContain("suggestion");
+  expect(tooBig).not.toContain("Cut to fit");
+});
+
+test("the result carries no suggestion the secrets filter would change, so a secret never reaches the check (F1, #508)", async () => {
+  const github = host();
+  await createPublisher({ writer: github, person, secretsRemoved: tokenRemoved }).publish(
+    posting([finding("F1", { suggestion: `    const token = "${TOKEN}";` })]),
+  );
+  const text = completed(github.posts).output.text;
+  expect(text).not.toContain(TOKEN);
+  expect(readResult(text)?.findings.map((f) => [f.id, f.suggestion])).toEqual([["F1", null]]);
+});
+
+test("a suggestion empty or blank once trimmed is none: applying it would delete the finding's lines", async () => {
+  const github = host();
+  await createPublisher({ writer: github, person }).publish(
+    posting([finding("F1", { suggestion: "" }), finding("F2", { line: 44, suggestion: "  \n\t\n " })]),
+  );
+  for (const c of github.view(change).reviews[0]?.comments ?? []) expect(c.body).not.toContain("suggestion");
+  expect(readResult(completed(github.posts).output.text)?.findings.map((f) => [f.id, f.suggestion])).toEqual([
+    ["F1", null],
+    ["F2", null],
+  ]);
+});
+
+test("a finding whose line's text is in no line of the diff goes into the status block, even on a line the diff shows (ADR 0044)", async () => {
   const github = host();
   // Head line 43 is in the hunk, but the text the engine quoted is not.
   const unmatched = finding("F1", { line: 43, lineText: "await sleep(backoff);", anchoring: "unmatched" });
   await createPublisher({ writer: github, person }).publish(posting([unmatched]));
-  const { reviews, comments } = github.view(change);
-  expect(reviews[0]?.comments ?? []).toEqual([]);
-  expect(comments[0]?.body).toContain("No comment on the line: the code it names is not in the diff.");
+  expect(github.view(change).reviews).toEqual([]);
+  expect(blockOn(github)).toContain("· `src/queue/send.ts` line 43\n  Not in the diff: when the upstream");
 });
 
 test("an earlier round's finding is placed again against the new diff, with its side", async () => {
@@ -487,20 +588,20 @@ test("an earlier round's finding is placed again against the new diff, with its 
     reconciled: { ...posting([REMOVED]).reconciled, raised: [], post: [] },
   });
   const read = readResult(completed(github.posts).output.text);
-  expect(read?.findings.map((f) => [f.id, f.placement])).toEqual([["F1", "summary"]]);
-  expect(github.view(change).comments[0]?.body).toContain("**Not on a line**\n- F1 ·");
+  expect(read?.findings.map((f) => [f.id, f.placement])).toEqual([["F1", "status"]]);
+  // Its comment of round 1 is its thread: the block lists it as it was.
+  expect(blockOn(github)).toEndWith(
+    "- **Blocking** · The removed send acked the message · `src/queue/send.ts` old line 42",
+  );
 });
 
-test("a finding kept in the app is counted in the summary and the check, and nothing says the rest can go (ADR 0042)", async () => {
+test("a finding kept in the app is counted in the check, never in the status block, and nothing says the rest can go (ADR 0042, ADR 0074)", async () => {
   const github = host();
   // Round 1: F1 and F2 open on the pull request, F3 a Consider kept in the app.
   await createPublisher({ writer: github, person }).publish(round1);
-  const { reviews, comments } = github.view(change);
-  expect(reviews[0]?.body).toBe(
-    `Lookover · Looked over a1b2c3d. 2 things to fix, starting with send.ts line 43.\n\nOne finding is on a line outside the diff: it is in the summary comment.\n\n${MARKED_1}`,
-  );
   const kept = "One finding stays in Lookover, not on the pull request.";
-  expect(comments[0]?.body).toContain(`2 things to fix, starting with send.ts line 43.\n\n${kept}`);
+  expect(blockOn(github)).toStartWith(`### ${wordmark(26)} · 2 things to fix\n\nRound 1 · `);
+  expect(blockOn(github)).not.toContain("Lookover, not on");
   const { summary } = completed(github.posts).output;
   expect(summary.split("\n").slice(0, 2)).toEqual(["2 things to fix, starting with send.ts line 43.", kept]);
   expect(JSON.stringify(github.posts)).not.toContain("The rest can go");
@@ -526,25 +627,22 @@ test("with nothing on the pull request and findings kept in the app, it says how
       counts: NO_COUNTS,
     },
   });
-  expect(github.view(change).reviews[0]?.body).toBe(
-    `Lookover · Looked over a1b2c3d. Nothing to fix.\n\n${MARKED_1}`,
-  );
   const { title, summary } = completed(github.posts).output;
   expect(title).toBe("Looked over a1b2c3d: nothing to fix");
   expect(summary).toBe("Nothing to fix.\n2 findings stay in Lookover, not on the pull request.");
-  expect(github.view(change).comments[0]?.body).toContain(
-    "Nothing to fix.\n\n2 findings stay in Lookover, not on the pull request.",
+  expect(blockOn(github)).toBe(
+    `### ${wordmark(26)} · Nothing to fix\n\nRound 1 · [\`a1b2c3d\`](${URL}/commits/${ROUND_1})`,
   );
   expect(readResult(completed(github.posts).output.text)?.verdict.headline).toBe("Nothing to fix.");
 });
 
-test("a round posts in the fixed order: check in progress, review, summary, check completed", async () => {
+test("a round posts in the fixed order: check in progress, review, status block, check completed", async () => {
   const github = host();
   await createPublisher({ writer: github, person }).publish(round1);
   expect(github.posts.map((p) => p.kind)).toEqual([
     "check.created",
     "review",
-    "summary.created",
+    "status.written",
     "check.completed",
   ]);
 });
@@ -558,7 +656,7 @@ class Crash extends Error {}
  * An outbox kept in memory, as the store keeps it on disk: the posts `from` saved (every post owed when none).
  * `crashAfter` stops the process once that post is marked sent, before the next one is begun; `lostAnswer`, once
  * the host took that post, before it is marked sent (the host holds it, and nothing says so). `degraded`: the round's
- * findings were sent in the summary before.
+ * findings were sent in the status block before.
  */
 function memoryOutbox(
   options: { from?: SavedPost[]; crashAfter?: PostKind; lostAnswer?: PostKind; degraded?: boolean } = {},
@@ -608,7 +706,7 @@ function memoryOutbox(
   };
 }
 
-for (const crashAfter of ["check", "review", "summary"] as const) {
+for (const crashAfter of ["check", "review", "status"] as const) {
   test(`a crash once the ${crashAfter} post is saved resumes with the next post: none is sent twice`, async () => {
     const github = host();
     const publisher = createPublisher({ writer: github, person });
@@ -618,11 +716,133 @@ for (const crashAfter of ["check", "review", "summary"] as const) {
     expect(github.posts.map((p) => p.kind)).toEqual([
       "check.created",
       "review",
-      "summary.created",
+      "status.written",
       "check.completed",
     ]);
   });
 }
+
+test("a round owes a review only when it has a line comment (ADR 0074)", () => {
+  expect(postsOf(round1)).toEqual(["check", "review", "status", "completed"]);
+  // F2's file is not in the diff: no comment, so no review.
+  expect(postsOf(posting([F2]))).toEqual(["check", "status", "completed"]);
+  expect(postsOf(posting([]))).toEqual(["check", "status", "completed"]);
+});
+
+test("a round with no line comment posts no review: the check, the status block, the check completed", async () => {
+  const github = host();
+  const outbox = memoryOutbox();
+  const published = await createPublisher({ writer: github, person }).publish(posting([F2]), outbox);
+  expect(github.posts.map((p) => p.kind)).toEqual(["check.created", "status.written", "check.completed"]);
+  expect(published.reviewId).toBeNull();
+  expect(outbox.saved.map((p) => p.kind)).toEqual(["check", "status", "completed"]);
+  expect(blockOn(github)).toContain("Missing timeout on fetch");
+});
+
+test("a status block the person may not write is said in the log, and the round goes on to its check (ADR 0074)", async () => {
+  const github = host();
+  github.forbidDescription(change);
+  const said: string[] = [];
+  const outbox = memoryOutbox();
+  await createPublisher({ writer: github, person, log: (line) => said.push(line) }).publish(round1, outbox);
+  expect(github.posts.map((p) => p.kind)).toEqual(["check.created", "review", "check.completed"]);
+  expect(said).toEqual([expect.stringMatching(/^sasensi\/demo-app#42: no status block: invalid: /)]);
+  // Begun, never marked sent: a round with no review lands all the same (the store's).
+  expect(outbox.saved.find((p) => p.kind === "status")).toEqual({ kind: "status", hostId: null, tries: 1 });
+});
+
+test("the status block says where the change stands as it is written, from the caller's reader; its null writes none", async () => {
+  const github = host();
+  const asked: string[][] = [];
+  const reader = (stands: "posted" | null) =>
+    createPublisher({
+      writer: github,
+      person,
+      threads: (c) => github.threads(c),
+      status: (_change, threads) => {
+        asked.push(threads.map((t) => `${t.findingId} ${t.url}`));
+        return stands === null ? null : { kind: "running", sha: ROUND_2, round: 2, again: false };
+      },
+    });
+  await reader(null).publish(round1);
+  expect(github.view(change).description).toBe("");
+  expect(github.posts.map((p) => p.kind)).toEqual(["check.created", "review", "check.completed"]);
+  // A round 2 already running when round 1's block is sent: the block says so, never round 1's list.
+  await reader("posted").publish(round1);
+  expect(blockOn(github)).toBe(
+    `### ${wordmark(26)} · Looking over [\`c3d4e5f\`](${URL}/commits/${ROUND_2})\n\nRound 2`,
+  );
+  // Round 1 posted twice here: the newest of its two threads.
+  expect(asked.at(-1)).toEqual([`F1 ${URL}#discussion_r100002`]);
+});
+
+test("outside a round, the status block is written from the reader: a running round reads no thread, a waiting one links its list", async () => {
+  const github = host();
+  await createPublisher({ writer: github, person }).publish(round1);
+  let reads = 0;
+  let stands: Status | null = { kind: "running", sha: ROUND_2, round: 2, again: false };
+  const publisher = createPublisher({
+    writer: github,
+    person,
+    threads: (c) => {
+      reads++;
+      return github.threads(c);
+    },
+    status: (_change, threads) =>
+      stands?.kind === "waiting" && stands.posted !== null
+        ? { ...stands, posted: { ...stands.posted, threads } }
+        : stands,
+  });
+  await publisher.status(change);
+  expect(blockOn(github)).toBe(
+    `### ${wordmark(26)} · Looking over [\`c3d4e5f\`](${URL}/commits/${ROUND_2})\n\nRound 2`,
+  );
+  expect(reads).toBe(0);
+
+  // Waiting on round 1's list: its finding linked to its thread, from one read.
+  const posted: StatusRound = {
+    n: 1,
+    sha: ROUND_1,
+    base: BASE,
+    rounds: [{ n: 1, sha: ROUND_1 }],
+    findings: [{ ...F1, posted: true, commented: true }],
+    loop: "open",
+    threads: [],
+  };
+  stands = { kind: "waiting", sha: ROUND_2, round: 2, deferral: null, until: null, now: 0, posted };
+  await publisher.status(change);
+  expect(reads).toBe(1);
+  expect(blockOn(github)).toContain(`](${URL}#discussion_r100001) · \`src/queue/send.ts\``);
+  expect(blockOn(github)).toContain("Round 2 · The review starts once the reviews before it are done.");
+
+  // The reader's null writes nothing.
+  const before = github.posts.length;
+  stands = null;
+  await publisher.status(change);
+  expect(github.posts.length).toBe(before);
+});
+
+test("outside a round, a status block the person may not write is said in the log, never thrown", async () => {
+  const github = host();
+  github.forbidDescription(change);
+  const said: string[] = [];
+  await createPublisher({
+    writer: github,
+    person,
+    log: (line) => said.push(line),
+    status: () => ({ kind: "running", sha: ROUND_1, round: 1, again: false }),
+  }).status(change);
+  expect(said).toEqual([expect.stringMatching(/^sasensi\/demo-app#42: no status block: invalid: /)]);
+});
+
+test("a crash once the status block of a round with no review is saved resumes with the check completed: no review, no second write", async () => {
+  const github = host();
+  const publisher = createPublisher({ writer: github, person });
+  const stopped = memoryOutbox({ crashAfter: "status" });
+  await expect(publisher.publish(posting([F2]), stopped)).rejects.toBeInstanceOf(Crash);
+  await publisher.publish(posting([F2]), memoryOutbox({ from: stopped.saved }));
+  expect(github.posts.map((p) => p.kind)).toEqual(["check.created", "status.written", "check.completed"]);
+});
 
 test("a review the host took before the service stopped is found by its marker and not posted again", async () => {
   const github = host();
@@ -630,13 +850,12 @@ test("a review the host took before the service stopped is found by its marker a
   const stopped = memoryOutbox({ lostAnswer: "review" });
   await expect(publisher.publish(round1, stopped)).rejects.toBeInstanceOf(Crash);
   const resumed = memoryOutbox({ from: stopped.saved });
-  const published = await publisher.publish(round1, resumed);
+  const reviewId = present((await publisher.publish(round1, resumed)).reviewId);
   const { reviews } = github.view(change);
-  expect(reviews).toHaveLength(1);
-  expect(published.reviewId).toBe(reviews[0]?.id ?? "no review");
+  expect(reviews.map((r) => r.id)).toEqual([reviewId]);
   expect(resumed.saved.find((p) => p.kind === "review")).toEqual({
     kind: "review",
-    hostId: reviews[0]?.id ?? "no review",
+    hostId: reviewId,
     tries: 1,
   });
 });
@@ -650,7 +869,7 @@ test("a check the host created before the service stopped is found by the job's 
   expect(github.posts.map((p) => p.kind)).toEqual([
     "check.created",
     "review",
-    "summary.created",
+    "status.written",
     "check.completed",
   ]);
   expect(github.view(change).checks.map((c) => c.status)).toEqual(["completed"]);
@@ -681,12 +900,11 @@ test("a check another person's Lookover made for a job of the same id is never t
 test("a round's review is found on the host by its marker; none before it was posted, nor another round's", async () => {
   const github = host();
   const publisher = createPublisher({ writer: github, person });
-  expect(await publisher.findReview(round1, false)).toBeNull();
-  const { reviewId } = await publisher.publish(round1);
-  // F1 has its comment; F2 is outside the diff, in the summary.
-  expect(await publisher.findReview(round1, false)).toEqual({ reviewId, commented: [F1.id] });
-  expect(await publisher.findReview(round1, true)).toEqual({ reviewId, commented: [] });
-  expect(await publisher.findReview(round2, false)).toBeNull();
+  expect(await publisher.findReview(round1)).toBeNull();
+  const reviewId = present((await publisher.publish(round1)).reviewId);
+  // F1 has its comment; F2 is outside the diff, in the status block.
+  expect(await publisher.findReview(round1)).toEqual({ reviewId, commented: [F1.id] });
+  expect(await publisher.findReview(round2)).toBeNull();
 });
 
 test("a review begun but never taken by the host is posted when sent again", async () => {
@@ -751,6 +969,7 @@ const EXPECTED_1: ReviewResult = {
       body: "When the upstream returns a 4xx, `sendWithRetry` retries forever, because only a 5xx is skipped and `res.ok` is false.",
       location: { path: "src/queue/send.ts", start_line: 43, end_line: 43, side: "head", sha: ROUND_1 },
       placed: { path: "src/queue/send.ts", start_line: 43, end_line: 43, side: "head" },
+      suggestion: null,
       rule: null,
       raised: { round: 1, sha: ROUND_1 },
       last_checked: { round: 1, sha: ROUND_1 },
@@ -762,7 +981,7 @@ const EXPECTED_1: ReviewResult = {
       fingerprints: { location: "loc:F2", meaning: "sem:F2" },
       status: "open",
       posted: true,
-      placement: "summary",
+      placement: "status",
       needs_action_by: "agent",
       severity: "should_fix",
       category: "reliability",
@@ -770,6 +989,7 @@ const EXPECTED_1: ReviewResult = {
       body: "When the upstream hangs, the request stays open forever, because the shared client sets no timeout.",
       location: { path: "src/http/client.ts", start_line: 12, end_line: 12, side: "head", sha: ROUND_1 },
       placed: null,
+      suggestion: null,
       rule: null,
       raised: { round: 1, sha: ROUND_1 },
       last_checked: { round: 1, sha: ROUND_1 },
@@ -789,6 +1009,7 @@ const EXPECTED_1: ReviewResult = {
       body: "`250` appears twice; a named constant would make the backoff easier to tune.",
       location: { path: "src/queue/send.ts", start_line: 44, end_line: 44, side: "head", sha: ROUND_1 },
       placed: null,
+      suggestion: null,
       rule: null,
       raised: { round: 1, sha: ROUND_1 },
       last_checked: { round: 1, sha: ROUND_1 },
@@ -843,7 +1064,7 @@ test("the result says who confirmed the round and what the confirm said of each 
   ]);
 });
 
-test("a blocking finding lowered for want of a confirmation says so: its comment, the summary and the check (ADR 0044)", async () => {
+test("a blocking finding lowered for want of a confirmation says so: its comment, the status block and the check (ADR 0044)", async () => {
   const github = host();
   const lowered = finding("F1", {
     severity: "should_fix",
@@ -856,45 +1077,46 @@ test("a blocking finding lowered for want of a confirmation says so: its comment
     confirmation: { verdict: "unsure", by: "claude", reason: "Maybe.", evidence: [], demoted: false },
   });
   await createPublisher({ writer: github, person }).publish(posting([lowered, unsure]));
-  const { reviews, comments } = github.view(change);
-  expect(reviews[0]?.comments.map((c) => c.body.split("\n")[0])).toEqual([
-    "Lookover · **Retry loop never stops on 4xx** · Should fix, unconfirmed",
-    "Lookover · **Missing timeout on fetch** · Should fix",
+  const { reviews } = github.view(change);
+  expect(reviews[0]?.comments.map((c) => c.body.split("\n\n").slice(0, 2))).toEqual([
+    [`${MARK} · Should fix, unconfirmed`, "**Retry loop never stops on 4xx**"],
+    [`${MARK} · Should fix`, "**Missing timeout on fetch**"],
   ]);
-  expect(comments[0]?.body).toContain(
-    "- F1 · Should fix, unconfirmed · `src/queue/send.ts` line 43 · Retry loop never stops on 4xx",
+  expect(blockOn(github)).toContain(
+    "- **Should fix, unconfirmed** · Retry loop never stops on 4xx · `src/queue/send.ts` line 43",
   );
   expect(completed(github.posts).output.summary).toContain("- F1 · Should fix, unconfirmed ·");
-  expect(comments[0]?.body).not.toContain("Not double-checked");
+  expect(blockOn(github)).not.toContain("double-checked");
 });
 
-test("a finding following a repository rule names it: its comment, the summary and the result (ADR 0048)", async () => {
+test("a finding following a repository rule names it in the result; its comment cites it in its body, and the status block in none (ADR 0048, ADR 0074)", async () => {
   const github = host();
   const rule = { id: "7c1e0a9d3b2f4e58", file: "REVIEW.md" as const, line: 12 };
   const inline = finding("F1", { category: "repo_rule", rule });
   const outside = { ...F2, category: "repo_rule", rule: { ...rule, file: "AGENTS.md" as const, line: 3 } };
   const published = await createPublisher({ writer: github, person }).publish(posting([inline, outside]));
-  const { reviews, comments } = github.view(change);
+  const { reviews } = github.view(change);
   expect(reviews[0]?.comments[0]?.body).toStartWith(
-    `Lookover · **Retry loop never stops on 4xx** · Blocking\n\n${inline.body}\n\nRule: REVIEW.md, line 12.\n\n`,
+    `${MARK} · Blocking\n\n**Retry loop never stops on 4xx**\n\n${inline.body}\n\n${FINDING_MARKER}`,
   );
-  expect(comments[0]?.body).toContain(`  ${F2.body}\n  Rule: AGENTS.md, line 3.\n  No comment on the line:`);
+  expect(blockOn(github)).toContain("  Not in the diff: when the upstream hangs");
+  expect(blockOn(github)).not.toContain("Rule:");
   expect(published.result.findings.map((f) => f.rule)).toEqual([
     { id: "7c1e0a9d3b2f4e58", source: "REVIEW.md", line: 12 },
     { id: "7c1e0a9d3b2f4e58", source: "AGENTS.md", line: 3 },
   ]);
 });
 
-test("a round whose confirm pass failed says its findings were not double-checked, and why (ADR 0044)", async () => {
+test("a round whose confirm pass failed says in its check its findings were not double-checked, and why (ADR 0044)", async () => {
   const said = async (confirmFailure: NonNullable<RoundToPost["run"]["confirmFailure"]>) => {
     const github = host();
     await createPublisher({ writer: github, person }).publish({
       ...round1,
       run: { ...round1.run, confirmer: "claude", confirmFailure },
     });
-    const summary = github.view(change).comments[0]?.body ?? "";
-    expect(completed(github.posts).output.summary).toContain(summary.split("\n\n")[3] ?? "none");
-    return summary.split("\n\n")[3];
+    // Engines are named on the check only, never on the pull request (ADR 0074).
+    expect(blockOn(github)).not.toContain("double-checked");
+    return completed(github.posts).output.summary.split("\n")[1];
   };
   expect(await said("timeout")).toBe(
     "Not double-checked: Claude ran out of time, so these findings are posted as found.",
@@ -907,27 +1129,19 @@ test("a round whose confirm pass failed says its findings were not double-checke
   );
 });
 
-test("the summary's header is followed by who found the round and who double-checked it, never tokens or times (ADR 0055)", async () => {
-  const header = async (run: Partial<RoundToPost["run"]>, raised = round1.reconciled.raised) => {
-    const github = host();
-    await createPublisher({ writer: github, person }).publish({
-      ...round1,
-      run: { ...round1.run, ...run },
-      reconciled: { ...round1.reconciled, raised },
-    });
-    return (github.view(change).comments[0]?.body ?? "").split("\n\n")[1];
-  };
-  const lead = "**Lookover** · round 1 · looked over a1b2c3d\n";
-  // Every case is `foundAndCheckedText`'s, in contracts; here, what the run gives it.
-  expect(await header({ secondFind: { engine: "codex", failure: null }, confirmer: "codex" })).toBe(
-    `${lead}Found by Claude and Codex, double-checked by Codex.`,
-  );
-  expect(await header({ confirmer: "claude" })).toBe(
-    `${lead}Found by Claude, double-checked by Claude in a new session.`,
-  );
-  // No confirm pass: Quick when the round raised findings, else nothing was new.
-  expect(await header({ confirmer: null })).toBe(`${lead}Found by Claude, not double-checked.`);
-  expect(await header({ confirmer: null }, [])).toBe(`${lead}Found by Claude, nothing new to double-check.`);
+test("nothing on the pull request names who found the round or who double-checked it (ADR 0074)", async () => {
+  const github = host();
+  await createPublisher({ writer: github, person }).publish({
+    ...round1,
+    run: { ...round1.run, secondFind: { engine: "codex", failure: null }, confirmer: "codex" },
+  });
+  const { reviews } = github.view(change);
+  const shown = [blockOn(github), ...reviews.flatMap((r) => [r.body, ...r.comments.map((c) => c.body)])];
+  expect(shown.join("\n")).not.toMatch(/Claude|Codex/);
+  expect(readResult(completed(github.posts).output.text)?.run.engine).toEqual({
+    finder: "claude",
+    confirmer: "codex",
+  });
 });
 
 test("a Deep round whose second find pass failed says it had one find pass, and why (ADR 0044)", async () => {
@@ -936,8 +1150,7 @@ test("a Deep round whose second find pass failed says it had one find pass, and 
     ...round1,
     run: { ...round1.run, secondFind: { engine: "codex", failure: "quota_exhausted" } },
   });
-  const summary = github.view(change).comments[0]?.body ?? "";
-  expect(summary.split("\n\n")[3]).toBe("One find pass, not two: Codex reached its limit.");
+  expect(blockOn(github)).not.toContain("find pass");
   expect(completed(github.posts).output.summary).toContain(
     "One find pass, not two: Codex reached its limit.",
   );
@@ -978,11 +1191,8 @@ test("round 2's result says what was verified fixed and what the agent should re
   expect(
     (open?.blocking ?? 0) + (open?.should_fix ?? 0) + (open?.consider ?? 0) + (read?.counts.escalated ?? 0),
   ).toBe(round2.reconciled.open);
-  // The review says what is new and what an earlier round left open; "the rest can go" would be false.
-  const review = github.view(change).reviews[1]?.body;
-  expect(review).toBe(
-    `Lookover · Looked over c3d4e5f. One new thing to fix, send.ts line 44.\n\nOne finding from an earlier round is still open: it is in the summary comment.\n\n${REVIEW_MARKER}{"v":1,"run":"run-2","n":2} -->`,
-  );
+  // The review says nothing of its own: its marker names round 2.
+  expect(github.view(change).reviews[1]?.body).toBe(`${REVIEW_MARKER}{"v":1,"run":"run-2","n":2} -->`);
 });
 
 // Claims (ADR 0052): the author answered on the threads, and round 2 answered them.
@@ -1045,7 +1255,7 @@ test("a finding kept after a claim carries its thread, its claim and kept in the
   await publisher.publish(answering);
   const read = readResult(completed(github.posts).output.text);
   expect(reviewResultV1.safeParse(read).success).toBe(true);
-  // F1's comment is the first inline comment the host took; F2 went into the summary, F3 nowhere: no thread.
+  // F1's comment is the first inline comment the host took; F2 went into the status block, F3 nowhere: no thread.
   expect(read?.findings.find((f) => f.id === "F1")).toMatchObject({
     status: "open",
     needs_action_by: "agent",
@@ -1076,22 +1286,17 @@ test("a finding kept after a claim carries its thread, its claim and kept in the
   expect(read?.findings.find((f) => f.id === "F1")?.thread?.resolved).toBeUndefined();
 });
 
-test("the summary says the claim a finding was kept against and why, and an acknowledged one as acknowledged", async () => {
+test("the status block links a finding to its thread, and lists an acknowledged one no more", async () => {
   const github = host();
   const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
   await publisher.publish(round1);
   await publisher.publish(answering);
-  const summary = github.view(change).comments[0]?.body ?? "";
-  expect(summary).toContain(
-    [
-      "**To fix**",
-      "- F1 · Blocking · `src/queue/send.ts` line 43 · Retry loop never stops on 4xx",
-      "  sasensi said won't fix. Kept: A 4xx from the proxy still loops forever.",
-    ].join("\n"),
+  expect(blockOn(github)).toContain(
+    `- **Blocking** · [Retry loop never stops on 4xx](${URL}#discussion_r100001) · \`src/queue/send.ts\` line 43`,
   );
-  expect(summary).toContain(
-    "**Done**\n- F2 · Missing timeout on fetch · acknowledged: sasensi said deferred",
-  );
+  expect(blockOn(github)).not.toContain("Missing timeout on fetch");
+  // The claim and the answer are on the thread: the block says neither.
+  expect(blockOn(github)).not.toContain("won't fix");
 });
 
 test("without a threads reader, or when GitHub refuses the read, the result has no thread and the check still completes", async () => {
@@ -1170,7 +1375,7 @@ const withdrawing: RoundToPost = {
   },
 };
 
-test("a round replies on the thread of each finding it answered, after its review and before the summary", async () => {
+test("a round replies on the thread of each finding it answered, before the status block (no review: no line comment)", async () => {
   const github = host();
   const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
   await publisher.publish(round1);
@@ -1178,16 +1383,54 @@ test("a round replies on the thread of each finding it answered, after its revie
   await publisher.publish(await rooted(github, answering));
   expect(github.posts.slice(before).map((p) => p.kind)).toEqual([
     "check.created",
-    "review",
     "reply",
-    "summary.edited",
+    "status.written",
     "check.completed",
   ]);
   const reply = github.posts.find((p) => p.kind === "reply");
   expect(reply).toMatchObject({
     commentId: 100001,
-    body: `Kept.\n\nA 4xx from the proxy\nstill loops forever.\n\nIf it is kept again, the owner decides.\n\n${replyMarker("run-2", "F1", 100002)}`,
+    body: `${MARK} · Kept\n\nA 4xx from the proxy\nstill loops forever.\n\nIf it is kept again, the owner decides.\n\n${replyMarker("run-2", "F1", 100002)}`,
   });
+});
+
+/** Round 2's replies on F1's thread, given F1 as the round left it. */
+async function replied(reply: Omit<ThreadReply, "findingId">, f1: Finding = F1_KEPT): Promise<string> {
+  const github = host();
+  const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
+  await publisher.publish(round1);
+  await publisher.publish(
+    await rooted(github, {
+      ...answering,
+      reconciled: {
+        ...answering.reconciled,
+        findings: [f1, F2_ACKNOWLEDGED, F3],
+        replies: [{ findingId: F1.id, ...reply }],
+      },
+    }),
+  );
+  const post = github.posts.find((p) => p.kind === "reply");
+  return post?.kind === "reply" ? post.body : "";
+}
+
+test("each reply opens with the wordmark and its kind, then why, then its marker (ADR 0074)", async () => {
+  const marker = replyMarker("run-2", "F1", 100002);
+  const why = "The guard is there.";
+  expect(await replied({ kind: "withdrawn", why })).toBe(`${MARK} · Withdrawn\n\n${why}\n\n${marker}`);
+  expect(await replied({ kind: "answered", why })).toBe(`${MARK} · Answer\n\n${why}\n\n${marker}`);
+  expect(await replied({ kind: "escalated", why })).toBe(
+    `${MARK} · The owner decides this one\n\n${why}\n\n${marker}`,
+  );
+  expect(await replied({ kind: "kept", why }, { ...F1_KEPT, status: "escalated", kept: 2 })).toBe(
+    `${MARK} · Kept. The owner decides\n\n${why}\n\n${marker}`,
+  );
+});
+
+test("a won't fix kept twice is the owner's: the reply says so in the prototype's words, not the finder's", async () => {
+  const twice: Finding = { ...F1_KEPT, status: "escalated", kept: 2 };
+  expect(await replied({ kind: "escalated", why: "Still loops." }, twice)).toBe(
+    `${MARK} · The owner decides this one\n\nKept twice against "won't fix". Fix it, or resolve this thread to keep the code as it is.\n\n${replyMarker("run-2", "F1", 100002)}`,
+  );
 });
 
 test("a reply whose reason is too long for GitHub is cut at a line and keeps its marker", async () => {
@@ -1204,7 +1447,7 @@ test("a reply whose reason is too long for GitHub is cut at a line and keeps its
   const reply = github.posts.find((p) => p.kind === "reply");
   const body = reply?.kind === "reply" ? reply.body : "";
   expect(utf8Bytes(body)).toBeLessThanOrEqual(COMMENT_MAX_BYTES);
-  expect(body.startsWith("The owner decides this one.\n\nLine 0 of the reason.\n")).toBe(true);
+  expect(body.startsWith(`${MARK} · The owner decides this one\n\nLine 0 of the reason.\n`)).toBe(true);
   expect(body.endsWith(replyMarker("run-2", "F1", 100002))).toBe(true);
 });
 
@@ -1222,7 +1465,7 @@ test("a kept reply cut to fit still ends by saying the owner decides if it is ke
   const reply = github.posts.find((p) => p.kind === "reply");
   const body = reply?.kind === "reply" ? reply.body : "";
   expect(utf8Bytes(body)).toBeLessThanOrEqual(COMMENT_MAX_BYTES);
-  expect(body.startsWith("Kept.\n\nLine 0 of the reason.\n")).toBe(true);
+  expect(body.startsWith(`${MARK} · Kept\n\nLine 0 of the reason.\n`)).toBe(true);
   expect(body).toContain("Cut to fit GitHub's limit");
   expect(
     body.endsWith(`\n\nIf it is kept again, the owner decides.\n\n${replyMarker("run-2", "F1", 100002)}`),
@@ -1245,8 +1488,7 @@ test("an answer with no words is never sent: no empty reply on the thread", asyn
   );
   expect(github.posts.slice(before).map((p) => p.kind)).toEqual([
     "check.created",
-    "review",
-    "summary.edited",
+    "status.written",
     "check.completed",
   ]);
 });
@@ -1268,8 +1510,7 @@ test("a reply GitHub refuses for good, its thread's root deleted, is said in the
   });
   expect(github.posts.slice(before).map((p) => p.kind)).toEqual([
     "check.created",
-    "review",
-    "summary.edited",
+    "status.written",
     "check.completed",
   ]);
   expect(github.view(change).checks.find((c) => c.id === checkId)?.status).toBe("completed");
@@ -1283,56 +1524,48 @@ test("a reply GitHub refuses for good, its thread's root deleted, is said in the
 const lookoversBy = (poster: { id: number }) => async () => (r: HostThreadReply) =>
   r.author.id === poster.id && r.body.includes(REPLY_MARKER);
 
-/** The person signed in on the shared App (ADR 0066): Lookover's posts are theirs. */
-const SIGNED_IN = { id: 1, login: "sasensi" };
 /** A teammate on the repository, who can copy any text Lookover posts but never write as who posts. */
 const TEAMMATE = { id: 77, login: "teammate", bot: false };
 
-for (const way of [
-  { name: "as the App's bot", github: () => host(), poster: bot },
-  { name: "as the person signed in", github: () => hostAs(SIGNED_IN), poster: SIGNED_IN },
-]) {
-  test(`${way.name}, a reply the host took before the service stopped is found by its marker: sent once, never a teammate's copy`, async () => {
-    const github = way.github();
-    const lookovers = lookoversBy(way.poster);
-    const publisher = createPublisher({
-      writer: github,
-      person,
-      threads: (c) => github.threads(c),
-      lookovers,
-    });
-    await publisher.publish(round1);
-    const round = await rooted(github, answering);
-    // The marker the round's reply ends with, copied onto the thread by a teammate before it is sent.
-    const root = round.roots?.[0];
-    const copied = `Same here.\n\n${replyMarker("run-2", "F1", 100002)}`;
-    github.seedReply(change, root?.commentId ?? 0, { author: TEAMMATE, body: copied });
-    const stopped = memoryOutbox({ lostAnswer: "reply:F1" });
-    await expect(publisher.publish(round, stopped)).rejects.toBeInstanceOf(Crash);
-    const resumed = memoryOutbox({ from: stopped.saved });
-    await publisher.publish(round, resumed);
-    const replies = github.posts.filter((p) => p.kind === "reply");
-    expect(replies).toHaveLength(1);
-    expect(resumed.saved.find((p) => p.kind === "reply:F1")).toEqual({
-      kind: "reply:F1",
-      hostId: replies[0]?.kind === "reply" ? replies[0].replyId : "no reply",
-      tries: 1,
-    });
+test("a reply the host took before the service stopped is found by its marker: sent once, never a teammate's copy", async () => {
+  const github = host();
+  const lookovers = lookoversBy(SIGNED_IN);
+  const publisher = createPublisher({
+    writer: github,
+    person,
+    threads: (c) => github.threads(c),
+    lookovers,
   });
-}
+  await publisher.publish(round1);
+  const round = await rooted(github, answering);
+  // The marker the round's reply ends with, copied onto the thread by a teammate before it is sent.
+  const root = round.roots?.[0];
+  const copied = `Same here.\n\n${replyMarker("run-2", "F1", 100002)}`;
+  github.seedReply(change, root?.commentId ?? 0, { author: TEAMMATE, body: copied });
+  const stopped = memoryOutbox({ lostAnswer: "reply:F1" });
+  await expect(publisher.publish(round, stopped)).rejects.toBeInstanceOf(Crash);
+  const resumed = memoryOutbox({ from: stopped.saved });
+  await publisher.publish(round, resumed);
+  const replies = github.posts.filter((p) => p.kind === "reply");
+  expect(replies).toHaveLength(1);
+  expect(resumed.saved.find((p) => p.kind === "reply:F1")).toEqual({
+    kind: "reply:F1",
+    hostId: replies[0]?.kind === "reply" ? replies[0].replyId : "no reply",
+    tries: 1,
+  });
+});
 
-test("the review and each of its line comments start with Lookover, as the bot and as the person signed in (ADR 0066)", async () => {
-  for (const github of [host(), hostAs(SIGNED_IN)]) {
-    await createPublisher({ writer: github, person }).publish(round1);
-    const [review] = github.view(change).reviews;
-    expect(review?.body).toStartWith("Lookover · Looked over a1b2c3d.");
-    expect(review?.comments.length).toBeGreaterThan(0);
-    for (const c of review?.comments ?? []) expect(c.body).toStartWith("Lookover · **");
-  }
+test("the review is its marker alone, and each line comment opens with the wordmark and its severity (ADR 0074)", async () => {
+  const github = host();
+  await createPublisher({ writer: github, person }).publish(round1);
+  const [review] = github.view(change).reviews;
+  expect(review?.body).toBe(MARKED_1);
+  expect(review?.comments.length).toBeGreaterThan(0);
+  for (const c of review?.comments ?? []) expect(c.body).toStartWith(`${MARK} · Blocking\n\n**`);
 });
 
 test("a reply begun is sent again when only a teammate's copy of its marker is on the thread", async () => {
-  const github = hostAs(SIGNED_IN);
+  const github = host();
   const time = heldTime();
   const lookovers = lookoversBy(SIGNED_IN);
   const publisher = createPublisher({
@@ -1364,7 +1597,7 @@ test("a reply GitHub saved though it answered with its internal error is not sen
     writer: github,
     person,
     threads: (c) => github.threads(c),
-    lookovers: lookoversBy(bot),
+    lookovers: lookoversBy(SIGNED_IN),
     time,
   });
   await publisher.publish(round1);
@@ -1384,12 +1617,11 @@ test("once the check completes, the requests the round answered and the root of 
   await publisher.publish(await rooted(github, withdrawing, [request]));
   expect(github.posts.slice(before)).toMatchObject([
     { kind: "check.created" },
-    { kind: "review" },
     {
       kind: "reply",
-      body: `Withdrawn.\n\nA 4xx never reaches here.\n\n${replyMarker("run-2", "F1", 100002)}`,
+      body: `${MARK} · Withdrawn\n\nA 4xx never reaches here.\n\n${replyMarker("run-2", "F1", 100002)}`,
     },
-    { kind: "summary.edited" },
+    { kind: "status.written" },
     { kind: "check.completed" },
     { kind: "minimized", nodeId: request, reason: "resolved" },
     { kind: "minimized", nodeId: "PRRC_100001", reason: "resolved" },
@@ -1477,11 +1709,11 @@ function dismissalOutbox(options: { from?: SavedDismissalPost[]; lostAnswer?: Di
   } satisfies DismissalOutbox & { saved: SavedDismissalPost[] };
 }
 
-test("a dismissal replies on its finding's thread, rewrites the summary and the round's check, then minimizes the root", async () => {
+test("a dismissal replies on its finding's thread, rewrites the status block and the round's check, then minimizes the root", async () => {
   const github = host();
   const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
   const { checkId } = await publisher.publish(round1);
-  expect(dismissalPostsOf(checkId)).toEqual(["reply", "summary", "completed", "minimize"]);
+  expect(dismissalPostsOf(checkId)).toEqual(["reply", "status", "completed", "minimize"]);
   const before = github.posts.length;
   await publisher.dismiss(dismissal(checkId));
 
@@ -1489,15 +1721,17 @@ test("a dismissal replies on its finding's thread, rewrites the summary and the 
     {
       kind: "reply",
       commentId: 100001,
-      body: `Dismissed by the owner.\n\nIt won't be raised again on this pull request.\n\n${dismissalMarker("F1")}`,
+      body: `${MARK} · Dismissed by the owner\n\nIt won't be raised again on this pull request.\n\n${dismissalMarker("F1")}`,
     },
-    { kind: "summary.edited" },
+    { kind: "status.written" },
     { kind: "check.completed", checkId, conclusion: "success" },
     { kind: "minimized", nodeId: "PRRC_100001", reason: "resolved" },
   ]);
-  const summary = github.view(change).comments.find((c) => c.body.includes(SUMMARY_MARKER))?.body ?? "";
-  expect(summary).toContain("- F1 · Retry loop never stops on 4xx · dismissed by the owner");
-  expect(summary).not.toContain("**To fix**");
+  // Dismissed counts as withdrawn; F2 alone is left to fix.
+  expect(blockOn(github)).toStartWith(
+    `### ${wordmark(26)} · One thing to fix\n\nRound 1 · [\`a1b2c3d\`](${URL}/commits/${ROUND_1}) · 1 withdrawn\n\n- **Should fix** · Missing timeout on fetch`,
+  );
+  expect(blockOn(github)).not.toContain("Retry loop never stops on 4xx");
   const result = readResult(completed(github.posts).output.text);
   expect(reviewResultV1.safeParse(result).success).toBe(true);
   expect(result?.verdict).toMatchObject({ value: "pass", conclusion: "success" });
@@ -1509,51 +1743,46 @@ test("a dismissal replies on its finding's thread, rewrites the summary and the 
   });
 });
 
-test("a dismissal whose check is left, the head moved since, says it on the thread and the summary only", async () => {
+test("a dismissal whose check is left, the head moved since, says it on the thread and the status block only", async () => {
   const github = host();
   const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
   await publisher.publish(round1);
-  expect(dismissalPostsOf(null)).toEqual(["reply", "summary", "minimize"]);
+  expect(dismissalPostsOf(null)).toEqual(["reply", "status", "minimize"]);
   const before = github.posts.length;
   await publisher.dismiss(dismissal(null));
-  expect(github.posts.slice(before).map((p) => p.kind)).toEqual(["reply", "summary.edited", "minimized"]);
+  expect(github.posts.slice(before).map((p) => p.kind)).toEqual(["reply", "status.written", "minimized"]);
 });
 
-test("a finding in the summary only has no thread: the dismissal rewrites the summary and the check alone", async () => {
+test("a finding in the status block only has no thread: the dismissal rewrites the block and the check alone", async () => {
   const github = host();
   const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
   const { checkId } = await publisher.publish(round1);
   const before = github.posts.length;
   await publisher.dismiss(dismissal(checkId, F2.id));
-  expect(github.posts.slice(before).map((p) => p.kind)).toEqual(["summary.edited", "check.completed"]);
+  expect(github.posts.slice(before).map((p) => p.kind)).toEqual(["status.written", "check.completed"]);
 });
 
-for (const way of [
-  { name: "as the App's bot", github: () => host(), poster: bot },
-  { name: "as the person signed in", github: () => hostAs(SIGNED_IN), poster: SIGNED_IN },
-]) {
-  test(`${way.name}, a dismissal's reply the host took before the service stopped is found by its marker: sent once`, async () => {
-    const github = way.github();
-    const publisher = createPublisher({
-      writer: github,
-      person,
-      threads: (c) => github.threads(c),
-      lookovers: lookoversBy(way.poster),
-    });
-    const { checkId } = await publisher.publish(round1);
-    const stopped = dismissalOutbox({ lostAnswer: "reply" });
-    await expect(publisher.dismiss(dismissal(checkId), stopped)).rejects.toBeInstanceOf(Crash);
-    const resumed = dismissalOutbox({ from: stopped.saved });
-    await publisher.dismiss(dismissal(checkId), resumed);
-    expect(github.posts.filter((p) => p.kind === "reply")).toHaveLength(1);
-    expect(resumed.saved.map((p) => [p.kind, p.hostId !== null, p.tries])).toEqual([
-      ["reply", true, 1],
-      ["summary", true, 1],
-      ["completed", true, 1],
-      ["minimize", true, 1],
-    ]);
+test("a dismissal's reply the host took before the service stopped is found by its marker: sent once", async () => {
+  const github = host();
+  const publisher = createPublisher({
+    writer: github,
+    person,
+    threads: (c) => github.threads(c),
+    lookovers: lookoversBy(SIGNED_IN),
   });
-}
+  const { checkId } = await publisher.publish(round1);
+  const stopped = dismissalOutbox({ lostAnswer: "reply" });
+  await expect(publisher.dismiss(dismissal(checkId), stopped)).rejects.toBeInstanceOf(Crash);
+  const resumed = dismissalOutbox({ from: stopped.saved });
+  await publisher.dismiss(dismissal(checkId), resumed);
+  expect(github.posts.filter((p) => p.kind === "reply")).toHaveLength(1);
+  expect(resumed.saved.map((p) => [p.kind, p.hostId !== null, p.tries])).toEqual([
+    ["reply", true, 1],
+    ["status", true, 1],
+    ["completed", true, 1],
+    ["minimize", true, 1],
+  ]);
+});
 
 /** Round 2's diff after a push that added a line above the loop's body: the 5xx line is now head line 44. */
 const DIFF_MOVED = [
@@ -1599,7 +1828,7 @@ test("a withheld finding posted after a push is found again by its line's text: 
   expect(github.view(change).reviews[0]?.comments.map((c) => c.line)).toEqual([44]);
 });
 
-test("a withheld finding whose line's text is gone, or never known, goes into the summary after a push, not on its old line", async () => {
+test("a withheld finding whose line's text is gone, or never known, goes into the status block after a push, not on its old line", async () => {
   for (const f1 of [
     { ...F1, lineText: "    if (res.status >= 599) continue;" },
     { ...F1, lineText: null },
@@ -1607,10 +1836,29 @@ test("a withheld finding whose line's text is gone, or never known, goes into th
     const github = host(COMMENTABLE_2);
     github.push(change, ROUND_2, COMMENTABLE_2);
     await createPublisher({ writer: github, person }).publish(reposting(f1));
-    const { reviews, comments } = github.view(change);
-    expect(reviews[0]?.comments).toEqual([]);
-    expect(comments[0]?.body).toContain("Retry loop never stops on 4xx");
+    expect(github.view(change).reviews).toEqual([]);
+    expect(blockOn(github)).toContain(
+      "Retry loop never stops on 4xx · `src/queue/send.ts` line 43\n  Not in the diff",
+    );
   }
+});
+
+test("a withheld finding posted after a push offers no suggestion: it was written for the lines of another commit (F4, #508)", async () => {
+  // Round 2's commit keeps head line 43's text where it was, and edits line 44, inside the finding's range.
+  const edited = DIFF_1.replace("+    done = res.ok;", "+    done = res.ok && !closed;");
+  const f1: Finding = {
+    ...WITHHELD_F1,
+    endLine: 44,
+    suggestion: "    if (res.status >= 400) break;\n    done = res.ok;",
+  };
+  const github = host();
+  github.push(change, ROUND_2, COMMENTABLE_1);
+  await createPublisher({ writer: github, person }).publish(reposting(f1, ROUND_2, edited));
+  const [comment] = github.view(change).reviews[0]?.comments ?? [];
+  expect([comment?.line, comment?.endLine]).toEqual([43, 44]);
+  expect(comment?.body).not.toContain("suggestion");
+  const read = readResult(completed(github.posts).output.text);
+  expect(read?.findings.map((f) => [f.id, f.suggestion])).toEqual([["F1", null]]);
 });
 
 test("a withheld finding posted on the commit it was found on keeps its line", async () => {
@@ -1774,7 +2022,7 @@ test("a host refusal propagates, and the posts sent before it are marked sent wi
   ]);
 });
 
-test("the check's summary lists at most 20 findings and says how many more the summary comment has", async () => {
+test("the check's summary lists at most 20 findings and says how many more the description has", async () => {
   const github = host();
   const many = Array.from({ length: 25 }, (_, i) =>
     finding(`F${i + 1}`, { title: `Finding ${i + 1}`, line: 40 + (i % 6) }),
@@ -1796,12 +2044,12 @@ test("the check's summary lists at most 20 findings and says how many more the s
   expect(summary.split("\n")).toHaveLength(22);
   expect(summary).toContain("F20 ·");
   expect(summary).not.toContain("F21 ·");
-  expect(summary.split("\n").at(-1)).toBe("- and 5 more, in the summary comment");
+  expect(summary.split("\n").at(-1)).toBe("- and 5 more, in the pull request's description");
   expect(utf8Bytes(summary)).toBeLessThanOrEqual(CHECK_OUTPUT_MAX_BYTES);
 });
 
 // Refusals (ADR 0044): a transient one is tried again on the caller's time, for about an hour; a comment GitHub
-// can't place sends the review once more with every finding in the summary.
+// can't place leaves the round no review, every finding in the status block.
 
 /** Lets the work a timer started settle: every pending promise reaction runs before the next macrotask. */
 const settled = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -1857,12 +2105,12 @@ test("a review GitHub saved though it answered with its internal error is found 
   const outbox = memoryOutbox();
   const published = createPublisher({ writer: github, person, time }).publish(round1, outbox);
   await time.advance(MINUTE);
-  const { reviewId } = await published;
+  const reviewId = present((await published).reviewId);
   expect(github.view(change).reviews.map((r) => r.id)).toEqual([reviewId]);
   expect(github.posts.map((p) => p.kind)).toEqual([
     "check.created",
     "review",
-    "summary.created",
+    "status.written",
     "check.completed",
   ]);
   expect(outbox.saved.find((p) => p.kind === "review")).toEqual({
@@ -1885,15 +2133,15 @@ test("a review refused by a server error is sent again a few seconds later, and 
   expect(github.view(change).reviews).toHaveLength(1);
 });
 
-test("every post is tried again, the summary and the check's completion too", async () => {
+test("every post is tried again, the status block and the check's completion too", async () => {
   const github = host();
   const time = heldTime();
   const publisher = createPublisher({ writer: github, person, time });
-  github.refuseNext("unavailable", { post: "summary" });
+  github.refuseNext("unavailable", { post: "status" });
   const first = publisher.publish(round1);
   await time.advance(MINUTE);
   await first;
-  expect(github.view(change).comments).toHaveLength(1);
+  expect(blockOn(github)).toContain("2 things to fix");
   github.push(change, ROUND_2, COMMENTABLE_2);
   // Round 2's job has its check already: the write refused is the completion.
   const checkId = await github.createCheck(
@@ -1913,7 +2161,7 @@ test("every post is tried again, the summary and the check's completion too", as
   expect(github.posts.slice(4).map((p) => p.kind)).toEqual([
     "check.created",
     "review",
-    "summary.edited",
+    "status.written",
     "check.completed",
   ]);
 });
@@ -2037,7 +2285,7 @@ test("a refusal sending again can't change is not tried again: a body too long, 
       override publishReview(): Promise<string> {
         return Promise.reject(new HostError(failure, "refused as it is"));
       }
-    })({ repo, bot, changes: [] });
+    })({ repo, bot, person: SIGNED_IN, changes: [] });
     const published = createPublisher({ writer: refusing, person, time }).publish(round1);
     expect(await settledYet(published)).toBe(true);
     await expect(published).rejects.toMatchObject({ failure });
@@ -2047,37 +2295,37 @@ test("a refusal sending again can't change is not tried again: a body too long, 
 /** The host takes comments on head lines 40 to 42 only: our diff places F1 on 43, which GitHub can't place. */
 const narrowHost = () => host([{ path: "src/queue/send.ts", side: "head", from: 40, to: 42 }]);
 
-test("a comment GitHub can't place sends the review once more, every finding of the round in the summary", async () => {
+test("a comment GitHub can't place leaves the round no review, every finding of the round in the status block", async () => {
   const github = narrowHost();
   const outbox = memoryOutbox();
   const published = await createPublisher({ writer: github, person }).publish(round1, outbox);
-  const { reviews, comments } = github.view(change);
-  expect(reviews).toHaveLength(1);
-  expect(reviews[0]?.comments).toEqual([]);
-  expect(reviews[0]?.body).toContain(
-    "GitHub would not place this round's comments on their lines: the findings are in the summary comment.",
+  expect(github.view(change).reviews).toEqual([]);
+  expect(published.reviewId).toBeNull();
+  expect(github.posts.map((p) => p.kind)).toEqual(["check.created", "status.written", "check.completed"]);
+  expect(blockOn(github)).toContain(
+    `- **Blocking** · Retry loop never stops on 4xx · \`src/queue/send.ts\` line 43\n  Not in the diff: when the upstream returns a 4xx, \`sendWithRetry\` retries forever, because only a 5xx is skipped and \`res.ok\` is false.\n\n  https://github.com/sasensi/demo-app/blob/${ROUND_1}/src/queue/send.ts#L43`,
   );
-  expect(reviews[0]?.body).not.toContain("outside the diff");
-  expect(comments[0]?.body).toContain(
-    "When the upstream returns a 4xx, `sendWithRetry` retries forever, because only a 5xx is skipped and `res.ok` is false.\n  No comment on the line: GitHub would not place this round's comments.",
+  expect(blockOn(github)).toContain(
+    "Missing timeout on fetch · `src/http/client.ts` line 12\n  Not in the diff",
   );
-  expect(comments[0]?.body).toContain("the file is not in the diff");
   expect(published.result.findings.map((f) => [f.id, f.placement])).toEqual([
-    ["F1", "summary"],
-    ["F2", "summary"],
+    ["F1", "status"],
+    ["F2", "status"],
     ["F3", "check_only"],
   ]);
   expect(outbox.degraded).toBe(true);
 });
 
-test("a round whose review was sent with its findings in the summary keeps them there after a restart", async () => {
+test("a round whose findings went in the status block for a comment GitHub refused keeps them there after a restart, and sends no review", async () => {
   const github = narrowHost();
   const publisher = createPublisher({ writer: github, person });
-  const stopped = memoryOutbox({ crashAfter: "review" });
+  const stopped = memoryOutbox({ crashAfter: "status" });
   await expect(publisher.publish(round1, stopped)).rejects.toBeInstanceOf(Crash);
+  expect(stopped.degraded).toBe(true);
   await publisher.publish(round1, memoryOutbox({ from: stopped.saved, degraded: stopped.degraded }));
-  expect(github.view(change).comments[0]?.body).toContain(
-    "No comment on the line: GitHub would not place this round's comments.",
+  expect(github.posts.map((p) => p.kind)).toEqual(["check.created", "status.written", "check.completed"]);
+  expect(blockOn(github)).toContain(
+    "Retry loop never stops on 4xx · `src/queue/send.ts` line 43\n  Not in the diff",
   );
 });
 
@@ -2134,7 +2382,7 @@ test("a comment at the byte limit is posted whole; one byte over, it is cut at a
   expect(cut).toEndWith(
     `${FINDING_MARKER}{"v":1,"id":"F1","fingerprints":{"location":"loc:F1","meaning":"sem:F1"},"severity":"blocking","sha":"${ROUND_1}"} -->`,
   );
-  expectCutAtALine(cut, `Lookover · **Retry loop never stops on 4xx** · Blocking\n\n${body}${pad}y`);
+  expectCutAtALine(cut, `${MARK} · Blocking\n\n**Retry loop never stops on 4xx**\n\n${body}${pad}y`);
   // Too big for the check's result as well: the result says it left a finding out.
   expect(published.result.truncated).toBe(true);
   expect(completed(over.posts).conclusion).toBe("neutral");
@@ -2164,64 +2412,39 @@ test("a cut closes the code block it falls in, and cuts a line too long to keep 
   expect(utf8Bytes(cut)).toBeLessThanOrEqual(COMMENT_MAX_BYTES);
   // No character split: a lone half of a pair would not come back the same through UTF-8.
   expect(new TextDecoder().decode(new TextEncoder().encode(cut))).toBe(cut);
-  expect(cut).toStartWith("Lookover · **😀😀");
+  expect(cut).toStartWith(`${MARK} · Blocking\n\n**😀😀`);
   expect(cut).toContain(`😀…\n\n${CUT}\n\n${FINDING_MARKER}`);
 });
 
-test("a summary at the byte limit is posted whole; one byte over, it is cut at a line and says where the rest is", async () => {
-  const body = longBody(1_600);
-  // F2's file is not in the diff: its body is in the summary.
-  const make = (pad: string) => posting([{ ...F2, body: `${body}${pad}` }]);
-  const summary = (github: FakeGitHost) => github.view(change).comments[0]?.body ?? "";
-  const pad = await padding(make, summary);
-
-  const atLimit = host();
-  await createPublisher({ writer: atLimit, person }).publish(make(pad));
-  expect(utf8Bytes(summary(atLimit))).toBe(COMMENT_MAX_BYTES);
-  expect(summary(atLimit)).not.toContain(CUT);
-  expect(summary(atLimit)).toContain("| Round | Commit | Raised | Verified fixed |");
-
+test("a file's name too long for GitHub cuts the result's headline short; the review keeps its marker as its body", async () => {
+  // The headline names the file of the round's first finding: a long name makes it long. Beside it, a finding on the
+  // diff, so the round has a review.
   const over = host();
-  await createPublisher({ writer: over, person }).publish(make(`${pad}y`));
-  const cut = summary(over);
-  expect(utf8Bytes(cut)).toBeLessThanOrEqual(COMMENT_MAX_BYTES);
-  expect(cut.startsWith(SUMMARY_MARKER)).toBe(true);
-  expect(cut).toEndWith(`\n\n${CUT}`);
-  expectCutAtALine(cut, summary(atLimit).replace(pad, `${pad}y`));
-  expect(completed(over.posts).conclusion).toBe("neutral");
-});
-
-test("a review body at the byte limit is posted whole; one byte over, it is cut and keeps its marker", async () => {
-  // The review's body names the file of the round's first finding: a long name makes it long.
-  const make = (pad: string) => posting([{ ...F2, file: `src/http/${"a".repeat(60_000)}${pad}.ts` }]);
-  const reviewBody = (github: FakeGitHost) => github.view(change).reviews[0]?.body ?? "";
-  const pad = await padding(make, reviewBody);
-
-  const atLimit = host();
-  await createPublisher({ writer: atLimit, person }).publish(make(pad));
-  expect(utf8Bytes(reviewBody(atLimit))).toBe(COMMENT_MAX_BYTES);
-  expect(reviewBody(atLimit)).not.toContain(CUT);
-
-  const over = host();
-  const published = await createPublisher({ writer: over, person }).publish(make(`${pad}y`));
-  const cut = reviewBody(over);
-  expect(utf8Bytes(cut)).toBeLessThanOrEqual(COMMENT_MAX_BYTES);
-  expect(cut).toContain(CUT);
-  expect(cut).toEndWith(MARKED_1);
+  const published = await createPublisher({ writer: over, person }).publish(
+    posting([
+      { ...F2, severity: "blocking", file: `src/http/${"a".repeat(70_000)}.ts` },
+      { ...F1, id: findingId("F3"), severity: "should_fix" },
+    ]),
+  );
+  const [review] = over.view(change).reviews;
+  expect(review?.body).toBe(MARKED_1);
+  expect(review?.comments.map((c) => c.path)).toEqual(["src/queue/send.ts"]);
   // The result's headline is one sentence: cut short between two characters, with no pointer.
   const headline = published.result.verdict.headline ?? "";
-  expect(headline).toStartWith("One thing to fix, aaaa");
+  expect(headline).toStartWith("2 things to fix, starting with aaaa");
   expect(headline).toEndWith("a…");
   expect(headline).not.toContain("\n");
   expect(utf8Bytes(headline)).toBeLessThanOrEqual(1_024);
-  // The summary and the check's summary name the file too: cut as well, and every post landed.
-  expect(utf8Bytes(over.view(change).comments[0]?.body ?? "")).toBeLessThanOrEqual(COMMENT_MAX_BYTES);
+  // The block can't hold the name: its items go from the end, and its heading and line stay; every post landed.
+  expect(blockOn(over)).toBe(
+    `### ${wordmark(26)} · 2 things to fix\n\nRound 1 · [\`a1b2c3d\`](${URL}/commits/${ROUND_1})`,
+  );
   expect(completed(over.posts).conclusion).toBe("neutral");
 });
 
-test("a round with more findings than one review holds posts the most urgent as comments, the rest in the summary, and completes", async () => {
+test("a round with more findings than one review holds posts the most urgent as comments, the rest in the status block, and completes", async () => {
   // 30 findings on lines the diff shows, 7 kB each: more comments than one review takes, and more text than the
-  // summary holds.
+  // description holds.
   const many = Array.from({ length: 30 }, (_, i) =>
     finding(`F${i + 1}`, {
       severity: i < 25 ? "should_fix" : "blocking",
@@ -2232,9 +2455,9 @@ test("a round with more findings than one review holds posts the most urgent as 
   );
   const github = host();
   const published = await createPublisher({ writer: github, person }).publish(posting(many));
-  const { reviews, comments } = github.view(change);
+  const { reviews, description } = github.view(change);
   expect(reviews).toHaveLength(1);
-  const commented = reviews[0]?.comments.map((c) => c.body.split(" · ")[1]) ?? [];
+  const commented = reviews[0]?.comments.map((c) => c.body.split("\n\n")[1]) ?? [];
   expect(commented).toHaveLength(REVIEW_MAX_COMMENTS);
   // The five blocking findings, and the first 15 that should be fixed, in the ledger's order.
   expect(commented.slice(13, 17)).toEqual([
@@ -2244,19 +2467,20 @@ test("a round with more findings than one review holds posts the most urgent as 
     "**Finding 27**",
   ]);
   expect(commented.at(-1)).toBe("**Finding 30**");
-  expect(reviews[0]?.body).toContain(
-    "10 findings did not fit in the review's 20 comments: they are in the summary comment.",
+  expect(reviews[0]?.body).toBe(MARKED_1);
+  // The block lists the most urgent first, as many as the description holds: the blocking five lead.
+  const block = blockOn(github);
+  expect(block).toStartWith(`### ${wordmark(26)} · 30 things to fix\n\nRound 1 · `);
+  expect(block.split("\n\n")[2]).toStartWith("- **Blocking** · Finding 26 · ");
+  expect(block).toContain(
+    "- **Should fix** · Finding 16 · `src/queue/send.ts` line 43\n  Not in the diff: line 00001",
   );
-  const summary = comments[0]?.body ?? "";
-  expect(summary).toContain("**Not on a line**\n- F16 · Should fix ·");
-  expect(summary).toContain("No comment on the line: the review holds 20 comments at most.");
-  expect(summary).toEndWith(CUT);
-  expect(utf8Bytes(summary)).toBeLessThanOrEqual(COMMENT_MAX_BYTES);
+  expect(characterCount(description)).toBeLessThanOrEqual(DESCRIPTION_MAX_CHARACTERS);
   // The result holds as many whole findings as fit, each placed where the round put it.
   const past = new Set(Array.from({ length: 10 }, (_, i) => `F${i + 16}`));
   expect(published.result.truncated).toBe(true);
   for (const f of published.result.findings)
-    expect([f.id, f.placement]).toEqual([f.id, past.has(f.id) ? "summary" : "inline"]);
+    expect([f.id, f.placement]).toEqual([f.id, past.has(f.id) ? "status" : "inline"]);
   expect(completed(github.posts).conclusion).toBe("neutral");
 });
 
@@ -2266,13 +2490,11 @@ const shouldFix = (n: number) =>
     finding(`F${i + 1}`, { severity: "should_fix", title: `Finding ${i + 1}`, line: 40 + (i % 6) }),
   );
 
-/** The ids listed in the summary's section `heading`, in order. */
-function listed(summary: string, heading: string): string[] {
-  const section = summary.split(`**${heading}**\n`)[1]?.split("\n\n**")[0] ?? "";
-  return [...section.matchAll(/^- (F\d+) ·/gm)].map((m) => m[1] ?? "");
-}
+/** The titles the status block lists, in order. */
+const listed = (block: string): string[] =>
+  [...block.matchAll(/^- \*\*[^*]+\*\* · ([^·]+) · /gm)].map((m) => m[1] ?? "");
 
-test("the summary lists every finding without a comment in one list, most urgent first, so a cut drops the least urgent", async () => {
+test("the status block lists the most urgent first, so a block too large for the description drops the least urgent", async () => {
   const big = longBody(1_000);
   // 21 to fix on lines the diff shows (F21 past the review's comments), two outside it, the consider one first.
   const findings = [
@@ -2288,14 +2510,13 @@ test("the summary lists every finding without a comment in one list, most urgent
   ];
   const github = host();
   await createPublisher({ writer: github, person }).publish(posting(findings));
-  const summary = github.view(change).comments[0]?.body ?? "";
-  // About 30 kB each: the blocking one whole, the one that should be fixed cut, the one to consider left out.
-  expect(listed(summary, "Not on a line")).toEqual(["F23", "F21"]);
-  expect(summary).toEndWith(CUT);
-  expect(summary).not.toContain("F22 ·");
+  // About 34,000 characters each: the blocking one and the short ones fit, the long one to fix and the one to
+  // consider, last, are left out.
+  expect(listed(blockOn(github))).toEqual(["Outside, blocking", ...shouldFix(20).map((f) => f.title)]);
+  expect(characterCount(github.view(change).description)).toBeLessThanOrEqual(DESCRIPTION_MAX_CHARACTERS);
 });
 
-test("a finding past the review's comments is recorded as having none, and round 2 keeps it in the summary", async () => {
+test("a finding past the review's comments is recorded as having none, and round 2 lists it as not in the diff", async () => {
   const github = host();
   const outbox = memoryOutbox();
   await createPublisher({ writer: github, person }).publish(posting(shouldFix(21)), outbox);
@@ -2308,16 +2529,16 @@ test("a finding past the review's comments is recorded as having none, and round
     ...round2,
     reconciled: { ...posting(ledger).reconciled, raised: [], post: [] },
   });
-  const summary = github.view(change).comments[0]?.body ?? "";
-  expect(listed(summary, "To fix")).toEqual(shouldFix(20).map((f) => f.id));
-  expect(listed(summary, "Not on a line")).toEqual(["F21"]);
-  expect(summary).toContain("No comment on the line: none was posted for it.");
+  const block = blockOn(github);
+  expect(listed(block)).toEqual(shouldFix(21).map((f) => f.title));
+  expect(block.split("Not in the diff:")).toHaveLength(2);
+  expect(block).toContain("· Finding 21 · `src/queue/send.ts` line 42\n  Not in the diff:");
   const f21 = published.result.findings.find((f) => f.id === "F21");
-  expect([f21?.placement, f21?.placed]).toEqual(["summary", null]);
+  expect([f21?.placement, f21?.placed]).toEqual(["status", null]);
 });
 
 test("a round over the review's comments that GitHub refuses lists each finding it posts as refused, the withheld one off it", async () => {
-  // Line 43 is one GitHub can't place: the first review is refused, and sent again with no comment.
+  // Line 43 is one GitHub can't place: the review is refused, and none is sent.
   const many = shouldFix(22);
   const withheld = finding("F23", { severity: "consider", title: "Withheld", posted: false });
   const github = narrowHost();
@@ -2334,24 +2555,16 @@ test("a round over the review's comments that GitHub refuses lists each finding 
     },
     outbox,
   );
-  const { reviews, comments } = github.view(change);
-  expect(reviews).toHaveLength(1);
-  expect(reviews[0]?.comments).toEqual([]);
-  expect(reviews[0]?.body).toContain(
-    "GitHub would not place this round's comments on their lines: the findings are in the summary comment.",
-  );
-  expect(reviews[0]?.body).not.toContain("did not fit");
-  const summary = comments[0]?.body ?? "";
-  expect(listed(summary, "Not on a line")).toEqual(many.map((f) => f.id));
-  expect(summary.split("No comment on the line: GitHub would not place this round's comments.")).toHaveLength(
-    23,
-  );
-  expect(summary).not.toContain("Withheld");
+  expect(github.view(change).reviews).toEqual([]);
+  const block = blockOn(github);
+  expect(listed(block)).toEqual(many.map((f) => f.title));
+  expect(block.split("Not in the diff:")).toHaveLength(23);
+  expect(block).not.toContain("Withheld");
   expect(published.result.findings.map((f) => [f.id, f.placement])).toEqual([
-    ...many.map((f) => [f.id, "summary"]),
+    ...many.map((f) => [f.id, "status"]),
     ["F23", "check_only"],
   ]);
-  expect(outbox.commented).toEqual([]);
+  expect(outbox.commented).toBeNull();
 });
 
 // The output filter (ADR 0056, SR-08): what an engine or a person wrote is posted harmless, everywhere it shows.
@@ -2367,7 +2580,7 @@ const HOSTILE = finding("F1", {
   title: `Leaks ${TOKEN} to @dana`,
   body: `Ask @dana.\u{202E} ![x](https://evil.example/p.png) <img src="https://evil.example/q.png"> <details>\n\n${SUGGESTION}`,
 });
-/** In the summary: its file is not in the diff. */
+/** In the status block: its file is not in the diff. */
 const HOSTILE_ELSEWHERE = finding("F2", {
   severity: "should_fix",
   file: "src/http/client.ts",
@@ -2380,19 +2593,20 @@ const HOSTILE_BODY = `Ask @${Z}dana. !${Z}[x](https://evil.example/p.png) <${Z}i
 const ELSEWHERE_TITLE = `Ping @${Z}lee <${Z}b>here<${Z}/b>`;
 const ELSEWHERE_BODY = `See !${Z}[](https://evil.example/r.png), @${Z}lee.`;
 
-test("a hostile finding's comment, summary entry, check and result are all filtered; its suggestion stays as written", async () => {
+test("a hostile finding's comment, status block entry, check and result are all filtered; its suggestion stays as written", async () => {
   const github = host();
   await createPublisher({ writer: github, person, secretsRemoved: tokenRemoved }).publish(
     posting([HOSTILE, HOSTILE_ELSEWHERE]),
   );
-  const { reviews, comments } = github.view(change);
+  const { reviews } = github.view(change);
   expect(reviews[0]?.comments[0]?.body).toStartWith(
-    [`Lookover · **${HOSTILE_TITLE}** · Blocking`, HOSTILE_BODY, SUGGESTION].join("\n\n"),
+    [`${MARK} · Blocking`, `**${HOSTILE_TITLE}**`, HOSTILE_BODY, SUGGESTION].join("\n\n"),
   );
-  const summary = comments[0]?.body ?? "";
-  expect(summary).toContain(`- F1 · Blocking · \`src/queue/send.ts\` line 43 · ${HOSTILE_TITLE}`);
-  expect(summary).toContain(`- F2 · Should fix · \`src/http/client.ts\` line 12 · ${ELSEWHERE_TITLE}`);
-  expect(summary).toContain(ELSEWHERE_BODY);
+  // Its own wordmark aside: the block's words are filtered.
+  const summary = blockOn(github).replace(wordmark(26), "");
+  expect(summary).toContain(`- **Blocking** · ${HOSTILE_TITLE} · \`src/queue/send.ts\` line 43`);
+  expect(summary).toContain(`- **Should fix** · ${ELSEWHERE_TITLE} · \`src/http/client.ts\` line 12`);
+  expect(summary).toContain(`Not in the diff: s${ELSEWHERE_BODY.slice(1)}`);
   const { output } = completed(github.posts);
   for (const text of [summary, output.title, output.summary, output.text]) {
     expect(text).not.toContain(TOKEN);
@@ -2437,10 +2651,8 @@ test("a claim's text, a reply's reason and a reason for closing are filtered too
   );
   const reply = github.posts.find((p) => p.kind === "reply");
   expect(reply?.kind === "reply" && reply.body).toStartWith(
-    `Kept.\n\nStill loops: !${Z}[x](https://evil.example/p.png)`,
+    `${MARK} · Kept\n\nStill loops: !${Z}[x](https://evil.example/p.png)`,
   );
-  const summary = github.view(change).comments[0]?.body ?? "";
-  expect(summary).toContain(`Kept: Still loops: !${Z}[x](https://evil.example/p.png)`);
   const read = readResult(completed(github.posts).output.text);
   expect(read?.findings.find((f) => f.id === "F1")).toMatchObject({
     claim: { text: `Won't fix, ask @${Z}dana: [redacted]` },
@@ -2464,18 +2676,17 @@ test("a reply's reason is filtered after it is trimmed: an indented block the tr
   );
   const reply = github.posts.find((p) => p.kind === "reply");
   expect(reply?.kind === "reply" && reply.body).toStartWith(
-    `Kept.\n\n!${Z}[x](https://evil.example/p.png) \`@${Z}dana\``,
+    `${MARK} · Kept\n\n!${Z}[x](https://evil.example/p.png) \`@${Z}dana\``,
   );
 });
 
 test("an engine's text that ends inside a fence has it closed, so Lookover's own lines and marker stay out of the code", async () => {
   const github = host();
   const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
-  const rule = { id: "7c1e0a9d3b2f4e58", file: "REVIEW.md" as const, line: 12 };
-  const open = finding("F1", { category: "repo_rule", rule, body: "Loops:\n\n  ~~~~ts\n  send(@dana);" });
+  const open = finding("F1", { body: "Loops:\n\n  ~~~~ts\n  send(@dana);" });
   await publisher.publish(posting([open]));
   expect(github.view(change).reviews[0]?.comments[0]?.body).toStartWith(
-    `Lookover · **Retry loop never stops on 4xx** · Blocking\n\nLoops:\n\n  ~~~~ts\n  send(@dana);\n  ~~~~\n\nRule: REVIEW.md, line 12.\n\n${FINDING_MARKER}`,
+    `${MARK} · Blocking\n\n**Retry loop never stops on 4xx**\n\nLoops:\n\n  ~~~~ts\n  send(@dana);\n  ~~~~\n\n${FINDING_MARKER}`,
   );
   await publisher.publish(
     await rooted(github, {
@@ -2487,10 +2698,12 @@ test("an engine's text that ends inside a fence has it closed, so Lookover's own
     }),
   );
   const reply = github.posts.find((p) => p.kind === "reply");
-  expect(reply?.kind === "reply" && reply.body).toStartWith("Kept.\n\nStill:\n```\n@dana\n```\n\n");
+  expect(reply?.kind === "reply" && reply.body).toStartWith(
+    `${MARK} · Kept\n\nStill:\n\`\`\`\n@dana\n\`\`\`\n\n`,
+  );
 });
 
-test("a dismissal's summary and check show the round's findings filtered", async () => {
+test("a dismissal's status block and check show the round's findings filtered", async () => {
   const github = host();
   const publisher = createPublisher({
     writer: github,
@@ -2507,8 +2720,8 @@ test("a dismissal's summary and check show the round's findings filtered", async
       reconciled: { ...dismissedRound.reconciled, findings: [dismissed, HOSTILE_ELSEWHERE] },
     },
   });
-  const summary = github.view(change).comments.find((c) => c.body.includes(SUMMARY_MARKER))?.body ?? "";
-  expect(summary).toContain(`- F1 · ${HOSTILE_TITLE} · dismissed by the owner`);
+  expect(blockOn(github)).toContain(`· 1 withdrawn\n\n- **Should fix** · ${ELSEWHERE_TITLE} · `);
+  expect(blockOn(github)).not.toContain(HOSTILE_TITLE);
   const read = readResult(completed(github.posts).output.text);
   // Open first: the dismissed one after.
   expect(read?.findings.map((f) => f.title)).toEqual([ELSEWHERE_TITLE, HOSTILE_TITLE]);
@@ -2543,13 +2756,13 @@ test("text put on one line is filtered as that line: a fence the filter left as 
       }),
     ]),
   );
-  const { reviews, comments } = github.view(change);
+  const { reviews } = github.view(change);
   const fence = `Fence ${Z}~~~ @${Z}kim ${Z}~~~`;
-  expect(reviews[0]?.comments[0]?.body).toStartWith(`Lookover · **${fence}** · Blocking`);
-  const summary = comments[0]?.body ?? "";
-  expect(summary).toContain(`- F1 · Blocking · \`src/queue/send.ts\` line 43 · ${fence}\n`);
-  expect(summary).toContain(
-    `- F2 · Should fix · \`src/http/client.ts\` line 12 · Ping @${Z}lee\n  Text. @${Z}dana ${Z}\`\`\` @${Z}ana\n`,
+  expect(reviews[0]?.comments[0]?.body).toStartWith(`${MARK} · Blocking\n\n**${fence}**\n\n`);
+  const block = blockOn(github);
+  expect(block).toContain(`- **Blocking** · ${fence} · \`src/queue/send.ts\` line 43\n`);
+  expect(block).toContain(
+    `- **Should fix** · Ping @${Z}lee · \`src/http/client.ts\` line 12\n  Not in the diff: text. @${Z}dana ${Z}\`\`\` @${Z}ana\n`,
   );
   expect(completed(github.posts).output.summary).toContain(`line 12 · Ping @${Z}lee`);
 });
@@ -2562,11 +2775,11 @@ test("a secret in a finding's path is removed wherever the path shows; its comme
   await createPublisher({ writer: github, person, secretsRemoved }).publish(
     posting([finding("F1", {}), unmatched]),
   );
-  const { reviews, comments } = github.view(change);
+  const { reviews } = github.view(change);
   // Placed on the path as the diff names it.
   expect(reviews[0]?.comments.map((c) => c.path)).toEqual(["src/queue/send.ts"]);
   expect(JSON.stringify(github.posts)).not.toContain(TOKEN);
-  const summary = comments[0]?.body ?? "";
+  const summary = blockOn(github);
   expect(summary).toContain("`src/[redacted]/client.ts` line 12");
   expect(summary).toContain("`src/[redacted]/send.ts` line 43");
   const { output } = completed(github.posts);
@@ -2579,7 +2792,7 @@ test("a secret in a finding's path is removed wherever the path shows; its comme
   ]);
 });
 
-test("a line keeps a code span holding a pipe; a summary entry's body opens no table and no fence", async () => {
+test("a line keeps a code span holding a pipe; a status block entry's body opens no table and no fence", async () => {
   const github = host();
   const outside = { severity: "should_fix" as const, file: "src/http/client.ts", line: 12 };
   await createPublisher({ writer: github, person }).publish(
@@ -2589,61 +2802,14 @@ test("a line keeps a code span holding a pipe; a summary entry's body opens no t
       finding("F3", { ...outside, line: 13, body: "~~~ ts" }),
     ]),
   );
-  const summary = github.view(change).comments[0]?.body ?? "";
-  expect(summary).toContain("line 43 · Returns `string | null`\n");
-  expect(summary).toContain("line 12 · a | b\n  \\--- | :---:\n");
-  expect(summary).toContain(`line 13 · Retry loop never stops on 4xx\n  ${Z}~~~ ts\n`);
-});
-
-test("a reply's reason and a reason for closing, on one line in the summary, are filtered as that line", async () => {
-  const github = host();
-  const publisher = createPublisher({
-    writer: github,
-    person,
-    threads: (c) => github.threads(c),
-    secretsRemoved: tokenRemoved,
-  });
-  await publisher.publish(round1);
-  const deferred: Finding = { ...F2_ACKNOWLEDGED, claim: null, closedWhy: "Later.\n\n    @dana" };
-  await publisher.publish(
-    await rooted(github, {
-      ...answering,
-      reconciled: {
-        ...answering.reconciled,
-        findings: [F1_KEPT, deferred, F3],
-        replies: [{ findingId: F1.id, kind: "kept", why: "Still loops:\n```\n@lee" }],
-      },
-    }),
+  const block = blockOn(github);
+  expect(block).toContain("- **Blocking** · Returns `string | null` · `src/queue/send.ts` line 43\n");
+  expect(block).toContain(
+    "- **Should fix** · a | b · `src/http/client.ts` line 12\n  Not in the diff: \\--- | :---:\n",
   );
-  const summary = github.view(change).comments[0]?.body ?? "";
-  expect(summary).toContain(`Kept: Still loops: ${Z}\`\`\` @${Z}lee`);
-  expect(summary).toContain(`acknowledged: Later. @${Z}dana`);
-});
-
-test("a dismissal's reason is on one line in the summary, filtered as that line", async () => {
-  const github = host();
-  const publisher = createPublisher({
-    writer: github,
-    person,
-    threads: (c) => github.threads(c),
-    secretsRemoved: tokenRemoved,
-  });
-  const { checkId } = await publisher.publish(posting([HOSTILE, HOSTILE_ELSEWHERE]));
-  const dismissed = {
-    ...HOSTILE,
-    status: "dismissed" as const,
-    closedIn: 1,
-    closedWhy: "Fine.\n\n    @dana",
-  };
-  await publisher.dismiss({
-    ...dismissal(checkId),
-    round: {
-      ...dismissedRound,
-      reconciled: { ...dismissedRound.reconciled, findings: [dismissed, HOSTILE_ELSEWHERE] },
-    },
-  });
-  const summary = github.view(change).comments.find((c) => c.body.includes(SUMMARY_MARKER))?.body ?? "";
-  expect(summary).toContain(`dismissed by the owner: Fine. @${Z}dana\n`);
+  expect(block).toContain(
+    `- **Should fix** · Retry loop never stops on 4xx · \`src/http/client.ts\` line 13\n  Not in the diff: ${Z}~~~ ts\n`,
+  );
 });
 
 test("a text cut to fit is filtered once cut, and fits with the filter's breaks", async () => {
@@ -2667,7 +2833,7 @@ test("a text cut to fit is filtered once cut, and fits with the filter's breaks"
   );
   const reply = github.posts.find((p) => p.kind === "reply");
   const body = reply?.kind === "reply" ? reply.body : "";
-  expect(body).toStartWith(`Kept.\n\n\`@${Z}dana @${Z}x @${Z}x`);
+  expect(body).toStartWith(`${MARK} · Kept\n\n\`@${Z}dana @${Z}x @${Z}x`);
   expect(body).not.toMatch(/@[a-z]/);
   expect(utf8Bytes(body)).toBeLessThanOrEqual(COMMENT_MAX_BYTES);
 });

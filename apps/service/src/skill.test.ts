@@ -69,7 +69,8 @@ test("a binary with a space in its path: every spot filled with its command, Pow
   // The rest as written: the template's own `lookover` words untouched.
   expect(inOrder(text, fixedParts())).toBe(true);
   expect(text).toContain("/lookover review");
-  expect(text).toContain("LOOKOVER_APP");
+  expect(text).toContain("APP=lookover-dev");
+  expect(text).not.toMatch(/LOOKOVER_APP|--app/);
   // No bare `lookover <verb>` for an agent to copy: it would run whatever `lookover` its PATH finds, or nothing.
   expect(text).not.toMatch(/`lookover (wait|feedback|reply|status|open|start|stop)\b/);
   expect(text.startsWith("---\nname: lookover-review-loop\ndescription: Get a pull request through")).toBe(

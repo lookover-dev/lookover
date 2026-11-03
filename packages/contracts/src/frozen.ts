@@ -4,8 +4,26 @@
 /** The name of the check on every reviewed commit. */
 export const CHECK_NAME = "Lookover";
 
-/** The marker that finds the one summary comment per change, created once and edited every round (ADR 0023). */
-export const SUMMARY_MARKER = "<!-- lookover:summary -->";
+/**
+ * Where the status block Lookover owns in a pull request's description opens (ADR 0074): the block runs to the first
+ * `STATUS_END_MARKER` that has one of these before it, from the last of these before that end (`spliceStatus`),
+ * after the author's text, and is rewritten whenever the status changes. Everything outside the two is the author's,
+ * kept byte for byte, an opening marker they left with no end included.
+ */
+export const STATUS_MARKER = "<!-- lookover:status -->";
+
+/** Where the status block ends (ADR 0074): the first of these with a `STATUS_MARKER` before it. */
+export const STATUS_END_MARKER = "<!-- /lookover:status -->";
+
+/**
+ * The wordmark every post on GitHub opens with (ADR 0074), drawn for the reader's theme: `light` on a light page,
+ * `dark` on a dark one. What Lookover posted keeps pointing at them, so the site serves both forever and its check
+ * fails without them.
+ */
+export const WORDMARK_URLS = {
+  light: "https://lookover.dev/brand/lookover-wordmark.svg",
+  dark: "https://lookover.dev/brand/lookover-wordmark-on-dark.svg",
+} as const;
 
 /** The public result format, in the check's output. Inside `v1`, changes are additive only. */
 export const REVIEW_RESULT_SCHEMA = "lookover.review-result/v1";

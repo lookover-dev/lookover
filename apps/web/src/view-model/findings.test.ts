@@ -45,6 +45,7 @@ function finding(id: string, status: FindingStatus, extra: Partial<Finding> = {}
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: null,
     status,
     posted: true,
     commented: false,
@@ -304,15 +305,15 @@ test('"This finding is wrong" is offered on any posted finding still unsettled, 
     hint: "keep it out of future rounds",
     choice: { kind: "wrong", changeId: changeId("sam/app#1"), findingId: findingId("F1") },
     effect:
-      "The finding is dismissed here and on GitHub: Lookover says so on its thread, hides its comment, and updates the summary and the check. It won't be raised again on this pull request.",
+      "The finding is dismissed here and on GitHub: Lookover says so on its thread, hides its comment, and updates the pull request's description and the check. It won't be raised again on this pull request.",
     saved: "Marked as wrong. The finding is dismissed.",
   });
-  // In the summary only, it has no thread: the summary and the check say it.
-  const summaryOnly = noiseChoices(on, finding("F2", "escalated", { commented: false }));
-  expect(summaryOnly.map((c) => [c.choice.kind, c.effect])).toEqual([
+  // In the description only, it has no thread: the description and the check say it.
+  const descriptionOnly = noiseChoices(on, finding("F2", "escalated", { commented: false }));
+  expect(descriptionOnly.map((c) => [c.choice.kind, c.effect])).toEqual([
     [
       "wrong",
-      "The finding is dismissed here and on GitHub: Lookover updates the summary and the check. It won't be raised again on this pull request.",
+      "The finding is dismissed here and on GitHub: Lookover updates the pull request's description and the check. It won't be raised again on this pull request.",
     ],
   ]);
   // A commit pushed since the latest round: its check is on an older commit, and stays as it is.
@@ -320,8 +321,8 @@ test('"This finding is wrong" is offered on any posted finding still unsettled, 
   expect(
     [inline, finding("F2", "escalated", { commented: false })].map((f) => noiseChoices(pushed, f)[0]?.effect),
   ).toEqual([
-    "The finding is dismissed here and on GitHub: Lookover says so on its thread, hides its comment, and updates the summary. The check stays: it is on an older commit. It won't be raised again on this pull request.",
-    "The finding is dismissed here and on GitHub: Lookover updates the summary. The check stays: it is on an older commit. It won't be raised again on this pull request.",
+    "The finding is dismissed here and on GitHub: Lookover says so on its thread, hides its comment, and updates the pull request's description. The check stays: it is on an older commit. It won't be raised again on this pull request.",
+    "The finding is dismissed here and on GitHub: Lookover updates the pull request's description. The check stays: it is on an older commit. It won't be raised again on this pull request.",
   ]);
   // Kept off the pull request, or settled: nothing on GitHub to dismiss.
   expect(noiseChoices(on, finding("F3", "open", { posted: false }))).toEqual([]);

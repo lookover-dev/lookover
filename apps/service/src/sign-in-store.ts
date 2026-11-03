@@ -1,12 +1,13 @@
 // The sign-in store (ADR 0066, "The sign-in is kept like the key"): the person signed in to the shared App, in a data
 // folder's `github/` folder. `sign-in.json` holds the record (the person, as `GET /user` named them, and where their
-// tokens are); the token, the refresh token and their expiries are sealed as the App's key is (`sealing.ts`, the one
-// sealing), sealed to the person's id: under a data key in the keychain, `lookover-dev-…` for a folder under `.dev`,
-// or in a user-only `sign-in.<24 hex>.token`, named after a random id of its own, when the keychain can't. A new sign-in replaces the last, whoever it names;
-// a renewed one is a new sign-in to the store. A sign-in that no longer opens reads as `lost`, naming the person.
-// One store per folder in one process: its calls take turns, so a renewal, written only in place of the sign-in it
-// renews, never puts back one a new sign-in replaced while GitHub renewed it. Its folder is the data folder, unless the service is
-// given another (`bun run live` keeps one sign-in in the live data folder for every run, ADR 0066).
+// tokens are); the token, the refresh token and their expiries are sealed by `sealing.ts`, sealed to the person's id:
+// under a data key in the keychain, `lookover-dev-…` for a folder under `.dev`, or in a user-only
+// `sign-in.<24 hex>.token`, named after a random id of its own, when the keychain can't. A new sign-in replaces the
+// last, whoever it names; a renewed one is a new sign-in to the store. A sign-in that no longer opens reads as `lost`,
+// naming the person. One store per folder in one process: its calls take turns, so a renewal, written only in place
+// of the sign-in it renews, never puts back one a new sign-in replaced while GitHub renewed it. Its folder is the data
+// folder, unless the service is given another (`bun run live` keeps one sign-in in the live data folder for every
+// run, ADR 0066).
 // It must never know: GitHub, or what a sign-in lets Lookover do; and it never logs or sends a token.
 import { join } from "node:path";
 import type { HostLogin, KeyProtection, SignIn, SignInKeeper } from "@lookover/contracts";
@@ -73,6 +74,16 @@ function parsed(bytes: Buffer | null): SignInRecord | null {
   if (bytes === null) return null;
   const read = RECORD.safeParse(jsonOrNull(bytes.toString("utf8")));
   return read.success ? read.data : null;
+}
+
+/**
+ * The keychain entry the folder `home`'s sign-in is kept under now, as its record names it; null when it keeps none,
+ * keeps it in a file (the keychain couldn't), or has a record the store didn't write. Read, never opened: `bun run
+ * live`'s keychain sweep spares it.
+ */
+export async function signInEntryOf(home: string): Promise<string | null> {
+  const kept = parsed(await bytesOf(join(home, RECORD_FILE)));
+  return kept?.key.kept === "keychain" ? kept.key.entry : null;
 }
 
 /**

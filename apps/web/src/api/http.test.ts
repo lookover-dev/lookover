@@ -638,7 +638,7 @@ const SERVICE = resolve(import.meta.dir, "../../../service/src/main.ts");
 // given longer than the starts it waits for, or Bun's 5 s would cut a slow start short.
 const START_LIMIT_MS = 10_000;
 /** The events S10's seed sends: the default scenario's, which every start plays. */
-const S10_SEEDED = 68;
+const S10_SEEDED = 66;
 const ONE_START_MS = START_LIMIT_MS + 5_000;
 const TWO_STARTS_MS = 2 * START_LIMIT_MS + 5_000;
 
@@ -808,9 +808,9 @@ test(
     const off = api.subscribe((e) => seen.push(e));
     cleanups.push(off);
     const state = await api.snapshot();
-    // The demo wiring (ADR 0046): S10's seed, a quiet day, played before the first request: the start, the
-    // repository, six pull requests opened and reviewed or skipped, main's rules read and counted, each round's
-    // outbox as it posted, sixty-eight events.
+    // The demo wiring (ADR 0046): S10's seed, a quiet day, played before the first request: the start, the account
+    // the sign-in reaches, the repository, six pull requests opened and reviewed or skipped, main's rules read and
+    // counted, each round's outbox as it posted, sixty-six events.
     expect(state.seq).toBe(S10_SEEDED);
     expect(state.repos.map((r) => r.id)).toEqual([repositoryId("sasensi/lookover-sandbox")]);
     expect(Object.keys(state.changes).sort()).toEqual([
@@ -882,11 +882,11 @@ test(
   async () => {
     const { demo, withSession } = await sharedDemo();
 
-    // Events 1 to 68 happened; the service keeps 67 and 68, the round of the seed's last review and the rules it
-    // counted. A tab at 66 missed two.
+    // Events 1 to 66 happened; the service keeps 65 and 66, the round of the seed's last review and the rules it
+    // counted. A tab at 64 missed two.
     const recent = new HttpApi({
       base: demo.origin,
-      fetch: snapshotAt(withSession, 66),
+      fetch: snapshotAt(withSession, 64),
       source: streamSource(withSession),
       visibility: new FakeVisibility(),
     });
@@ -896,14 +896,14 @@ test(
     await until(() => missed.length >= 2);
     await Bun.sleep(100);
     expect(events(missed)).toEqual([
-      [67, "round.finished"],
-      [68, "rules.changed"],
+      [65, "round.finished"],
+      [66, "rules.changed"],
     ]);
 
-    // A tab at 65 missed one the service no longer holds: it loads the snapshot again.
+    // A tab at 63 missed one the service no longer holds: it loads the snapshot again.
     const old = new HttpApi({
       base: demo.origin,
-      fetch: snapshotAt(withSession, 65),
+      fetch: snapshotAt(withSession, 63),
       source: streamSource(withSession),
       visibility: new FakeVisibility(),
     });
@@ -912,7 +912,7 @@ test(
     cleanups.push(old.subscribe((e) => reloaded.push(e)));
     await until(() => reloaded.length >= 1);
     expect(reloaded).toHaveLength(1);
-    expect(reloaded[0]).toMatchObject({ type: "state.replaced", seq: 68 });
+    expect(reloaded[0]).toMatchObject({ type: "state.replaced", seq: 66 });
   },
   ONE_START_MS,
 );
@@ -932,8 +932,8 @@ test(
     cleanups.push(api.subscribe((e) => seen.push(e)));
     const heard: LogMessage[] = [];
     cleanups.push(api.subscribeLogs((m) => heard.push(m)));
-    expect((await api.snapshot()).seq).toBe(68);
-    // The snapshot swapped the first stream for one asking after 68: it follows the log once its answer came. One
+    expect((await api.snapshot()).seq).toBe(66);
+    // The snapshot swapped the first stream for one asking after 66: it follows the log once its answer came. One
     // asked while the scenario loads waits for the load, and so misses the new room's seed lines (#313).
     const connected = () => heard.filter((m) => m.type === "connected").length;
     await until(() => connected() >= 2);
@@ -942,8 +942,8 @@ test(
     const drawer = new DemoApi({ base: demo.origin, fetch: withSession });
     await drawer.send({ type: "demo.load", id: "S10" });
     await until(() => seen.length >= 1);
-    // S10 again in a new room: its sixty-eight events and the load's clock event, numbered on from 68.
-    expect(seen.map((e) => [e.seq, e.type])).toEqual([[137, "state.replaced"]]);
+    // S10 again in a new room: its sixty-six events and the load's clock event, numbered on from 66.
+    expect(seen.map((e) => [e.seq, e.type])).toEqual([[133, "state.replaced"]]);
     // The new room's seed wrote to the same log file, and its lines came live, on no event.
     const opened = (m: LogMessage) =>
       m.type === "line" && / sasensi\/lookover-sandbox#135 opened by /.test(m.line);
@@ -955,8 +955,8 @@ test(
     await drawer.send({ type: "demo.advance", ms: 60_000 });
     await until(() => seen.length >= 2);
     expect(events(seen)).toEqual([
-      [137, "state.replaced"],
-      [138, "clock"],
+      [133, "state.replaced"],
+      [134, "clock"],
     ]);
   },
   ONE_START_MS,
@@ -992,7 +992,7 @@ test(
     const after = seen[0];
     if (after?.type !== "state.replaced") throw new Error(`Expected a replaced state, got ${after?.type}`);
     // The restart plays the scenario again in a new room, numbered on from the first one's last event (ADR
-    // 0046), so the tab reloads rather than mixing two stories; what the start fixed moved with it. S10's sixty-eight
+    // 0046), so the tab reloads rather than mixing two stories; what the start fixed moved with it. S10's sixty-six
     // events, on from the last number the tab had.
     expect(after.seq).toBe(before.seq + S10_SEEDED);
     expect(after.state.service.since).toBeGreaterThanOrEqual(before.service.since);

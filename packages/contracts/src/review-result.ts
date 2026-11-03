@@ -87,7 +87,7 @@ const resolutionKind = enumOf<Exclude<FindingStatus, "open"> | "kept">()([
   "obsolete",
   "dismissed",
 ]);
-const placement = z.enum(["inline", "summary", "check_only"]);
+const placement = z.enum(["inline", "status", "check_only"]);
 const engine = enumOf<EngineId>()(["claude", "codex"]);
 
 /**
@@ -138,7 +138,7 @@ const finding = z
      */
     fingerprints: z.object({ location: z.string(), meaning: z.string() }),
     status: findingStatus,
-    /** On the pull request (inline or in the summary), or kept off it by strictness or the later-round rule. */
+    /** On the pull request (inline, or in the status only), or kept off it by strictness or the later-round rule. */
     posted: z.boolean(),
     placement,
     /** Contracts' `ActionBy`, or `reviewer`, which no round asks for before the reviewer reads the threads. */
@@ -175,6 +175,7 @@ const finding = z
       })
       .nullable()
       .optional(),
+    /** The finder's replacement for `location`'s lines; null when it offered none. */
     suggestion: z.object({ replacement: z.string() }).nullable().optional(),
     /** The repository's rule it follows (ADR 0048): its file as `source`, and its first line there. */
     rule: z
@@ -222,7 +223,7 @@ const finding = z
   })
   .refine((f) => f.posted === (f.placement !== "check_only"), {
     path: ["posted"],
-    message: "A finding is posted exactly when its placement is inline or summary",
+    message: "A finding is posted exactly when its placement is inline or status",
   })
   .refine((f) => f.placed == null || f.placement === "inline", {
     path: ["placed"],

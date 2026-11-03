@@ -14,6 +14,7 @@ const AT = Date.UTC(2026, 9, 7, 12, 0, 0);
 const OPTIONS: FakeGitHostOptions = {
   repo,
   bot: { id: 9001, login: "lookover-demo[bot]" },
+  person: { id: 1, login: "sasensi" },
   changes: [
     {
       number: 42,

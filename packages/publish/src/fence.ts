@@ -22,5 +22,16 @@ export function closes(line: string, fence: Fence): boolean {
   return run?.startsWith(fence.char) === true && run.length >= fence.length;
 }
 
+/**
+ * `code` in a fenced block of `info`: a fence of backticks longer than any run of them in it, three at least, so
+ * nothing in it closes the block. One line end at its end is the block's own.
+ */
+export function fenced(info: string, code: string): string {
+  const longest = Math.max(0, ...(code.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  const lines = code.replace(/\n$/, "");
+  return `${fence}${info}\n${lines === "" ? "" : `${lines}\n`}${fence}`;
+}
+
 /** The line that closes what `fence` opened. */
 export const closing = (fence: Fence): string => fence.char.repeat(fence.length);

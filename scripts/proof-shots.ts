@@ -5,8 +5,7 @@
 // Shots of the same world share one load; a shot whose act changes what the service holds (`alone`) gets a load
 // of its own. Each shot lands on the screen its path routes to, or the one it names (`screen`): a shot that lands
 // elsewhere (the session screen, the setup in place of the app, "No such pull request") fails.
-import { API, APP_FLOW, type ConnectionCause, DEMO_API, type FaultId } from "@lookover/contracts";
-import { HANDED_APP, MADE_APP, REFUSED_PAGES } from "@lookover/service";
+import { API, type ConnectionCause, DEMO_API, type FaultId } from "@lookover/contracts";
 import type { Page } from "playwright";
 
 /** What an act may ask of the demo, as the developer drawer would. */
@@ -160,108 +159,45 @@ async function setupUntilBothReady(page: Page, demo: Demo) {
     throw new Error("The AI step moved on by itself: setup waits for Continue (ADR 0058).");
 }
 
-/** S1 on to the GitHub step: both AIs ready, then Continue; the step opens on Sign in with GitHub (ADR 0066). */
-async function setupUntilWays(page: Page, demo: Demo) {
+/** S1 on to the GitHub step: both AIs ready, then Continue; the step is Sign in with GitHub (ADR 0066, ADR 0073). */
+async function setupUntilGitHub(page: Page, demo: Demo) {
   await setupUntilBothReady(page, demo);
   await button(page, "Continue").click();
-  await button(page, "Use your own App").waitFor();
-}
-
-/** The GitHub step's second way, Use your own App: today's flow, "Create it on GitHub" first. */
-async function useOwnApp(page: Page) {
-  await button(page, "Use your own App").click();
-  await link(page, "Create it on GitHub").waitFor();
-}
-
-/** S1 on to the GitHub step's own App: both AIs ready, Continue, then Use your own App. */
-async function setupUntilGitHub(page: Page, demo: Demo) {
-  await setupUntilWays(page, demo);
-  await useOwnApp(page);
+  await button(page, "Sign in with GitHub").waitFor();
 }
 
 /** S1's Sign in with GitHub asked: the code GitHub's fake gave, with Copy code and open GitHub. */
 async function setupUntilCode(page: Page, demo: Demo) {
-  await setupUntilWays(page, demo);
+  await setupUntilGitHub(page, demo);
   await button(page, "Sign in with GitHub").click();
   await link(page, "Copy code and open GitHub").waitFor();
 }
 
 /**
- * S1's "Create it on GitHub" (ADR 0053): its page opens in a new tab and posts the manifest to GitHub's fake "new App"
- * page, which makes the App at once; GitHub's redirect brings the tab back to the service, which keeps the App and
- * sends the tab on to the App's install page. The tab, there.
+ * S1 until the GitHub step is done: the code entered on GitHub's fake, the sign-in kept 5 s on, then the install's next
+ * check (4 s) finds the accounts; the step waits for Continue (ADR 0058).
  */
-async function createApp(page: Page): Promise<Page> {
-  const [tab] = await Promise.all([
-    page.context().waitForEvent("page"),
-    link(page, "Create it on GitHub").click(),
-  ]);
-  await tab.getByRole("button", { name: "Install" }).waitFor();
-  return tab;
-}
-
-/**
- * S15's "Create it on GitHub" on ledger-dev (ADR 0059): the organisation picked, its tab opened once the service took
- * it, GitHub's fake making the App on the organisation's page and sending the tab on to its install page. The tab,
- * there.
- */
-async function createOnOrganisation(page: Page): Promise<Page> {
-  await useOwnApp(page);
-  await page.getByLabel("ledger-dev").check();
-  return createApp(page);
-}
-
-/**
- * "Advanced: use an existing App" opened on the GitHub step, the App id given and a file chosen (`text` its words): the
- * App made before (on another computer, or by S15's ledger-dev admin) is `MADE_APP`, id 1, the one ledger-co's admin
- * handed over (ADR 0059) `HANDED_APP`, id 7.
- */
-async function useExistingApp(page: Page, file: string, text: string, id = 1) {
-  await button(page, "Advanced: use an existing App").click();
-  await page.getByLabel("App id").fill(String(id));
-  await page
-    .locator(".use-app input[type=file]")
-    .setInputFiles({ name: file, mimeType: "application/octet-stream", buffer: Buffer.from(text) });
-  await page.getByText(file).waitFor();
-}
-
-/**
- * S1 until the GitHub step is done: the App made, installed on GitHub's fake install page and found 4 s on; the step
- * waits for Continue (ADR 0058).
- */
-async function setupUntilInstalled(page: Page, demo: Demo) {
-  await setupUntilGitHub(page, demo);
-  const tab = await createApp(page);
-  await tab.getByRole("button", { name: "Install" }).click();
-  await tab.getByText("Lookover is installed").waitFor();
-  await tab.close();
+async function setupUntilSignedIn(page: Page, demo: Demo) {
+  await setupUntilCode(page, demo);
+  await demo.inject("sign-in-entered");
+  await demo.advance(5 * SEC);
+  await page.locator(".substep.done").first().waitFor();
   await demo.advance(4 * SEC);
   await page.getByText("GitHub is connected.").waitFor();
 }
 
 /**
- * S15 set up on ledger-dev to the end (ADR 0059): the App made and installed on the organisation, its repositories
- * taken, the owner's #148 reviewed, then Home.
+ * S1 set up to the end through the sign-in (ADR 0066, ADR 0073): signed in, ledger-api kept, #148 reviewed, then Home.
  */
-async function setUpOnOrganisation(page: Page, demo: Demo) {
-  const tab = await createOnOrganisation(page);
-  await tab.getByRole("button", { name: "Install" }).click();
-  await tab.getByText("Lookover is installed").waitFor();
-  await tab.close();
-  await demo.advance(4 * SEC);
-  await button(page, "Continue").click();
-  await page.getByText("Pick the repositories to review.").waitFor();
-  await button(page, "Continue").click();
-  await button(page, "Review this pull request").click();
-  await demo.advance(5 * MIN);
-  await button(page, "Continue").click();
+async function setUpSignedIn(page: Page, demo: Demo) {
+  await setupUntilAgent(page, demo);
   await button(page, "Go to my reviews").click();
   await page.locator('[data-screen="home"]').waitFor();
 }
 
 /** S1 on to the repositories step: the GitHub step done, then Continue. */
 async function setupUntilRepositories(page: Page, demo: Demo) {
-  await setupUntilInstalled(page, demo);
+  await setupUntilSignedIn(page, demo);
   await button(page, "Continue").click();
   await page.getByText("Pick the repositories to review.").waitFor();
 }
@@ -276,48 +212,6 @@ async function setupUntilAgent(page: Page, demo: Demo) {
   await page.getByText("Let your coding agent run the loop.").waitFor();
 }
 
-/**
- * The tab GitHub sends back once the App is installed (ADR 0058): it arrives from another site, as from github.com
- * (a page of an address no service has, answered by the browser itself), on the installed page, carrying no session
- * cookie (`SameSite=Strict`); then Back to setup, a same-site navigation that carries it, lands on setup, never on the
- * session screen. Each navigation's own request headers say so: the page's own requests carry the cookie anyway.
- */
-async function backToSetupFromGitHub(page: Page) {
-  // Plain HTTP, as the app is: from HTTPS, the browser would send no referrer to say where the tab came from.
-  const github = "http://github.example/apps/lookover/installations/new";
-  const installed = new URL(`${APP_FLOW.installed}?installation_id=1&setup_action=install`, page.url()).href;
-  const setup = new URL("/", page.url()).href;
-  const session = (await page.context().cookies(setup)).find((c) => c.sameSite === "Strict" && c.httpOnly);
-  if (session === undefined) throw new Error("The app holds no session cookie to go with the click");
-  const sent = `${session.name}=${session.value}`;
-  /**
-   * The cookie and referer headers the navigation to `url` carried, once `act` makes it, as the browser sent them
-   * (Playwright shows no `Sec-Fetch-Site`: the referer says where a navigation came from).
-   */
-  const headersOf = async (url: string, act: () => Promise<void>) => {
-    const [request] = await Promise.all([
-      page.waitForRequest((r) => r.url() === url && r.isNavigationRequest()),
-      act(),
-    ]);
-    const headers = await request.allHeaders();
-    return { cookie: headers.cookie ?? "", from: headers.referer ?? "" };
-  };
-  await page.route(github, (route) =>
-    route.fulfill({ contentType: "text/html", body: `<a href="${installed}">Back to Lookover</a>` }),
-  );
-  await page.goto(github);
-  const arrived = await headersOf(installed, () => link(page, "Back to Lookover").click());
-  await page.getByText("Lookover is installed").waitFor();
-  if (arrived.cookie.includes(sent) || arrived.from !== `${new URL(github).origin}/`)
-    throw new Error(`The installed page wasn't reached as from another site: ${JSON.stringify(arrived)}`);
-  const back = await headersOf(setup, () => link(page, "Back to setup").click());
-  if (!back.cookie.includes(sent))
-    throw new Error(`Back to setup didn't carry the session cookie: ${JSON.stringify(back)}`);
-  await page.locator(".setup").waitFor();
-  if ((await page.locator(".session").count()) > 0)
-    throw new Error("Back to setup reached the session screen");
-}
-
 /** Each way the connection can't be used (ADR 0053), as the drawer makes it happen, and the pill it shows. */
 interface CauseShot {
   /** The shots' names: `home-<name>` and `status-pill-<name>`. */
@@ -326,66 +220,23 @@ interface CauseShot {
   scenario: string;
   advance?: number;
   inject?: FaultId[];
-  /**
-   * What happens once the page is open, before the shot (the pill clicked after it): S15 set up on ledger-dev, then
-   * its fault. Such a shot is `alone`, opening on the setup.
-   */
-  setUp?: (page: Page, demo: Demo) => Promise<void>;
 }
-
-/** S15 set up on ledger-dev (ADR 0059), then `fault` made to happen: the cause in the organisation's words. */
-const onLedgerDev =
-  (fault: FaultId) =>
-  async (page: Page, demo: Demo): Promise<void> => {
-    await setUpOnOrganisation(page, demo);
-    await demo.inject(fault);
-  };
 
 /** By the cause's kind, so a new cause can't go without its shots. */
 const CAUSES = {
   // S13 a minute on: GitHub out of reach.
   unreachable: [{ name: "github-down", pill: "GitHub unreachable", scenario: "S13", advance: MIN }],
   uninstalled: [
-    { name: "app-uninstalled", pill: "GitHub App uninstalled", scenario: "S10", inject: ["app-uninstalled"] },
-    { name: "app-suspended", pill: "GitHub App suspended", scenario: "S10", inject: ["app-suspended"] },
-    // An organisation's App: its admins reinstall or unsuspend it.
-    {
-      name: "app-uninstalled-organisation",
-      pill: "GitHub App uninstalled",
-      scenario: "S15",
-      setUp: onLedgerDev("app-uninstalled"),
-    },
-    {
-      name: "app-suspended-organisation",
-      pill: "GitHub App suspended",
-      scenario: "S15",
-      setUp: onLedgerDev("app-suspended"),
-    },
+    // The shared App uninstalled from every account the sign-in reaches (ADR 0067): the connection itself down.
+    { name: "app-uninstalled", pill: "GitHub App uninstalled", scenario: "S16", inject: ["app-uninstalled"] },
+    // The shared App suspended on the person's own account: theirs to unsuspend, ledger-dev going on.
+    { name: "app-suspended", pill: "App suspended on sasensi", scenario: "S16", inject: ["app-suspended"] },
     // An owner of ledger-dev suspends the shared App there (ADR 0067): the pill names the account, the connection up.
     {
       name: "organisation-suspended",
       pill: "App suspended on ledger-dev",
       scenario: "S16",
       inject: ["organisation-suspended"],
-    },
-  ],
-  "key-refused": [
-    { name: "key-refused", pill: "GitHub key refused", scenario: "S10", inject: ["key-refused"] },
-    {
-      name: "key-refused-organisation",
-      pill: "GitHub key refused",
-      scenario: "S15",
-      setUp: onLedgerDev("key-refused"),
-    },
-  ],
-  "key-lost": [{ name: "key-lost", pill: "GitHub key lost", scenario: "S10", inject: ["key-lost"] }],
-  // The person removed from ledger-dev: reviews stop until an admin adds them back and they check again.
-  "not-a-member": [
-    {
-      name: "not-a-member",
-      pill: "GitHub membership lost",
-      scenario: "S15",
-      setUp: onLedgerDev("not-a-member"),
     },
   ],
   // Signed out of the shared App (ADR 0066): S16 signed in on two accounts, GitHub no longer renewing the sign-in.
@@ -432,32 +283,13 @@ export const SHOTS: Shot[] = [
     act: (p) => button(p, "Codex at its limit").click(),
   },
   { name: "home-waiting-engine", scenario: "S3", advance: 2 * MIN },
-  // GitHub out of reach, the App uninstalled or suspended, its key refused or lost: the band with its one fix, then
-  // the status menu.
+  // GitHub out of reach, the App suspended on an account, signed out, SSO asked: the band with its one fix, then the
+  // status menu.
   ...Object.values(CAUSES).flatMap((shots: CauseShot[]) =>
-    shots.flatMap(({ name, pill, setUp, ...world }): Shot[] => {
-      const alone = setUp === undefined ? {} : { alone: true, screen: '.setup, [data-screen="home"]' };
-      return [
-        {
-          name: `home-${name}`,
-          ...world,
-          ...alone,
-          act: async (p, demo) => {
-            await setUp?.(p, demo);
-            await button(p, pill).waitFor();
-          },
-        },
-        {
-          name: `status-pill-${name}`,
-          ...world,
-          ...alone,
-          act: async (p, demo) => {
-            await setUp?.(p, demo);
-            await button(p, pill).click();
-          },
-        },
-      ];
-    }),
+    shots.flatMap(({ name, pill, ...world }): Shot[] => [
+      { name: `home-${name}`, ...world, act: (p) => button(p, pill).waitFor() },
+      { name: `status-pill-${name}`, ...world, act: (p) => button(p, pill).click() },
+    ]),
   ),
   // Both AIs missing too: each with its one fix.
   { name: "home-service-problems", scenario: "S13", advance: 7 * MIN },
@@ -749,7 +581,8 @@ export const SHOTS: Shot[] = [
     },
   },
   // GitHub, as the fake host holds it
-  // The agent's reply under the escalated finding's comment; the summary says the owner settles it.
+  // The agent's reply under the escalated finding's comment, Lookover's "The owner decides this one" after it; the
+  // status block in the description says "Needs your look" (ADR 0074).
   {
     name: "github-escalated",
     scenario: "S4",
@@ -783,6 +616,41 @@ export const SHOTS: Shot[] = [
     path: "/github/sasensi/ledger-api/153",
     advance: MIN,
     fullPage: true,
+  },
+  // F3's file isn't in the diff: no line comment, the status block lists it "Not in the diff" with its lines.
+  { name: "github-not-in-diff", scenario: "S6", path: "/github/sasensi/ledger-api/153" },
+  // Claude signed out mid-run: the block waits on the commit, saying why and when the review starts.
+  { name: "github-waiting", scenario: "S3", path: "/github/sasensi/ledger-api/151", advance: 2 * MIN },
+  // The service stopped twice while #151 ran: the second time the job fails, and the block says so.
+  {
+    name: "github-failed",
+    scenario: "S3",
+    path: "/github/sasensi/ledger-api/151",
+    inject: ["npm-install", "npm-install"],
+  },
+  // The owner marks the page size finding as wrong in the app: its thread's root is hidden on GitHub, Lookover's
+  // reply under it.
+  {
+    name: "github-dismissed",
+    scenario: "S7",
+    path: "/github/sasensi/ledger-api/148",
+    alone: true,
+    fullPage: true,
+    act: async (p) => {
+      const github = p.url();
+      await p.goto(github.replace("/github/", "/reviews/"));
+      await tooNoisy(p, "The page size is not capped").click();
+      await p.getByRole("button", { name: /This finding is wrong/ }).click();
+      await button(p, "Save").click();
+      await p.getByText("Marked as wrong. The finding is dismissed.").waitFor();
+      await p.goto(github);
+      // `lookover wait` resolved its thread (#148 is the agent's): opened, as a reader would, to show what it holds.
+      const thread = p.locator("details.gh-thread", { hasText: "Dismissed by the owner" });
+      await thread.waitFor({ state: "attached" });
+      await thread.evaluate((el) => {
+        if (el instanceof HTMLDetailsElement) el.open = true;
+      });
+    },
   },
   // Repositories and settings
   { name: "repositories", scenario: "S9", path: "/repositories" },
@@ -862,42 +730,20 @@ export const SHOTS: Shot[] = [
       await p.getByText("Saving…", { exact: true }).waitFor();
     },
   },
-  // Settings' GitHub group on your own App: its App, Open on GitHub and the slug line, "Use an existing App" closed.
+  // Settings' GitHub group once set up through the sign-in: who is signed in, Sign in again, the accounts; nothing
+  // else (ADR 0073). It opens on the setup.
   {
     name: "settings-github",
-    scenario: "S10",
-    path: "/settings",
-    act: async (p) => {
-      await link(p, "Open on GitHub").scrollIntoViewIfNeeded();
-    },
-  },
-  // The key refused (ADR 0070): the band's Open Settings lands here, where the App's row says the problem, with Add a
-  // new key in Open on GitHub's place, and "Use an existing App" is open for the new key; the band has no button here.
-  {
-    name: "settings-github-key-refused",
-    scenario: "S10",
-    path: "/settings",
-    inject: ["key-refused"],
-    act: async (p) => {
-      await link(p, "Add a new key").waitFor();
-      await p.getByLabel("App id").scrollIntoViewIfNeeded();
-    },
-  },
-  // The key refused while Settings is open: the row says it in place, and the disclosure stays as it was, closed.
-  {
-    name: "settings-github-key-refused-later",
-    scenario: "S10",
-    path: "/settings",
+    scenario: "S1",
+    screen: '.setup, [data-screen="settings"]',
     alone: true,
     act: async (p, demo) => {
-      await link(p, "Open on GitHub").waitFor();
-      await demo.inject("key-refused");
-      await link(p, "Add a new key").scrollIntoViewIfNeeded();
-      const open = await button(p, "Use an existing App").getAttribute("aria-expanded");
-      if (open !== "false") throw new Error("“Use an existing App” opened when the key was refused later");
+      await setUpSignedIn(p, demo);
+      await link(p, "Settings").click();
+      await centre(p.locator(".signed-in-row"));
     },
   },
-  // Settings › GitHub on the shared App (ADR 0067): signed in, the accounts list setup shows, Use your own App.
+  // Settings › GitHub on the shared App (ADR 0067): signed in, the accounts list setup shows.
   { name: "settings-github-shared", scenario: "S16", path: "/settings", act: toSharedGitHub },
   // On a phone each row stacks: the account over its detail, its fix and Ask again's place beneath.
   {
@@ -1038,21 +884,10 @@ export const SHOTS: Shot[] = [
   { name: "setup-1-ai-missing", scenario: "S1", inject: ["engines-missing"], screen: ".setup" },
   // Both AIs ready: the step says so and waits for Continue; nothing moves by itself (ADR 0058).
   { name: "setup-1-ai-ready", scenario: "S1", screen: ".setup", alone: true, act: setupUntilBothReady },
-  {
-    name: "setup-2-github",
-    scenario: "S1",
-    screen: ".setup",
-    alone: true,
-    act: async (p, demo) => {
-      await setupUntilGitHub(p, demo);
-      await (await createApp(p)).close();
-      await p.locator(".substep.done").first().waitFor();
-    },
-  },
-  // Sign in with GitHub (ADR 0066): the step's start, both ways; the code GitHub gave, with Copy code and open GitHub
-  // and Cancel; a code that ran out; one GitHub didn't sign in (cancelled on its page); then who you are and the
-  // accounts reached. GitHub's fake device page, where the code is entered.
-  { name: "setup-github-ways", scenario: "S1", screen: ".setup", alone: true, act: setupUntilWays },
+  // Sign in with GitHub, the one way in (ADR 0066, ADR 0073): the step's start; the code GitHub gave, with Copy code
+  // and open GitHub and Cancel; a code that ran out; one GitHub didn't sign in (cancelled on its page); then who you
+  // are and the accounts reached. GitHub's fake device page, where the code is entered.
+  { name: "setup-2-github", scenario: "S1", screen: ".setup", alone: true, act: setupUntilGitHub },
   { name: "setup-github-sign-in-code", scenario: "S1", screen: ".setup", alone: true, act: setupUntilCode },
   {
     name: "setup-github-sign-in-expired",
@@ -1077,21 +912,8 @@ export const SHOTS: Shot[] = [
       await p.getByText("GitHub didn't sign you in.").waitFor();
     },
   },
-  {
-    name: "setup-github-signed-in",
-    scenario: "S1",
-    screen: ".setup",
-    alone: true,
-    act: async (p, demo) => {
-      await setupUntilCode(p, demo);
-      await demo.inject("sign-in-entered");
-      await demo.advance(5 * SEC);
-      // Kept on disk, then the install's next check (4 s) finds the accounts.
-      await p.locator(".substep.done").first().waitFor();
-      await demo.advance(4 * SEC);
-      await p.getByText("GitHub is connected.").waitFor();
-    },
-  },
+  // Kept on disk, then the install's next check (4 s) finds the accounts.
+  { name: "setup-github-signed-in", scenario: "S1", screen: ".setup", alone: true, act: setupUntilSignedIn },
   // Signed in, the shared App installed on none of your accounts: the accounts row looks, the list offers the installs.
   {
     name: "setup-github-signed-in-looking",
@@ -1115,8 +937,8 @@ export const SHOTS: Shot[] = [
       await tab.close();
     },
   },
-  // Signed in before the install, then signed out on GitHub (the same as a sign-in lost with the keychain): both ways
-  // again, and why.
+  // Signed in before the install, then signed out on GitHub (the same as a sign-in lost with the keychain): the step
+  // at its start again, and why.
   {
     name: "setup-github-signed-out",
     scenario: "S1",
@@ -1201,240 +1023,6 @@ export const SHOTS: Shot[] = [
     },
   },
   { name: "github-device", scenario: "S1", path: `${DEMO_API.github}/login/device`, screen: "main" },
-  // Where the App lives (ADR 0059): S1's gh signed out, so its line says `gh auth login` beside Check again, your own
-  // account the one choice; S15's lists ledger-dev, picked, under it how a member who isn't an admin gets an App.
-  {
-    name: "setup-github-gh-signed-out",
-    scenario: "S1",
-    screen: ".setup",
-    alone: true,
-    act: async (p, demo) => {
-      await setupUntilGitHub(p, demo);
-      await p.getByText("To create it on an organisation, run").waitFor();
-    },
-  },
-  // gh not on the computer: the line says to install it, then sign in.
-  {
-    name: "setup-github-gh-missing",
-    scenario: "S1",
-    inject: ["gh-uninstalled"],
-    screen: ".setup",
-    alone: true,
-    act: async (p, demo) => {
-      await setupUntilGitHub(p, demo);
-      await p.getByText("To create it on an organisation, install gh").first().waitFor();
-    },
-  },
-  {
-    name: "setup-github-organisation",
-    scenario: "S15",
-    screen: ".setup",
-    alone: true,
-    act: async (p) => {
-      await useOwnApp(p);
-      await p.getByLabel("ledger-dev").check();
-      await p.getByText("Not an admin of your organisation?").waitFor();
-    },
-  },
-  // Made on ledger-dev's pages of GitHub's fake and installed there: the step done, the choice kept on ledger-dev,
-  // disabled.
-  {
-    name: "setup-github-organisation-installed",
-    scenario: "S15",
-    screen: ".setup",
-    alone: true,
-    act: async (p, demo) => {
-      const tab = await createOnOrganisation(p);
-      await tab.getByRole("button", { name: "Install" }).click();
-      await tab.getByText("Lookover is installed").waitFor();
-      await tab.close();
-      await demo.advance(4 * SEC);
-      await p.getByText("GitHub is connected.").waitFor();
-    },
-  },
-  // The App a ledger-dev admin made before, taken by "Use an existing App" (ADR 0059): gh says the person is a member,
-  // and it is installed there, so the step is done a few seconds on.
-  {
-    name: "setup-github-organisation-existing-app",
-    scenario: "S15",
-    screen: ".setup",
-    fullPage: true,
-    alone: true,
-    act: async (p, demo) => {
-      await useOwnApp(p);
-      await useExistingApp(p, "lookover-ledger-dev.private-key.pem", MADE_APP.key, MADE_APP.id);
-      await button(p, "Use this App").click();
-      await demo.advance(4 * SEC);
-      await p.getByText("GitHub is connected.").waitFor();
-    },
-  },
-  // GitHub's fake, on the organisation: its Apps (the one an admin made before, for "Use an existing App"), and an
-  // App's install page, the organisation's repositories to choose from.
-  {
-    name: "github-organisation-apps",
-    scenario: "S15",
-    path: `${DEMO_API.github}/organizations/ledger-dev/settings/apps`,
-    screen: "main",
-  },
-  {
-    name: "github-organisation-install",
-    scenario: "S15",
-    path: `${DEMO_API.github}/apps/lookover-ledger-dev/installations/new`,
-    screen: "main",
-  },
-  // Once set up on ledger-dev: the owner's #148 reviewed first, then two teammates' pull requests skipped. It opens
-  // on the setup and ends on Home.
-  {
-    name: "home-organisation",
-    scenario: "S15",
-    screen: '.setup, [data-screen="home"]',
-    alone: true,
-    act: async (p, demo) => {
-      const tab = await createOnOrganisation(p);
-      await tab.getByRole("button", { name: "Install" }).click();
-      await tab.getByText("Lookover is installed").waitFor();
-      await tab.close();
-      await demo.advance(4 * SEC);
-      await button(p, "Continue").click();
-      await p.getByText("Pick the repositories to review.").waitFor();
-      await button(p, "Continue").click();
-      await button(p, "Review this pull request").click();
-      await demo.advance(5 * MIN);
-      await button(p, "Continue").click();
-      await button(p, "Go to my reviews").click();
-      await demo.advance(10 * MIN);
-      await p.getByText("#153").first().waitFor();
-    },
-  },
-  // Set up on ledger-dev, the account is named where the App is (ADR 0059): Settings › GitHub with the person reviews
-  // are for, Repositories, and the status menu. Each opens on the setup.
-  {
-    name: "settings-organisation",
-    scenario: "S15",
-    screen: '.setup, [data-screen="settings"]',
-    fullPage: true,
-    alone: true,
-    act: async (p, demo) => {
-      await setUpOnOrganisation(p, demo);
-      await link(p, "Settings").click();
-      await p.getByText("on the ledger-dev organisation").waitFor();
-    },
-  },
-  {
-    name: "repositories-organisation",
-    scenario: "S15",
-    screen: '.setup, [data-screen="repositories"]',
-    alone: true,
-    act: async (p, demo) => {
-      await setUpOnOrganisation(p, demo);
-      await link(p, "Repositories").click();
-      await p.getByText("on the ledger-dev organisation.").waitFor();
-    },
-  },
-  // A repository that left the organisation's installation: Add it back opens the organisation's installation settings.
-  {
-    name: "repositories-departed-organisation",
-    scenario: "S15",
-    screen: '.setup, [data-screen="repositories"]',
-    alone: true,
-    act: async (p, demo) => {
-      await setUpOnOrganisation(p, demo);
-      await demo.inject("repository-removed");
-      await link(p, "Repositories").click();
-      await p.getByText("is no longer reviewed").waitFor();
-    },
-  },
-  {
-    name: "status-pill-organisation",
-    scenario: "S15",
-    screen: '.setup, [data-screen="home"]',
-    alone: true,
-    act: async (p, demo) => {
-      await setUpOnOrganisation(p, demo);
-      await button(p, "All good").click();
-      await p.getByText("on the ledger-dev organisation").waitFor();
-    },
-  },
-  // The App installed on no repository: the step says so, GitHub's page its one way on (ADR 0053).
-  {
-    name: "setup-github-nothing-granted",
-    scenario: "S1",
-    screen: ".setup",
-    alone: true,
-    act: async (p, demo) => {
-      await setupUntilGitHub(p, demo);
-      const tab = await createApp(p);
-      await tab.getByLabel("Only select repositories").check();
-      await tab.getByRole("button", { name: "Install" }).click();
-      await tab.getByText("Lookover is installed").waitFor();
-      await tab.close();
-      await demo.advance(4 * SEC);
-      await p.getByText("Installed, with no repository.").waitFor();
-    },
-  },
-  // The App installed on three repositories: the step says it is done and waits for Continue (ADR 0058).
-  {
-    name: "setup-github-installed",
-    scenario: "S1",
-    screen: ".setup",
-    alone: true,
-    act: setupUntilInstalled,
-  },
-  // "Use an existing App": the App made on another computer, its id and key file given; then a file that holds no
-  // key, refused under the form.
-  {
-    name: "setup-github-existing-app",
-    scenario: "S1",
-    screen: ".setup",
-    fullPage: true,
-    alone: true,
-    act: async (p, demo) => {
-      await setupUntilGitHub(p, demo);
-      await useExistingApp(p, "lookover-spike-sasensi.private-key.pem", "-----BEGIN RSA PRIVATE KEY-----");
-    },
-  },
-  {
-    name: "setup-github-existing-app-refused",
-    scenario: "S1",
-    screen: ".setup",
-    fullPage: true,
-    alone: true,
-    act: async (p, demo) => {
-      await setupUntilGitHub(p, demo);
-      await useExistingApp(p, "notes.txt", "my notes");
-      await button(p, "Use this App").click();
-      await p.getByText("That file holds no private key.").first().waitFor();
-    },
-  },
-  // ledger-co's App, handed over by its admin (ADR 0059): refused while gh is signed out, then, gh signed in, as the
-  // owner isn't a member of ledger-co.
-  {
-    name: "setup-github-existing-app-gh-signed-out",
-    scenario: "S1",
-    screen: ".setup",
-    fullPage: true,
-    alone: true,
-    act: async (p, demo) => {
-      await setupUntilGitHub(p, demo);
-      await useExistingApp(p, "ledger-co.private-key.pem", HANDED_APP.key, HANDED_APP.id);
-      await button(p, "Use this App").click();
-      await p.getByText("needs gh signed in").first().waitFor();
-    },
-  },
-  {
-    name: "setup-github-existing-app-not-a-member",
-    scenario: "S1",
-    inject: ["gh-signed-in"],
-    screen: ".setup",
-    fullPage: true,
-    alone: true,
-    act: async (p, demo) => {
-      await setupUntilGitHub(p, demo);
-      await useExistingApp(p, "ledger-co.private-key.pem", HANDED_APP.key, HANDED_APP.id);
-      await button(p, "Use this App").click();
-      await p.getByText("who isn't a member of ledger-co").first().waitFor();
-    },
-  },
   {
     name: "setup-3-repositories",
     scenario: "S1",
@@ -1463,7 +1051,7 @@ export const SHOTS: Shot[] = [
     act: async (p, demo) => {
       await setupUntilRepositories(p, demo);
       await button(p, "Back").click();
-      await p.getByText("Already using Lookover on another computer?").click();
+      await p.getByText("Signed in as", { exact: false }).waitFor();
     },
   },
   {
@@ -1784,18 +1372,6 @@ export const SHOTS: Shot[] = [
     inject: ["codex-failed-self-test"],
     act: (p) => button(p, "Codex needs attention").click(),
   },
-  // The pages GitHub's redirects reach, stand-alone pages without the app (ADR 0058): the install's, then each
-  // refusal's as demo mode shows it (some can't happen on the fakes), then the tab GitHub sends back taken to setup.
-  { name: "github-return-installed", scenario: "S1", path: APP_FLOW.installed, screen: ".standalone" },
-  ...REFUSED_PAGES.map(
-    (refused): Shot => ({
-      name: `github-return-${refused}`,
-      scenario: "S1",
-      path: `${DEMO_API.listing}/pages/${refused}`,
-      screen: ".standalone",
-    }),
-  ),
-  { name: "github-return-back-to-setup", scenario: "S1", screen: ".setup", act: backToSetupFromGitHub },
   // Your coding agent, setup's last step (ADR 0058): fresh after a posted first review (the binary off the PATH, both
   // agents found, Try it naming #148), then Claude Code's skill installed, then the PATH added (each row keeps its
   // height, so nothing under it moves), then a write the computer refuses, then
@@ -1962,12 +1538,5 @@ export const SHOTS: Shot[] = [
       await setupUntilAgent(p, demo);
       await p.getByText("npm put it on your PATH").waitFor();
     },
-  },
-  // Settings › GitHub: the App, and the line for a coding agent on another computer under its one sentence.
-  {
-    name: "settings-github-agent-app",
-    scenario: "S10",
-    path: "/settings",
-    act: (p) => p.locator(".agent-app").evaluate((el) => el.scrollIntoView({ block: "center" })),
   },
 ];

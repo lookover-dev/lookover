@@ -74,9 +74,6 @@
 //   as closed, a running one's run ended; no check's end, round post, dismissal post or reaction owed for its
 //   changes any more; its listing, switch and comment place forgotten, so it is new if it comes back; its jobs,
 //   rounds and rules kept as history);
-// - `appFlows`: the manifest flows (ADR 0053): "make the App here" (your own account, or an organisation and the
-//   person it works for, ADR 0059: chosen last, kept), "a flow was opened with this state for this place" (its hash
-//   only), "when was it opened and for where", "it is used up", "forget those opened before then";
 // - `installAsks`: the shared App's asks to install (ADR 0067): "which accounts did this person ask to install it
 //   on, and when", "they asked on this one" (one ask per account, by GitHub's id for it, the last winning, with its
 //   login as last asked), "this one is reached" (forgotten), "this person signed in" (every other person's forgotten).
@@ -107,7 +104,6 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { type AppFlows, appFlows } from "./app-flows.ts";
 import { type Dismissals, dismissals } from "./dismissals.ts";
 import { type Events, events } from "./events.ts";
 import { type Inbox, inbox } from "./inbox.ts";
@@ -156,12 +152,10 @@ export interface Store {
   requests: Requests;
   selfTests: SelfTestResults;
   setup: Setup;
-  appFlows: AppFlows;
   installAsks: InstallAsks;
   close(): void;
 }
 
-export type { AppChoice, AppFlows, AppPlace } from "./app-flows.ts";
 export type {
   Dismissal,
   DismissalPostKind,
@@ -229,7 +223,6 @@ export function openStore({ home, migrations, durable = true, eventsFrom = 0 }: 
       requests: requests(db),
       selfTests: selfTests(db),
       setup: setup(db),
-      appFlows: appFlows(db),
       installAsks: installAsks(db),
       close: () => db.close(),
     };

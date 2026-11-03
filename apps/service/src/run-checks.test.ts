@@ -4,7 +4,6 @@ import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import type { CheckItem, Event } from "@lookover/contracts";
 import {
   api,
-  BOT,
   fakeEngines,
   home,
   messages,
@@ -34,7 +33,7 @@ test("Run all checks reads both engines again and reports each engine, the conne
   expect((await post(service, cookie, { type: "service.runChecks" })).status).toBe(200);
   const running = await until(stream, "service.changed");
   expect(running).toEqual([
-    { type: "service.changed", seq: 5, at: T0, patch: { checks: { at: T0, running: true, items: [] } } },
+    { type: "service.changed", seq: 6, at: T0, patch: { checks: { at: T0, running: true, items: [] } } },
   ]);
   // Up to the checks' end: Codex found and, read again with it (ADR 0058), your coding agent offering its skill.
   const changed = (e: Event, key: "checks" | "agent") =>
@@ -65,7 +64,8 @@ test("Run all checks reads both engines again and reports each engine, the conne
       unusable: null,
       detail: "",
     },
-    { check: "connection", state: "connected", cause: null, bot: BOT.login, key: null },
+    // Signed in to the shared App (ADR 0066).
+    { check: "connection", state: "connected", cause: null },
     // On by default (ADR 0054); the room's own stand-in registers nothing (ADR 0070).
     { check: "service", state: "running", startAtLogin: true, atLogin: "none", loginItem: "stand-in" },
     { check: "settings", invalid: [] },
@@ -175,10 +175,10 @@ test("Unlock marks the session unlocked, once: a second unlock changes nothing",
 
   expect((await post(service, cookie, { type: "service.unlock" })).status).toBe(200);
   expect(await until(stream, "service.changed")).toEqual([
-    { type: "service.changed", seq: 5, at: T0, patch: { unlocked: true } },
+    { type: "service.changed", seq: 6, at: T0, patch: { unlocked: true } },
   ]);
   expect((await post(service, cookie, { type: "service.unlock" })).status).toBe(200);
-  expect(await snapshot(service, cookie)).toMatchObject({ seq: 5, service: { unlocked: true } });
+  expect(await snapshot(service, cookie)).toMatchObject({ seq: 6, service: { unlocked: true } });
 });
 
 test("a service stopped mid-check ends the checks before it closes; started again on the same folder, it runs them afresh", async () => {

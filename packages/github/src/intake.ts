@@ -43,7 +43,7 @@ const OUTDATED = `query($ids: [ID!]!) {
 
 /**
  * Lookover's threads among a pull request's inline comments (ADR 0052, ADR 0066): each root comment written by who
- * posts (`poster`, the bot or the signed-in person, by numeric id) holding a finding marker, with the replies to it,
+ * posts (`poster`, the signed-in person, by numeric id) holding a finding marker, with the replies to it,
  * oldest first, those of a deleted account left out; `outdated` names the root comments GitHub shows outdated.
  */
 function threadsOf(comments: ThreadComment[], poster: number, outdated: Set<string>): HostThread[] {
@@ -213,12 +213,11 @@ export function createIntake(api: GitHubApi, session: Session, allowed: Allowed)
     },
     async poster(repo) {
       allowed(repo);
-      // Through a token for the repository: the session keeps who posts. The App's token is bought for the repository,
-      // so one it isn't installed on is refused there; the person's is the same for every repository, so the
-      // repository is read with it, and one it can't see is not_found.
+      // The session keeps who posts. The person's token is the same for every repository, so the repository is read
+      // with it, and one it can't see is not_found.
       return session.withToken(repo, async (token) => {
-        const { id, login, bot } = await session.poster(repo);
-        if (!bot) await api.request({ path: repoPath(repo), bearer: token });
+        const { id, login } = await session.poster(repo);
+        await api.request({ path: repoPath(repo), bearer: token });
         return { id, login };
       });
     },
@@ -238,24 +237,21 @@ export function createIntake(api: GitHubApi, session: Session, allowed: Allowed)
     },
     async fetchSpec(repo): Promise<FetchSpec> {
       allowed(repo);
-      // Read at each fetch, so a renamed default branch is followed; with the fetch's own read-only token.
+      // Read at each fetch, so a renamed default branch is followed.
       const path = repoPath(repo);
       const branch = await session.withToken(
         repo,
         async (token) =>
           parse(defaultBranch, (await api.request({ path, bearer: token })).body, `GET ${path}`)
             .default_branch,
-        "fetch",
       );
       return {
         cloneUrl: `https://github.com/${repo.owner}/${repo.name}.git`,
         defaultBranch: branch,
-        // GitHub's form for an installation token over HTTPS: the token as the password of `x-access-token`.
+        // GitHub's form for a token over HTTPS: the token as the password of `x-access-token`.
         credentials: () =>
-          session.withToken(
-            repo,
-            (token) => Promise.resolve({ username: "x-access-token", password: token }),
-            "fetch",
+          session.withToken(repo, (token) =>
+            Promise.resolve({ username: "x-access-token", password: token }),
           ),
       };
     },

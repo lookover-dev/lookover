@@ -1,8 +1,11 @@
 // The check following its job (ADR 0043), and one round, posted in the fixed order of ADR 0039 through the
 // `HostWriter` port: the check in progress (created here only when the job has none), the review with its inline
-// comments, the summary comment, the check completed with the result. The result's text is measured in bytes
-// against `CHECK_OUTPUT_MAX_BYTES` before it is sent (ADR 0022). Each post is tried again after a transient refusal
-// (`retry.ts`), and a review with a comment the host can't place is sent once more, its findings in the summary.
+// comments (only when the round has one, ADR 0074), the replies on the threads, the status block in the pull request's
+// description, the check completed with the result. The block is rendered as it is written, from where the change
+// stands then (`PublisherOptions.status`), never from a text kept. The result's text is measured in bytes against
+// `CHECK_OUTPUT_MAX_BYTES` before it is sent (ADR 0022). Each post is tried again after a transient refusal
+// (`retry.ts`); a review with a comment the host can't place is not sent again: its findings go in the block, and the
+// round owes no review from then on.
 import {
   CHECK_OUTPUT_MAX_BYTES,
   type ChangeRef,
@@ -24,7 +27,7 @@ import {
 import { indexDiff } from "@lookover/diff";
 import { filteredRound, findingFilter, hiddenRemoved, postablePath, postableText } from "./filter.ts";
 import { clip } from "./fit.ts";
-import { cap, degrade, placeFindings } from "./place.ts";
+import { cap, degrade, type PlacedFinding, placeFindings } from "./place.ts";
 import {
   checkCompleted,
   checkEnded,
@@ -37,12 +40,12 @@ import {
   headline,
   renderReply,
   renderReview,
-  renderSummary,
   replyMarker,
   reviewMarker,
 } from "./render.ts";
 import { type ActedOn, buildResult, endedResult, withActors } from "./result.ts";
 import { persist } from "./retry.ts";
+import { statusBlock } from "./status.ts";
 import type {
   Created,
   DismissalOutbox,
@@ -56,6 +59,8 @@ import type {
   Publisher,
   PublisherOptions,
   RoundToPost,
+  Status,
+  StatusRound,
   ThreadRoot,
 } from "./types.ts";
 
@@ -119,12 +124,11 @@ function freshOutbox(): Outbox {
 }
 
 /**
- * The round's findings placed as its posts show them, with who acts on each. What it posts whose lines are of
- * another commit (withheld by a round given up, and a push since) is found again by its line's text; `refused`:
- * the host refused a comment, so the round's go into the summary; past the review's most comments, the least
- * urgent go there too. Throws for a finding `core` gave nobody to act on.
+ * The round's findings placed as its posts show them. What it posts whose lines are of another commit (withheld by a
+ * round given up, and a push since) is found again by its line's text; `refused`: the host refused a comment, so the
+ * round's go into the status block; past the review's most comments, the least urgent go there too.
  */
-function placementOf(round: PlacedRound, refused: boolean): ActedOn[] {
+function placedOf(round: PlacedRound, refused: boolean): PlacedFinding[] {
   const { reconciled } = round;
   const posting = new Set(reconciled.post.map((f) => f.id));
   const commitOf = new Map(round.rounds.map((r) => [r.n, r.sha]));
@@ -134,14 +138,15 @@ function placementOf(round: PlacedRound, refused: boolean): ActedOn[] {
       .map((f) => f.id),
   );
   const found = placeFindings(indexDiff(round.diff), reconciled.findings, posting, moved);
-  return withActors(
-    cap(refused ? degrade(found, posting) : found, posting, REVIEW_MAX_COMMENTS),
-    reconciled.actionBy,
-  );
+  return cap(refused ? degrade(found, posting) : found, posting, REVIEW_MAX_COMMENTS);
 }
 
-/** The round's findings its review holds a comment on, placed so. */
-const commentedIn = (round: PlacedRound, placed: ActedOn[]): FindingId[] => {
+/** `placedOf`, with who acts on each finding. Throws for a finding `core` gave nobody to act on. */
+const placementOf = (round: PlacedRound, refused: boolean): ActedOn[] =>
+  withActors(placedOf(round, refused), round.reconciled.actionBy);
+
+/** The round's findings its review holds a comment on, placed so: none, and the round owes no review (ADR 0074). */
+const commentedIn = (round: PlacedRound, placed: readonly PlacedFinding[]): FindingId[] => {
   const posting = new Set(round.reconciled.post.map((f) => f.id));
   return placed.flatMap((p) => (p.placement === "inline" && posting.has(p.finding.id) ? [p.finding.id] : []));
 };
@@ -169,16 +174,18 @@ function tidiedOf(round: PlacedRound): string[] {
 }
 
 /**
- * The posts a round owes, in the order they are sent (ADR 0039, ADR 0044, ADR 0052): the check in progress
- * (created only when the job has none), the review, a reply on each thread the round answers, the summary comment,
- * the check completed, then each comment it minimizes. What the caller saves as owed before the first is sent.
+ * The posts a round owes, in the order they are sent (ADR 0039, ADR 0044, ADR 0052, ADR 0074): the check in progress
+ * (created only when the job has none), the review when the round has a line comment, a reply on each thread the
+ * round answers, the status block, the check completed, then each comment it minimizes. What the caller saves as owed
+ * before the first is sent.
  */
 export function postsOf(round: PlacedRound): PostKind[] {
+  const owesReview = commentedIn(round, placedOf(round, false)).length > 0;
   return [
     "check",
-    "review",
+    ...(owesReview ? ["review" as const] : []),
     ...repliesOf(round).map(({ reply }): PostKind => `reply:${reply.findingId}`),
-    "summary",
+    "status",
     "completed",
     ...tidiedOf(round).map((nodeId): PostKind => `minimize:${nodeId}`),
   ];
@@ -207,12 +214,12 @@ async function unless(
 }
 
 /**
- * The posts a dismissal owes, in the order they are sent (ADR 0052): the reply on the finding's thread, the summary,
- * the round's check when it is rewritten (`checkId`), then the thread's root minimized. What the caller saves as owed
- * before the first is sent.
+ * The posts a dismissal owes, in the order they are sent (ADR 0052): the reply on the finding's thread, the status
+ * block, the round's check when it is rewritten (`checkId`), then the thread's root minimized. What the caller saves
+ * as owed before the first is sent.
  */
 export function dismissalPostsOf(checkId: string | null): DismissalPostKind[] {
-  return ["reply", "summary", ...(checkId === null ? [] : ["completed" as const]), "minimize"];
+  return ["reply", "status", ...(checkId === null ? [] : ["completed" as const]), "minimize"];
 }
 
 /**
@@ -283,6 +290,51 @@ function completedOf(
   return { output: checkCompleted(round, result, left(result)), result };
 }
 
+/**
+ * The refusals of a status block that stand and never fail the round (ADR 0074): the person may not edit the
+ * description (403, `invalid`), or it is too long for GitHub. Any other stops the round like any post's.
+ */
+const STANDING_STATUS_REFUSALS: ReadonlySet<HostFailure> = new Set(["invalid", "too_large"]);
+
+/** A status block's post id: the description it is in has none of its own. */
+const DESCRIBED = "description";
+
+/** The URL of each finding's newest thread among `read`. */
+function linksOf(read: readonly HostThread[]): StatusRound["threads"] {
+  return [...new Set(read.map((t) => t.findingId))].flatMap((findingId) => {
+    const thread = newestThread(read, findingId);
+    return thread === undefined ? [] : [{ findingId, url: thread.url }];
+  });
+}
+
+/**
+ * `round` posted, as its status block says it with no reader of the change's status: its ledger, the findings it
+ * posts holding a comment of its review when `commented` names them (as the store marks them once it lands), and
+ * the threads `threads` links.
+ */
+function postedOf(
+  round: PlacedRound,
+  commented: readonly FindingId[],
+  threads: StatusRound["threads"],
+): Status {
+  const ids = new Set(commented);
+  const posting = new Set(round.reconciled.post.map((f) => f.id));
+  return {
+    kind: "posted",
+    posted: {
+      n: round.round,
+      sha: round.sha,
+      base: round.base,
+      rounds: [...round.rounds.filter((r) => r.n !== round.round), { n: round.round, sha: round.sha }],
+      findings: round.reconciled.findings.map((f) =>
+        posting.has(f.id) ? { ...f, commented: ids.has(f.id) } : f,
+      ),
+      loop: round.reconciled.loop,
+      threads,
+    },
+  };
+}
+
 /** A dismissal's outbox nobody keeps: every post owed. */
 const freshDismissalOutbox = (): DismissalOutbox => ({ posts: [], sending: () => {}, sent: () => {} });
 
@@ -298,16 +350,19 @@ export function createPublisher({
   person,
   lookovers,
   secretsRemoved,
+  status: current,
 }: PublisherOptions): Publisher {
   /**
    * The round as it is posted (ADR 0056): every text an engine or a person wrote filtered once, as `publish` receives
-   * it, so the review, the replies, the summary, the check and the result all show the same; the caller keeps the raw.
+   * it, so the review, the replies, the status block, the check and the result all show the same; the caller keeps the raw.
    * `placing`: its findings placed on their paths as given, so a comment goes where the diff names its file, and shown
    * filtered, their paths too.
    */
+  const text = (t: string) => postableText(t, secretsRemoved);
+  /** A new filter of findings: each finding filtered once however often it is given. */
+  const findingsFiltered = () => findingFilter({ text, path: (p) => postablePath(p, secretsRemoved) });
   const postable = <R extends PlacedRound>(given: R) => {
-    const text = (t: string) => postableText(t, secretsRemoved);
-    const finding = findingFilter({ text, path: (p) => postablePath(p, secretsRemoved) });
+    const finding = findingsFiltered();
     const placing = (refused: boolean): ActedOn[] =>
       placementOf(given, refused).map((p) => ({ ...p, finding: finding(p.finding) }));
     return { round: filteredRound(given, text, finding), placing };
@@ -340,6 +395,50 @@ export function createPublisher({
       throw error;
     }
   };
+  /** The status block for `status` within `room`, the findings' words as the round's posts show them (ADR 0056). */
+  const blockOf = (change: ChangeRef, status: Status, room: number): string | null => {
+    // A running round lists nothing; the others list a posted round's findings, filtered.
+    if (status.kind === "running") return statusBlock(change, status, room, offset);
+    const finding = findingsFiltered();
+    const filtered = (posted: StatusRound): StatusRound => ({
+      ...posted,
+      findings: posted.findings.map(finding),
+    });
+    const shown: Status =
+      status.kind === "posted"
+        ? { ...status, posted: filtered(status.posted) }
+        : { ...status, posted: status.posted && filtered(status.posted) };
+    return statusBlock(change, shown, room, offset);
+  };
+  /**
+   * Writes the change's status block (ADR 0074), rendered as the description is read, from where the change stands
+   * then: the caller's `current`, else `given` (the round being posted). Nothing for a pull request Lookover skips;
+   * nothing either when even the block's heading doesn't fit, said in the log. The block has no id of its own: its
+   * post's is `DESCRIBED`.
+   */
+  const described = async (
+    change: ChangeRef,
+    read: HostThread[] | null,
+    given: (threads: StatusRound["threads"]) => Status,
+  ): Promise<string> => {
+    const links = linksOf(read ?? []);
+    await writer.upsertStatus(change, (room) => {
+      const now = current ? current(change, links) : given(links);
+      if (now === null) return null;
+      const block = blockOf(change, now, room);
+      if (block === null)
+        log(`${changeName(change)}: no status block: the description leaves ${room} characters`);
+      return block;
+    });
+    return DESCRIBED;
+  };
+  /** A status block refused for good is said, and the round goes on: it landed all the same. */
+  const describing = (change: ChangeRef, write: () => Promise<unknown>) =>
+    unless(
+      write,
+      (failure) => STANDING_STATUS_REFUSALS.has(failure),
+      (error) => log(`${changeName(change)}: no status block: ${error.failure}: ${error.message}`),
+    );
   /** Minimizes a comment as `resolved`: its global id is the post's id. */
   const minimized = async (change: ChangeRef, nodeId: string): Promise<string> => {
     await writer.minimize(change.repo, nodeId, "resolved");
@@ -350,28 +449,12 @@ export function createPublisher({
       const { round, placing } = postable(given);
       const { change, reconciled } = round;
       /**
-       * The findings placed, with who acts on each: when the host refused a comment, the round's in the summary; past
-       * the review's most comments, the least urgent in the summary.
+       * The findings placed, with who acts on each: when the host refused a comment, the round's in the status block;
+       * past the review's most comments, the least urgent in the block.
        */
-      let degraded = outbox.degraded;
       // Checked before the first post: a round `core` left incomplete posts nothing.
-      let placed = placing(degraded);
+      let placed = placing(outbox.degraded);
       const { send, saved } = sender<PostKind>(outbox, time, signal);
-      /**
-       * The review; refused for a comment the host can't place, sent once more with every finding of the round in
-       * the summary, kept in the outbox first so the summary and a restart say the same.
-       */
-      const review = async (): Promise<string> => {
-        try {
-          return await writer.publishReview(change, renderReview(round, placed));
-        } catch (error) {
-          if (degraded || !unplaceable(error)) throw error;
-          outbox.degrade();
-          degraded = true;
-          placed = placing(true);
-          return writer.publishReview(change, renderReview(round, placed));
-        }
-      };
       // The job's check, in progress since the run started, is the round's: created only when it has none, and
       // looked for by its external id (the job's and the person's) first when a create began whose answer was lost.
       const externalId = checkExternalId(round.run.job, person());
@@ -391,12 +474,23 @@ export function createPublisher({
       );
       /** The round's findings the review holds a comment on, as it was sent. */
       const commented = () => commentedIn(round, placed);
-      const reviewId = await send(
-        "review",
-        review,
-        () => writer.findReview(change, reviewMarker(round)),
-        commented,
-      );
+      // The review, only with a line comment (ADR 0074). Refused for a comment the host can't place, it is not sent
+      // again: its findings go in the status block, kept in the outbox first so the block and a restart say the same.
+      let reviewId: string | null = null;
+      if (commented().length > 0) {
+        try {
+          reviewId = await send(
+            "review",
+            () => writer.publishReview(change, renderReview(round, placed)),
+            () => writer.findReview(change, reviewMarker(round)),
+            commented,
+          );
+        } catch (error) {
+          if (!unplaceable(error)) throw error;
+          outbox.degrade();
+          placed = placing(true);
+        }
+      }
       // The replies on the threads (ADR 0052), each once: one begun before is looked for by its marker first. A
       // thread GitHub no longer has, or a reply it finds invalid, is said, and the round goes on.
       for (const { reply, root } of repliesOf(round)) {
@@ -414,15 +508,15 @@ export function createPublisher({
             ),
         );
       }
-      const summaryId = await send("summary", () =>
-        writer.upsertSummary(change, renderSummary(round, placed)),
+      // The threads, read once for the status block and the check (not once both were sent): the block links each
+      // finding's, the result names it. A transient refusal is tried again like a post; one that stands leaves them out.
+      const read = (["status", "completed"] as const).some((kind) => saved(kind).hostId === null)
+        ? await threadsOf(change, signal, (wait) => outbox.waiting(wait))
+        : null;
+      // The status block (ADR 0074): its send begun lands a round with no review, whatever GitHub answers.
+      await describing(change, () =>
+        send("status", () => described(change, read, (links) => postedOf(given, commented(), links))),
       );
-      // The threads, read once as the check is completed (not when it already was): the result names each
-      // finding's. A transient refusal is tried again like a post; a refusal that stands leaves them out.
-      const read =
-        saved("completed").hostId === null
-          ? await threadsOf(change, signal, (wait) => outbox.waiting(wait))
-          : null;
       const { output, result } = completedOf(round, placed, read);
       await send("completed", async () => {
         await writer.completeCheck(change.repo, checkId, reconciled.conclusion, output);
@@ -437,7 +531,7 @@ export function createPublisher({
             log(`${changeName(change)}: ${nodeId} not minimized: ${error.failure}: ${error.message}`),
         );
       }
-      return { checkId, reviewId, summaryId, result };
+      return { checkId, reviewId, result };
     },
     async dismiss(dismissal, outbox = freshDismissalOutbox(), signal) {
       const { round, placing } = postable<RoundToPost>({ ...dismissal.round, checkId: dismissal.checkId });
@@ -466,7 +560,9 @@ export function createPublisher({
           (failure) => STANDING_REPLY_REFUSALS.has(failure),
           said("no dismissal said"),
         );
-      await send("summary", () => writer.upsertSummary(change, renderSummary(round, placed)));
+      await describing(change, () =>
+        send("status", () => described(change, read, (links) => postedOf(dismissal.round, [], links))),
+      );
       const { checkId } = dismissal;
       if (checkId !== null) {
         const { output } = completedOf(round, placed, read);
@@ -482,12 +578,28 @@ export function createPublisher({
           said("root not minimized"),
         );
     },
-    async findReview(given, degraded) {
-      // Placed as `publish` placed it: the round filtered the same way.
+    async findReview(given) {
+      // Placed as `publish` placed it: the round filtered the same way (a round that owes a review never degraded).
       const { round, placing } = postable(given);
       const reviewId = await writer.findReview(round.change, reviewMarker(round));
-      return reviewId === null ? null : { reviewId, commented: commentedIn(round, placing(degraded)) };
+      return reviewId === null ? null : { reviewId, commented: commentedIn(round, placing(false)) };
     },
     check: (job, created = () => {}) => follow(writer, job, created, offset, person),
+    async status(change) {
+      const now = current?.(change, []) ?? null;
+      if (now === null) return;
+      // The threads only for a block that lists findings: a running round's lists none.
+      const listed = now.kind === "posted" || (now.kind !== "running" && now.posted !== null);
+      // A read refused leaves the findings unlinked: the block is written all the same.
+      const read =
+        listed && threads
+          ? await threads(change).catch((error: unknown) => {
+              if (error instanceof HostError) return null;
+              throw error;
+            })
+          : null;
+      await describing(change, () => described(change, read, () => now));
+    },
+    statusBlock: blockOf,
   };
 }

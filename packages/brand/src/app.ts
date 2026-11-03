@@ -5,6 +5,7 @@ import { biome, constant, type Formatter } from "./format.ts";
 import { markParts } from "./icon.ts";
 import { LOADER, loaderCss } from "./loader.ts";
 import { COLOURS, MARK } from "./numbers.ts";
+import { WORDMARK_SHAPES } from "./wordmark.ts";
 
 /** The module `Mark`, `Eyes` and the GitHub avatar's icon take their numbers from. */
 export const EYES_MODULE = "apps/web/src/ui/eyes.generated.ts";
@@ -58,6 +59,11 @@ export function eyesModule(format: Formatter = biome): Promise<string> {
           dot,
           hole,
         },
+      ),
+      constant(
+        "The wordmark's drawing box, its files' `viewBox`: the simulated GitHub page sizes it from it.",
+        "WORDMARK_BOX",
+        { width: WORDMARK_SHAPES.view.width, height: WORDMARK_SHAPES.view.height },
       ),
     ].join("\n"),
   );

@@ -1209,14 +1209,6 @@ dialog.cmdk {
 .disc.open > .disc-body .disc-in {
   opacity: 1;
 }
-.disc-group {
-  display: grid;
-  gap: 2px;
-  justify-items: start;
-}
-.disc-group .disc {
-  width: 100%;
-}
 .verdict .disc {
   flex-basis: 100%;
 }

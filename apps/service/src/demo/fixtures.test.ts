@@ -1,9 +1,9 @@
 // Every scenario's fixtures hold together (ADR 0046): each scripted finding's path and line text sit in its
 // commit's diff, as `review` anchors them, so a hand-written mismatch never degrades a round silently (a finding
-// whose text isn't in the diff goes to the summary); each confirm verdict names a candidate the find pass gave;
+// whose text isn't in the diff goes to the summary), but the few meant to be outside it; each confirm verdict names a candidate the find pass gave;
 // each change's commits are its own, and every id is one of a kind.
 import { expect, test } from "bun:test";
-import type { RepositoryRef } from "@lookover/contracts";
+import type { DiffIndex, RepositoryRef } from "@lookover/contracts";
 import { findLine, indexDiff } from "@lookover/diff";
 import { SCENARIOS, type Scenario } from "../index.ts";
 
@@ -16,20 +16,36 @@ const commits = (): { scenario: Scenario; change: ScenarioChange; commit: Scenar
     scenario.changes.flatMap((change) => change.commits.map((commit) => ({ scenario, change, commit }))),
   );
 
-test("every scripted finding's path and line text are in its commit's diff, on its side, at its line", () => {
+/**
+ * The scripted findings meant to sit on a file their commit's diff doesn't touch, named as the test names them:
+ * S6's F3, which the status block lists with its lines (ADR 0074).
+ */
+const OUTSIDE_THE_DIFF = ["S6 #153 d0e1f2a src/invoices/reminders.ts:9"];
+
+type ScriptedFinding = NonNullable<ScenarioCommit["find"]>["findings"][number];
+
+/** A scripted finding's line text is in the diff on its side, at its line, as `review` anchors it. */
+function anchored(index: DiffIndex, finding: ScriptedFinding): boolean {
+  const where = { path: finding.path, side: finding.side ?? "head", line: finding.line };
+  const found = findLine(index, where, finding.lineText);
+  return found.kind === "found" && found.line === finding.line;
+}
+
+test("every scripted finding's path and line text are in its commit's diff, on its side, at its line, but the ones meant to be outside", () => {
   const unanchored: string[] = [];
+  const outside: string[] = [];
   for (const { scenario, change, commit } of commits()) {
     const index = indexDiff(commit.diff);
     for (const finding of commit.find?.findings ?? []) {
-      const where = { path: finding.path, side: finding.side ?? "head", line: finding.line };
-      const found = findLine(index, where, finding.lineText);
-      if (found.kind !== "found" || found.line !== finding.line)
-        unanchored.push(
-          `${scenario.id} #${change.number} ${commit.sha.slice(0, 7)} ${finding.path}:${finding.line}`,
-        );
+      const name = `${scenario.id} #${change.number} ${commit.sha.slice(0, 7)} ${finding.path}:${finding.line}`;
+      if (!OUTSIDE_THE_DIFF.includes(name)) {
+        if (!anchored(index, finding)) unanchored.push(name);
+      } else if (!index.files.some((f) => f.path === finding.path)) outside.push(name);
     }
   }
   expect(unanchored).toEqual([]);
+  // Each one named is outside indeed: its file isn't in the diff at all.
+  expect(outside).toEqual(OUTSIDE_THE_DIFF);
 });
 
 test("every confirm verdict names a candidate of its commit's find pass, C1 to Cn in the finder's order", () => {

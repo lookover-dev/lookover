@@ -63,14 +63,14 @@ export interface DiffIndex {
  * How `review` anchored a finding by the text of its line (ADR 0044, I-158). `reported`: on the line the engine
  * gave, whose text matched, or which came with no text to check. `moved`: to the nearest line on the same side of
  * the same file whose text matched, the end line shifted by as much. `unmatched`: no line of the diff holds the
- * text, so the finding goes to the summary (`text_not_in_diff`), never to a guessed line.
+ * text, so the finding goes to the status block (`text_not_in_diff`), never to a guessed line.
  */
 export type Anchoring = "reported" | "moved" | "unmatched";
 
 /**
  * Where a finding goes. `inline`: the host accepts a comment there (the location, as the host wants it).
- * `outside`: no comment can go there, and why; `publish` puts the finding in the summary instead.
- * `diff_truncated`: not found, but the index was cut, so the line may well be in the diff: the summary says so.
+ * `outside`: no comment can go there, and why; `publish` puts the finding in the status block instead.
+ * `diff_truncated`: not found, but the index was cut, so the line may well be in the diff.
  * `text_not_in_diff`: the finding's anchoring is `unmatched`; `publish` says so without asking the leaf, which
  * places by line number only.
  */

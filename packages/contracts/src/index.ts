@@ -35,18 +35,29 @@
 // `CHECK_OUTPUT_MAX_BYTES` in `host.ts`, with `utf8Bytes`, a text measured as GitHub counts them.
 // The one exception to "never a sentence": `copy.ts`, the phrases the app, GitHub and the service's log file share
 // (`engineName`, `deferralText`, `failureText`, `cancelText` and `cancelPhrase`, `skipText`, `confirmFailureText`,
-// `findersText`, `foundAndCheckedText`, `keptText`, `ruleText`, `CODEX_REVIEWS`, `postWaitText`, and
-// `LOOKOVERS_OPENING`, what Lookover's words open with on the pull request), the service's
-// sentences the web says too (`createAppRefusalText`), and the ways of writing they share (`asSentence`, `shortSha`,
-// `dayText`, `twoDigits`), written once here because the web may import only this package and `publish` words the
-// pull request: everything else either says stays in its own module.
+// `findersText`, `foundAndCheckedText`, `keptText`, `ruleText`, `CODEX_REVIEWS`, `postWaitText`; the status block's
+// headings `NEEDS_YOUR_LOOK`, `thingsText`, `lookingOverHead`, `waitingHead` and `failedHead`, its lines
+// `roundLine` (with `roundCountsText`), `stoppedText`, `TRY_AGAIN`, `waitingText` and `startsOnceText`, its notes
+// `notInDiffText` and `escalationText`; a thread reply's `replyKind`), and the ways of writing they share
+// (`asSentence`, `shortSha`, `dayText`, `twoDigits`), written once here because the web may import only this package
+// and `publish` words the pull request: everything else either says stays in its own module. `findingPermalink`
+// (`status-block.ts`): where a finding with no line comment shows its lines, for the block and the simulated page.
 // Ports (ADR 0033): `Clock` and `IdGen` (ADR 0037); `Engines`, `HostIntake` and `HostWriter` (ADR 0039, polling
 // and reactions by ADR 0043), each shaped by what the service calls and nothing more, a host's listing saying
 // `unchanged` when the host says so, with `HostError` as the one way a host refuses; `AgentHost`, the host as
 // the coding agent sees it with its own login, shaped by what `lookover wait` calls (ADR 0021, ADR 0043);
 // `HostView`, what a host shows of a change, the one shape the real adapter and the fake read back.
-// `HostIntake.poster` names who posts on a repository by numeric id, the App's bot or the person signed in on the
-// shared App (ADR 0066): what tells Lookover's replies on its threads, with the ids it kept.
+// `HostIntake.poster` names who posts on a repository by numeric id, the person signed in on the shared App (ADR
+// 0066): what tells Lookover's replies on its threads, with the ids it kept.
+// The posts on GitHub (ADR 0074): the status block Lookover owns in a pull request's description, between
+// `STATUS_MARKER` and `STATUS_END_MARKER` (`frozen.ts`), written by `HostWriter.upsertStatus` within
+// `DESCRIPTION_MAX_CHARACTERS` (`characterCount`) and shown by `HostView.description`, placed by the one splice the
+// fake host and the real one share (`status-block.ts`: `spliceStatus`, the first closing marker with an opening one
+// before it replaced from the last such opening one, all else kept byte for byte, else written at the end, after
+// `---` only under a non-empty author's text; `statusOf`, the block a description holds; `showsStatus`, whether a
+// read shows a block, line endings aside; `statusRoom`, the characters GitHub's limit leaves it); the wordmark every
+// post opens with (`wordmark(px)`, its two files `WORDMARK_URLS`), and `withoutWordmark`, a post's opening taken off
+// for the agent.
 // A port changes here only, one change at a time. The frozen identifiers of ADR 0032 are in `frozen.ts`.
 // `API` and `SSE` name where `LookoverApi` is over HTTP and what its event stream sends (ADR 0038); beside it, the
 // `lookover` commands' two routes (`API.link`, answered as a `MintedLink`, and `API.stop`, ADR 0054). The log file's
@@ -68,30 +79,26 @@
 // ends with, written and read back (the claim it answers), and `newestThread`, a finding's thread among a change's;
 // `HostIntake.threads` reads a change's threads, `HostWriter.reply` answers on one and `HostWriter.minimize` hides a
 // comment as resolved or outdated (`MinimizeReason`), which `HostView` shows.
-// The types row 7 fills so onboarding is real (ADR 0053, `github-app.ts`): the owner's App, its installation and the
-// installation port (`HostInstallations`: convert a manifest, read the App, its installation on the owner's
-// account, that installation's repositories), the permissions the App asks for (`APP_PERMISSIONS`), the refusals of
-// "Create it on GitHub" and "Use an existing App" (`connection.useApp`, whose key is never in an event or a refusal),
-// how the key is kept as Run checks says it; the connection's cause, App and installation (`Connection.cause`,
+// The types row 7 fills so onboarding is real (ADR 0053): the connection's cause (`Connection.cause`,
 // `connectionCauseOf`, a `HostError`'s `connectionCause`), the setup's GitHub step (`Setup.github`), `repo.removed`,
-// a problem's fix as a command or a link (`FixAction`), the manifest flow's pages (`APP_FLOW`) and the links to
-// GitHub's pages built on `Connection.web` (`githubLinks`, `GITHUB_WEB`, demo mode's `DEMO_API.github`).
-// Organisations (ADR 0059, `gh.ts`): the person's own `gh` as a port (`Gh`: who it is signed in as, their admin
-// organisations, a membership), what the setup's GitHub step shows of it (`Connection.gh`, read again by `gh.check`),
-// and where "Create it on GitHub" makes the App (`connection.createApp`'s `organisation`, refused with
-// `CreateAppRefusal`'s `gh-*` and `not-an-admin`).
+// a problem's fix as a command or a link (`FixAction`), and the links to GitHub's pages built on `Connection.web`
+// (`githubLinks`, `GITHUB_WEB`, demo mode's `DEMO_API.github`).
+// Organisations (ADR 0059, `gh.ts`): the person's own `gh` as a port (`Gh`: who it is signed in as, their
+// organisations).
+// One way in (ADR 0073): the connection is the shared App's alone, its causes, commands and setup step with no own
+// App's, and no App level of its own: no key, no manifest.
 // The shared App (ADR 0065, ADR 0066): `SHARED_APP`, its id, slug, client ID and account, shipped, never configured;
 // a check's `external_id` as `checkExternalId` writes it (`<job>@<person's id>`) and `readCheckExternalId` reads it
 // back (null for an older check's job id alone); `AgentHost.account`, whose token the agent holds. Signing in to it
 // (`sign-in.ts`): the device flow and the refresh as a port (`HostSignIn`: a device code, `DeviceGrant`, polled to a
 // `DevicePoll`, the tokens issued, `SignInTokens`, then whose they are, `person`; a `SignIn` renewed, its refusal
-// the connection's cause `signed-out`), where the sign-in is kept (`SignInKeeper`), so the adapter never knows the
-// disk, and why the service didn't start one (`SignInStartRefusal`). What the person reaches through it
+// the connection's cause `signed-out`), where the sign-in is kept (`SignInKeeper`, and how, `KeyProtection`, as Run
+// checks says it), so the adapter never knows the disk, and why the service didn't start one (`SignInStartRefusal`).
+// What the person reaches through it
 // (`HostAccounts`: who they are, and every account's installation with its repositories, `ReachedAccount`, or the
 // account's own cause, `AccountCause`: suspended, or `sso`, an organisation asking for SAML single sign-on). The
 // connection keeps every account it reaches with its installation and its own cause (`Connection.accounts`,
-// `ConnectionAccount`; `accountOf` finds a repository owner's), one on an own App (`ownInstallation`). On `shared`
-// (ADR 0067) each reached account says whether the person owns it (`ConnectionAccount.owner`), the accounts the App
+// `ConnectionAccount`; `accountOf` finds a repository owner's). Each (ADR 0067) reached account says whether the person owns it (`ConnectionAccount.owner`), the accounts the App
 // doesn't reach are named (`Connection.unreached`, `UnreachedAccount`: their own, and the organisations their `gh`
 // names, with when they asked an owner to install it), "Ask to install on <org>" records that ask
 // (`connection.askToInstall`, refused with `AskToInstallRefusal`), a suspension names who suspended it
@@ -110,10 +117,9 @@
 // Ordering: events are applied in their number order; `apply` ignores one numbered at or below the snapshot's
 // `seq` (sent twice, or older than the snapshot it arrives on) and takes `state.replaced` whatever its number
 // (ADR 0038); it never looks for a gap: a follower that lost its stream asks after its last number and gets the
-// missed events or a reload. A port that has an order
-// states it in its file: `HostWriter`'s post order (check in progress → review → summary → check completed),
-// `ProcessRunner.sweepOrphans` once at start before any `start`, an engine run's folder complete once `run`
-// resolves.
+// missed events or a reload. A port that has an order states it in its file: `HostWriter`'s post order (check in
+// progress → review → replies → status block → check completed), `ProcessRunner.sweepOrphans` once at start before
+// any `start`, an engine run's folder complete once `run` resolves.
 // Error modes: `apply`, `readResult`, `enumOf` and every helper above never throw: an
 // event about a change the snapshot doesn't hold changes nothing, a text without a valid result reads as null.
 // An ID constructor throws a plain `Error` on a value that can't be that ID, where it enters. `reviewResultV1`
@@ -122,7 +128,7 @@
 export type { EngineActivity, RunActivity } from "./activity.ts";
 export type { AgentChange, AgentCheck, AgentHost, AgentThread } from "./agent-host.ts";
 export type { LogMessage, LookoverApi, MintedLink, NoSession } from "./api.ts";
-export { API, APP_FLOW, SSE } from "./api.ts";
+export { API, SSE } from "./api.ts";
 export { apply, emptyReview } from "./apply.ts";
 export type { Change } from "./change.ts";
 export { checkExternalId, readCheckExternalId } from "./check-external-id.ts";
@@ -144,48 +150,55 @@ export type {
   AskToInstallRefusal,
   Connection,
   ConnectionAccount,
-  ConnectionApp,
   ConnectionCause,
-  ConnectionWay,
-  KeyRefusal,
   UnreachedAccount,
 } from "./connection.ts";
-export { accountOf, ownInstallation, sameLogin } from "./connection.ts";
+export { accountOf, sameLogin } from "./connection.ts";
 export {
   asSentence,
   CODEX_REVIEWS,
   cancelPhrase,
   cancelText,
   confirmFailureText,
-  createAppRefusalText,
   dayText,
   deferralText,
   engineDetailText,
   engineHealthText,
   engineName,
+  escalationText,
   FAILED_SAFETY_CHECK,
+  failedHead,
   failureText,
   findersText,
   foundAndCheckedText,
-  GH_FIX_BEFORE,
-  GH_SIGN_IN,
-  ghFixText,
+  KEPT_TWICE_WONT_FIX,
   keptText,
-  LOOKOVERS_OPENING,
+  lookingOverHead,
+  NEEDS_YOUR_LOOK,
   NOT_DOUBLE_CHECKED,
   NOT_RAISED_AGAIN,
   NOTHING_NEW_TO_CHECK,
+  notInDiffText,
   postWaitText,
+  type ReplyWords,
   type RoundChecks,
+  replyKind,
+  roundCountsText,
+  roundLine,
   ruleText,
   severityText,
   shortSha,
   skipText,
+  startsOnceText,
+  stoppedText,
+  TRY_AGAIN,
+  thingsText,
   twoDigits,
-  USE_EXISTING_APP,
   unusableFixedText,
   unusableStateText,
   upperFirst,
+  waitingHead,
+  waitingText,
 } from "./copy.ts";
 export type { DemoClock, DemoCommand, DemoFault, DemoListing, DemoScenario, FaultId } from "./demo.ts";
 export { DEMO_API, FAULTS } from "./demo.ts";
@@ -229,48 +242,36 @@ export {
   RESULT_MARKER,
   REVIEW_MARKER,
   REVIEW_RESULT_SCHEMA,
-  SUMMARY_MARKER,
+  STATUS_END_MARKER,
+  STATUS_MARKER,
+  WORDMARK_URLS,
 } from "./frozen.ts";
 export type {
   Gh,
-  GhAdminOrganisations,
-  GhChoices,
-  GhMembership,
   GhMemberships,
   GhNoAnswer,
   GhOrganisation,
   GhPerson,
-  GhRefusal,
   GhRole,
   GhUnanswered,
   GhWhy,
 } from "./gh.ts";
-export { ghRefusalOf } from "./gh.ts";
 export type {
   AccountCause,
-  AppCredentials,
-  AppPermission,
-  CreateAppRefusal,
   HostAccount,
   HostAccounts,
-  HostApp,
   HostInstallation,
-  HostInstallations,
   HostLogin,
-  KeyProtection,
-  ManifestConversion,
-  NoNewApp,
-  PermissionLevel,
   ReachedAccount,
-  SetupGitHubRefusal,
-  UseAppRefusal,
 } from "./github-app.ts";
-export { APP_PERMISSIONS, GITHUB_WEB, githubLinks, PRIVATE_KEY_ARMOUR } from "./github-app.ts";
+export { GITHUB_WEB, githubLinks } from "./github-app.ts";
 export type { ChangeRef, GitHost, HostFailure, RepositoryRef, TransientHostFailure } from "./host.ts";
 export {
   CHECK_OUTPUT_MAX_BYTES,
   COMMENT_MAX_BYTES,
+  characterCount,
   connectionCauseOf,
+  DESCRIPTION_MAX_CHARACTERS,
   HostError,
   REVIEW_MAX_COMMENTS,
   repositoryName,
@@ -418,9 +419,12 @@ export type {
   DeviceGrant,
   DevicePoll,
   HostSignIn,
+  KeyProtection,
   SignIn,
   SignInKeeper,
   SignInStartRefusal,
   SignInTokens,
 } from "./sign-in.ts";
 export type { State } from "./state.ts";
+export { findingPermalink, showsStatus, spliceStatus, statusOf, statusRoom } from "./status-block.ts";
+export { withoutWordmark, wordmark } from "./wordmark.ts";

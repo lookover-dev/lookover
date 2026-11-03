@@ -3,19 +3,29 @@
 // publishing or a restart already retried it, which fails it (ADR 0043, #62); a host that won't answer, or a
 // prepare that fails, during a run fails the job, recorded and shown.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { changeId, type Event, HostError, jobId, type ReviewJob, type State } from "@lookover/contracts";
+import {
+  changeId,
+  type Event,
+  HostError,
+  jobId,
+  type ReviewJob,
+  type State,
+  statusOf,
+} from "@lookover/contracts";
 import { RetrievalError } from "@lookover/retrieval";
 import { openStore } from "@lookover/store";
 import { type FakeChange, FakeGitHost, ScriptedRetrieval } from "@lookover/testkit";
 import {
   api,
-  BOT,
   fakeEngines,
   HeldReviews,
   heldRuns,
   home,
   lastEvent,
   messages,
+  ONE_FINDING,
+  OWNER,
+  onTheDiff,
   openApp,
   PLANTED,
   post,
@@ -26,6 +36,7 @@ import {
   SANDBOX,
   SHA1,
   SHA1_PUSHED,
+  SHARED_BOT,
   sinceStart,
   snapshot,
   start,
@@ -78,27 +89,12 @@ class RefusingPosts extends FakeGitHost {
 const MIN = 60_000;
 const PR1 = { repo: SANDBOX, number: 1 };
 
-/** A find pass that answers one blocking finding on a line of pull request #1's diff. */
-const ONE_FINDING = [
-  "```json",
-  JSON.stringify({
-    findings: [
-      {
-        severity: "blocking",
-        category: "security",
-        title: "The key is logged",
-        body: "When the total is computed, the API key is printed, because the debug line was left in.",
-        path: "src/total.ts",
-        side: "head",
-        line: 3,
-        end_line: null,
-        line_text: null,
-        defect_key: "secret-logged",
-      },
-    ],
-  }),
-  "```",
-].join("\n");
+/** Engines that find `ONE_FINDING` once, then confirm nothing. */
+function findingOnce() {
+  const engines = fakeEngines();
+  engines.answer({ outcome: "ok", text: ONE_FINDING });
+  return engines;
+}
 
 const OTHER = changeId("sasensi/lookover-sandbox#9");
 const TENTH = changeId("sasensi/lookover-sandbox#10");
@@ -317,9 +313,10 @@ test("a restart that finds a follow-up behind the interrupted job runs the follo
 
 test("a restart during publishing resumes the round's posts: nothing is found again, and the check completes (ADR 0044)", async () => {
   const dir = home();
-  const engines = fakeEngines({ reviews: 1 });
-  const host = new HeldReviews({ repo: SANDBOX, bot: BOT, changes: [pr1] });
-  const first = await start({ home: dir, host, engines });
+  const engines = findingOnce();
+  const retrieval = onTheDiff();
+  const host = new HeldReviews({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
+  const first = await start({ home: dir, host, engines, retrieval });
   await review(first.service, await openApp(first.service));
   // The service stops while GitHub holds the review's answer: the round is saved, its review begun, never answered.
   await host.asked;
@@ -330,13 +327,14 @@ test("a restart during publishing resumes the round's posts: nothing is found ag
   const last = lastEvent(dir);
   const logged: string[] = [];
   const log = (line: string) => logged.push(line);
-  const second = await start({ home: dir, host, engines, time: first.time, idsFrom: 100, log });
+  const ran = engines.runs.length;
+  const second = await start({ home: dir, host, engines, retrieval, time: first.time, idsFrom: 100, log });
   expect(logged).toEqual([
     "sasensi/lookover-sandbox#1 review resumes its posts: the service stopped while it posted",
   ]);
   const again = await openApp(second.service);
   const seen = await until(await sinceStart(second.service, again, last), "round.finished");
-  expect(logged.at(-1)).toBe("sasensi/lookover-sandbox#1 round 1 posted: no open findings");
+  expect(logged.at(-1)).toStartWith("sasensi/lookover-sandbox#1 round 1 posted: 1 open finding");
   // No job is asked again, and the engine never runs again: the round's posts resume.
   // Its outbox shown as kept (the check sent before the stop), then each post sent.
   expect(seen.map(named)).toEqual([
@@ -348,11 +346,12 @@ test("a restart during publishing resumes the round's posts: nothing is found ag
   ]);
   expect(seen[0]).toMatchObject({ posting: { sent: 1, owed: 4, wait: null } });
   expect(seen.at(-1)).toMatchObject({ job: { ...job1, state: "done" }, round: { n: 1, sha: SHA1 } });
-  expect(engines.runs).toHaveLength(1);
+  expect(engines.runs).toHaveLength(ran);
   const shown = host.view({ repo: SANDBOX, number: 1 });
-  expect(shown.reviews).toHaveLength(1);
-  expect(shown.checks.map((c) => `${c.status} ${c.conclusion}`)).toEqual(["completed success"]);
-  expect(shown.comments).toHaveLength(1);
+  expect(shown.reviews.map((r) => r.comments.length)).toEqual([1]);
+  expect(shown.checks.map((c) => c.status)).toEqual(["completed"]);
+  expect(shown.comments).toEqual([]);
+  expect(statusOf(shown.description)).toContain("\n\nRound 1 · ");
 });
 
 /**
@@ -387,9 +386,10 @@ class KeptThenStopped extends FakeGitHost {
 
 test("a review GitHub kept as the service stopped is found by its marker after the restart: one review, no engine run (ADR 0056)", async () => {
   const dir = home();
-  const engines = fakeEngines({ reviews: 1 });
-  const host = new KeptThenStopped({ repo: SANDBOX, bot: BOT, changes: [pr1] });
-  const first = await start({ home: dir, host, engines });
+  const engines = findingOnce();
+  const retrieval = onTheDiff();
+  const host = new KeptThenStopped({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
+  const first = await start({ home: dir, host, engines, retrieval });
   await review(first.service, await openApp(first.service));
   await host.kept;
   await first.service.stop();
@@ -397,6 +397,7 @@ test("a review GitHub kept as the service stopped is found by its marker after t
   host.stopped();
   await first.time.advance(0);
   expect(host.view(PR1).reviews).toHaveLength(1);
+  const ran = engines.runs.length;
 
   const last = lastEvent(dir);
   const logged: string[] = [];
@@ -404,6 +405,7 @@ test("a review GitHub kept as the service stopped is found by its marker after t
     home: dir,
     host,
     engines,
+    retrieval,
     time: first.time,
     idsFrom: 100,
     log: (line) => logged.push(line),
@@ -415,19 +417,24 @@ test("a review GitHub kept as the service stopped is found by its marker after t
     await sinceStart(second.service, await openApp(second.service), last),
     "round.finished",
   );
-  expect(seen.at(-1)).toMatchObject({ job: { state: "done" }, round: { n: 1, sha: SHA1 } });
-  expect(engines.runs).toHaveLength(1);
+  expect(seen.at(-1)).toMatchObject({
+    job: { state: "done" },
+    round: { n: 1, sha: SHA1 },
+    findings: [{ id: "F1", posted: true, commented: true }],
+  });
+  expect(engines.runs).toHaveLength(ran);
   const shown = host.view(PR1);
   expect(shown.reviews).toHaveLength(1);
-  expect(shown.comments).toHaveLength(1);
-  expect(shown.checks.map((c) => `${c.status} ${c.conclusion}`)).toEqual(["completed success"]);
+  expect(shown.comments).toEqual([]);
+  expect(statusOf(shown.description)).toContain("The key is logged");
+  expect(shown.checks.map((c) => c.status)).toEqual(["completed"]);
 });
 
 test("a service stopped while a refused review waits to be sent again resumes, and finds the review GitHub kept: one review", async () => {
   const dir = home();
-  const engines = fakeEngines();
-  engines.answer({ outcome: "ok", text: ONE_FINDING });
-  const first = await start({ home: dir, engines, changes: [pr1] });
+  const engines = findingOnce();
+  const retrieval = onTheDiff();
+  const first = await start({ home: dir, engines, retrieval, changes: [pr1] });
   const { host, time } = first;
   // GitHub answers the review "422 An internal error occurred" and keeps it all the same.
   host.refuseNext("unavailable", { post: "review", saved: true });
@@ -438,7 +445,7 @@ test("a service stopped while a refused review waits to be sent again resumes, a
   const ran = engines.runs.length;
 
   const last = lastEvent(dir);
-  const second = await start({ home: dir, host, engines, time, idsFrom: 100 });
+  const second = await start({ home: dir, host, engines, retrieval, time, idsFrom: 100 });
   const seen = await until(
     await sinceStart(second.service, await openApp(second.service), last),
     "round.finished",
@@ -449,62 +456,67 @@ test("a service stopped while a refused review waits to be sent again resumes, a
   expect(host.view(PR1).reviews).toHaveLength(1);
 });
 
-/** Pull request #1's diff as the worktree gives it: head lines 1 to 4, line 3 the logging line the finding is on. */
-const TOTAL_DIFF = [
-  "diff --git a/src/total.ts b/src/total.ts",
-  "--- a/src/total.ts",
-  "+++ b/src/total.ts",
-  "@@ -1,2 +1,4 @@",
-  " export function total(items: Item[]) {",
-  "+  const key = process.env.API_KEY;",
-  "+  console.log(key);",
-  " }",
-  "",
-].join("\n");
-
 /**
- * A host that takes comments on head lines 1 and 2 only, and holds each review with no comment until `release`;
- * `inline` counts the reviews asked with comments.
+ * A host that takes comments on head lines 1 and 2 only, and holds each status block but the first (the one the job
+ * writes as it runs, ADR 0074) until `release`; `inline` counts the reviews asked with comments.
  */
-class NarrowHost extends HeldReviews {
+class NarrowHost extends FakeGitHost {
   inline = 0;
+  private statuses = 0;
+  private heard = () => {};
+  readonly asked = new Promise<void>((resolve) => {
+    this.heard = resolve;
+  });
+  private let = () => {};
+  private readonly released = new Promise<void>((resolve) => {
+    this.let = resolve;
+  });
+
+  release(): void {
+    this.let();
+  }
 
   override publishReview(...args: Parameters<FakeGitHost["publishReview"]>): Promise<string> {
-    const [, posted] = args;
-    // Refused for its comment on line 3 as GitHub refuses it, before anything is held.
-    if (posted.comments.length > 0) {
-      this.inline++;
-      return FakeGitHost.prototype.publishReview.apply(this, args);
-    }
+    // Refused for its comment on line 3 as GitHub refuses it.
+    this.inline++;
     return super.publishReview(...args);
+  }
+
+  override async upsertStatus(...args: Parameters<FakeGitHost["upsertStatus"]>): Promise<void> {
+    if (this.statuses++ > 0) {
+      this.heard();
+      await this.released;
+    }
+    return super.upsertStatus(...args);
   }
 }
 
-test("a review GitHub refused for a comment it can't place goes with its findings in the summary, after a restart too", async () => {
+test("a review GitHub refused for a comment it can't place leaves no review, its findings in the status block, after a restart too", async () => {
   const dir = home();
-  const engines = fakeEngines();
-  engines.answer({ outcome: "ok", text: ONE_FINDING });
-  const retrieval = new ScriptedRetrieval();
-  retrieval.diff = TOTAL_DIFF;
+  const engines = findingOnce();
+  const retrieval = onTheDiff();
   const narrow = { ...pr1, diff: [{ path: "src/total.ts", side: "head" as const, from: 1, to: 2 }] };
-  const host = new NarrowHost({ repo: SANDBOX, bot: BOT, changes: [narrow] });
+  const host = new NarrowHost({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [narrow] });
   const first = await start({ home: dir, host, engines, retrieval });
   await review(first.service, await openApp(first.service));
-  // The review with its findings in the summary is begun, and the service stops before GitHub answers it.
+  // The status block with the round's findings is begun, and the service stops before GitHub answers it.
   await host.asked;
   await first.service.stop();
 
   host.release();
   const last = lastEvent(dir);
   const second = await start({ home: dir, host, engines, retrieval, time: first.time, idsFrom: 100 });
-  await until(await sinceStart(second.service, await openApp(second.service), last), "round.finished");
-  const shown = host.view(PR1);
-  expect(shown.reviews.map((r) => r.comments)).toEqual([[]]);
-  // The store kept it: after the restart, the review was not tried with its comment again.
-  expect(host.inline).toBe(1);
-  expect(shown.comments[0]?.body).toContain(
-    "No comment on the line: GitHub would not place this round's comments.",
+  const seen = await until(
+    await sinceStart(second.service, await openApp(second.service), last),
+    "round.finished",
   );
+  expect(seen.at(-1)).toMatchObject({ job: { state: "done" }, findings: [{ id: "F1", posted: true }] });
+  const shown = host.view(PR1);
+  expect(shown.reviews).toEqual([]);
+  // The store kept it: after the restart, no review was tried again.
+  expect(host.inline).toBe(1);
+  expect(shown.comments).toEqual([]);
+  expect(statusOf(shown.description)).toContain("· `src/total.ts` line 3\n  Not in the diff: when the total");
 });
 
 test("a run's end that can't be recorded is tried once more", async () => {
@@ -547,7 +559,14 @@ test("a run's end that can't be recorded twice fails the job in its own write an
   await time.advance(0);
   expect(
     host.posts.map((p) => (p.kind === "check.completed" ? `${p.kind} ${p.conclusion}` : p.kind)),
-  ).toEqual(["check.created", "check.updated", "review", "summary.created", "check.completed success"]);
+  ).toEqual([
+    "check.created",
+    "check.updated",
+    // Looking over as it runs (ADR 0074), then the round's block.
+    "status.written",
+    "status.written",
+    "check.completed success",
+  ]);
 
   // Nothing is left running: the next "Review now" runs at once, a new job.
   expect((await review(service, cookie)).status).toBe(200);
@@ -595,6 +614,7 @@ test("a review GitHub took whose record failed is found by the next round: its f
     home: dir,
     store: refusingPosts(dir, 1, "review"),
     engines,
+    retrieval: onTheDiff(),
     changes: [pr1],
     log: () => {},
   });
@@ -614,14 +634,14 @@ test("a review GitHub took whose record failed is found by the next round: its f
     round: { n: 2, open: 1 },
     findings: [{ id: "F1", status: "open", posted: true }],
   });
-  const [, second] = host.view(PR1).reviews;
-  expect(second?.body).toContain("Nothing new to fix");
+  // Round 2 has no line comment of its own: it posts no review (ADR 0074).
+  expect(host.view(PR1).reviews).toHaveLength(1);
 });
 
 test("a finding whose review GitHub refused is posted by the next round while the defect is there, and holds it open", async () => {
   const engines = fakeEngines();
   engines.answer({ outcome: "ok", text: ONE_FINDING });
-  const { service, host } = await start({ engines, changes: [pr1] });
+  const { service, host } = await start({ engines, retrieval: onTheDiff(), changes: [pr1] });
   const cookie = await openApp(service);
   const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   // A refusal publish doesn't try again: round 1's posts are given up at once, its finding held off.
@@ -642,9 +662,8 @@ test("a finding whose review GitHub refused is posted by the next round while th
     findings: [{ id: "F1", status: "open", posted: true }],
   });
   const shown = host.view(PR1);
-  expect(shown.reviews).toHaveLength(1);
-  expect(shown.reviews[0]?.body).toContain("One new thing to fix");
-  expect(shown.comments[0]?.body).toContain("The key is logged");
+  expect(shown.reviews.map((r) => r.comments.length)).toEqual([1]);
+  expect(statusOf(shown.description)).toContain("The key is logged");
   // Not clean: one thing to fix (a Should fix, its blocking unconfirmed with no confirm answer).
   expect(shown.checks.at(-1)).toMatchObject({
     status: "completed",
@@ -655,8 +674,8 @@ test("a finding whose review GitHub refused is posted by the next round while th
 test("an hour of GitHub refusing the review fails the job, the round kept and its findings held off the pull request; the check completes neutral once GitHub answers", async () => {
   const engines = fakeEngines();
   engines.answer({ outcome: "ok", text: ONE_FINDING });
-  const host = new RefusingPosts({ repo: SANDBOX, bot: BOT, changes: [pr1] });
-  const { service, time } = await start({ host, engines });
+  const host = new RefusingPosts({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
+  const { service, time } = await start({ host, engines, retrieval: onTheDiff() });
   const cookie = await openApp(service);
   const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   expect((await review(service, cookie)).status).toBe(200);
@@ -709,7 +728,9 @@ test("a run that finds Claude signed out, whose deferral can't be recorded twice
 });
 
 test("a host that lists the change but won't say what it is when the run asks fails the job, recorded and shown", async () => {
-  const { service } = await start({ host: new HostDown({ repo: SANDBOX, bot: BOT, changes: [pr1] }) });
+  const { service } = await start({
+    host: new HostDown({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] }),
+  });
   const cookie = await openApp(service);
   const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   expect((await review(service, cookie)).status).toBe(200);
@@ -722,7 +743,9 @@ test("a host that lists the change but won't say what it is when the run asks fa
 });
 
 test("a host that lists the change but refuses to say how to fetch it fails the job as the host's failure", async () => {
-  const { service } = await start({ host: new FetchRefused({ repo: SANDBOX, bot: BOT, changes: [pr1] }) });
+  const { service } = await start({
+    host: new FetchRefused({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] }),
+  });
   const cookie = await openApp(service);
   const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   expect((await review(service, cookie)).status).toBe(200);

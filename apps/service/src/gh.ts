@@ -1,7 +1,6 @@
 // The person's own `gh` (ADR 0059): a port, `Gh`, that says who the GitHub CLI is signed in as, that account's active
-// organisation memberships with its role in each (ADR 0067), and its membership of one organisation. Before an App exists the service
-// has no GitHub credential of its own, and an App's credentials can't say which person runs Lookover: the person's
-// `gh` login can, since GitHub vouches for it. Every read answers, never rejects: `missing` (no `gh`), `signed-out`,
+// organisation memberships with its role in each (ADR 0067): the organisations the shared App doesn't reach yet. Every
+// read answers, never rejects: `missing` (no `gh`), `signed-out`,
 // or `unanswered` with why (GitHub out of reach, an organisation's SAML single sign-on, a token without `read:org`, no
 // answer in time, anything else) and `gh`'s own words. Reads only: `gh api` with `GET`, never a write.
 // The fake is testkit's `memoryGh` (demo mode and the tests; its shapes are these, `describeGh` holds both to one
@@ -15,15 +14,7 @@
 // to search, or it is `bun run live`'s suite (`scripts/live-gh.ts`), which reads the owner's real `gh`.
 import { execFile } from "node:child_process";
 import { delimiter, isAbsolute, join } from "node:path";
-import type {
-  Gh,
-  GhMembership,
-  GhOrganisation,
-  GhPerson,
-  GhUnanswered,
-  GhWhy,
-  HostLogin,
-} from "@lookover/contracts";
+import type { Gh, GhOrganisation, GhPerson, GhUnanswered, GhWhy, HostLogin } from "@lookover/contracts";
 import { programEnv } from "@lookover/engines";
 import { z } from "zod";
 import { caseBlind, isFile, runnable, savedPath } from "./command-path.ts";
@@ -45,9 +36,6 @@ const GH_OWN = {
   NO_COLOR: "1",
   NoDefaultCurrentDirectoryInExePath: "1",
 };
-
-/** An organisation's login as GitHub allows it: letters, digits and single hyphens, 39 at most. */
-const ORGANISATION_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 
 /** Thrown by the real adapter built under `bun test` without a command of its own to run. */
 const UNDER_TEST =
@@ -245,8 +233,6 @@ function heard(ran: Ran, timeoutMs: number): Heard {
 const account = z.object({ id: z.number().int(), login: z.string().min(1) });
 /** One membership in the person's list. */
 const listed = z.object({ state: z.string(), role: z.string(), organization: account });
-/** The person's membership of one organisation. */
-const membership = z.object({ state: z.enum(["active", "pending"]), role: z.string(), user: account });
 
 /** An account as the port gives it: the id and the login alone. */
 const accountOf = (a: z.infer<typeof account>): HostLogin => ({ id: a.id, login: a.login });
@@ -292,9 +278,6 @@ function membershipsPage(
   return { kind: "page", listed: found, next: next === undefined ? null : next.slice(API.length) };
 }
 
-/** Not a member of the organisation, or no such organisation. */
-const ABSENT: GhMembership = { kind: "absent" };
-
 /** Who `gh` is signed in as (`GET /user`), or why it can't say. */
 async function you(api: (path: string) => Promise<Heard>): Promise<GhPerson> {
   const got = await api("user");
@@ -335,18 +318,6 @@ function reads(api: (path: string) => Promise<Heard>): Gh {
       if (who.kind !== "signed-in") return who;
       const listed = await everyMembership(api);
       return listed.kind === "listed" ? { ...listed, person: who.account } : listed;
-    },
-    membership: async (organisation) => {
-      if (!ORGANISATION_LOGIN.test(organisation)) return ABSENT;
-      const got = await api(`user/memberships/orgs/${organisation}`);
-      // Not found: not a member, or no such organisation; unless the token can't see it (SSO, a scope).
-      if (got.kind === "refused")
-        return untrusted(got.response) ?? (got.response.status === 404 ? ABSENT : refusal(got.response));
-      if (got.kind !== "ok") return got;
-      const parsed = membership.safeParse(got.response.body);
-      if (!parsed.success) return unexpected(organisation, parsed.error);
-      const { state, role, user } = parsed.data;
-      return { kind: state, person: accountOf(user), admin: role === "admin" };
     },
   };
 }

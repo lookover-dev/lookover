@@ -38,6 +38,7 @@ function finding(extra: Partial<Finding> = {}): Finding {
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: null,
     status: "open",
     posted: true,
     commented: false,
@@ -72,6 +73,7 @@ function round(extra: Partial<Round> = {}): Round {
   return {
     n: 1,
     sha: commitSha("703205d"),
+    base: null,
     reviewer: "claude",
     secondFind: null,
     confirmer: "claude",

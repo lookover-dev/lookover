@@ -33,10 +33,6 @@ export interface StoreStatus {
   refusal: Refusal | null;
 }
 
-/** A command as the console may say it: "Use an existing App" without its key (ADR 0053). */
-const withoutKey = (command: Command): Command =>
-  command.type === "connection.useApp" ? { ...command, key: "(not shown)" } : command;
-
 export class Store {
   state: State | null = null;
   private status: StoreStatus = { session: "open", refusal: null };
@@ -77,12 +73,8 @@ export class Store {
     this.api.send(command).then(
       () => true,
       (error: unknown) => {
-        console.error(
-          "Lookover refused a command",
-          withoutKey(command),
-          error instanceof Refused ? error.answer : error,
-        );
-        this.status = { ...this.status, refusal: refusalOf(error, withoutKey(command)) };
+        console.error("Lookover refused a command", command, error instanceof Refused ? error.answer : error);
+        this.status = { ...this.status, refusal: refusalOf(error, command) };
         this.changed();
         return false;
       },

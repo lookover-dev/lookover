@@ -1,11 +1,16 @@
 // `HostWriter` on GitHub: the `Lookover` check run, carrying its external id as GitHub's `external_id` (found by it
-// among the session's App's runs on the commit); one review
-// with its inline comments, found again by its marker among the poster's own (the session's: the bot, or the person
-// signed in, ADR 0066); the summary comment found by its marker among the poster's own, a person's only when the
-// App posted it. Both lookups read every page GitHub's `Link` header gives. GitHub's rules from spike 03
-// (ADR 0022) are applied before a request leaves: the check output and every body are counted in UTF-8 bytes.
+// among the session's App's runs on the commit); one review with its inline comments, found again by its marker among
+// the poster's own (the session's: the person signed in, ADR 0066); the status block in the pull request's
+// description (ADR 0074), read with a request of its own (never the ETag-cached listing) right before it is written,
+// read again a second apart for up to 30 s while it doesn't show the last block this writer sent (GitHub's lag, ADR
+// 0069), then spliced by `contracts`' `spliceStatus` and written whole, a 403 on it the person's permission
+// (`invalid`), never a sign-out. Both lookups read every page GitHub's `Link` header gives. GitHub's rules from
+// spike 03 (ADR 0022) are applied before a request leaves: the check output and every body are counted in UTF-8
+// bytes.
 import type {
+  ChangeRef,
   CheckOutput,
+  Clock,
   DiffSide,
   HostWriter,
   InlineComment,
@@ -18,19 +23,23 @@ import {
   CHECK_NAME,
   CHECK_OUTPUT_MAX_BYTES,
   COMMENT_MAX_BYTES,
+  changeName,
+  characterCount,
+  DESCRIPTION_MAX_CHARACTERS,
   HostError,
-  SUMMARY_MARKER,
+  showsStatus,
+  spliceStatus,
+  statusRoom,
   utf8Bytes,
 } from "@lookover/contracts";
 import type { Allowed } from "./allowed.ts";
-import type { GitHubApi } from "./api.ts";
+import { type GitHubApi, GitHubRefusal } from "./api.ts";
 import { graphql } from "./graphql.ts";
 import {
   authoredReviews,
   checkRun,
+  described,
   externalRuns,
-  issueComment,
-  issueComments,
   minimizedComment,
   parse,
   replyId,
@@ -63,8 +72,6 @@ function fitsBody(what: string, body: string): void {
 }
 
 const repoPath = (repo: RepositoryRef) => `/repos/${repo.owner}/${repo.name}`;
-
-type IssueComment = ReturnType<typeof issueComments.parse>[number];
 
 /** A check not yet completed, as GitHub names its status. */
 const STATUS: Record<OpenCheckStatus, "queued" | "in_progress"> = {
@@ -111,7 +118,43 @@ const unprocessable = (words: string): HostError | null =>
       )
     : null;
 
-export function createWriter(api: GitHubApi, session: Session, allowed: Allowed): HostWriter {
+/**
+ * How long the status block's write reads again while GitHub's read doesn't show the block last sent (ADR 0069: a
+ * head was seen to lag about 3 s), and the pause between two reads. The rereads take no abort signal, none being at
+ * hand on the port: a stopping service waits at most these 30 s on one status write. The block last sent is kept in
+ * memory only (`sent`): after a restart, the first write of a change reads once and doesn't wait, so a read lagging
+ * behind the write before the restart can lose an edit the author saved in that lag (accepted: ADR 0074's
+ * read-modify-write race).
+ */
+const LAG_MS = 30_000;
+const LAG_PAUSE_MS = 1_000;
+
+/** The time and the pause the status block's write waits out GitHub's lag with. */
+export interface Waiting {
+  clock: Clock;
+  sleep(ms: number): Promise<void>;
+}
+
+/**
+ * GitHub's 403 on a description's write, with no SAML SSO asked: the person may not edit it (ADR 0074), refused again
+ * as it is, never the connection's. Any other error as it is.
+ */
+function standing(error: unknown): unknown {
+  if (!(error instanceof GitHubRefusal) || error.status !== 403 || error.sso !== null) return error;
+  if (error.failure !== "unauthorized") return error;
+  return new HostError("invalid", error.message);
+}
+
+export function createWriter(
+  api: GitHubApi,
+  session: Session,
+  allowed: Allowed,
+  { clock, sleep }: Waiting,
+): HostWriter {
+  /** The block this writer last sent to each change, by its name: what a fresh read must show. */
+  const sent = new Map<string, string>();
+  const keyOf = (change: ChangeRef) => changeName(change).toLowerCase();
+
   /** Every item of a listing, page after page as GitHub's `Link` header gives them. */
   async function everyPage<T>(path: string, token: string, read: (body: unknown, where: string) => T[]) {
     const items: T[] = [];
@@ -199,40 +242,41 @@ export function createWriter(api: GitHubApi, session: Session, allowed: Allowed)
         return own ? String(own.id) : null;
       });
     },
-    async upsertSummary(change, body) {
+    async upsertStatus(change, render) {
       allowed(change.repo);
-      if (!body.includes(SUMMARY_MARKER)) {
-        throw new HostError(
-          "missing_marker",
-          `The summary must hold the marker ${SUMMARY_MARKER}, or the next round can't find it`,
-        );
-      }
-      fitsBody("summary", body);
-      const poster = await session.poster(change.repo);
-      const issue = `${repoPath(change.repo)}/issues/${change.number}/comments`;
-      // The bot's comment is its own; a person's is Lookover's only when the App posted it (ADR 0066): one the person
-      // wrote by hand holding the marker is theirs.
-      const ours = (c: IssueComment) =>
-        c.user.id === poster.id &&
-        c.body.includes(SUMMARY_MARKER) &&
-        (poster.bot || c.performed_via_github_app?.id === session.appId);
-      return session.withToken(change.repo, async (token) => {
-        const comments = await everyPage(`${issue}?per_page=100`, token, (listed, where) =>
-          parse(issueComments, listed, where),
-        );
-        const own = comments.find(ours);
-        if (own) {
-          const path = `${repoPath(change.repo)}/issues/comments/${own.id}`;
-          await api.request({ method: "PATCH", path, bearer: token, body: { body } });
-          return String(own.id);
+      const path = `${repoPath(change.repo)}/pulls/${change.number}`;
+      await session.withToken(change.repo, async (token) => {
+        // Never the ETag-cached listing: a request of its own, read whole.
+        const read = async () =>
+          parse(described, (await api.request({ path, bearer: token })).body, `GET ${path}`).body ?? "";
+        const last = sent.get(keyOf(change));
+        const start = clock.now();
+        let description = await read();
+        while (last !== undefined && !showsStatus(description, last) && clock.now() - start < LAG_MS) {
+          await sleep(LAG_PAUSE_MS);
+          description = await read();
         }
-        const created = await api.request({ method: "POST", path: issue, bearer: token, body: { body } });
-        return String(parse(issueComment, created.body, `POST ${issue}`).id);
+        const block = render(statusRoom(description));
+        if (block === null) return;
+        const written = spliceStatus(description, block);
+        const size = characterCount(written);
+        if (size > DESCRIPTION_MAX_CHARACTERS)
+          throw new HostError(
+            "too_large",
+            `The description would be ${size} characters; GitHub takes ${DESCRIPTION_MAX_CHARACTERS} at most`,
+          );
+        if (written !== description)
+          await api
+            .request({ method: "PATCH", path, bearer: token, body: { body: written } })
+            .catch((error: unknown) => {
+              throw standing(error);
+            });
+        sent.set(keyOf(change), block);
       });
     },
     async react(repo, commentId, reaction) {
       allowed(repo);
-      // GitHub answers 201 for a new reaction and 200 for one the bot already put there: both are done.
+      // GitHub answers 201 for a new reaction and 200 for one the poster already put there: both are done.
       const path = `${repoPath(repo)}/issues/comments/${commentId}/reactions`;
       await session.withToken(repo, (token) =>
         api.request({ method: "POST", path, bearer: token, body: { content: CONTENT[reaction] } }),

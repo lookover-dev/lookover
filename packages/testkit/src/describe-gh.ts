@@ -5,7 +5,7 @@
 // token without `read:org`, an organisation behind SAML single sign-on. A state the real `gh` can't be brought to on
 // demand is left out of its setup, and that case is skipped. Every read answers: none rejects.
 import { describe, expect, test } from "bun:test";
-import type { Gh, GhMembership, GhMemberships, GhPerson, HostLogin } from "@lookover/contracts";
+import type { Gh, GhMemberships, GhPerson, HostLogin } from "@lookover/contracts";
 
 export interface GhFixture {
   gh: Gh;
@@ -18,10 +18,8 @@ export interface GhFixture {
   admin: HostLogin[];
   /** Organisations where the person is an active member, not an owner: each must be listed as a member. */
   member?: HostLogin[];
-  /** An organisation the person was invited to and hasn't joined: pending. None: not checked. */
+  /** An organisation the person was invited to and hasn't joined: never listed. None: not checked. */
   pending?: HostLogin;
-  /** An organisation's login the person isn't a member of. */
-  absent: string;
 }
 
 export interface GhSetup {
@@ -38,7 +36,7 @@ export interface GhSetup {
   sso?: () => Promise<{ gh: Gh; organisation: string }>;
 }
 
-type Answer = GhPerson | GhMemberships | GhMembership;
+type Answer = GhPerson | GhMemberships;
 
 /** An answer's kind, and why for one that can't answer, with whether it gave `gh`'s words. */
 const kindOf = (answer: Answer): string =>
@@ -46,9 +44,9 @@ const kindOf = (answer: Answer): string =>
     ? `unanswered: ${answer.why}${answer.detail.trim() === "" ? ", no words" : ""}`
     : answer.kind;
 
-/** Every read of `gh`, an organisation's with `organisation`, by kind. */
-const everyRead = async (gh: Gh, organisation: string): Promise<string[]> =>
-  (await Promise.all([gh.person(), gh.memberships(), gh.membership(organisation)])).map(kindOf);
+/** Every read of `gh`, by kind. */
+const everyRead = async (gh: Gh): Promise<string[]> =>
+  (await Promise.all([gh.person(), gh.memberships()])).map(kindOf);
 
 /** The memberships `gh` lists, or the case fails saying why it listed none. */
 async function listed(gh: Gh): Promise<Extract<GhMemberships, { kind: "listed" }>> {
@@ -98,52 +96,12 @@ export function describeGh(name: string, setup: GhSetup): void {
       if (pending !== undefined) expect(ids).not.toContain(pending.id);
     });
 
-    test("membership: each organisation memberships lists, read alone, says the same role, as the person", async () => {
-      const { gh, person } = await setup.signedIn();
-      const answer = await listed(gh);
-      for (const { organisation, role } of answer.organisations)
-        expect(await gh.membership(organisation.login)).toEqual({
-          kind: "active",
-          person,
-          admin: role === "owner",
-        });
-    });
-
-    test("membership: an organisation's login matched without case, as GitHub does", async () => {
-      const { gh, person, admin } = await setup.signedIn();
-      for (const organisation of admin.slice(0, 1))
-        expect(await gh.membership(organisation.login.toUpperCase())).toEqual({
-          kind: "active",
-          person,
-          admin: true,
-        });
-    });
-
-    test("membership: an active member who isn't an admin reads active, not as an admin", async () => {
-      const { gh, person, member } = await setup.signedIn();
-      for (const organisation of member ?? [])
-        expect(await gh.membership(organisation.login)).toEqual({ kind: "active", person, admin: false });
-    });
-
-    test("membership: an invitation not yet accepted reads pending", async () => {
-      const { gh, person, pending } = await setup.signedIn();
-      if (pending !== undefined)
-        expect(await gh.membership(pending.login)).toMatchObject({ kind: "pending", person });
-    });
-
-    test("membership: an organisation the person isn't in reads absent, and so does a login no organisation can have", async () => {
-      const { gh, absent } = await setup.signedIn();
-      expect(await gh.membership(absent)).toEqual({ kind: "absent" });
-      expect(await gh.membership("not/an organisation")).toEqual({ kind: "absent" });
-      expect(await gh.membership("")).toEqual({ kind: "absent" });
-    });
-
     when(setup.signedOut, "signed out: every read says so", async (gh) => {
-      expect(await everyRead(gh, "lookover-dev")).toEqual(["signed-out", "signed-out", "signed-out"]);
+      expect(await everyRead(gh)).toEqual(["signed-out", "signed-out"]);
     });
 
     when(setup.missing, "not installed: every read says so", async (gh) => {
-      expect(await everyRead(gh, "lookover-dev")).toEqual(["missing", "missing", "missing"]);
+      expect(await everyRead(gh)).toEqual(["missing", "missing"]);
     });
 
     when(
@@ -151,7 +109,7 @@ export function describeGh(name: string, setup: GhSetup): void {
       "GitHub out of reach: every read can't answer, offline, with gh's words",
       async (gh) => {
         const offline = "unanswered: offline";
-        expect(await everyRead(gh, "lookover-dev")).toEqual([offline, offline, offline]);
+        expect(await everyRead(gh)).toEqual([offline, offline]);
       },
     );
 
@@ -160,15 +118,14 @@ export function describeGh(name: string, setup: GhSetup): void {
       "a token without read:org: who it is answers, the organisations' reads can't, for the scope",
       async (gh) => {
         const scope = "unanswered: scope";
-        expect(await everyRead(gh, "lookover-dev")).toEqual(["signed-in", scope, scope]);
+        expect(await everyRead(gh)).toEqual(["signed-in", scope]);
       },
     );
 
     when(
       setup.sso,
-      "an organisation behind SAML single sign-on: its membership and the list of memberships can't answer, for SSO",
-      async ({ gh, organisation }) => {
-        expect(kindOf(await gh.membership(organisation))).toBe("unanswered: sso");
+      "an organisation behind SAML single sign-on: the list of memberships can't answer, for SSO",
+      async ({ gh }) => {
         expect(kindOf(await gh.memberships())).toBe("unanswered: sso");
         expect((await gh.person()).kind).toBe("signed-in");
       },

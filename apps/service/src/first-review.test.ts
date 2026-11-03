@@ -8,7 +8,6 @@ import { openStore, type Store } from "@lookover/store";
 import { DemoClock, FakeGitHost, type ScriptedRun } from "@lookover/testkit";
 import {
   api,
-  BOT,
   fakeEngines,
   home,
   lastEvent,
@@ -17,9 +16,11 @@ import {
   openApp,
   post,
   pr1,
+  roundWritten,
   SANDBOX,
   SHA1,
   SHA1_PUSHED,
+  SHARED_BOT,
   sinceStart,
   snapshot,
   start,
@@ -35,6 +36,32 @@ afterEach(stopAll);
 const ONE = changeId("sasensi/lookover-sandbox#1");
 const ref = { repo: SANDBOX, number: 1 };
 const REPO = repositoryId(`${SANDBOX.owner}/${SANDBOX.name}`);
+
+/**
+ * The rounds posted on the host: each writes the status block once. The rounds here put no finding on a line of
+ * the scripted diff, so they post no review (ADR 0074): the block is what says a round posted (not the one the job
+ * writes as it waits or runs).
+ */
+const postedRounds = (host: FakeGitHost) => host.posts.filter(roundWritten);
+
+/** What a preview must never post: a review or a status block. */
+const reviewsOrSummaries = (host: FakeGitHost) =>
+  host.posts.filter((p) => p.kind === "review" || p.kind === "status.written");
+
+/**
+ * The headings of what `reviewsOrSummaries` finds, in order: of a review that waited signed out before a preview
+ * joined it, only the block it wrote as it waited (ADR 0074; no block is ever taken off).
+ */
+const headings = (host: FakeGitHost) =>
+  reviewsOrSummaries(host).map((p) =>
+    p.kind === "status.written" ? (p.description.split("\n")[1]?.split(" · ")[1] ?? "") : p.kind,
+  );
+/**
+ * The one block a review that waited signed out wrote before a preview joined it. A gap, asserted as it is: no block
+ * can be taken off, so on a pull request whose only later run is a preview, "Waiting to look over" stays (I-229).
+ */
+const WAITED =
+  "Waiting to look over [`a1b2c3d`](https://github.com/sasensi/lookover-sandbox/pull/1/commits/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678)";
 
 test("a preview first review keeps its round with an empty outbox, posts nothing and says it was a preview", async () => {
   const dir = home();
@@ -145,18 +172,16 @@ test("the next round after a preview posts the preview's open finding on the pul
   ).toBe(200);
   const preview = (await until(stream, "round.finished")).at(-1);
   expect(preview).toMatchObject({ preview: true, findings: [{ id: "F1", severity: "blocking" }] });
-  expect(host.posts.filter((p) => p.kind === "review")).toEqual([]);
+  expect(reviewsOrSummaries(host)).toEqual([]);
 
   expect((await post(service, cookie, { type: "review.request", changeId: ONE })).status).toBe(200);
   const next = (await until(stream, "round.finished")).at(-1);
   expect(next).toMatchObject({ preview: false, round: { n: 2 }, findings: [{ id: "F1", posted: true }] });
-  const reviews = host.posts.flatMap((p) => (p.kind === "review" ? [p.review] : []));
-  expect(reviews).toHaveLength(1);
-  // The review says it; the line is outside the fake diff, so the finding itself is in the summary.
-  expect(reviews[0]?.body).toContain("One new thing to fix, total.ts line 12.");
-  const summary = host.posts.find((p) => p.kind === "summary.created");
-  expect(summary?.kind === "summary.created" && summary.body).toContain(
-    "F1 · Blocking · `src/total.ts` line 12 · The total skips the last invoice",
+  // The line is outside the fake diff, so the finding is in the status block, and no review is posted (ADR 0074).
+  expect(host.posts.filter((p) => p.kind === "review")).toEqual([]);
+  const block = host.posts.find(roundWritten);
+  expect(block?.kind === "status.written" && block.description).toContain(
+    "- **Blocking** · The total skips the last invoice · `src/total.ts` line 12\n  Not in the diff:",
   );
 });
 
@@ -171,7 +196,7 @@ test("a first review without preview is an ordinary request that posts, with the
     preview: false,
     job: { trigger: "first-review", state: "done" },
   });
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  expect(postedRounds(host)).toHaveLength(1);
   expect(host.view(ref).checks.map((c) => c.status)).toEqual(["completed"]);
   const state = await snapshot(service, cookie);
   expect(state.setup.firstReviewChange).toBe(ONE);
@@ -196,13 +221,13 @@ test("a first review of a pull request already being reviewed on its head commit
   await time.advance(12 * 60_000);
   await time.advance(0);
   expect(engines.runs).toHaveLength(1);
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  expect(postedRounds(host)).toHaveLength(1);
   const state = await snapshot(service, cookie);
   expect(state.setup.firstReviewChange).toBe(ONE);
   expect(state.reviews[ONE]).toMatchObject({ job: { state: "done" }, rounds: [{ n: 1 }] });
 });
 
-test("a first review of a pull request whose round on its head commit ended follows that round: one run, one review (#425)", async () => {
+test("a first review of a pull request whose round on its head commit ended follows that round: one run, one round posted (#425)", async () => {
   // The live case of #425: the poll reviewed the owner's new pull request by itself, and the owner picks it in the
   // setup after its round was posted (a list a tick behind, or a tab left open).
   const time = new DemoClock({ at: T0 });
@@ -222,13 +247,13 @@ test("a first review of a pull request whose round on its head commit ended foll
   await time.advance(5 * 60_000);
   await time.advance(0);
   expect(engines.runs).toHaveLength(1);
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  expect(postedRounds(host)).toHaveLength(1);
   const state = await snapshot(service, cookie);
   expect(state.setup.firstReviewChange).toBe(ONE);
   expect(state.reviews[ONE]).toMatchObject({ job: { trigger: "opened", state: "done" }, rounds: [{ n: 1 }] });
 });
 
-test("Review now or /lookover review on a head whose round ended still asks: a second run, a second review (#425)", async () => {
+test("Review now or /lookover review on a head whose round ended still asks: a second run, a second round posted (#425)", async () => {
   // Only the setup's first review follows a round already posted; the owner asking by hand means another look.
   const time = new DemoClock({ at: T0 });
   const engines = fakeEngines({ reviews: 3, tookMs: 60_000, time });
@@ -241,7 +266,7 @@ test("Review now or /lookover review on a head whose round ended still asks: a s
   await time.advance(2 * 60_000);
   await until(stream, "round.finished");
   await time.advance(0);
-  const reviews = () => host.posts.filter((p) => p.kind === "review");
+  const reviews = () => postedRounds(host);
   expect(reviews()).toHaveLength(1);
 
   expect((await post(service, cookie, { type: "review.request", changeId: ONE })).status).toBe(200);
@@ -282,10 +307,10 @@ test("a first review of a pull request whose round on its head was a preview run
   await until(stream, "round.finished");
   await time.advance(0);
   expect(engines.runs).toHaveLength(2);
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  expect(postedRounds(host)).toHaveLength(1);
 });
 
-test("a first review of a pull request the poll saw opened, asked while that review runs, follows it: one round, one review, one check", async () => {
+test("a first review of a pull request the poll saw opened, asked while that review runs, follows it: one round, posted once, one check", async () => {
   // The live race of #201: the poll sees the owner's new pull request and reviews it, unasked; the owner picks it
   // in the setup while that review runs.
   const time = new DemoClock({ at: T0 });
@@ -305,7 +330,7 @@ test("a first review of a pull request the poll saw opened, asked while that rev
   await time.advance(12 * 60_000);
   await time.advance(0);
   expect(engines.runs).toHaveLength(1);
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  expect(postedRounds(host)).toHaveLength(1);
   expect(host.view(ref).checks.map((c) => c.status)).toEqual(["completed"]);
   const state = await snapshot(service, cookie);
   expect(state.setup.firstReviewChange).toBe(ONE);
@@ -334,7 +359,7 @@ test("a preview first review asked while the change's review runs gets its own r
     [2, true],
   ]);
   expect(engines.runs).toHaveLength(2);
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  expect(postedRounds(host)).toHaveLength(1);
 });
 
 test("a first review that posts, asked while a preview that joined the owner's review runs, gets its own round, which posts", async () => {
@@ -368,7 +393,7 @@ test("a first review that posts, asked while a preview that joined the owner's r
     [2, false],
   ]);
   expect(engines.runs).toHaveLength(2);
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  expect(postedRounds(host)).toHaveLength(1);
 });
 
 test("a first review asked while a review of an older commit runs is a follow-up on the new head", async () => {
@@ -445,7 +470,7 @@ test("a preview joining a review whose check GitHub shows ends that check: skipp
   expect(host.view(ref).checks.map((c) => [c.status, c.conclusion, c.output.title])).toEqual([
     ["completed", "skipped", "A preview: nothing was posted"],
   ]);
-  expect(host.posts.filter((p) => p.kind === "review")).toEqual([]);
+  expect(headings(host)).toEqual([WAITED]);
 });
 
 test("a preview whose job a push moves ends the old commit's check and makes none on the new one", async () => {
@@ -474,7 +499,7 @@ test("a preview whose job a push moves ends the old commit's check and makes non
   expect((await until(stream, "round.finished")).at(-1)).toMatchObject({ preview: true });
   await time.advance(0);
   expect(shown(SHA1_PUSHED)).toEqual([]);
-  expect(host.posts.filter((p) => p.kind === "review")).toEqual([]);
+  expect(headings(host)).toEqual([WAITED]);
 });
 
 test("an agent's /lookover review beside the owner's waiting preview gets a review of its own: 👀 and a check at once, the preview first and posting nothing, then its round posted and 🚀", async () => {
@@ -523,7 +548,7 @@ test("an agent's /lookover review beside the owner's waiting preview gets a revi
     [2, false],
   ]);
   await time.advance(0);
-  expect(host.posts.filter((p) => p.kind === "review")).toHaveLength(1);
+  expect(postedRounds(host)).toHaveLength(1);
   expect(checks()).toEqual([["completed", "success"]]);
   expect(reactions()).toEqual({ eyes: 1, rocket: 1 });
 });
@@ -556,7 +581,38 @@ test("a preview's check end the host refused is sent again until it lands, after
   expect(first.host.view(ref).checks.map((c) => [c.status, c.conclusion, c.output.title])).toEqual([
     ["completed", "skipped", "A preview: nothing was posted"],
   ]);
-  expect(first.host.posts.filter((p) => p.kind === "review")).toEqual([]);
+  expect(headings(first.host)).toEqual([WAITED]);
+});
+
+test("a preview after a restart puts the last posted round back over the block its review wrote as it waited", async () => {
+  const dir = home();
+  const engines = fakeEngines({ reviews: 2 });
+  const first = await start({ home: dir, changes: [pr1], engines });
+  const cookie = await openApp(first.service);
+  const stream = messages(await fetch(api(first.service, "/events"), { headers: { cookie } }));
+  expect((await post(first.service, cookie, { type: "review.request", changeId: ONE })).status).toBe(200);
+  await first.time.advance(0);
+  expect((await until(stream, "round.finished")).at(-1)).toMatchObject({ preview: false, round: { n: 1 } });
+  await first.time.advance(0);
+  const posted = first.host.view(ref).description;
+
+  // Claude signed out, a push: the owner's review waits, and says so.
+  engines.setHealth("claude", { installed: true, version: "2.4.1", signedIn: false });
+  first.host.push(ref, SHA1_PUSHED, pr1.diff);
+  expect((await post(first.service, cookie, { type: "review.request", changeId: ONE })).status).toBe(200);
+  await first.time.advance(0);
+  expect(first.host.view(ref).description).toContain("Waiting to look over");
+  await first.service.stop();
+
+  // Back, a preview joins the waiting review; signed in, it runs, and round 1's block is back.
+  const second = await start({ home: dir, host: first.host, engines, time: first.time, idsFrom: 100 });
+  const again = await openApp(second.service);
+  const preview = { type: "setup.firstReview", changeId: ONE, preview: true };
+  expect((await post(second.service, again, preview)).status).toBe(200);
+  engines.setHealth("claude", { installed: true, version: "2.4.1", signedIn: true });
+  await second.time.advance(60_000);
+  await second.time.advance(0);
+  expect(first.host.view(ref).description).toBe(posted);
 });
 
 /** A host that holds every check it is asked to create until `release`: GitHub slow to answer. */
@@ -584,7 +640,7 @@ class HeldCheck extends FakeGitHost {
 
 test("a preview joining a review while GitHub is still creating its check ends that check once it is made", async () => {
   const time = new DemoClock({ at: T0 });
-  const host = new HeldCheck({ repo: SANDBOX, bot: BOT, changes: [pr1], clock: time });
+  const host = new HeldCheck({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1], clock: time });
   const engines = fakeEngines({ signedIn: false, reviews: 1 });
   const { service } = await start({ host, time, engines });
   const cookie = await openApp(service);
@@ -608,7 +664,7 @@ test("a preview joining a review while GitHub is still creating its check ends t
   expect(host.view(ref).checks.map((c) => [c.status, c.conclusion, c.output.title])).toEqual([
     ["completed", "skipped", "A preview: nothing was posted"],
   ]);
-  expect(host.posts.filter((p) => p.kind === "review")).toEqual([]);
+  expect(reviewsOrSummaries(host)).toEqual([]);
 });
 
 test("a preview left at publishing by a stopped service ends as its round at the next start: nothing found again, nothing posted", async () => {

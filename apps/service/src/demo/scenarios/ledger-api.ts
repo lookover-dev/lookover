@@ -18,7 +18,7 @@ export const SHORT_FIND_MS = 75_000;
 export const OWNER: Account = { id: 1, login: "sasensi" };
 export const DEPENDABOT: Account = { id: 49699333, login: "dependabot[bot]" };
 export const MIRA: Account = { id: 7, login: "mira" };
-/** The organisation the owner works in (S15, S16, S17). */
+/** The organisation the owner works in (S16, S17). */
 export const LEDGER_DEV: Account = { id: 338, login: "ledger-dev" };
 /** The owner's organisation without the shared App: theirs to install on (ADR 0067). */
 export const LEDGER_LABS: Account = { id: 340, login: "ledger-labs" };
@@ -28,9 +28,12 @@ export const LEDGER_HQ: Account = { id: 341, login: "ledger-hq" };
 /** `account`'s repository `name`. */
 export const of = (account: Account, name: string): RepositoryRef => ({ owner: account.login, name });
 
+/** The shared App's bot (ADR 0066), every world's: on the shared App it never posts, the owner does. */
+export const SHARED_BOT: Account = { id: 2020, login: "lookover-dev[bot]" };
+
 export const LEDGER_API: World = {
   repo: { owner: "sasensi", name: "ledger-api" },
-  bot: { id: 2, login: "lookover-spike-sasensi[bot]" },
+  bot: SHARED_BOT,
   owner: OWNER,
   engines: {
     claude: { installed: true, version: "2.4.1", signedIn: true },

@@ -18,7 +18,7 @@ export interface DeviceCode {
 export interface DeviceGrant extends DeviceCode {
   /** The code Lookover polls with: a credential, never shown or logged. */
   deviceCode: string;
-  /** How long to wait before the next poll, in milliseconds: GitHub's `interval`, 5 s more after each `slow_down`. */
+  /** How long to wait before the next poll, in milliseconds: GitHub's `interval`, the one its last `slow_down` gave. */
   interval: number;
 }
 
@@ -39,7 +39,7 @@ export type SignInTokens = Omit<SignIn, "person">;
 
 /**
  * One poll of a device code. `pending`: the person hasn't entered it yet, poll again after `grant.interval`;
- * `slow-down`: the same, GitHub asked to wait 5 s more, which `grant.interval` holds now. `expired`: the code ran out
+ * `slow-down`: the same, GitHub asked to wait longer, as `grant.interval` now says. `expired`: the code ran out
  * before it was entered; `denied`: the person refused on GitHub's page. `issued`: the tokens, the code spent with
  * them: never polled again, whatever happens next.
  */
@@ -54,10 +54,10 @@ export type DevicePoll =
  * The host's side of a sign-in (ADR 0066). `startSignIn` asks for a device code; `pollSignIn` asks once whether it was
  * entered, never waiting itself, and gives the tokens as soon as the host issues them; `person` reads whose a token is
  * (asked again, never the code, when the host can't answer: `unavailable`, `rate_limited`; a token it refuses is
- * `unauthorized`); `refreshSignIn` renews a sign-in with its refresh token, which the host rotates: the
- * answer holds a new one, the old one spent. A refresh the host refuses (`bad_refresh_token`: expired, revoked or
- * already spent; `incorrect_client_credentials`: unknown to it) is `unauthorized` with the connection's cause `signed-out`; an unreachable host is `unavailable`.
- * Every refusal is a `HostError`.
+ * `unauthorized`); `refreshSignIn` renews a sign-in with its refresh token, which the host rotates: the answer holds
+ * a new one, the old one spent. A refresh the host refuses (`bad_refresh_token`: expired, revoked or already spent;
+ * `incorrect_client_credentials`: unknown to it) is `unauthorized` with the connection's cause `signed-out`; an
+ * unreachable host is `unavailable`. Every refusal is a `HostError`.
  */
 export interface HostSignIn {
   startSignIn(): Promise<DeviceGrant>;
@@ -67,7 +67,7 @@ export interface HostSignIn {
 }
 
 /**
- * Where the sign-in is kept (ADR 0066: sealed in the data folder, like the App's key): read again before each
+ * Where the sign-in is kept (ADR 0066: sealed in the data folder by the service's `sealing.ts`): read again before each
  * refresh, in case another process renewed it first, and written with the rotated refresh token before the new
  * token is used. `read` gives null when none is kept. `write` keeps `renewed` in place of `from`, the sign-in it
  * renews, only while `from` is still the one kept (the same token and refresh token), in one turn with the keeper's
@@ -80,8 +80,13 @@ export interface SignInKeeper {
 }
 
 /**
- * Why "Sign in with GitHub" didn't start (`connection.signIn`, answered as the 409's `signIn`), as data the app words:
- * `unavailable`, no shared App is offered here; `own-app`, Lookover runs as its own App here; `pending`, a sign-in
- * already waits for its code.
+ * How the sign-in's tokens are kept (ADR 0053): `keychain`, encrypted under a data key in the OS keychain;
+ * `user-file`, unencrypted in a user-only file, the keychain out of reach.
  */
-export type SignInStartRefusal = "unavailable" | "own-app" | "pending";
+export type KeyProtection = "keychain" | "user-file";
+
+/**
+ * Why "Sign in with GitHub" didn't start (`connection.signIn`, answered as the 409's `signIn`), as data the app words:
+ * `pending`, a sign-in already waits for its code.
+ */
+export type SignInStartRefusal = "pending";

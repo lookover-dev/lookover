@@ -59,13 +59,10 @@ test("S16, signed in on two accounts: each account's ledger-api, its #151 the pe
   const state = await loaded("S16");
   expect(state.setup.done).toBe(true);
   expect(state.connection).toMatchObject({
-    way: "shared",
     state: "connected",
     cause: null,
     id: "github:sasensi",
     person: PERSON,
-    bot: null,
-    app: null,
   });
   expect(state.connection.accounts.map((a) => [a.account.login, a.account.type, a.cause])).toEqual([
     ["sasensi", "User", null],
@@ -112,7 +109,6 @@ test("the drawer signs the person out of GitHub: the connection says so, and Sig
     state: "connected",
     cause: null,
     signIn: null,
-    way: "shared",
     person: PERSON,
   });
 });
@@ -131,14 +127,14 @@ test("the drawer has ledger-dev ask for SSO: its account holds the cause, the co
   expect(sso.departed).toEqual([]);
   expect((await after(MIN)).connection.state).toBe("connected");
 
-  // The person's agent opens a pull request on their own ledger-api: reviewed and posted as them, ledger-dev still
-  // asking for SSO.
+  // The person's agent opens a pull request on their own ledger-api: reviewed, ledger-dev still asking for SSO. Its
+  // round finds nothing, so it posts no review on GitHub (ADR 0074, "Posting order"): its page lists none.
   expect(await inject(door, "agent-opens-change")).toBe(200);
   const reviewed = await after(5 * MIN);
   expect(reviewed.changes[AGENT]).toMatchObject({ number: 152, author: "you", writtenBy: "claude" });
   expect(reviewed.reviews[AGENT]?.job).toMatchObject({ state: "done" });
   expect(reviewed.reviews[AGENT]?.rounds).toHaveLength(1);
-  expect(reviewersOf(await onGitHub(door, "/sasensi/ledger-api/pull/152"))).toEqual(["sasensi"]);
+  expect(reviewersOf(await onGitHub(door, "/sasensi/ledger-api/pull/152"))).toEqual([]);
   expect(reviewed.connection.accounts.map((a) => [a.account.login, a.cause?.kind ?? null])).toEqual([
     ["sasensi", null],
     ["ledger-dev", "sso"],
@@ -215,6 +211,27 @@ test("the drawer has an owner suspend the App on ledger-dev: its account says so
   ]);
 });
 
+test("the drawer uninstalls the shared App from every account the sign-in reaches: the connection says so", async () => {
+  await loaded("S16");
+  expect(await inject(door, "app-uninstalled")).toBe(200);
+  const gone = await snapshotOf(door);
+  expect(gone.connection).toMatchObject({
+    state: "disconnected",
+    cause: { kind: "uninstalled", suspended: false },
+  });
+});
+
+test("the drawer suspends the shared App on the person's own account: its account says so, the others go on", async () => {
+  await loaded("S16");
+  expect(await inject(door, "app-suspended")).toBe(200);
+  const suspended = await snapshotOf(door);
+  expect(suspended.connection).toMatchObject({ state: "connected", cause: null });
+  expect(suspended.connection.accounts.map((a) => [a.account.login, a.cause])).toEqual([
+    ["sasensi", { kind: "uninstalled", suspended: true }],
+    ["ledger-dev", null],
+  ]);
+});
+
 /** An account reached, by its login. */
 const reachedOf = (state: State, login: string) => {
   const found = state.connection.accounts.find((a) => a.account.login === login);
@@ -260,8 +277,8 @@ test("ledger-dev asking for SSO: Sign in with SSO's page starts the session, and
   expect(fine.connection.state).toBe("connected");
 });
 
-test("the shared App's faults ask for a sign-in or an organisation reached: S10 runs on its own App", async () => {
-  await loaded("S10");
+test("the shared App's faults ask for a sign-in or an organisation reached: S1 is signed in nowhere yet", async () => {
+  await loaded("S1");
   expect(await refused("github-signed-out")).toEqual({
     status: 409,
     body: { error: "nobody is signed in to the shared App" },

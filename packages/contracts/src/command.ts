@@ -8,8 +8,8 @@ import type { SetupStep } from "./setup.ts";
 
 /**
  * What "Too noisy?" can do in v1 (ADR 0049, ADR 0052): dismiss a posted finding still unsettled as wrong (said on its
- * thread, the summary and the check rewritten, never raised again on the change), post only blocking findings in the
- * change's repository, or turn off the rule the finding cites.
+ * thread, the status block and the check rewritten, never raised again on the change), post only blocking findings
+ * in the change's repository, or turn off the rule the finding cites.
  */
 export type NoiseChoice =
   | { kind: "wrong"; changeId: ChangeId; findingId: FindingId }
@@ -22,22 +22,9 @@ export type Command =
   /** Send the jobs deferred on this engine to the other one. Only ever the owner's choice (ADR 0029). */
   | { type: "engine.reroute"; from: EngineId }
   /**
-   * "Create it on GitHub" (ADR 0053, ADR 0059): the setup waits for the App, made on your own account (`organisation`
-   * null) or on the organisation of that login, which must be one the person's `gh` lists as theirs to admin when
-   * asked. The page it opens makes the App where this said, whatever its own address says.
-   */
-  | { type: "connection.createApp"; organisation: string | null }
-  /** The person's own `gh` read again (ADR 0059): when the setup's GitHub step shows, and its Check again. */
-  | { type: "gh.check" }
-  /**
-   * "Use an existing App" (ADR 0053): the App's id and its private key, the PEM text of the file GitHub gave. The key
-   * is checked, kept and never echoed, logged or put in an event or a refusal (`UseAppRefusal`).
-   */
-  | { type: "connection.useApp"; appId: number; key: string }
-  /**
    * "Sign in with GitHub", and Sign in again once signed out (ADR 0066): a device code asked of GitHub and shown on
    * the connection (`signIn`) until the person enters it, it expires, or the sign-in is cancelled. Refused while one
-   * waits, and while Lookover runs as its own App.
+   * waits.
    */
   | { type: "connection.signIn" }
   /** The sign-in waiting for its code given up: the code no longer shown, nothing kept. Nothing when none waits. */

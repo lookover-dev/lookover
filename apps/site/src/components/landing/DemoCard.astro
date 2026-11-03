@@ -1,7 +1,8 @@
 ---
-// S2's review loop condensed into one card for the site, in GitHub's colours, as the shared App posts it (ADR 0065):
-// the review and the summary by the person signed in, the badge on the summary alone, the check under Lookover. The
-// caption makes clear that this groups the separate GitHub posts. The person is an example.
+// S2's review loop condensed into one card for the site, in GitHub's colours, as the shared App posts it (ADR 0065,
+// ADR 0074): Lookover's status block at the end of the description, the review by the person signed in with no body
+// and its line comment, each post opening with the wordmark, the check under Lookover. The caption makes clear that
+// this groups the separate GitHub posts. The person is an example.
 import { ICON } from "../../brand/eyes.generated.ts";
 
 const PERSON = "mira";
@@ -21,14 +22,30 @@ const INITIAL = PERSON.charAt(0).toUpperCase();
       </div>
       <div class="pr-body">
         <div class="cm">
+          <span class="av" aria-hidden="true">A</span>
+          <div class="cm-box">
+            <div class="cm-h"><b>agent</b> <span>commented</span></div>
+            <div class="cm-b">
+              <p>Limits each API key to 100 requests a minute on /v1/invoices.</p>
+              <hr />
+              <p class="block-head">
+                <img
+                  class="wm on-dark"
+                  src="/brand/lookover-wordmark-on-dark.svg"
+                  width="86"
+                  height="26"
+                  alt="Lookover"
+                /><img class="wm on-light" src="/brand/lookover-wordmark.svg" width="86" height="26" alt="Lookover" />
+                · Nothing to fix
+              </p>
+              <p class="block-line">Round 2 · <code>b2c3d4e</code> · 1 fixed</p>
+            </div>
+          </div>
+        </div>
+        <div class="cm">
           <span class="av" aria-hidden="true">{INITIAL}</span>
           <div class="cm-box">
-            <div class="cm-h"><b>{PERSON}</b> <span>reviewed <code>a1f9c2e</code> · round 1</span></div>
-            <div class="cm-b">
-              <p>
-                Lookover · <b>One thing to fix.</b> The rest can go.
-              </p>
-            </div>
+            <div class="cm-h"><b>{PERSON}</b> <span>commented on <code>a1f9c2e</code></span></div>
             <div class="diff">
               <div class="file">src/middleware/rateLimit.ts</div>
               <div class="ln"><span>41</span><span>if (limited) &#123;</span></div>
@@ -38,26 +55,24 @@ const INITIAL = PERSON.charAt(0).toUpperCase();
               <div class="ln"><span>43</span><span>  return res.status(429).end();</span></div>
             </div>
             <div class="cm-b">
-              <span class="sev">Blocking</span>
               <p>
-                <b>API key is written to the request log.</b> When a client is throttled, the full headers are logged,
-                including Authorization. Log the client id instead.
+                <img
+                  class="wm on-dark"
+                  src="/brand/lookover-wordmark-on-dark.svg"
+                  width="60"
+                  height="18"
+                  alt="Lookover"
+                /><img class="wm on-light" src="/brand/lookover-wordmark.svg" width="60" height="18" alt="Lookover" />
+                · Blocking
               </p>
+              <p>
+                <b>API key is written to the request log</b>
+              </p>
+              <p>When a client is throttled, the full headers are logged, including Authorization. Log the client id instead.</p>
             </div>
             <div class="thread">
               <span><b>agent</b> · Fixed in <code>b2c3d4e</code>: logs the key id only.</span>
               <span><span class="ok">Resolved</span> · verified fixed in <code>b2c3d4e</code></span>
-            </div>
-          </div>
-        </div>
-        <div class="cm">
-          <span class="av" aria-hidden="true">{INITIAL}<span class="badge"><Fragment set:html={ICON} /></span></span>
-          <div class="cm-box">
-            <div class="cm-h"><b>{PERSON}</b> <span>commented</span></div>
-            <div class="cm-b">
-              <p><b>Lookover</b> · round 2 · looked over <code>b2c3d4e</code></p>
-              <p class="found-by">Found by Codex, double-checked by Claude.</p>
-              <p>Nothing to fix.</p>
             </div>
           </div>
         </div>
@@ -69,7 +84,8 @@ const INITIAL = PERSON.charAt(0).toUpperCase();
       </div>
     </div>
     <p class="cap">
-      One pull request, two rounds, condensed. The review and the summary post as you; the check shows under Lookover.
+      One pull request, two rounds, condensed. Lookover keeps its status at the end of the description and posts its
+      findings as you; the check shows under Lookover.
     </p>
   </div>
 </section>

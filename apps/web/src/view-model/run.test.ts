@@ -59,6 +59,7 @@ function done(steps: RunStep[]): Review {
   const round: Round = {
     n: 1,
     sha: commitSha("a1f9c2e"),
+    base: null,
     reviewer: "claude",
     secondFind: null,
     confirmer: steps.includes("confirming") ? "codex" : null,

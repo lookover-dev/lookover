@@ -3,6 +3,8 @@ import "@fontsource-variable/hanken-grotesk";
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "@fontsource/ibm-plex-mono/600.css";
+// The device code's face (design-system.md "Device code"): Latin only, a code is A–Z, 0–9 and a hyphen.
+import "@fontsource/atkinson-hyperlegible-mono/latin-600.css";
 import "./styles/system.css";
 import "./styles/app.css";
 import "./styles/github.css";

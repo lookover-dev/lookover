@@ -3,9 +3,10 @@
 // alone reviews it: Codex never finds it, confirms it or steps in on it.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { changeId, commitSha, type Event } from "@lookover/contracts";
-import type { FakeChange, ScriptedRun } from "@lookover/testkit";
+import type { FakeChange, FakeGitHost, ScriptedRun } from "@lookover/testkit";
 import {
   api,
+  blockOn,
   fakeEngines,
   messages,
   OWNER,
@@ -78,6 +79,12 @@ function bothEngines(...claude: ScriptedRun[]) {
   engines.answerFor("codex", NO_FINDINGS);
   return engines;
 }
+
+/** The commit as the block links it. */
+const commit = (sha: string) =>
+  `[\`${sha.slice(0, 7)}\`](https://github.com/${SANDBOX.owner}/${SANDBOX.name}/pull/7/commits/${sha})`;
+/** The block's heading on the fork's pull request, past the wordmark. */
+const heading = (host: FakeGitHost) => blockOn(host, FORK).split("\n")[0]?.split(" · ").slice(1).join(" · ");
 
 const startedBy = (events: Event[]) =>
   events.flatMap((e) => (e.type === "run.started" ? [e.run.reviewer] : []));
@@ -165,6 +172,38 @@ test("a fork's request waiting when the fork is pushed ends cancelled on its com
   ]);
   expect(checks(pushed)).toEqual([]);
   expect(engines.runs).toEqual([]);
+  // The block it wrote as it waited stays: no round ever posted to put back, and no block is taken off (I-229).
+  expect(heading(host)).toBe(`Waiting to look over ${commit(fork.head.sha)}`);
+});
+
+test("a fork's second request waiting when the fork is pushed puts the block of the round that posted back", async () => {
+  const engines = bothEngines(FOUND, CONFIRMED);
+  const { service, host, time } = await start({ changes: [pr1], engines });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+
+  host.open(fork);
+  await time.advance(MIN);
+  await until(stream, "job.changed");
+  host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  await until(stream, "round.finished");
+  const posted = blockOn(host, FORK);
+  expect(heading(host)).toBe("One thing to fix");
+
+  // Claude signed out: the owner's second request waits, listing round 1's finding; then the fork is pushed.
+  engines.setHealth("claude", { installed: true, version: "2.4.1", signedIn: false });
+  host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  expect(heading(host)).toBe(`Waiting to look over ${commit(fork.head.sha)}`);
+  host.push(FORK, commitSha("8".repeat(40)), []);
+  await time.advance(MIN);
+  await time.advance(0);
+  expect((await snapshot(service, cookie)).reviews[id]?.job).toMatchObject({
+    state: "cancelled",
+    cancel: "pushed",
+  });
+  expect(blockOn(host, FORK)).toBe(posted);
 });
 
 test('"Review now" on a fork reviews it with Claude alone, as a comment does', async () => {

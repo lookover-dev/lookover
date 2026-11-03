@@ -64,6 +64,7 @@ function finding(title: string, line: number, at: At = {}): Finding {
     rule: null,
     snippet: null,
     fix: null,
+    suggestion: null,
     status: "open",
     posted: at.posted ?? true,
     commented: false,
