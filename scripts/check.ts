@@ -1,10 +1,15 @@
 // `bun run check`: every fast gate at once, in parallel, so the whole check costs about as much as the
 // slowest step. Prints the output of each failed step, then one line per step. Exits 1 if any failed.
-// `bun run check:full` (`--full`) adds the slower steps, run before a push and on GitHub, not after each edit.
+// It is the pre-push hook's check (ADR 0076). `bun run check:full` (`--full`) adds the slower steps and runs
+// every test file: CI runs it on every push of a pull request, no git hook does.
 // - First it checks that `node_modules` matches the manifests: after a pull that added or bumped a dependency,
 //   one line says to run `bun install`, instead of dozens of "Cannot find module" errors from the steps.
+// - `--pre-commit` (the git hook) is static only (`check-pre-commit.ts`): nothing when no code file is staged
+//   (`check-scope.ts`), else, after the `node_modules` line, Biome on the staged files, `typecheck` and
+//   `imports`, failing only on red in the staged files, over 3 s a warning. When git can't list the staged
+//   files, the whole tree is checked, nothing cut. It reads and writes no key and runs no test.
 // - It remembers the tree of its last green run (the working tree, untracked files included) and skips, in one
-//   line, when nothing changed since: `bun run check && git commit` then pays for one check, not two.
+//   line, when nothing changed since: a push right after a green `bun run check` pays for one check, not two.
 //   `--force` runs it anyway.
 // - It runs only the test files the change can reach (ADR 0071, the owner's answer on #440; `check-reach.ts` says
 //   what the change is and how a test is reached): the files that differ from the tree of the last green run (a
@@ -14,15 +19,15 @@
 //   place (a preload, `bunfig.toml`, a `package.json`, `bun.lock`, a tsconfig, a fixture or recording read at run
 //   time, `scripts/check*`, a file the graph doesn't hold), no merge base, or another Bun than the last green run's,
 //   runs every test file and says why. One line says what ran: "ran N of M test files (the change reaches these)".
-//   `--full` (`check:full`: the pre-push hook and CI) runs every test file, whatever the change.
+//   `--full` (`check:full`: CI) runs every test file, whatever the change.
 // - What a run checks, its key, is the working tree's git tree (every tracked file hashed again from its content,
 //   about half a second a key here), Bun's version and what is installed in
 //   `node_modules` (the package folders Bun installed and each workspace's links to them). The key is taken again
 //   after the steps: a file changed while they ran, and the green run is not remembered. Another install than the
 //   last green run's is doubt, measured from the merge base. Ignored files a test reads (a `.dev/` file, a cache)
-//   are outside the key: that is why `check:full` still runs everything before a push.
-// - `--pre-commit` (the git hook): no check at all when no code file is staged (`check-scope.ts`).
-// - Over its budget (15 s, ADR 0036; `--budget-ms` sets another), it says so and names the slowest test files.
+//   are outside the key: that is why CI's `check:full` still runs everything.
+// - Over its budget (15 s, ADR 0036; `--budget-ms` sets another, the pre-commit's too), it says so and names
+//   the slowest test files.
 import {
   existsSync,
   lstatSync,
@@ -36,6 +41,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { spawn, spawnSync } from "bun";
+import { preCommit } from "./check-pre-commit.ts";
 import { changeOf, selectTests } from "./check-reach.ts";
 import { isCode } from "./check-scope.ts";
 
@@ -43,7 +49,11 @@ const root = process.cwd();
 const flag = (name: string) => process.argv.includes(name);
 const full = flag("--full");
 const budgetArg = process.argv.find((a) => a.startsWith("--budget-ms="));
-const BUDGET_MS = budgetArg === undefined ? 15_000 : Number(budgetArg.slice("--budget-ms=".length));
+/** ADR 0036's budgets: 15 s for the check, 3 s for the pre-commit; `--budget-ms=` replaces either. */
+const CHECK_BUDGET_MS = 15_000;
+const PRE_COMMIT_BUDGET_MS = 3_000;
+const budgetSet = budgetArg === undefined ? undefined : Number(budgetArg.slice("--budget-ms=".length));
+const BUDGET_MS = budgetSet ?? CHECK_BUDGET_MS;
 const CACHE = join(root, "node_modules", ".cache", "lookover-check");
 const TIMINGS = join(CACHE, "test-timings.json");
 
@@ -53,12 +63,16 @@ function git(args: string[], env: Record<string, string | undefined> = process.e
   return done.exitCode === 0 ? done.stdout.toString().trim() : null;
 }
 
-if (flag("--pre-commit")) {
-  const staged = git(["diff", "--cached", "--name-only", "--no-renames"]);
-  if (staged !== null && !staged.split("\n").some(isCode)) {
-    console.log("pre-commit: no code file staged, so no check.");
-    process.exit(0);
-  }
+// The code files staged for the commit: undefined when this isn't the pre-commit check, null when git can't list
+// them (then the whole tree is checked).
+const stagedList = flag("--pre-commit")
+  ? git(["diff", "--cached", "--name-only", "--no-renames"])
+  : undefined;
+const stagedCode: string[] | null | undefined =
+  typeof stagedList === "string" ? stagedList.split("\n").filter(isCode) : stagedList;
+if (stagedCode?.length === 0) {
+  console.log("pre-commit: no code file staged, so no check.");
+  process.exit(0);
 }
 
 // A version range to compare with what is installed; `workspace:`, `file:` and the like are only checked linked.
@@ -162,6 +176,9 @@ if (stale) {
   console.error(`node_modules is out of date (${stale}): run \`bun install\`, then check again.`);
   process.exit(1);
 }
+
+if (stagedCode !== undefined)
+  process.exit(await preCommit(root, stagedCode, budgetSet ?? PRE_COMMIT_BUDGET_MS));
 
 const key = treeKey();
 // A green `check:full` also stands for the fast check, whose steps it includes.

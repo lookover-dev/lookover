@@ -63,17 +63,17 @@ class RefusedCompletion extends FakeGitHost {
   }
 }
 
-test("a job's check carries the job's id and the person's, read at each post (ADR 0066)", async () => {
+test("a job's check carries the job's id, its pull request's number and the person's, read at each post (ADR 0066, 0077)", async () => {
   const github = host();
   let who = PERSON;
   const id = await createPublisher({ writer: github, person: () => who }).check(waiting);
-  expect(await github.findCheck(repo, HEAD, `job-1@${PERSON}`)).toBe(id);
+  expect(await github.findCheck(repo, HEAD, `job-1#42@${PERSON}`)).toBe(id);
   who = 7;
   const next = await createPublisher({ writer: github, person: () => who }).check({
     ...waiting,
     job: { id: jobId("job-2"), trigger: "manual" },
   });
-  expect(await github.findCheck(repo, HEAD, "job-2@7")).toBe(next);
+  expect(await github.findCheck(repo, HEAD, "job-2#42@7")).toBe(next);
 });
 
 test("a job recorded creates its check queued on its commit, saying it waits for its turn", async () => {

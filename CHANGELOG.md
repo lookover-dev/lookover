@@ -2,6 +2,14 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.9.0](https://github.com/lookover-dev/lookover/compare/v0.8.0...v0.9.0) (2026-11-04)
+
+### Bug Fixes
+
+- **cli:** `lookover wait`, `feedback` and `reply` read only the round of their own pull request: another pull request on the same commit no longer answers for it.
+- **reviews:** with nothing reviewed yet, two repositories of the same name under two accounts are each named with their owner, not as one name twice.
+- **reviews:** with nothing reviewed yet, Lookover says to turn a repository on when none is, and waits for the App when it can see none.
+
 ## [0.8.0](https://github.com/lookover-dev/lookover/compare/v0.7.0...v0.8.0) (2026-11-03)
 
 ### Features

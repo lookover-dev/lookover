@@ -130,7 +130,7 @@ test('"Review now" creates a queued check on the head commit before the run star
   expect(readResult(check?.output.text ?? "")?.run).toMatchObject({ state: "done", trigger: "manual" });
 });
 
-test("the job's check is found again by its job and the owner's id, the external id the room writes (ADR 0066)", async () => {
+test("the job's check is found again by its job, its pull request and the owner's id, the external id the room writes (ADR 0066, 0077)", async () => {
   const engines = fakeEngines({ reviews: 1 });
   const { service, host, time } = await start({ engines });
   const cookie = await openApp(service);
@@ -142,8 +142,13 @@ test("the job's check is found again by its job and the owner's id, the external
   await until(stream, "round.finished");
   await time.advance(0);
   const [check] = host.view(PR).checks;
-  const externalId = checkExternalId(started.job.id, OWNER.id);
-  expect(readCheckExternalId(externalId)).toEqual({ job: started.job.id, person: OWNER.id });
+  const externalId = checkExternalId(started.job.id, PR.number, OWNER.id);
+  expect(readCheckExternalId(externalId)).toEqual({
+    job: started.job.id,
+    number: PR.number,
+    person: OWNER.id,
+  });
+  expect(await host.findCheck(SANDBOX, SHA1, `${started.job.id}@${OWNER.id}`)).toBeNull();
   expect(await host.findCheck(SANDBOX, SHA1, externalId)).toBe(check?.id ?? "no check");
 });
 

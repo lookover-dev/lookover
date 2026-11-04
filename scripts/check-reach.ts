@@ -1,5 +1,5 @@
 // Which test files `bun run check` runs (ADR 0071, the owner's answer on #440): those the change can reach through their
-// imports, and every one when in doubt. `check:full`, the pre-push hook and CI run them all, whatever this says.
+// imports, and every one when in doubt. `check:full`, in CI, runs them all, whatever this says.
 //
 // - The change (`changeOf`): every file that differs between the tree of the last green check and the tree checked
 //   now (both git tree objects, untracked files and deletions included), else, with no such tree (no green run
@@ -25,8 +25,7 @@
 //   setup (a preload, the runner and what it imports, `bunfig.toml`, a `package.json`, `bun.lock`, a tsconfig,
 //   `scripts/check*`), to a file other than source code that a test reaches (a fixture, a recording, a doc read at
 //   run time), to a file the change deleted, or to any file the graph doesn't hold, `docs/` and `scripts/` included
-//   (the owner's rule on #454). A commit of docs alone stays cheap: the pre-commit hook skips the check when no code
-//   file is staged (`check-scope.ts`).
+//   (the owner's rule on #454). The pre-commit hook runs no test at all (ADR 0076): this is the push's check.
 //
 // `bun scripts/check-reach.ts <file>…`: prints, for those changed files, each test file picked and why, one line
 // each (`  <test>: the change to <file> reaches it`), or why everything runs; the gate test runs it on

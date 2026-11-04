@@ -267,7 +267,7 @@ export async function stop(argv: string[], deps: VerbDeps): Promise<number> {
   // A service still starting is asked once it says where it serves.
   const said = await servingWhenSaid(home, deps, () => holds(home), null, deadline);
   const asked = isServing(said) ? said : null;
-  if (asked !== null) await post(home, asked, API.stop);
+  if (asked !== null) await post(home, asked.address, API.stop);
   if (await lockFreeBy(home, deadline, deps)) {
     deps.print.out("Lookover stopped.");
     return 0;
@@ -317,14 +317,14 @@ async function openOn(
   noOpen: boolean,
   deps: VerbDeps,
 ): Promise<number> {
-  const answer = await post(home, serving, API.link);
-  if (answer === null || !answer.ok) {
+  const minted = await mintLink(home, serving.address);
+  if (minted.url === null) {
     deps.print.err(
-      `Lookover didn't give a link${answer === null ? "" : ` (${answer.status})`}. Its log is in ${join(home, "logs")}.`,
+      `Lookover didn't give a link${minted.status === null ? "" : ` (${minted.status})`}. Its log is in ${join(home, "logs")}.`,
     );
     return 1;
   }
-  const { url }: MintedLink = await answer.json();
+  const { url } = minted;
   if (noOpen) {
     deps.print.out(`Open Lookover (the link works once, within 2 minutes):\n  ${url}`);
     return 0;
@@ -342,8 +342,22 @@ async function openOn(
   return 0;
 }
 
+/** A one-time link minted on a folder's running service, or the status it answered instead (null: no answer). */
+export type LinkMinted = { url: string } | { url: null; status: number | null };
+
+/**
+ * A fresh one-time link (`API.link`) from the service at `address` serving `home`, asked with the folder's session
+ * as `lookover open` asks: what `open` opens, and what `bun run live` opens its own app on.
+ */
+export async function mintLink(home: string, address: string): Promise<LinkMinted> {
+  const answer = await post(home, address, API.link);
+  if (answer === null || !answer.ok) return { url: null, status: answer?.status ?? null };
+  const { url }: MintedLink = await answer.json();
+  return { url };
+}
+
 /** A POST to the service as the UI makes one: the data folder's cookie and the exact Origin. Null with no answer. */
-async function post(home: string, serving: Serving, path: string): Promise<Response | null> {
+async function post(home: string, address: string, path: string): Promise<Response | null> {
   let secret: string;
   try {
     secret = readFileSync(join(home, "session"), "utf8");
@@ -351,9 +365,9 @@ async function post(home: string, serving: Serving, path: string): Promise<Respo
     return null;
   }
   try {
-    return await fetch(`${serving.address}${path}`, {
+    return await fetch(`${address}${path}`, {
       method: "POST",
-      headers: { cookie: `${sessionCookie(home)}=${secret}`, origin: serving.address },
+      headers: { cookie: `${sessionCookie(home)}=${secret}`, origin: address },
       signal: AbortSignal.timeout(ANSWER_LIMIT_MS),
     });
   } catch {

@@ -109,9 +109,9 @@
 // send began but was never marked sent may be on the host already: the review is looked for by the hidden
 // `REVIEW_MARKER` its body is (the round's run and number) through `findReview` before it is posted again (a round
 // that owes none is never looked for); the status block is written whole between its markers either way; the check
-// created on an answer that was lost is looked for by its external id (the job's id and the person's,
-// `checkExternalId`, ADR 0066: the `person` the options give) through `findCheck`; the check completed is a write by
-// id. `findReview(round)` answers whether the host holds a round's review, for a caller that gave a round up with its
+// created on an answer that was lost is looked for by its external id (the job's id, the pull request's number and
+// the person's, `checkExternalId`, ADR 0066, 0077: the `person` the options give) through `findCheck`; the check
+// completed is a write by id. `findReview(round)` answers whether the host holds a round's review, for a caller that gave a round up with its
 // review begun and never marked sent. A round that owes no review lands its ledger as its status block's send begins
 // (the caller's store), so a block refused, or not written at all, never sends its findings again.
 // Refusals (ADR 0044): given the caller's `time`, a transient refusal (`unavailable`: a 5xx, GitHub's 422 "An internal

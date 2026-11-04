@@ -81,7 +81,13 @@ async function follow(
   const { repo } = job.change;
   const { standing } = job;
   const create = async (status: OpenCheckStatus, output: CheckOutput): Promise<string> => {
-    const id = await writer.createCheck(repo, job.sha, status, output, checkExternalId(job.job.id, person()));
+    const id = await writer.createCheck(
+      repo,
+      job.sha,
+      status,
+      output,
+      checkExternalId(job.job.id, job.change.number, person()),
+    );
     created(id);
     return id;
   };
@@ -456,8 +462,9 @@ export function createPublisher({
       let placed = placing(outbox.degraded);
       const { send, saved } = sender<PostKind>(outbox, time, signal);
       // The job's check, in progress since the run started, is the round's: created only when it has none, and
-      // looked for by its external id (the job's and the person's) first when a create began whose answer was lost.
-      const externalId = checkExternalId(round.run.job, person());
+      // looked for by its external id (the job's, the pull request's and the person's) first when a create began whose
+      // answer was lost.
+      const externalId = checkExternalId(round.run.job, change.number, person());
       const checkId = await send(
         "check",
         async () => {

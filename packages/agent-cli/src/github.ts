@@ -66,7 +66,8 @@ const checkRuns = z.object({
         text: z.string().nullable(),
       }),
       app: z.object({ slug: z.string() }).nullable(),
-      // Whose check it is (ADR 0066): `<job>@<person's id>`; null on a check made without one.
+      // Whose check it is and for which pull request (ADR 0066, 0077): `<job>#<number>@<person's id>`; null on a check
+      // made without one.
       external_id: z.string().nullish(),
     }),
   ),

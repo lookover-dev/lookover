@@ -126,9 +126,9 @@ const NO_PERSON = 999_999_999;
 const NO_THREAD = "PRRT_kwDOLookoverNoSuchThread";
 /** The finding marker `publish` ends an inline comment with, naming `id`. */
 const marker = (id: string) => `${FINDING_MARKER}${JSON.stringify({ v: 1, id })} -->`;
-/** The external ids of the checks the cases create: two jobs', for one person (ADR 0066). */
-const JOB_1 = checkExternalId("agent-host-1", 1234567);
-const JOB_2 = checkExternalId("agent-host-2", 1234567);
+/** The external ids of the checks the cases create: two jobs', for one person and one pull request number (ADR 0066, 0077). */
+const JOB_1 = checkExternalId("agent-host-1", 1, 1234567);
+const JOB_2 = checkExternalId("agent-host-2", 1, 1234567);
 /** A commit no repository has. */
 const NO_COMMIT = commitSha("0123456789abcdef0123456789abcdef01234567");
 

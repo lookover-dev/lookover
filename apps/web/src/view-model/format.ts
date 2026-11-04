@@ -5,6 +5,12 @@ export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** Items as a list in a sentence, the last joined by `word`: "a", "a or b", "a, b or c". */
+export function inSentence(items: readonly string[], word: "and" | "or"): string {
+  const last = items.at(-1) ?? "";
+  return items.length > 1 ? `${items.slice(0, -1).join(", ")} ${word} ${last}` : last;
+}
+
 /** The word that points back at `n` things, beside `plural`: "it" for one, "them" for any other count. */
 export function itOrThem(n: number): "it" | "them" {
   return n === 1 ? "it" : "them";

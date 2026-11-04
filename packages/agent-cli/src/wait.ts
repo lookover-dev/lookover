@@ -17,13 +17,12 @@ import {
   readResult,
   requestedCommit,
   reviewRequest,
-  SHARED_APP,
   shortSha,
 } from "@lookover/contracts";
 import type { WaitArgs } from "./args.ts";
 import { branchChange } from "./change.ts";
 import { newestReply, type ReplyToAnswer, readThreads, resolveSettled } from "./threads.ts";
-import { mine, type Poster } from "./whose.ts";
+import { ourChecks, type Poster } from "./whose.ts";
 import type { World } from "./world.ts";
 
 /** What the exit says, each with its code (exploration 05 §11.3, ADR 0043). `8` stays unused: `gh`'s "pending". */
@@ -136,7 +135,7 @@ async function shown(
 
 interface Following {
   args: WaitArgs;
-  /** The agent's own account's id: its person's checks are the ones read (`mine`). */
+  /** The agent's own account's id: its person's checks of the change are the ones read (`ourChecks`). */
   me: number;
   change: ChangeRef;
   commit: CommitSha;
@@ -156,7 +155,10 @@ interface Following {
 const requestsFor = (comments: HostComment[], commit: CommitSha, me: number) =>
   comments.filter((c) => c.author.id === me && requestedCommit(c.body) === commit);
 
-/** What one read showed: the agent's person's checks of the commit (`mine`), oldest first, and its requests naming it. */
+/**
+ * What one read showed: the agent's person's checks of the commit for the change (`ourChecks`), oldest first, and its
+ * requests naming it.
+ */
 interface Read {
   checks: AgentCheck[];
   requests: HostComment[];
@@ -196,7 +198,7 @@ async function read(
   before?: Read,
   answering: Answering | null = null,
 ): Promise<Read> {
-  const all = mine(await host.checks(change.repo, commit, SHARED_APP.slug), me);
+  const all = await ourChecks(host, change, commit, me);
   const shown = before !== undefined && appeared(before, answering);
   const requests = shown ? before.requests : requestsFor(await host.comments(change), commit, me);
   return { checks: all.filter((c) => !nobodyAsked(c, requests.length > 0)), requests };

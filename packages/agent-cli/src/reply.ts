@@ -6,7 +6,7 @@ import { type AgentHost, type ChangeRef, newestThread, readResult, SHARED_APP } 
 import { CLAIMS, type ReplyArgs } from "./args.ts";
 import { changeOf } from "./change.ts";
 import { EXIT } from "./wait.ts";
-import { mine } from "./whose.ts";
+import { ourChecks } from "./whose.ts";
 import type { World } from "./world.ts";
 
 export async function reply(args: ReplyArgs, w: World): Promise<number> {
@@ -17,7 +17,8 @@ export async function reply(args: ReplyArgs, w: World): Promise<number> {
       w.err(change);
       return EXIT.error;
     }
-    // The agent's own person: the checks it reads name its account alone (`mine`), and Lookover posts as it.
+    // The agent's own person: the checks it reads name its account and the change alone (`ourChecks`), and Lookover
+    // posts as it.
     const { id: me } = await host.account();
     const thread = newestThread(await host.threads(change, SHARED_APP.slug, me), args.finding);
     if (thread === undefined) {
@@ -34,14 +35,12 @@ export async function reply(args: ReplyArgs, w: World): Promise<number> {
 }
 
 /**
- * Why the finding has no thread: in the status block only, as the head's newest result of the agent's person says, or
- * none Lookover has.
+ * Why the finding has no thread: in the status block only, as the head's newest result of the agent's person for the
+ * change says, or none Lookover has.
  */
 async function noThread(host: AgentHost, change: ChangeRef, me: number, id: string): Promise<string> {
   const { head } = await host.getChange(change);
-  const newest = mine(await host.checks(change.repo, head, SHARED_APP.slug), me).findLast(
-    (c) => c.status === "completed",
-  );
+  const newest = (await ourChecks(host, change, head, me)).findLast((c) => c.status === "completed");
   const found = readResult(newest?.output.text ?? "")?.findings.find((f) => f.id === id);
   if (found?.placement === "status")
     return `${id} is in the status block only, in the pull request's description: it has no thread, so it takes no reply. Fix it, or ask the owner to dismiss it.`;

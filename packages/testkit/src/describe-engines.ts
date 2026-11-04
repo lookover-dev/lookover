@@ -155,8 +155,11 @@ export function describeEngines(
       const { engines, spec } = f;
       const controller = new AbortController();
       const running = engines.run(spec, controller.signal);
-      await f.started?.();
-      controller.abort();
+      try {
+        await f.started?.();
+      } finally {
+        controller.abort();
+      }
       expect((await running).outcome).toBe("cancelled");
       expectFolder(f, spec, "cancelled");
     });

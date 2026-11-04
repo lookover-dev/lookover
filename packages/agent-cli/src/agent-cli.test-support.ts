@@ -1,4 +1,4 @@
-// What `lookover`'s tests share: one pull request on a `FakeGitHost`, the agent's side of it, a local checkout
+// What `lookover`'s tests share: one pull request on a `FakeGitHost` (and a second on the same head, asked for), the agent's side of it, a local checkout
 // whose head the test sets, a clock that `sleep` moves, and the App's moves scheduled at a time (`at`), played
 // when the clock passes it. Nothing waits on the wall clock.
 import {
@@ -24,6 +24,8 @@ import { run, type World } from "./index.ts";
 
 const repo: RepositoryRef = { owner: "sasensi", name: "lookover-sandbox" };
 export const ref: ChangeRef = { repo, number: 7 };
+/** A second pull request on the same head as #7 (a stacked branch, say), when the world is asked for it. */
+export const other: ChangeRef = { repo, number: 8 };
 export const sha = commitSha("5d9114c0a1b2c3d4e5f60718293a4b5c6d7e8f9a");
 export const earlier = commitSha("4c8003b0a1b2c3d4e5f60718293a4b5c6d7e8f9a");
 export const newer = commitSha("6eaa25d0a1b2c3d4e5f60718293a4b5c6d7e8f9a");
@@ -47,6 +49,15 @@ const change: FakeChange = {
 };
 
 const WAITING = { title: "Waiting for its turn", summary: "Queued.", text: "The result comes at the end." };
+
+/** #8, on #7's head. */
+const second: FakeChange = {
+  ...change,
+  number: 8,
+  title: "Add paid filter",
+  url: "https://github.com/sasensi/lookover-sandbox/pull/8",
+  head: { ref: "feature/paid", sha },
+};
 
 /** A finding of the result, needing the agent unless told otherwise. */
 export function finding(id: string, overrides: Partial<ReviewResultFinding> = {}): ReviewResultFinding {
@@ -100,13 +111,28 @@ export function result(overrides: {
 const textOf = (r: ReviewResult) => `Round 1.\n\n${RESULT_MARKER}${JSON.stringify(r)} -->`;
 
 /**
+ * The external id of the job `job`'s check for the person `by` and the pull request `pr`: the job's id alone when it
+ * names nobody (before ADR 0066), `<job>@<person>` when it names no pull request (before ADR 0077), else today's.
+ */
+function externalIdOf(job: string, by: number | null, pr: number | null): string {
+  if (by === null) return job;
+  if (pr === null) return `${job}@${by}`;
+  return checkExternalId(job, pr, by);
+}
+
+/**
  * The command's world on a fake host holding change #7, Lookover posting under the shared App as the agent's own
  * account, signed in to it (ADR 0066, 0073); `fork`: #7 comes from a fork; `mayResolve:
  * false`: the agent's token may not resolve a thread; `refuse`: GitHub refuses to read the threads, or to resolve
- * one, in these words.
+ * one, in these words; `second`: the host holds #8 too, on #7's head (`other`).
  */
 export function world(
-  options: { fork?: boolean; mayResolve?: boolean; refuse?: { threads?: string; resolve?: string } } = {},
+  options: {
+    fork?: boolean;
+    mayResolve?: boolean;
+    refuse?: { threads?: string; resolve?: string };
+    second?: boolean;
+  } = {},
 ) {
   let now = START;
   const clock = { now: () => now };
@@ -117,7 +143,7 @@ export function world(
   const fake = new FakeGitHost({
     repo,
     bot: { id: 338297045, login: `${SHARED_APP.slug}[bot]` },
-    changes: [{ ...change, fork: options.fork ?? false }],
+    changes: [{ ...change, fork: options.fork ?? false }, ...(options.second ? [second] : [])],
     clock,
     person: owner,
   });
@@ -180,17 +206,20 @@ export function world(
     /** The shared App's slug. */
     app,
     /**
-     * The App creates its check on `on` (the commit by default), as `name`, for the person `by` (the agent's own
-     * account by default; null: an external id that names nobody, as before ADR 0066).
+     * The App creates its check on `on` (the commit by default), as `name`, its job's id `job-<name>`, for the
+     * person `by` (the agent's own account by default; null: an external id that names nobody, as before ADR 0066)
+     * and the pull request `pr` (#7 by default; null: an id that names none, as before ADR 0077).
      */
     async check(
       name: string,
       status: OpenCheckStatus,
-      on: CommitSha = sha,
-      by: number | null = owner.id,
+      {
+        on = sha,
+        by = owner.id,
+        pr = ref.number,
+      }: { on?: CommitSha; by?: number | null; pr?: number | null } = {},
     ): Promise<void> {
-      const externalId = by === null ? "job-1" : checkExternalId("job-1", by);
-      made.set(name, await fake.createCheck(repo, on, status, WAITING, externalId));
+      made.set(name, await fake.createCheck(repo, on, status, WAITING, externalIdOf(`job-${name}`, by, pr)));
     },
     /** The App completes its check `name` with the result block. */
     async complete(name: string, conclusion: CheckConclusion, r: ReviewResult): Promise<void> {
@@ -202,21 +231,9 @@ export function world(
      * The App's review on the commit, one inline comment per finding on `src/invoice.ts` from line 12 down, each
      * holding its finding marker. Returns the root comments' ids, in the findings' order.
      */
-    async review(...findings: string[]): Promise<number[]> {
-      await fake.publishReview(ref, {
-        sha,
-        body: `Round 1.\n${REVIEW_MARKER}r1 -->`,
-        comments: findings.map((id, i) => ({
-          path: "src/invoice.ts",
-          side: "head" as const,
-          line: 12 + i,
-          endLine: null,
-          body: `${id} is wrong.\n${FINDING_MARKER}${JSON.stringify({ id })} -->`,
-        })),
-      });
-      const roots = (await fake.asAgent(owner).threads(ref, app, person)).map((t) => t.commentId);
-      return roots.slice(-findings.length);
-    },
+    review: (...findings: string[]): Promise<number[]> => reviewOn(ref, findings),
+    /** The App's review on the commit in the pull request `on`, as `review` posts it on #7. */
+    reviewOn: (on: ChangeRef, ...findings: string[]): Promise<number[]> => reviewOn(on, findings),
     /**
      * Someone else's root comment holding a finding marker, on line 20: another person's Lookover on the shared
      * App, or a copied marker. Returns its id.
@@ -237,11 +254,28 @@ export function world(
         author: poster,
         body: `${body}\n${REPLY_MARKER}{"v":1} -->`,
       }),
-    /** Lookover's threads as the agent reads them now. */
-    threads: () => fake.asAgent(owner).threads(ref, app, person),
-    /** The comments on the pull request now. */
-    comments: () => fake.view(ref).comments,
+    /** Lookover's threads on the pull request (#7 by default) as the agent reads them now. */
+    threads: (on: ChangeRef = ref) => fake.asAgent(owner).threads(on, app, person),
+    /** The comments on the pull request (#7 by default) now. */
+    comments: (on: ChangeRef = ref) => fake.view(on).comments,
     /** What `--json` printed, parsed. */
     json: (): unknown => JSON.parse(out.join("\n")),
   };
+
+  /** The App's review on the commit in `on`: one inline comment per finding. Returns the root comments' ids. */
+  async function reviewOn(on: ChangeRef, findings: string[]): Promise<number[]> {
+    await fake.publishReview(on, {
+      sha,
+      body: `Round 1.\n${REVIEW_MARKER}r1 -->`,
+      comments: findings.map((id, i) => ({
+        path: "src/invoice.ts",
+        side: "head" as const,
+        line: 12 + i,
+        endLine: null,
+        body: `${id} is wrong.\n${FINDING_MARKER}${JSON.stringify({ id })} -->`,
+      })),
+    });
+    const roots = (await fake.asAgent(owner).threads(on, app, person)).map((t) => t.commentId);
+    return roots.slice(-findings.length);
+  }
 }

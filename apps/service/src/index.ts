@@ -274,12 +274,19 @@
 // Exports: what `scripts/` uses (the live suites, `eval`, `build`), and what this package's own tests drive, since
 // they reach it through this entry alone (`scripts/check-deps.ts`, ADR 0033): the command and its ports (`lookover`,
 // `BackgroundPorts`, `Self`, `serveCommand`, `webBuildOf`, `cloneWebBuild`), `runService` and its pieces
-// (`readConfig`, `loginCommand`, `probeInstance`, `takeInstance`, `openLogSink`, `logLineOf`, the login items, the web
-// files).
+// (`readConfig`, `loginCommand`, `probeInstance`, `takeInstance`, `servingOf`, `openLogSink`, `logLineOf`, the login
+// items, the web files), and what holds `bun run live`'s service on its run folder and opens it (`heldService`,
+// `heldLines`, `mintLink`).
 // The code inside uses each of them too, so none moves to test support (`*.test-support.ts`), which reaches nothing
 // past this entry either. `main.ts` and the binary's generated entry import their files directly.
 
-export type { BackgroundPorts, ServeStarted, WebBuild } from "./background.ts";
+export {
+  type BackgroundPorts,
+  type LinkMinted,
+  mintLink,
+  type ServeStarted,
+  type WebBuild,
+} from "./background.ts";
 export { type LookoverDeps, lookover } from "./command.ts";
 export {
   type CommandPath,
@@ -307,8 +314,9 @@ export {
   ghCli,
   osGh,
 } from "./gh.ts";
+export { type HeldServiceOptions, heldLines, heldService } from "./held-service.ts";
 export type { GitHubSide, HostPorts } from "./installation.ts";
-export { InstanceHeld, probeInstance, takeInstance } from "./instance.ts";
+export { InstanceHeld, probeInstance, servingOf, takeInstance } from "./instance.ts";
 export {
   boundedKeychain,
   KEYCHAIN_SERVICE,

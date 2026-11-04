@@ -9,6 +9,7 @@ import {
   type ChangeReview,
   changeReviews,
   homeGroups,
+  nothingReviewedYet,
   problems,
   sentence,
   status,
@@ -39,7 +40,6 @@ export function Home() {
   const earlier = g.earlier.filter((i) => matchesSearch(i, query, statusLine(state, i)));
   // Problems are shown by the alert band above every page, not here.
   const calm = g.needs.length === 0 && problems(state).length === 0 && !state.service.paused;
-  const repoNames = state.repos.filter((r) => r.enabled).map((r) => r.name);
   const list = (rows: ChangeReview[]) => (
     <div className="list">
       {rows.map((i) => (
@@ -84,11 +84,7 @@ export function Home() {
         </Group>
       ) : null}
       {all.filter((i) => status(i).kind !== "not-asked").length === 0 ? (
-        <Empty title="Nothing reviewed yet">
-          Open a pull request in {repoNames.slice(0, -1).join(", ")}
-          {repoNames.length > 1 ? " or " : ""}
-          {repoNames.at(-1)} and it will show up here.
-        </Empty>
+        <Empty title="Nothing reviewed yet">{nothingReviewedYet(state.repos)}</Empty>
       ) : (
         <Link className="more-row" to="/reviews">
           <span>All reviews</span>

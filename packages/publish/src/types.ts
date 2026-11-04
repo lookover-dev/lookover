@@ -364,7 +364,8 @@ export interface PublisherOptions {
   /**
    * The numeric id on the host of the person Lookover posts for (the person signed in to the shared App), read at
    * each check created or looked for: their id is in its external id with the
-   * job's (`checkExternalId`, ADR 0066), so two people's checks on one commit never mix.
+   * job's and the pull request's number (`checkExternalId`, ADR 0066, 0077), so two people's checks on one commit never
+   * mix, nor two pull requests'.
    */
   person: () => number;
   /**

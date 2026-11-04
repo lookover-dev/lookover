@@ -121,13 +121,14 @@ Lookover's `wait` is optional. With `gh` and `jq` alone (`N` is the pull request
 
 2. **Ask, unless you already did.** Look for a check of yours from the App on that commit, and for a request
    of yours naming it: a colleague's asks their Lookover, not yours, and its 👀 says nothing of yours. Several
-   people's Lookovers may post under one App: a check's `external_id` ends in `@` and the id of the person it is
-   for. Yours are those ending in `@$ME`; never another person's, nor one naming nobody.
+   people's Lookovers may post under one App, and one commit may be the head of two pull requests: a check's
+   `external_id` ends in `#`, the number of the pull request it reviews, `@` and the id of the person it is for.
+   Yours are those ending in `#N@$ME`; never another person's or another pull request's, nor one naming nobody.
 
    ```sh
-   MINE='[.check_runs[] | select(.app.slug == $app and ((.external_id // "") | endswith("@" + $me)))]'
+   MINE='[.check_runs[] | select(.app.slug == $app and ((.external_id // "") | endswith("#" + $n + "@" + $me)))]'
    gh api "repos/{owner}/{repo}/commits/$SHA/check-runs?check_name=Lookover&filter=all" \
-     | jq --arg app "$APP" --arg me "$ME" "$MINE | length"
+     | jq --arg app "$APP" --arg me "$ME" --arg n N "$MINE | length"
    gh api "repos/{owner}/{repo}/issues/N/comments" --paginate \
      --jq "[.[] | select(.user.id == $ME and (.body | contains(\"lookover:request\") and contains(\"$SHA\")))] | length"
    ```
@@ -150,11 +151,12 @@ Lookover's `wait` is optional. With `gh` and `jq` alone (`N` is the pull request
 
    ```sh
    gh api "repos/{owner}/{repo}/commits/$SHA/check-runs?check_name=Lookover&filter=all" \
-     | jq --arg app "$APP" --arg me "$ME" "$MINE | sort_by(.id) | last | {id, status, conclusion}"
+     | jq --arg app "$APP" --arg me "$ME" --arg n N "$MINE | sort_by(.id) | last | {id, status, conclusion}"
    ```
 
-   Only the App's check counts, and of those only yours: any App can create a check named `Lookover`, and another
-   person's Lookover under the same App reviews for them. Read the newest one (the highest
+   Only the App's check counts, and of those only yours: any App can create a check named `Lookover`, another
+   person's Lookover under the same App reviews for them, and another pull request's check on the same commit
+   reviews that pull request. Read the newest one (the highest
    id): a commit can have an older check that a newer review replaced. If after 3 minutes there is no
    check and no 👀 on your request, Lookover is probably not running (`{{lookover}} status` says): report it. If the pull request's head moves past
    `$SHA`, start again from step 1 with the new commit.

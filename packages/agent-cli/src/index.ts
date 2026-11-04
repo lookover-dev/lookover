@@ -4,11 +4,13 @@
 // GitHub alone, with its own login. `wait` takes the commit from local git (never what GitHub shows first), finds
 // the pull request (`--pr`, else the current branch's), waits about 15 s for GitHub to show that commit as its
 // head, posts `/lookover review` with a hidden marker naming the commit only when that commit has neither a
-// request naming it nor a check of its own person's from the App, then reads that commit's check from the one App,
-// the shared App (ADR 0066, 0073: nothing names another), every 10 s, and exits with a code that says what to do
-// next. Of the App's checks it reads only those of its own person: those whose external id names the agent's account
-// (GitHub's `GET /user`), never another person's nor one naming nobody; Lookover's threads are then the App's bot's or
-// that person's, and its replies the bot's or that person's with a reply marker. A check a skip rule completed on an
+// request naming it nor a check of its own person's for that pull request from the App, then reads that commit's
+// check from the one App, the shared App (ADR 0066, 0073: nothing names another), every 10 s, and exits with a code
+// that says what to do next. Of the App's checks it reads only those of its own person and its pull request (ADR
+// 0077): those whose external id names the agent's account (GitHub's `GET /user`) and the pull request's number
+// (`ourChecks`), never another person's, another pull request's on the same head, nor one naming nobody or no pull
+// request; Lookover's threads are then the App's bot's or that person's, and its replies the bot's or that person's
+// with a reply marker. A check a skip rule completed on an
 // automatic trigger (an opening or a push: "Not your pull request" on a colleague's) answers nobody: `wait` leaves it
 // out, so it asks anyway (ADR 0043) and waits for the check its request leads to.
 // Once a round's check completes, `wait` reads Lookover's threads: when the round didn't read a person's newest reply
@@ -29,9 +31,7 @@
 // is part of the `lookover` command's help, and `CLAIMS` the claims' words and openings `reply` takes, which the docs
 // list. It has no program of its own: the one `lookover` command (`apps/service`, ADR 0054) runs it, from a clone
 // with `bun run lookover`. `SKILL_TEMPLATE` is the loop's skill, `skill/SKILL.md`, as text: the service renders it
-// into the coding agents' folders with Lookover's command (ADR 0058). `ours` is not the agent's but the merge gate's
-// (`scripts/ship-gate.ts`, owner-held): its own person's checks, else those naming nobody, a fallback the agent never
-// takes.
+// into the coding agents' folders with Lookover's command (ADR 0058).
 // Exit codes (exploration 05 §11.3): 0 nothing to fix (`next_action` `stop`), 1 error, 2 usage, 3 something to
 // fix (`fix`, or `reply`), 4 a person is needed (`ask_human`), 5 timed out (`--timeout`, 30 minutes by default;
 // `feedback`: the newest check is still running), 6 skipped (the check's `run.state` `skipped` or `cancelled`),

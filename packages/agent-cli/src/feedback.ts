@@ -1,6 +1,6 @@
-// `lookover feedback` (ADR 0052): the newest of the agent's person's checks of the pull request's head, read once,
-// and Lookover's threads, so the agent sees what waits on it without parsing GitHub. Its exit says what the result
-// means, as `wait`'s does.
+// `lookover feedback` (ADR 0052, 0077): the newest of the agent's person's checks of the pull request's head naming
+// that pull request, read once, and Lookover's threads, so the agent sees what waits on it without parsing GitHub.
+// Its exit says what the result means, as `wait`'s does.
 import {
   type AgentThread,
   type CommitSha,
@@ -11,7 +11,7 @@ import {
 import type { FeedbackArgs } from "./args.ts";
 import { changeOf } from "./change.ts";
 import { ending, nobodyAsked, type Outcome } from "./wait.ts";
-import { mine, type Poster } from "./whose.ts";
+import { ourChecks, type Poster } from "./whose.ts";
 import type { World } from "./world.ts";
 
 /**
@@ -49,9 +49,7 @@ export async function feedback(args: FeedbackArgs, w: World): Promise<Feedback> 
     const at = `${shortSha(head)} (pull request #${number})`;
     const { id: me } = await host.account();
     // Nobody asked for an automatic skip: no answer, as `wait` reads it.
-    const checks = mine(await host.checks(change.repo, head, SHARED_APP.slug), me).filter(
-      (c) => !nobodyAsked(c, false),
-    );
+    const checks = (await ourChecks(host, change, head, me)).filter((c) => !nobodyAsked(c, false));
     const newest = checks.at(-1);
     if (newest === undefined) return none(end("no_review", `No review of ${at} yet: run lookover wait.`));
     const still = end("pending", `Lookover is still reviewing ${at}: run lookover wait.`);

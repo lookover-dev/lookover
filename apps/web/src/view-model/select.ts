@@ -37,7 +37,17 @@ import {
   ssoFix,
 } from "./accounts.ts";
 import { deferralText, waitingNotice } from "./deferral.ts";
-import { ago, agoSentence, clock, isToday, itOrThem, plural, until, type WithCommand } from "./format.ts";
+import {
+  ago,
+  agoSentence,
+  clock,
+  inSentence,
+  isToday,
+  itOrThem,
+  plural,
+  until,
+  type WithCommand,
+} from "./format.ts";
 import {
   causeText,
   connectionText,
@@ -92,6 +102,23 @@ export function changeLabel(change: Change): string {
 /** "sasensi/ledger-api": a repository with its owner, as Repositories lists every account's (ADR 0066). */
 export function repositoryLabel(repo: Pick<Repository, "owner" | "name">): string {
   return `${repo.owner}/${repo.name}`;
+}
+
+/**
+ * Home's empty state, the sentence under "Nothing reviewed yet": with no repository listed (the App sees none, or was
+ * uninstalled), it waits for one; with none turned on, it says where to turn one on; else the repositories turned on,
+ * by name, with the owner only where a name repeats among them, in any case (#536): two lookover-sandbox under two
+ * accounts are never said as the same one twice.
+ */
+export function nothingReviewedYet(repos: readonly Pick<Repository, "owner" | "name" | "enabled">[]): string {
+  if (repos.length === 0)
+    return "Once the App can see a repository on GitHub, its pull requests will show up here.";
+  const on = repos.filter((r) => r.enabled);
+  if (on.length === 0) return "Turn on a repository in Repositories and its pull requests will show up here.";
+  const key = (r: Pick<Repository, "name">) => r.name.toLowerCase();
+  const repeats = (r: Pick<Repository, "name">) => on.filter((o) => key(o) === key(r)).length > 1;
+  const names = on.map((r) => (repeats(r) ? repositoryLabel(r) : r.name));
+  return `Open a pull request in ${inSentence(names, "or")} and it will show up here.`;
 }
 
 /**

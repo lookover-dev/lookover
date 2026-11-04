@@ -2,7 +2,7 @@
 // review page's log and the simulated GitHub page say for it.
 import { type Change, shortSha, type TimelineEntry, type Trigger } from "@lookover/contracts";
 import { deferralText } from "./deferral.ts";
-import { clock, plural } from "./format.ts";
+import { clock, inSentence, plural } from "./format.ts";
 
 const TRIGGER_TEXT: Record<Trigger, string> = {
   opened: "Pull request opened",
@@ -13,10 +13,7 @@ const TRIGGER_TEXT: Record<Trigger, string> = {
 };
 
 /** Findings by their ids, as a list in a sentence: "F2", "F2 and F3", "F2, F3 and F5". */
-function listed(ids: readonly string[]): string {
-  const last = ids.at(-1) ?? "";
-  return ids.length > 1 ? `${ids.slice(0, -1).join(", ")} and ${last}` : last;
-}
+const listed = (ids: readonly string[]): string => inSentence(ids, "and");
 
 export function timelineText(change: Pick<Change, "openedBy">, entry: TimelineEntry): string {
   switch (entry.kind) {

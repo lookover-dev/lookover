@@ -27,7 +27,7 @@ describe("whose checks", () => {
   test("two people's checks on one commit: the agent's own is read, never the other's, even when newer", async () => {
     const w = world();
     w.at(10_000, () => w.check("mine", "queued"));
-    w.at(20_000, () => w.check("theirs", "queued", sha, colleague.id));
+    w.at(20_000, () => w.check("theirs", "queued", { by: colleague.id }));
     w.at(30_000, () => w.complete("theirs", "success", result({})));
     w.at(50_000, () => w.complete("mine", "neutral", fix()));
     expect(await w.lookover("wait")).toBe(3);
@@ -36,7 +36,7 @@ describe("whose checks", () => {
 
   test("another person's check alone answers nothing: the request is posted, and no review appears", async () => {
     const w = world();
-    await w.check("theirs", "in_progress", sha, colleague.id);
+    await w.check("theirs", "in_progress", { by: colleague.id });
     await w.complete("theirs", "success", result({}));
     expect(await w.lookover("wait", "--appear-timeout", "1m")).toBe(9);
     expect(w.comments().map((c) => c.body)).toEqual([reviewRequest(sha)]);
@@ -44,7 +44,7 @@ describe("whose checks", () => {
 
   test("a check naming nobody answers nothing either: the request is posted, and no review appears", async () => {
     const w = world();
-    await w.check("old", "in_progress", sha, null);
+    await w.check("old", "in_progress", { by: null });
     await w.complete("old", "success", result({}));
     expect(await w.lookover("wait", "--appear-timeout", "1m")).toBe(9);
     expect(w.comments().map((c) => c.body)).toEqual([reviewRequest(sha)]);
@@ -52,7 +52,7 @@ describe("whose checks", () => {
 
   test("a check naming nobody is no review for feedback", async () => {
     const w = world();
-    await w.check("old", "in_progress", sha, null);
+    await w.check("old", "in_progress", { by: null });
     await w.complete("old", "neutral", fix());
     expect(await w.lookover("feedback")).toBe(9);
     expect(w.comments()).toEqual([]);
@@ -62,7 +62,7 @@ describe("whose checks", () => {
     const w = world();
     await w.check("mine", "in_progress");
     await w.complete("mine", "neutral", fix());
-    await w.check("old", "in_progress", sha, null);
+    await w.check("old", "in_progress", { by: null });
     await w.complete("old", "success", result({}));
     expect(await w.lookover("feedback")).toBe(3);
   });

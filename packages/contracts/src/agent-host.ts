@@ -35,7 +35,8 @@ export interface AgentThread extends HostThread {
 
 /**
  * A `Lookover` check as the agent reads it: with the external id its App created it with (GitHub's `external_id`,
- * `checkExternalId`'s `<job>@<person's id>`; empty when it has none), which tells whose it is (ADR 0066).
+ * `checkExternalId`'s `<job>#<number>@<person's id>`; empty when it has none), which tells whose it is and for which
+ * pull request (ADR 0066, 0077).
  */
 export interface AgentCheck extends HostCheck {
   externalId: string;

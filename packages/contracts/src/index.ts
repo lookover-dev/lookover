@@ -90,8 +90,9 @@
 // One way in (ADR 0073): the connection is the shared App's alone, its causes, commands and setup step with no own
 // App's, and no App level of its own: no key, no manifest.
 // The shared App (ADR 0065, ADR 0066): `SHARED_APP`, its id, slug, client ID and account, shipped, never configured;
-// a check's `external_id` as `checkExternalId` writes it (`<job>@<person's id>`) and `readCheckExternalId` reads it
-// back (null for an older check's job id alone); `AgentHost.account`, whose token the agent holds. Signing in to it
+// a check's `external_id` as `checkExternalId` writes it (`<job>#<number>@<person's id>`, ADR 0077) and
+// `readCheckExternalId` reads it back (`CheckExternalId`: no number in one from before, null for an older check's job
+// id alone), and `checkIsFor`, whether it names a person and a pull request; `AgentHost.account`, whose token the agent holds. Signing in to it
 // (`sign-in.ts`): the device flow and the refresh as a port (`HostSignIn`: a device code, `DeviceGrant`, polled to a
 // `DevicePoll`, the tokens issued, `SignInTokens`, then whose they are, `person`; a `SignIn` renewed, its refusal
 // the connection's cause `signed-out`), where the sign-in is kept (`SignInKeeper`, and how, `KeyProtection`, as Run
@@ -133,7 +134,12 @@ export type { LogMessage, LookoverApi, MintedLink, NoSession } from "./api.ts";
 export { API, SSE } from "./api.ts";
 export { apply, emptyReview } from "./apply.ts";
 export type { Change } from "./change.ts";
-export { checkExternalId, readCheckExternalId } from "./check-external-id.ts";
+export {
+  type CheckExternalId,
+  checkExternalId,
+  checkIsFor,
+  readCheckExternalId,
+} from "./check-external-id.ts";
 export type { Claim, ClaimKind, FindingClaim } from "./claim.ts";
 export type { Clock } from "./clock.ts";
 export type {

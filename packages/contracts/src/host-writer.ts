@@ -6,7 +6,7 @@
 // comment (only when it has one, ADR 0074) and the status block in the description; or without a round. The bot's
 // own comments are told by its numeric user id, never by its login. Apart from a round, it reacts to a review
 // request (ADR 0043): 👀 when the request is recorded, 🚀 when its round is posted. Each post can be sent again
-// safely (ADR 0044): the check carries its external id (`checkExternalId`: the job's id and the person's, found with
+// safely (ADR 0044): the check carries its external id (`checkExternalId`: the job's id, the pull request's number and the person's, found with
 // `findCheck` before a re-send), and the review its round's `REVIEW_MARKER` (found with `findReview` before a
 // re-send). The status block (ADR 0074) is the description's part between `STATUS_MARKER` and `STATUS_END_MARKER`,
 // rewritten whole each time (`upsertStatus`), the author's text around it kept. On its threads (ADR 0052) it
@@ -69,7 +69,7 @@ export interface ReviewPost {
 export interface HostWriter {
   /**
    * Creates the `Lookover` check on the commit, `queued` or `in_progress`, with its output, and `externalId` (the
-   * job's and the person's ids, `checkExternalId`), which the host keeps with it (GitHub's `external_id`). Returns
+   * job's id, the pull request's number and the person's id, `checkExternalId`), which the host keeps with it (GitHub's `external_id`). Returns
    * the host's id for it, to update and complete it with. Throws `HostError("too_large")` as `completeCheck` does.
    */
   createCheck(

@@ -44,7 +44,7 @@
 // adapter last sent (`showsStatus`, line endings aside), the author's text kept byte for byte, a block past
 // `statusRoom` refused `too_large` before a request, a 403 on the write `invalid` (the person may not edit it), never
 // a sign-out; `view` gives the description, "" for GitHub's null; the poster's review is found by its marker
-// (`findReview`); a check carries the external id `publish` gives it (`<job>@<person>`) as GitHub's
+// (`findReview`); a check carries the external id `publish` gives it (`<job>#<number>@<person>`) as GitHub's
 // `external_id`, found among the session's App's runs (`findCheck`); a check output and every body are counted in
 // UTF-8 bytes before they are sent; a reaction is posted once whatever the repeats (GitHub answers a repeat `200`).
 // Threads (ADR 0052): `threads` reads the pull request's review comments, every page, grouped by `in_reply_to_id`,

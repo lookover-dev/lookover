@@ -41,6 +41,7 @@ import {
   homeGroups,
   lookedOver,
   nextStep,
+  nothingReviewedYet,
   openVerdict,
   type Problem,
   pill,
@@ -296,6 +297,59 @@ test("two repositories of one name on two accounts: each change is found at its 
   expect(changeLabel(mine)).toBe("sam/app #1");
   // Repositories lists each account's, owner and name (ADR 0066): two apps, never one twice.
   expect(st.repos.map(repositoryLabel)).toEqual(["sam/app", "acme/app"]);
+});
+
+// ---- Home's empty state: where a pull request would come from ----
+
+const repo = (owner: string, name: string, enabled = true): Repository => ({
+  id: repositoryId(`${owner}/${name}`),
+  owner,
+  name,
+  enabled,
+  settings: DEFAULTS,
+});
+
+test("nothing reviewed and no repository listed: the empty state waits for the App to see one", () => {
+  expect(nothingReviewedYet([])).toBe(
+    "Once the App can see a repository on GitHub, its pull requests will show up here.",
+  );
+});
+
+test("nothing reviewed and none of the repositories listed on: the empty state says where to turn one on", () => {
+  expect(nothingReviewedYet([repo("sam", "app", false)])).toBe(
+    "Turn on a repository in Repositories and its pull requests will show up here.",
+  );
+});
+
+test("nothing reviewed: the empty state names the one repository on, by its name", () => {
+  expect(nothingReviewedYet([repo("sam", "app"), repo("sam", "web", false)])).toBe(
+    "Open a pull request in app and it will show up here.",
+  );
+});
+
+test("nothing reviewed: distinct names are said alone, the last after “or”", () => {
+  expect(nothingReviewedYet([repo("sam", "app"), repo("acme", "web")])).toBe(
+    "Open a pull request in app or web and it will show up here.",
+  );
+});
+
+test("nothing reviewed: two repositories of one name under two owners are each said with their owner (#536)", () => {
+  expect(
+    nothingReviewedYet([repo("sasensi", "lookover-sandbox"), repo("lookover-dev", "lookover-sandbox")]),
+  ).toBe(
+    "Open a pull request in sasensi/lookover-sandbox or lookover-dev/lookover-sandbox and it will show up here.",
+  );
+});
+
+test("nothing reviewed: of three, only the two whose names repeat, in any case, get their owner; one turned off repeats nothing", () => {
+  expect(
+    nothingReviewedYet([
+      repo("sam", "App"),
+      repo("acme", "app"),
+      repo("sam", "web"),
+      repo("old", "web", false),
+    ]),
+  ).toBe("Open a pull request in sam/App, acme/app or web and it will show up here.");
 });
 
 // ---- problems: what the alert band lists ----

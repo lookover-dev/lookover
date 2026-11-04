@@ -875,17 +875,18 @@ test("a check the host created before the service stopped is found by the job's 
   expect(github.view(change).checks.map((c) => c.status)).toEqual(["completed"]);
 });
 
-test("a round's check carries its job's id and the person's, and is looked for by both (ADR 0066)", async () => {
+test("a round's check carries its job's id, its pull request's number and the person's, and is looked for by them (ADR 0066, 0077)", async () => {
   const github = host();
   const { checkId } = await createPublisher({ writer: github, person }).publish(round1);
-  expect(await github.findCheck(repo, round1.sha, `${round1.run.job}@${PERSON}`)).toBe(checkId);
+  expect(await github.findCheck(repo, round1.sha, `${round1.run.job}#42@${PERSON}`)).toBe(checkId);
+  expect(await github.findCheck(repo, round1.sha, `${round1.run.job}@${PERSON}`)).toBeNull();
   expect(await github.findCheck(repo, round1.sha, round1.run.job)).toBeNull();
 });
 
 test("a check another person's Lookover made for a job of the same id is never taken for the round's", async () => {
   const github = host();
   const output = { title: "Looking over", summary: "Round 1 is running.", text: "" };
-  const theirs = await github.createCheck(repo, round1.sha, "in_progress", output, `${round1.run.job}@7`);
+  const theirs = await github.createCheck(repo, round1.sha, "in_progress", output, `${round1.run.job}#42@7`);
   const publisher = createPublisher({ writer: github, person });
   const stopped = memoryOutbox({ lostAnswer: "check" });
   await expect(publisher.publish(round1, stopped)).rejects.toBeInstanceOf(Crash);

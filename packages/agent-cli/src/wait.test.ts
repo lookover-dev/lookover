@@ -226,7 +226,7 @@ describe("lookover wait: asking", () => {
   test("a check of an earlier commit is not this one's", async () => {
     const w = world();
     w.fake.push(ref, earlier, []);
-    await w.check("old", "in_progress", earlier);
+    await w.check("old", "in_progress", { on: earlier });
     await w.complete("old", "success", result({}));
     w.fake.push(ref, sha, []);
     expect(await w.lookover("wait", "--appear-timeout", "30s")).toBe(9);
@@ -439,7 +439,7 @@ describe("lookover wait: finding the pull request", () => {
     const w = world();
     w.local.head = newer;
     w.at(5_000, () => w.fake.push(ref, newer, []));
-    w.at(20_000, () => w.check("round", "queued", newer));
+    w.at(20_000, () => w.check("round", "queued", { on: newer }));
     w.at(30_000, () => w.complete("round", "success", result({})));
     expect(await w.lookover("wait")).toBe(0);
     expect(w.comments().map((c) => c.body)).toEqual([reviewRequest(newer)]);
@@ -486,7 +486,7 @@ describe("lookover wait: what it says", () => {
       sha,
       "queued",
       { title: "Waiting", summary: "", text: "" },
-      checkExternalId("job-1", owner.id),
+      checkExternalId("job-1", ref.number, owner.id),
     );
     await w.fake.completeCheck(ref.repo, id, "neutral", { title: "Done", summary: "", text: "No block." });
     expect(await w.lookover("wait")).toBe(1);

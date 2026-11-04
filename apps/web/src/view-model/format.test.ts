@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { duration, itOrThem, LONGEST_RUNNING_TIMES, startsAt, until } from "./format.ts";
+import { duration, inSentence, itOrThem, LONGEST_RUNNING_TIMES, startsAt, until } from "./format.ts";
 
 const PARIS = "Europe/Paris";
 const NEW_YORK = "America/New_York";
@@ -73,4 +73,11 @@ test("a running time's sizers are durations it writes, none shorter in character
   let longest = 0;
   for (let s = 0; s < 100 * 3600; s += 1) longest = Math.max(longest, duration(s * 1000).length);
   for (const sizer of LONGEST_RUNNING_TIMES) expect(sizer.length).toBe(longest);
+});
+
+test("a list in a sentence: one item alone, the last joined by its word, the rest by commas", () => {
+  expect(inSentence([], "or")).toBe("");
+  expect(inSentence(["a"], "or")).toBe("a");
+  expect(inSentence(["a", "b"], "or")).toBe("a or b");
+  expect(inSentence(["F2", "F3", "F5"], "and")).toBe("F2, F3 and F5");
 });
