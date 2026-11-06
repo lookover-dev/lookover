@@ -386,14 +386,17 @@ describe("FakeGitHost intake on its own", () => {
       commits: 5,
       diverged: false,
       messages: ["one", "two", "three", "four", fifth],
+      mergeBase: change.head.sha,
     });
     expect(await fake.countCommits(repo, second, third)).toMatchObject({
       messages: ["three", "four", fifth],
+      mergeBase: second,
     });
     expect(await fake.countCommits(repo, third, change.head.sha)).toEqual({
       commits: 0,
       diverged: true,
       messages: [],
+      mergeBase: change.head.sha,
     });
     await expect(
       fake.countCommits(repo, change.head.sha, commitSha("4444444444444444444444444444444444444444")),
@@ -413,9 +416,50 @@ describe("FakeGitHost intake on its own", () => {
       commits: 2,
       diverged: false,
       messages: ["Start the filter", signed],
+      mergeBase: change.base.sha,
     });
     expect((await fake.countCommits(repo, wip.base.sha, wip.head.sha)).messages).toEqual(["One more"]);
     // Shown as GitHub shows a pull request: its commits aren't part of it.
     expect(await fake.getChange(repo, 1)).toEqual(change);
+  });
+
+  test("a change held without its commits' messages sits on its base all the same: its merge base is the base", async () => {
+    // As the real-retrieval tests hold the sandbox's commits: the head's parent is the base.
+    expect(await host().countCommits(repo, change.base.sha, change.head.sha)).toEqual({
+      commits: 0,
+      diverged: false,
+      messages: [],
+      mergeBase: change.base.sha,
+    });
+  });
+
+  test("the merge base is the nearest commit both hold: a head pushed again onto the base meets the old one there", async () => {
+    const fake = host();
+    const first = nextSha();
+    fake.push(ref, first, [], [], { commits: 2 });
+    const rewritten = nextSha();
+    fake.push(ref, rewritten, [], [], { onto: change.base.sha });
+    // `first` sits on the change's head, which sits on the base; `rewritten` on the base itself.
+    expect((await fake.countCommits(repo, first, rewritten)).mergeBase).toBe(change.base.sha);
+    expect((await fake.countCommits(repo, rewritten, first)).mergeBase).toBe(change.base.sha);
+    expect((await fake.countCommits(repo, first, first)).mergeBase).toBe(first);
+  });
+
+  test("two commits with no common history are not found, as GitHub's compare answers 404", async () => {
+    const fake = host();
+    const orphan = commitSha("6666666666666666666666666666666666666666");
+    fake.open({
+      ...wip,
+      number: 5,
+      base: { ref: "orphan", sha: commitSha("7777777777777777777777777777777777777777") },
+      head: { ref: "orphan-work", sha: orphan },
+      diff: [],
+    });
+    await expect(fake.countCommits(repo, change.head.sha, orphan)).rejects.toMatchObject({
+      failure: "not_found",
+    });
+    await expect(fake.countCommits(repo, orphan, change.base.sha)).rejects.toMatchObject({
+      failure: "not_found",
+    });
   });
 });

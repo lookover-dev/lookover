@@ -89,9 +89,9 @@ function item(n: number, how: How, title = `Change ${n}`): ChangeReview {
 
 const line = () => "";
 const numbers = (items: ChangeReview[], filter: Filter, query = "") =>
-  allReviews(items, filter, query, line).rows.map((i) => i.change.number);
+  allReviews(items, "everyone", filter, query, line).rows.map((i) => i.change.number);
 const dimmed = (items: ChangeReview[], filter: Filter, query = "") =>
-  allReviews(items, filter, query, line)
+  allReviews(items, "everyone", filter, query, line)
     .options.filter((o) => o.disabled)
     .map((o) => o.value);
 
@@ -124,7 +124,7 @@ test("a preview is the owner's to read: in Needs you, not Findings open (ADR 007
 });
 
 test("the options keep their order and words whatever they hold", () => {
-  expect(allReviews([], "all", "", line).options.map((o) => o.label)).toEqual([
+  expect(allReviews([], "everyone", "all", "", line).options.map((o) => o.label)).toEqual([
     "All",
     "Needs you",
     "Findings open",
@@ -168,6 +168,32 @@ test("the search reads the title, the number, the author and the status line, in
   const items = [item(148, "to-fix", "Fix the Ledger")];
   expect(numbers(items, "all", "  LEDGER ")).toEqual([148]);
   expect(numbers(items, "all", "#148")).toEqual([148]);
-  expect(allReviews(items, "all", "two findings", () => "Two findings open").rows).toHaveLength(1);
+  expect(allReviews(items, "everyone", "all", "two findings", () => "Two findings open").rows).toHaveLength(
+    1,
+  );
   expect(numbers(items, "all", "codex")).toEqual([]);
+  // Who opened it and who wrote it, both.
+  expect(numbers(items, "all", "sasensi")).toEqual([148]);
+  expect(numbers(items, "all", "written by claude")).toEqual([148]);
+});
+
+test("the filters and the search apply within the tab, and what can be picked reads the tab's rows (ADR 0078)", () => {
+  const teammate = (n: number, how: How): ChangeReview => {
+    const it = item(n, how);
+    return { ...it, change: { ...it.change, author: "other", openedBy: "ana", writtenBy: null } };
+  };
+  const items = [item(1, "to-fix"), teammate(2, "not-asked"), teammate(3, "skipped")];
+  const rows = (scope: "mine" | "everyone", filter: Filter, query = "") =>
+    allReviews(items, scope, filter, query, line).rows.map((i) => i.change.number);
+  const off = (scope: "mine" | "everyone") =>
+    allReviews(items, scope, "all", "", line)
+      .options.filter((o) => o.disabled)
+      .map((o) => o.value);
+  expect(rows("mine", "all")).toEqual([1]);
+  expect(rows("everyone", "all")).toEqual([1, 2, 3]);
+  expect(rows("everyone", "skipped")).toEqual([2, 3]);
+  expect(rows("mine", "all", "ana")).toEqual([]);
+  expect(rows("everyone", "all", "ana")).toEqual([2, 3]);
+  expect(off("mine")).toEqual(["needs", "done", "skipped"]);
+  expect(off("everyone")).toEqual(["needs", "done"]);
 });

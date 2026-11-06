@@ -6,7 +6,9 @@
 // skipped by a rule) or `neutral` (failed), as the job itself says. A waiting job moved to a newer commit first
 // completes its old commit's check (`skipped`, a newer commit), then creates one on the new commit (a preview's
 // makes none: ADR 0047). The store keeps
-// the check's id and commit, and whether it is completed.
+// the check's id and commit, and whether it is completed. An old skip's end on another author's change, nobody asked
+// in person, is never sent, only marked sent (`core.endUnsent`, ADR 0078): an upgrade posts nothing there, unless
+// that skip's check was created (its id kept): that check gets its end, never left queued.
 // Ordering: one job's changes are sent one at a time, in the order they were recorded, each with the job as it
 // was then; different jobs' go side by side. A change the host already shows (the same commit, state and reason,
 // and for a job waiting on an engine's limit the same reset, sent with success) is not sent again, and nothing is
@@ -38,6 +40,7 @@
 // queue's, `core`).
 
 import {
+  type Change,
   type ChangeId,
   type Clock,
   DESCRIPTION_MAX_CHARACTERS,
@@ -50,7 +53,7 @@ import {
   type ReviewJob,
   type RunId,
 } from "@lookover/contracts";
-import { loopState } from "@lookover/core";
+import { endUnsent, loopState } from "@lookover/core";
 import type { Ended, JobCheck, Publisher, Standing, Status } from "@lookover/publish";
 import type { JobCheckRef, Store, StoredJob, StoredJobCheck } from "@lookover/store";
 import { said } from "./said.ts";
@@ -76,6 +79,8 @@ export interface ChecksDeps {
   changeRef(changeId: ChangeId): { repo: RepositoryRef; number: number };
   /** Whether only Codex may review in the change's repository now: a fork's skip then points to Settings (ADR 0048). */
   onlyCodex(changeId: ChangeId): boolean;
+  /** Who opened the change, as the open changes say; null when it is not listed open (none closed is kept). */
+  authorOf(changeId: ChangeId): Change["author"] | null;
   /** Until when the engine's limit holds, as the UI is told (ADR 0055); null when none holds or no reset is known. */
   limitUntil(engine: EngineId): number | null;
   /**
@@ -258,6 +263,9 @@ export function createChecks(d: ChecksDeps): Checks {
     const { base, rounds } = facts(changeId, job, run, at);
     const standing = standingOf(job, rounds, d.limitUntil);
     if (shown(job, check, standing)) return;
+    // An old skip on another author's change, nobody asked in person, with no check created: its end is never sent
+    // (ADR 0078).
+    if (endUnsent(job, d.authorOf(changeId), { created: check.ref !== null })) return completed(job.id);
     if (followed.run) runs.set(job.id, followed.run);
     const ref = await onItsCommit(job, check.ref, base);
     // A preview's job let go of its old commit's check: it makes none on the new one (ADR 0047).

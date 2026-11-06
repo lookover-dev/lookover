@@ -28,10 +28,10 @@ afterEach(stopAll);
 const MIN = 60_000;
 const id = (n: number) => changeId(`sasensi/lookover-sandbox#${n}`);
 /**
- * S10's seed: sixty-six events (the start, the account the sign-in reaches, the repository, six pull requests and their reviews, their outboxes as
+ * S10's seed: sixty-four events (the start, the account the sign-in reaches, the repository, six pull requests and their reviews, their outboxes as
  * they posted, main's rules read and counted three times).
  */
-const SEEDED = 66;
+const SEEDED = 64;
 /** The pull requests S10's seed opens. */
 const S10_CHANGES = [135, 137, 139, 141, 144, 146].map(id);
 /** What a load adds to the seed: the one `clock` event that ends it, so the UI's `now` follows. */

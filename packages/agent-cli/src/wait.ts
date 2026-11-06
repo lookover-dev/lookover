@@ -167,16 +167,17 @@ interface Read {
 /** The triggers nobody asked with: Lookover saw the pull request open or move by itself. */
 const AUTOMATIC = new Set(["opened", "push"]);
 /**
- * The skip rules (`core.intake`'s) `wait` asks past, as the result's `state_reason` names them. Not `fork`: a fork's
- * pull request is reviewed only when the owner asks by hand (ADR 0048), so its skip is the answer, reported (6),
- * unless a request names the commit.
+ * The skip rules (`core.intake`'s) `wait` asks past, as the result's `state_reason` names them; `not_yours` only on
+ * checks older versions posted (ADR 0078: a colleague's pull request gets none now). Not `fork`: a fork's pull request
+ * is reviewed only when the owner asks by hand (ADR 0048), so its skip is the answer, reported (6), unless a request
+ * names the commit.
  */
 const SKIP_RULES = new Set(["not_yours", "draft", "repo_off", "on_open_off"]);
 
 /**
- * A check a skip rule completed when nobody asked: an automatic trigger skipped (ADR 0043: "Not your pull request"
- * on a colleague's pull request when it opened). It answers no request, so `wait` asks anyway and reads the check
- * of the review its request leads to; it is no sign Lookover is running either.
+ * A check a skip rule completed when nobody asked: an automatic trigger skipped (ADR 0043: the "Not your pull request"
+ * older versions posted on a colleague's pull request when it opened). It answers no request, so `wait` asks anyway
+ * and reads the check of the review its request leads to; it is no sign Lookover is running either.
  */
 export function nobodyAsked(check: HostCheck, requested: boolean): boolean {
   if (check.status !== "completed") return false;

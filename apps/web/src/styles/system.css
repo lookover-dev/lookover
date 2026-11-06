@@ -780,6 +780,18 @@ select.input {
   background: var(--ink);
   border-radius: 2px;
 }
+/* a tab's count: tabular figures */
+.tabs .n {
+  font-variant-numeric: tabular-nums;
+}
+/* a list's Mine / Everyone (ADR 0078): each count holds room for three figures (3ch, as .code .ln), so a count that
+   grows moves no tab */
+.tabs.split .n {
+  display: inline-block;
+  min-width: 3ch;
+  margin-inline-start: var(--s-1);
+  text-align: start;
+}
 /* top-level navigation: three destinations, read as places, not as filters */
 /* v0.3: the current place is ink text on a 2 px ink bar that sits on the top bar's edge. No pill: it read as a button. */
 .navtop {

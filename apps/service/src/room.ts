@@ -738,6 +738,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     host: "github",
     changeRef: (changeId) => ({ repo: watched.ofChange(changeId), number: numberOf(changeId) }),
     onlyCodex: (changeId) => settings(repoIdOf(watched.ofChange(changeId))).values.reviewers === "codex",
+    authorOf: (changeId) => openChanges().get(changeId)?.author ?? null,
     limitUntil: statusFacts.limitUntil,
     status: (changeId) => statusNow(store, changeId, [], statusFacts),
     ...logged,

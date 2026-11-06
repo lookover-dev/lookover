@@ -11,8 +11,9 @@
 // (`ourChecks`), never another person's, another pull request's on the same head, nor one naming nobody or no pull
 // request; Lookover's threads are then the App's bot's or that person's, and its replies the bot's or that person's
 // with a reply marker. A check a skip rule completed on an
-// automatic trigger (an opening or a push: "Not your pull request" on a colleague's) answers nobody: `wait` leaves it
-// out, so it asks anyway (ADR 0043) and waits for the check its request leads to.
+// automatic trigger (an opening or a push: "Not your pull request", which only older versions posted on a colleague's)
+// answers nobody: `wait` leaves it out, so it asks anyway (ADR 0043) and waits for the check its request leads
+// to. A colleague's pull request has no check of the person's until someone asks (ADR 0078): `wait` asks there too.
 // Once a round's check completes, `wait` reads Lookover's threads: when the round didn't read a person's newest reply
 // on the thread of a finding it left unsettled (the finding's claim, in GitHub's time, is older than the reply; with
 // no claim, the round started before it), it asks again on the same commit (never on a fork's pull request), its

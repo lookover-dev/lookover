@@ -223,12 +223,13 @@ test("agent-opens-change: the agent's #149 opens, Codex finds and Claude confirm
   expect(await again.json()).toEqual({ error: "no pull request left to open in this scenario" });
 });
 
-test("other-opens-change: a colleague's #150 opens and is skipped; nothing left, the fault says so", async () => {
+test("other-opens-change: a colleague's #150 opens with nothing asked or posted; nothing left, the fault says so", async () => {
   const door = await quiet();
   expect(await inject(door, "other-opens-change")).toBe(200);
   const state = await snapshotOf(door);
   expect(state.changes[id(150)]).toMatchObject({ author: "other", openedBy: "mira" });
-  expect(state.reviews[id(150)]?.job).toMatchObject({ state: "skipped", skip: "not-yours" });
+  // Nobody asked in person: no job, so no check either (ADR 0078).
+  expect(state.reviews[id(150)]?.job).toBeNull();
   expect(await inject(door, "other-opens-change")).toBe(409);
 });
 

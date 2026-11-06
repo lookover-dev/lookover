@@ -309,21 +309,26 @@ test("a pull request closed on the host goes through the poll: it leaves the lis
   expect(Object.keys((await snapshot(service, cookie)).changes)).toEqual([PLANTED]);
 });
 
-test("another author's pull request is skipped, with the reason on its check", async () => {
-  const { service, host, time } = await start({ changes: [pr1], engines: fakeEngines({ reviews: 1 }) });
+test("another author's pull request, opened then pushed to, is listed with nothing asked and nothing posted (ADR 0078)", async () => {
+  const { service, host, time } = await start({
+    changes: [pr1],
+    engines: fakeEngines({ reviews: 1 }),
+    repositorySettings: { onPush: true },
+  });
   const cookie = await openApp(service);
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
   host.open(opened(6, { author: { id: 583231, login: "octocat" } }));
   await time.advance(MIN);
-  const events = [...(await until(stream, "change.opened")), ...(await until(stream, "job.changed"))];
-  expect(events.at(-1)).toMatchObject({
-    changeId: idOf(6),
-    job: { state: "skipped", skip: "not-yours", trigger: "opened" },
+  expect((await until(stream, "change.opened")).at(-1)).toMatchObject({
+    change: { id: idOf(6), author: "other" },
   });
+  host.push(ref(6), commitSha("6".repeat(40)), []);
+  await time.advance(MIN);
   await time.advance(0);
-  expect(host.view(ref(6)).checks.map((c) => `${c.status} ${c.conclusion}: ${c.output.title}`)).toEqual([
-    "completed skipped: Not your pull request",
-  ]);
+  const state = await snapshot(service, cookie);
+  expect(state.changes[idOf(6)]).toMatchObject({ author: "other", headSha: commitSha("6".repeat(40)) });
+  expect(state.reviews[idOf(6)]?.job).toBeNull();
+  expect(host.posts).toEqual([]);
 });
 
 test("a pull request's age is when GitHub opened it: a data folder that kept another is right after the next listing (ADR 0068)", async () => {

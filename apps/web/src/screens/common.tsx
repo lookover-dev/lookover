@@ -2,9 +2,9 @@
 import type { Command, Review, RunStep, State } from "@lookover/contracts";
 import { type ReactNode, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { reviewPath, useAppState, useSend } from "../store.tsx";
+import { reviewPath, useAppState, useListScope, useSend } from "../store.tsx";
 import { useTickingNow } from "../ticking.tsx";
-import { Button, Chip, Eyes, Icon, Row, Said } from "../ui/basics.tsx";
+import { Button, Chip, Eyes, Icon, Row, Said, Tabs } from "../ui/basics.tsx";
 import { Tip } from "../ui/layers.tsx";
 import { duration, LONGEST_RUNNING_TIMES, type WithCommand } from "../view-model/format.ts";
 import {
@@ -19,6 +19,7 @@ import {
   stepTime,
 } from "../view-model/run.ts";
 import { SAVE_IDLE, SAVE_TEXT, type SaveShown, type SaveStep, saveStep } from "../view-model/save.ts";
+import { scopeTabs } from "../view-model/scope.ts";
 import {
   authorLabel,
   type ChangeReview,
@@ -51,6 +52,16 @@ export function useSaving(): { stamp: { shown: SaveShown; text: string }; save: 
       );
     },
   };
+}
+
+/**
+ * Mine and Everyone above a list of pull requests (ADR 0078): nothing until another author's is listed, then kept
+ * while the page is open. `items`: every open one.
+ */
+export function ScopeTabs({ items }: { items: ChangeReview[] }) {
+  const { scope, shown, choose } = useListScope();
+  const tabs = scopeTabs(items, shown);
+  return tabs ? <Tabs split label="Whose pull requests" value={scope} tabs={tabs} onChange={choose} /> : null;
 }
 
 export function ReviewRow({ item, fresh }: { item: ChangeReview; fresh?: boolean }) {

@@ -14,11 +14,12 @@ export type JobState = "queued" | "deferred" | "running" | "done" | "skipped" | 
 export type Trigger = "opened" | "push" | "comment" | "manual" | "first-review";
 
 /**
- * Why a job was skipped. `not-yours`: another author's change nobody asked for in person (ADR 0016).
+ * Why a job was skipped. `not-yours`: another author's change nobody asked for in person (ADR 0016), only on the
+ * skips recorded before ADR 0078: no new skip carries it, another author's change is not asked then.
  * `codex-not-yours`: another author's change, or a change from a fork asked for in person (ADR 0048), in a
  * repository where only Codex may review, and Codex reviews only the owner's own changes from the repository while
  * its reads aren't confined (ADR 0044); set by the round plan when the job is taken.
- * `fork`: a change from a fork nobody asked for in person, whoever wrote it (ADR 0048).
+ * `fork`: the owner's change from a fork nobody asked for in person (ADR 0048); before ADR 0078, anyone's.
  */
 export type SkipReason = "not-yours" | "draft" | "repo-off" | "on-open-off" | "codex-not-yours" | "fork";
 

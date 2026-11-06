@@ -1,6 +1,7 @@
 // The fork rule (ADR 0048), through the service's entry, on fakes only: a pull request whose head is in another
-// repository than its base is never reviewed by itself, whoever wrote it; its check says why. Asked by hand, Claude
-// alone reviews it: Codex never finds it, confirms it or steps in on it.
+// repository than its base is never reviewed by itself, whoever wrote it. The person's says why on its check; a
+// teammate's gets nothing at all (ADR 0078). Asked by hand, Claude alone reviews it: Codex never finds it, confirms it
+// or steps in on it.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { changeId, commitSha, type Event } from "@lookover/contracts";
 import type { FakeChange, FakeGitHost, ScriptedRun } from "@lookover/testkit";
@@ -174,6 +175,56 @@ test("a fork's request waiting when the fork is pushed ends cancelled on its com
   expect(engines.runs).toEqual([]);
   // The block it wrote as it waited stays: no round ever posted to put back, and no block is taken off (I-229).
   expect(heading(host)).toBe(`Waiting to look over ${commit(fork.head.sha)}`);
+});
+
+test("a teammate's fork gets nothing; the person's request on it waiting when it is pushed ends on the asked commit only (ADR 0078)", async () => {
+  const engines = fakeEngines({ signedIn: false });
+  const { service, host, time } = await start({
+    changes: [pr1],
+    engines,
+    repositorySettings: { onPush: true },
+  });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  const checks = (on: typeof fork.head.sha) =>
+    host.view(FORK, on).checks.map((c) => `${c.status} ${c.conclusion}: ${c.output.title}`);
+
+  const teammate = { id: 583231, login: "octocat" };
+  host.open({ ...fork, author: teammate });
+  await time.advance(MIN);
+  await until(stream, "change.opened");
+  const before = commitSha("6".repeat(40));
+  host.push(FORK, before, []);
+  await time.advance(MIN);
+  // The teammate's own `/lookover review` is ignored too.
+  host.seedComment(FORK, { author: teammate, body: "/lookover review" });
+  await time.advance(MIN);
+  expect((await snapshot(service, cookie)).reviews[id]?.job).toBeNull();
+  expect(host.posts).toEqual([]);
+
+  // Claude is signed out: the person's request waits on the fork's head.
+  host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  expect((await until(stream, "job.changed")).at(-1)).toMatchObject({
+    job: { trigger: "comment", skip: null, sha: before },
+  });
+  const pushed = commitSha("8".repeat(40));
+  host.push(FORK, pushed, []);
+  engines.setHealth("claude", { installed: true, version: "2.4.1", signedIn: true });
+  await time.advance(MIN);
+  await time.advance(MIN);
+  await time.advance(0);
+  expect((await snapshot(service, cookie)).reviews[id]?.job).toMatchObject({
+    state: "cancelled",
+    cancel: "pushed",
+    sha: before,
+  });
+  // Its end on the commit asked for, and nothing else: no fork skip, nothing on the new head.
+  expect(checks(fork.head.sha)).toEqual([]);
+  expect(checks(before)).toEqual(["completed skipped: A newer commit was pushed after the request"]);
+  expect(checks(pushed)).toEqual([]);
+  expect(engines.runs).toEqual([]);
+  expect(heading(host)).toBe(`Waiting to look over ${commit(before)}`);
 });
 
 test("a fork's second request waiting when the fork is pushed puts the block of the round that posted back", async () => {

@@ -29,6 +29,7 @@ import {
   type Turn,
 } from "@lookover/contracts";
 import {
+  authorLabel,
   bandOn,
   type ChangeReview,
   canReviewAgain,
@@ -42,6 +43,7 @@ import {
   lookedOver,
   nextStep,
   nothingReviewedYet,
+  notReviewed,
   openVerdict,
   type Problem,
   pill,
@@ -56,6 +58,7 @@ import {
   sentence,
   settledVerdict,
   skipWhy,
+  status,
   statusLine,
   waitNotice,
 } from "./select.ts";
@@ -1029,7 +1032,7 @@ test("pull requests with an escalated finding need you, and are counted", () => 
 test("a review waiting for a signed-out AI is not one more thing: the AI is", () => {
   const st = withChange(signedOut(calm(), "claude"), 1, "deferred", 5 * MIN);
   expect(sentence(st).title).toBe("1 thing needs you.");
-  expect(homeGroups(st).waiting.map((i) => String(i.change.id))).toEqual(["sam/app#1"]);
+  expect(homeGroups(st, "mine").waiting.map((i) => String(i.change.id))).toEqual(["sam/app#1"]);
 });
 
 test("problems count with pull requests", () => {
@@ -1080,7 +1083,7 @@ test("Home groups reviews by what they need, today's finished ones last", () => 
   st = withChange(st, 8, "skipped", 4 * HOUR);
   st = withChange(st, 9, "settled", 20 * HOUR);
   st = withChange(st, 10, "none");
-  const g = homeGroups(st);
+  const g = homeGroups(st, "mine");
   const ids = (list: { change: { id: string } }[]) => list.map((i) => String(i.change.id));
   expect(ids(g.needs)).toEqual(["sam/app#2"]);
   expect(ids(g.running)).toEqual(["sam/app#3"]);
@@ -1242,7 +1245,7 @@ test("a preview with one blocking finding and nothing else is the owner's to rea
   expect(sentence(st).title).toBe("1 preview to read.");
   expect(chip(firstOf(st))).toEqual({ tone: "need", label: "Preview" });
   expect(statusLine(st, firstOf(st))).toBe("1 blocking finding found · nothing posted");
-  const g = homeGroups(st);
+  const g = homeGroups(st, "mine");
   expect(g.needs.map((i) => String(i.change.id))).toEqual(["sam/app#148"]);
   expect(g.earlier).toEqual([]);
 });
@@ -1471,7 +1474,7 @@ test("a fork skipped says so on Home, and the review page says why and how to ha
   // The review page's card reads "Not reviewed: it comes from a fork." (spec #134, story 19).
   expect(statusLine(calm(), it)).toBe("it comes from a fork");
   expect(skipWhy(it, "fork")).toEqual({
-    text: "It comes from a fork, so its code could try to steer the reviewer. Lookover never reviews a pull request from a fork by itself, whoever opened it.",
+    text: "It comes from a fork, so its code could try to steer the reviewer. Lookover never reviews a pull request from a fork by itself.",
     ask: {
       lead: "To have Claude review it, comment",
       command: "/lookover review",
@@ -1531,6 +1534,71 @@ test("a change never asked for, opened with reviews on open off, says so, not th
   });
 });
 
+test("another author's pull request the person hasn't asked about says so, not that reviews on open are off (ADR 0078)", () => {
+  const st = withChange(calm(), 9, "none");
+  const id = changeId("sam/app#9");
+  const change = st.changes[id];
+  const review = st.reviews[id];
+  const [repo] = st.repos;
+  if (!change || !review || !repo) throw new Error("No change");
+  const mira: ChangeReview = { change: { ...change, openedBy: "mira", author: "other" }, review, repo };
+  const opened =
+    "By itself, Lookover reviews only the pull requests opened by you or by your coding agents. This one was opened by mira, so nothing was posted on it.";
+  expect(notReviewed(mira)).toEqual({
+    title: "you haven't asked",
+    why: {
+      text: opened,
+      ask: {
+        lead: "To have it reviewed, comment",
+        command: "/lookover review",
+        tail: "on it, or use “Review now”.",
+      },
+    },
+  });
+  const fork = { ...mira, change: { ...mira.change, fork: true } };
+  expect(notReviewed(fork)).toEqual({
+    title: "you haven't asked",
+    why: {
+      text: `${opened} It comes from a fork, so only Claude would review it.`,
+      ask: {
+        lead: "To have Claude review it, comment",
+        command: "/lookover review",
+        tail: "on it, or use “Review now”.",
+      },
+    },
+  });
+  expect(canReviewAgain(mira)).toBe(true);
+  // Where only Codex reviews, Codex never reviews another author's: Settings is the way, not the button.
+  const codexRepo = {
+    ...repo,
+    settings: {
+      ...repo.settings,
+      reviewers: { value: "codex" as const, origin: "owner-repository" as const, overrode: null },
+    },
+  };
+  const codexOnly: ChangeReview = { ...mira, repo: codexRepo };
+  const settings =
+    "Only Codex reviews in app, and it reviews only your own pull requests from this repository. To have this one reviewed, let Claude review too, in Settings.";
+  expect(notReviewed(codexOnly)).toEqual({
+    title: "you haven't asked",
+    why: { text: `${opened} ${settings}`, ask: null },
+  });
+  expect(canReviewAgain(codexOnly)).toBe(false);
+  const codexFork: ChangeReview = { ...fork, repo: codexRepo };
+  expect(notReviewed(codexFork)).toEqual({
+    title: "you haven't asked",
+    why: { text: `${opened} It comes from a fork, so only Claude would review it. ${settings}`, ask: null },
+  });
+  expect(canReviewAgain(codexFork)).toBe(false);
+  // The person's own, opened with reviews on open off, and a skip, each keep their card.
+  const own: ChangeReview = { ...mira, change: { ...change, author: "you" } };
+  expect(notReviewed(own)).toEqual({ title: "reviews on open are off", why: skipWhy(own, "on-open-off") });
+  expect(notReviewed(skippedFor("fork"))).toEqual({
+    title: "it comes from a fork",
+    why: skipWhy(skippedFor("fork"), "fork"),
+  });
+});
+
 test("where only Codex reviews, a fork or another author's change points to Settings, not to a request", () => {
   const codexOnly = (it: ChangeReview): ChangeReview => ({
     ...it,
@@ -1544,7 +1612,7 @@ test("where only Codex reviews, a fork or another author's change points to Sett
   });
   const fork = codexOnly(skippedFor("fork"));
   expect(skipWhy(fork, "fork")).toEqual({
-    text: "It comes from a fork, so its code could try to steer the reviewer. Lookover never reviews a pull request from a fork by itself, whoever opened it. Only Codex reviews in app, and it reviews only your own pull requests from this repository. To have this one reviewed, let Claude review too, in Settings.",
+    text: "It comes from a fork, so its code could try to steer the reviewer. Lookover never reviews a pull request from a fork by itself. Only Codex reviews in app, and it reviews only your own pull requests from this repository. To have this one reviewed, let Claude review too, in Settings.",
     ask: null,
   });
   expect(canReviewAgain(fork)).toBe(false);
@@ -1563,7 +1631,7 @@ test("each skip explains itself, and only a skip a request reviews offers “Rev
     ],
     [
       "fork",
-      "It comes from a fork, so its code could try to steer the reviewer. Lookover never reviews a pull request from a fork by itself, whoever opened it.",
+      "It comes from a fork, so its code could try to steer the reviewer. Lookover never reviews a pull request from a fork by itself.",
     ],
     ["draft", "Drafts are skipped. It is reviewed when it is marked ready."],
     ["repo-off", "Reviews are turned off for app. Turn them on in Repositories."],
@@ -1630,3 +1698,105 @@ test("the verdict names the commit it looked over by its first seven characters,
   const fresh = { ...it, change: { ...it.change, headSha: head }, review: { ...it.review, rounds: [] } };
   expect(lookedOver(fresh)).toBe("0123456");
 });
+
+// ---- Mine and Everyone (ADR 0078) ----
+
+/** The change `sam/app#n` as another author's, "ana"'s, and, when `asked`, its job asked for with Review now. */
+function asOther(state: State, n: number, { asked = false } = {}): State {
+  const id = changeId(`sam/app#${n}`);
+  const change = state.changes[id];
+  const review = state.reviews[id];
+  if (!change || !review) throw new Error("No change");
+  const job = asked && review.job ? { ...review.job, trigger: "manual" as const } : review.job;
+  return {
+    ...state,
+    changes: { ...state.changes, [id]: { ...change, openedBy: "ana", author: "other", writtenBy: null } },
+    reviews: { ...state.reviews, [id]: { ...review, job } },
+  };
+}
+
+const numbers = (items: ChangeReview[]) => items.map((i) => i.change.number);
+
+test("Home: Mine keeps the person's in every group; Everyone adds others' never asked as Not reviewed", () => {
+  let st = withChange(calm(), 1, "to-fix", MIN);
+  st = withChange(st, 2, "running", MIN);
+  st = asOther(withChange(st, 3, "none", MIN), 3);
+  st = asOther(withChange(st, 4, "skipped", MIN), 4);
+  st = asOther(withChange(st, 5, "queued", MIN), 5, { asked: true });
+  const mine = homeGroups(st, "mine");
+  expect(numbers(mine.running)).toEqual([2]);
+  expect(numbers(mine.waiting)).toEqual([5]);
+  expect(numbers(mine.earlier)).toEqual([1]);
+  expect(mine.notReviewed).toEqual([]);
+  const everyone = homeGroups(st, "everyone");
+  expect(numbers(everyone.running)).toEqual([2]);
+  expect(numbers(everyone.waiting)).toEqual([5]);
+  // An old skip of another's keeps its place among what ended today.
+  expect(numbers(everyone.earlier).sort()).toEqual([1, 4]);
+  expect(numbers(everyone.notReviewed)).toEqual([3]);
+});
+
+test("Review now only on another's pull request never asked; an old skip's row keeps what it shows", () => {
+  const never = firstOf(asOther(withChange(calm(), 1, "none"), 1));
+  expect(rowAction(never)).toEqual({
+    label: REVIEW_BUTTON.now,
+    command: { type: "review.request", changeId: changeId("sam/app#1") },
+  });
+  expect(rowAction(firstOf(withChange(calm(), 1, "none")))).toBeNull();
+  expect(rowAction(firstOf(asOther(withChange(calm(), 1, "skipped"), 1)))).toBeNull();
+  expect(rowAction(firstOf(asOther(withChange(calm(), 1, "queued"), 1, { asked: true })))).toBeNull();
+  expect(rowAction(firstOf(asOther(withChange(calm(), 1, "clean"), 1)))).toBeNull();
+});
+
+test("the row follows the page: no Review now where only Codex reviews another's, or the repository is off", () => {
+  const never = firstOf(asOther(withChange(calm(), 1, "none"), 1));
+  const codexOnly: ChangeReview = {
+    ...never,
+    repo: {
+      ...never.repo,
+      settings: {
+        ...never.repo.settings,
+        reviewers: { value: "codex", origin: "owner-repository", overrode: null },
+      },
+    },
+  };
+  expect(canReviewAgain(codexOnly)).toBe(false);
+  expect(rowAction(codexOnly)).toBeNull();
+  // A request in a repository switched off is skipped `repo-off`: the card says the repository is off, and offers nothing.
+  const off: ChangeReview = { ...never, repo: { ...never.repo, enabled: false } };
+  expect(notReviewed(off)).toEqual({ title: "this repository is off", why: skipWhy(off, "repo-off") });
+  expect(notReviewed(off)?.why.ask).toBeNull();
+  expect(canReviewAgain(off)).toBe(false);
+  expect(rowAction(off)).toBeNull();
+  // The person's own, never reviewed in a repository switched off, says the same.
+  const ownOff: ChangeReview = { ...firstOf(withChange(calm(), 1, "none")), repo: off.repo };
+  expect(notReviewed(ownOff)).toEqual({ title: "this repository is off", why: skipWhy(ownOff, "repo-off") });
+  expect(canReviewAgain(ownOff)).toBe(false);
+});
+
+test("a row names who opened it, then who wrote it", () => {
+  const { change } = firstOf(withChange(calm(), 1, "none"));
+  const label = (author: "you" | "agent" | "other", openedBy: string, writtenBy: EngineId | null) =>
+    authorLabel({ ...change, author, openedBy, writtenBy });
+  expect(label("you", "sam", null)).toBe("by sam");
+  expect(label("you", "sam", "claude")).toBe("sam · written by Claude");
+  expect(label("agent", "sam", "claude")).toBe("sam · written by Claude");
+  expect(label("agent", "sam", "codex")).toBe("sam · written by Codex");
+  expect(label("other", "ana", null)).toBe("ana");
+  expect(label("other", "ana", "claude")).toBe("ana · written by Claude");
+});
+
+test("a skipped job that never said why shows as not reviewed, never as another author's", () => {
+  const st = withChange(calm(), 1, "none", MIN, {
+    job: { ...levelsJob(), state: "skipped", skip: null },
+  });
+  expect(status(firstOf(st))).toEqual({ kind: "not-asked" });
+  expect(statusLine(st, firstOf(st))).toBe("not reviewed yet");
+});
+
+/** A job as `withChange` gives it, queued. */
+function levelsJob(): ReviewJob {
+  const job = withChange(calm(), 1, "queued").reviews[changeId("sam/app#1")]?.job;
+  if (!job) throw new Error("No job");
+  return job;
+}

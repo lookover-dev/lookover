@@ -99,10 +99,10 @@ const onClaude: Pick<ReviewJob, "state" | "deferral"> = {
   deferral: { reason: "engine-signed-out", engine: "claude" },
 };
 /**
- * The start, the account the sign-in reaches, the repository, #1 opened, queued and deferred, #2 opened and skipped,
- * the ask queued and deferred.
+ * The start, the account the sign-in reaches, the repository, #1 opened, queued and deferred, #2 opened (Mira's, not
+ * asked: no job, ADR 0078), the ask queued and deferred.
  */
-const SEEDED_EVENTS = 10;
+const SEEDED_EVENTS = 9;
 
 /** Reads events until a `job.changed` of `change` whose job is in `state`; the events read. */
 async function untilJob(
@@ -134,7 +134,7 @@ test("each deferred job says which engine may step in; a reroute moves only the 
     stepIn: "codex",
   });
   expect(before.reviews[MIRAS]?.job).toMatchObject({
-    id: jobId("3"),
+    id: jobId("2"),
     trigger: "comment",
     ...onClaude,
     stepIn: null,
@@ -162,7 +162,7 @@ test("each deferred job says which engine may step in; a reroute moves only the 
   const after = await snapshotOf(door);
   expect(after.reviews[MINE]?.job).toMatchObject({ id: jobId("1"), state: "done" });
   expect(after.reviews[MINE]?.rounds).toMatchObject([{ n: 1, reviewer: "codex", raised: 0 }]);
-  expect(after.reviews[MIRAS]?.job).toMatchObject({ id: jobId("3"), ...onClaude, stepIn: null });
+  expect(after.reviews[MIRAS]?.job).toMatchObject({ id: jobId("2"), ...onClaude, stepIn: null });
 
   // "Review now" on the owner's change again: the rule plans Claude, and the new job waits on it, as before the
   // reroute. The owner's one click steered one job, not every later review of the change.
@@ -194,7 +194,7 @@ test("a job sent to Codex while Codex is signed out too waits on Codex now, and 
     stepIn: "claude",
   });
   // Mira's review still waits on Claude: Codex may not take it.
-  expect(after.reviews[MIRAS]?.job).toMatchObject({ id: jobId("3"), ...onClaude, stepIn: null });
+  expect(after.reviews[MIRAS]?.job).toMatchObject({ id: jobId("2"), ...onClaude, stepIn: null });
   // The demo clock stands at T0 and nothing moved it: the reroute's own take deferred the job on Codex, not a
   // tick a minute later.
   expect(after.now).toBe(T0);

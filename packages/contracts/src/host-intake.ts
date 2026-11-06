@@ -82,6 +82,12 @@ export interface CommitCount {
    * long push may give fewer messages than `commits`.
    */
   messages: string[];
+  /**
+   * The nearest commit both `from` and `to` hold, as the host shows it (GitHub: the compare's `merge_base_commit`):
+   * where a change's diff starts when `from` is its base and `to` its head, read here since a shallow copy can't
+   * find it (ADR 0068). `from` itself when it is an ancestor of `to`.
+   */
+  mergeBase: CommitSha;
 }
 
 /**
@@ -136,8 +142,9 @@ export interface HostIntake {
    */
   poster(repo: RepositoryRef): Promise<{ id: number; login: string }>;
   /**
-   * How many commits `to` has that `from` hasn't, and whether `from` is no ancestor of `to`. Throws
-   * `HostError("not_found")` for a commit the repository doesn't have.
+   * How many commits `to` has that `from` hasn't, whether `from` is no ancestor of `to`, and the nearest commit
+   * both hold. Throws `HostError("not_found")` for a commit the repository doesn't have, or for two commits with no
+   * common history (GitHub answers both 404).
    */
   countCommits(repo: RepositoryRef, from: CommitSha, to: CommitSha): Promise<CommitCount>;
   fetchSpec(repo: RepositoryRef): Promise<FetchSpec>;

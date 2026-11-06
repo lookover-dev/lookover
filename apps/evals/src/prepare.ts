@@ -19,9 +19,9 @@ const localFetch = (built: BuiltCase): FetchSpec => ({
 });
 
 /**
- * Prepares `built` through `retrieval`: the review worktree at its head, the diff from its merge base with `main`,
- * the rules files on `main`, and the diff's file. The job takes the case's neutral name, so a crashed run's worktree is replaced. Throws what
- * `retrieval` throws.
+ * Prepares `built` through `retrieval`: the review worktree at its head, the diff from its base (its merge base with
+ * `main`, the change being one commit on it), the rules files on `main`, and the diff's file. The job takes the case's
+ * neutral name, so a crashed run's worktree is replaced. Throws what `retrieval` throws.
  */
 export async function prepareCase(
   retrieval: Retrieval,
@@ -33,7 +33,8 @@ export async function prepareCase(
     repo,
     job: jobId(built.name),
     head: built.head,
-    base: built.base,
+    // The case's change is one commit on `main`: its base is its merge base, as the host's compare would say.
+    mergeBase: built.base,
     fetch: localFetch(built),
   };
   const prepared = await retrieval.prepare(request, signal);

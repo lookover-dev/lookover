@@ -395,13 +395,18 @@ export function Tabs<T extends string>({
   value,
   tabs,
   onChange,
+  label,
+  split = false,
 }: {
   value: T;
   tabs: { value: T; label: string; count?: number }[];
   onChange: (value: T) => void;
+  label?: string;
+  /** A list's Mine / Everyone: each count holds room for three figures, so a growing count moves no tab. */
+  split?: boolean;
 }) {
   return (
-    <div className="tabs" role="tablist">
+    <div className={split ? "tabs split" : "tabs"} role="tablist" aria-label={label}>
       {tabs.map((t) => (
         <button
           type="button"

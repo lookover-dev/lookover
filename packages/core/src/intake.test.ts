@@ -1,7 +1,7 @@
 // Whether a change that asks for a review gets a review job, or is skipped and why (ADR 0016, ADR 0026).
 import { expect, test } from "bun:test";
 import type { Change, SettingValues, SkipReason, Trigger } from "@lookover/contracts";
-import { type Intake, intake, skipOutcome } from "./index.ts";
+import { endUnsent, type Intake, intake, skipOutcome } from "./index.ts";
 
 /** Lookover's defaults (ADR 0025, ADR 0026), as `settings` resolves them with nothing set. */
 const DEFAULTS: SettingValues = {
@@ -41,16 +41,9 @@ test("each skip reason, with the first that applies winning", () => {
   const cases: [string, Intake][] = [
     [
       "repository switched off",
-      ask("opened", { author: "other", draft: true }, { enabled: false, settings: { onOpen: false } }),
+      ask("opened", { draft: true, fork: true }, { enabled: false, settings: { onOpen: false } }),
     ],
-    [
-      "a change from a fork",
-      ask("opened", { author: "other", draft: true, fork: true }, { settings: { onOpen: false } }),
-    ],
-    [
-      "someone else's change",
-      ask("opened", { author: "other", draft: true }, { settings: { onOpen: false } }),
-    ],
+    ["a change from a fork", ask("opened", { draft: true, fork: true }, { settings: { onOpen: false } })],
     ["a draft that opens", ask("opened", { draft: true }, { settings: { onOpen: false } })],
     ["a push to a draft", ask("push", { draft: true }, { settings: { onPush: true } })],
     ["reviews on open switched off", ask("opened", {}, { settings: { onOpen: false } })],
@@ -58,24 +51,34 @@ test("each skip reason, with the first that applies winning", () => {
   expect(cases).toEqual([
     ["repository switched off", { kind: "skipped", reason: "repo-off" }],
     ["a change from a fork", { kind: "skipped", reason: "fork" }],
-    ["someone else's change", { kind: "skipped", reason: "not-yours" }],
     ["a draft that opens", { kind: "skipped", reason: "draft" }],
     ["a push to a draft", { kind: "skipped", reason: "draft" }],
     ["reviews on open switched off", { kind: "skipped", reason: "on-open-off" }],
   ]);
 });
 
-test("the owner's request on another author's change is reviewed: a comment or the app (ADR 0016, ADR 0043)", () => {
-  for (const trigger of ["comment", "manual"] satisfies Trigger[]) {
-    expect([trigger, ask(trigger, { author: "other", draft: true })]).toEqual([trigger, { kind: "job" }]);
-  }
-  // Nobody asked in person: another author's change is still skipped, with the reason on its check.
-  for (const trigger of ["opened", "first-review"] satisfies Trigger[]) {
-    expect([trigger, ask(trigger, { author: "other" })]).toEqual([
-      trigger,
-      { kind: "skipped", reason: "not-yours" },
-    ]);
-  }
+test("another author's change is not asked by a trigger nobody asked in person, fork or not, draft or not, repository on or off (ADR 0078)", () => {
+  for (const trigger of ["opened", "push", "first-review"] satisfies Trigger[])
+    for (const fork of [false, true])
+      for (const draft of [false, true])
+        for (const enabled of [true, false])
+          expect([
+            trigger,
+            fork,
+            draft,
+            enabled,
+            ask(trigger, { author: "other", fork, draft }, { enabled, settings: { onPush: true } }),
+          ]).toEqual([trigger, fork, draft, enabled, { kind: "not-asked" }]);
+});
+
+test("the owner's request on another author's change is reviewed: a comment or the app, a fork's too (ADR 0016, ADR 0043)", () => {
+  for (const trigger of ["comment", "manual"] satisfies Trigger[])
+    for (const fork of [false, true])
+      expect([trigger, fork, ask(trigger, { author: "other", draft: true, fork })]).toEqual([
+        trigger,
+        fork,
+        { kind: "job" },
+      ]);
   // A repository switched off is off for a request too.
   expect(ask("comment", { author: "other" }, { enabled: false })).toEqual({
     kind: "skipped",
@@ -83,8 +86,8 @@ test("the owner's request on another author's change is reviewed: a comment or t
   });
 });
 
-test("a fork change is never reviewed by itself, whoever wrote it: only a request reviews it (ADR 0048)", () => {
-  const authors: Change["author"][] = ["you", "agent", "other"];
+test("the owner's fork change is never reviewed by itself: it is skipped, told; only a request reviews it (ADR 0048)", () => {
+  const authors: Change["author"][] = ["you", "agent"];
   for (const author of authors) {
     for (const trigger of ["opened", "push", "first-review"] satisfies Trigger[]) {
       expect([trigger, author, ask(trigger, { author, fork: true }, { settings: { onPush: true } })]).toEqual(
@@ -99,6 +102,7 @@ test("a fork change is never reviewed by itself, whoever wrote it: only a reques
       ]);
     }
   }
+  expect(skipOutcome("opened", "fork", false)).toBe("record");
   // A repository switched off is off for a fork too, and a push nobody asked for skips nothing.
   expect(ask("opened", { fork: true }, { enabled: false })).toEqual({ kind: "skipped", reason: "repo-off" });
   expect(ask("push", { fork: true })).toEqual({ kind: "not-asked" });
@@ -115,12 +119,12 @@ test("a push is reviewed only with reviews after every push switched on; otherwi
   expect(ask("push", {}, { settings: { onPush: false } })).toEqual({ kind: "not-asked" });
 });
 
-test("an automatic trigger's skip is recorded only for another author's change or a fork's; a request's always (ADR 0043, ADR 0048)", () => {
+test("an automatic trigger's skip is recorded only for a fork's; a request's always (ADR 0043, ADR 0048, ADR 0078)", () => {
   const reasons: SkipReason[] = ["not-yours", "fork", "draft", "repo-off", "on-open-off", "codex-not-yours"];
   const told = (trigger: Trigger) =>
     reasons.filter((reason) => skipOutcome(trigger, reason, false) === "record");
-  expect(told("opened")).toEqual(["not-yours", "fork"]);
-  expect(told("push")).toEqual(["not-yours", "fork"]);
+  expect(told("opened")).toEqual(["fork"]);
+  expect(told("push")).toEqual(["fork"]);
   expect(told("comment")).toEqual(reasons);
   expect(told("manual")).toEqual(reasons);
   expect(told("first-review")).toEqual(reasons);
@@ -148,8 +152,30 @@ test("with reviews after every push off, a push asks nothing of anyone's change:
   expect(ask("push", { author: "other" }, off)).toEqual({ kind: "not-asked" });
   expect(ask("push", { draft: true }, off)).toEqual({ kind: "not-asked" });
   expect(ask("push", {}, { ...off, enabled: false })).toEqual({ kind: "not-asked" });
-  expect(ask("push", { author: "other" }, { settings: { onPush: true } })).toEqual({
-    kind: "skipped",
-    reason: "not-yours",
+  expect(ask("push", { author: "other" }, { settings: { onPush: true } })).toEqual({ kind: "not-asked" });
+});
+
+test("an old skip's end owed on another author's change, nobody asked in person, with no check created, is never sent; the person's fork's is (ADR 0078)", () => {
+  const skipped = (skip: SkipReason, trigger: Trigger = "opened") => ({
+    state: "skipped" as const,
+    skip,
+    trigger,
   });
+  expect([
+    endUnsent(skipped("not-yours"), "other", { created: false }),
+    // A change no longer listed open: its `not-yours` skip says whose it was.
+    endUnsent(skipped("not-yours"), null, { created: false }),
+    endUnsent(skipped("fork", "push"), "other", { created: false }),
+    endUnsent(skipped("fork"), "you", { created: false }),
+    endUnsent(skipped("fork"), "agent", { created: false }),
+    // A closed pull request, whose author the store no longer keeps: its skip end is worth nothing.
+    endUnsent(skipped("fork"), null, { created: false }),
+    // A request's skip was asked in person: its end is sent.
+    endUnsent(skipped("repo-off", "comment"), "other", { created: false }),
+    endUnsent(skipped("draft"), "other", { created: false }),
+    endUnsent({ state: "cancelled", skip: null, trigger: "opened" }, "other", { created: false }),
+    // A check already created on the host: its end is sent, so it completes.
+    endUnsent(skipped("not-yours"), "other", { created: true }),
+    endUnsent(skipped("fork"), null, { created: true }),
+  ]).toEqual([true, true, true, false, false, true, false, false, false, false, false]);
 });

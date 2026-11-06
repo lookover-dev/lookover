@@ -143,6 +143,19 @@ const toSharedGitHub = async (page: Page) => {
     );
 };
 
+/**
+ * Presses Everyone on Home or All reviews (ADR 0078), then waits for a teammate's row: the list it adds is up. The
+ * pointer leaves the tab, so the shot shows it at rest.
+ */
+const toEveryone = async (page: Page) => {
+  await page
+    .getByRole("tablist", { name: "Whose pull requests" })
+    .getByRole("tab", { name: /^Everyone/ })
+    .click();
+  await page.getByText("Link the testing guide from CONTRIBUTING").first().waitFor();
+  await page.mouse.move(0, 0);
+};
+
 /** "Too noisy?" on the finding card whose title holds `title`. */
 const tooNoisy = (page: Page, title: string) =>
   page.locator(".card.finding", { hasText: title }).getByRole("button", { name: "Too noisy?" });
@@ -272,7 +285,9 @@ const PAUSED = 8 * MIN;
 export const SHOTS: Shot[] = [
   // Home
   { name: "home-needs-you", scenario: "S12" },
+  // S10's day on Mine; Everyone adds teammates' pull requests nobody asked about, in Not reviewed (ADR 0078).
   { name: "home-quiet", scenario: "S10" },
+  { name: "home-everyone", scenario: "S10", act: toEveryone },
   // GitHub's rate limit, as the service's poll shows it (ADR 0043): a warning with nothing to do.
   { name: "home-github-limit", scenario: "S10", inject: ["github-limit"] },
   // An AI at its limit until a day that isn't today: the band, then the status menu (ADR 0055).
@@ -540,21 +555,25 @@ export const SHOTS: Shot[] = [
   // A finding that follows main's REVIEW.md (ADR 0048): "Why it was raised" names the rule and where it is.
   { name: "review-rule", scenario: "S10", path: "/reviews/sasensi/lookover-sandbox/139" },
   { name: "review-new-commits", scenario: "S6", path: "/reviews/sasensi/ledger-api/153", advance: MIN },
+  // A teammate's pull request you haven't asked about: nothing posted, and how to ask (ADR 0078).
   {
-    name: "review-skipped",
+    name: "review-not-asked",
     scenario: "S10",
     path: "/reviews/sasensi/lookover-sandbox/137",
     act: (p) => p.getByText("Why wasn't it reviewed?").click(),
   },
-  // A colleague's pull request from her fork (ADR 0048): never reviewed by itself; Claude only, when asked.
+  // The person's own pull request from a fork (ADR 0048, 0078): never reviewed by itself; Claude only, when asked.
   {
     name: "review-skipped-fork",
     scenario: "S5",
-    path: "/reviews/sasensi/ledger-api/152",
+    path: "/reviews/sasensi/ledger-api/153",
     advance: 2 * MIN,
     act: (p) => p.getByText("Why wasn't it reviewed?").click(),
   },
   { name: "all-reviews", scenario: "S12", path: "/reviews" },
+  // Mine, then Everyone with teammates' pull requests nobody asked about (ADR 0078).
+  { name: "all-reviews-mine", scenario: "S10", path: "/reviews" },
+  { name: "all-reviews-everyone", scenario: "S10", path: "/reviews", act: toEveryone },
   // After setup's first review was a preview of #148 (ADR 0072): its findings are the owner's to read, so Home
   // counts it ("1 preview to read.") and All reviews files it under Needs you. Each opens on the setup.
   {

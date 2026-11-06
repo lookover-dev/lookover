@@ -1,12 +1,14 @@
 // @lookover/retrieval: Lookover's copies of a repository (ADR 0033, ADR 0039).
 // The decision it hides: how the change's code reaches the engine's working directory without the host's token ever
 // reaching the disk. One bare mirror per repository (`<root>/mirrors/<owner>/<name>.git`, fetched again before every
-// job for what that job needs and nothing else, ADR 0068: its head and base commits, by commit, into the job's own refs
-// `refs/lookover/jobs/<job>/head|base`, deleted on every way out of the prepare, failed or not; and the default branch,
-// whatever its name, as `refs/lookover/default`, for the rules (nothing is written under `refs/heads/`, so a branch
-// the host renames can't collide with an old one); no tags, no other branch, no other change's head, so its time doesn't grow with
-// the repository's pull requests); one detached worktree per job at the change's head commit
-// (`<root>/worktrees/<job>`); the diff from the merge base of the base commit and the head commit, as git prints it,
+// job for what that job needs and nothing else, ADR 0068, each commit one deep (`--depth=1`: the mirror is shallow, no
+// history the review doesn't read is fetched, nothing deepens it): the change's head and its merge base, by commit,
+// into the job's own refs `refs/lookover/jobs/<job>/head|merge-base`, deleted on every way out of the prepare, failed
+// or not; and the default branch's tip, whatever its name, as `refs/lookover/default`, for the rules (nothing is
+// written under `refs/heads/`, so a branch the host renames can't collide with an old one); no tags, no other branch,
+// no other change's head, so its time doesn't grow with the repository's history or its pull requests); one detached
+// worktree per job at the change's head commit (`<root>/worktrees/<job>`); the diff from the merge base the request
+// gives (the caller's to find, from its host: a shallow mirror can't) to the head commit, as git prints it,
 // rename-aware, `a/` and `b/` prefixes. Git runs through `process` (ADR 0012): the program by absolute path, no shell,
 // the caller's environment minus every `GIT_*` variable (a hook's would point git elsewhere), never a terminal prompt.
 // Every git command runs with the safe options (ADR 0056, SR-06) in its environment, above the user's own configuration
@@ -18,9 +20,9 @@
 // which any process can list), with credential helpers off for that command. The secret is never put in a URL, a config
 // file, a remote, a logged line or an error (`log` and `RetrievalError.detail` have every form of it replaced by
 // `<hidden>`), so no file in the mirror or the worktree holds it and a reviewed change cannot read it.
-// Interface: `createRetrieval({ root, runner, git?, env, log? })` returns `prepare(request, signal?)`, which gives
-// `{ cwd, diff, rules, mergeBase, diffFile, dispose }` (`cwd` and `diff` are contracts' `Prepared`, what `review`
-// reads). `rules`: `REVIEW.md`, `AGENTS.md` and `CLAUDE.md`, in that order, as they stand at the root of the commit the
+// Interface: `createRetrieval({ root, runner, git?, env, log? })` returns `prepare(request, signal?)`, the request
+// `{ repo, job, head, mergeBase, fetch }`, which gives `{ cwd, diff, rules, mergeBase, diffFile, dispose }` (`cwd` and
+// `diff` are contracts' `Prepared`, what `review` reads; `mergeBase` is the request's). `rules`: `REVIEW.md`, `AGENTS.md` and `CLAUDE.md`, in that order, as they stand at the root of the commit the
 // `FetchSpec`'s default branch is at after the fetch (ADR 0048), never the worktree's copies, which are the change's:
 // the host's branch named in full (`refs/heads/<name>`, so no revision syntax in a name reaches git), read from
 // `refs/lookover/default`, each file's path, text and that commit. A missing file is left out; a link, a submodule, a
@@ -35,19 +37,21 @@
 // `dispose()` removes the worktree, the mirror stays. A worktree a crashed run left behind is replaced on the next
 // prepare of the same job.
 // Ordering: `prepare` makes the mirror if it is missing, asks the `FetchSpec` for credentials just before the fetch
-// (never earlier, so a token is as fresh as it can be), fetches, checks both commits, reads the rules files, finds the
-// merge base, then adds the worktree, reads the diff and saves it there; it stops at the first step that fails, and
+// (never earlier, so a token is as fresh as it can be), removes what a killed git left in the mirror (temporary packs
+// and objects, stale locks), fetches (again removing what it left when it fails), checks both commits, reads the rules files, then adds
+// the worktree, reads the diff and saves it there; it stops at the first step that fails, and
 // deletes the job's refs either way (the worktree's own `HEAD` keeps its commit). Prepares of one repository run one at
 // a time, in the order they were asked, whoever asks (two gits on one mirror race for its locks: the service runs a
 // Claude review and a Codex review at once, ADR 0043); a failed one doesn't hold the next, and a signal fired while one
 // waits cancels it before its first git. Prepares of two repositories run at once.
 // Error modes: `prepare` and `dispose` throw `RetrievalError { problem, detail }` and nothing else, whatever failed
 // (git, the disk or the host): `git_not_found` (no git, or it can't start), `mirror_failed` (the mirror or its folder
-// can't be made), `fetch_failed` (git's fetch failed, a head or base commit the host doesn't have included, or the
+// can't be made), `fetch_failed` (git's fetch failed, a head or merge base the host doesn't have included, or the
 // `FetchSpec` gave no credentials: the host's refusal in `detail`, its `HostError` code first), `commit_not_found` (the
-// head or base fetched is not a commit), `worktree_failed` (added or removed), `diff_failed` (read or saved),
+// head or merge base fetched is not a commit), `worktree_failed` (added or removed), `diff_failed` (read or saved),
 // `cancelled` (the signal fired; the running git was killed). `rules_unread` is never thrown: a rules file git couldn't
-// read is only logged. A git that runs past its limit fails with its step's problem.
+// read is only logged. A git that runs past its limit fails with its step's problem; the fetch reports progress, so its idle limit
+// means silence, and `worktree add` gets the fetch's limits. A `detail` is git's words without its progress lines.
 // It must never know: what runs in the worktree, the engines, any host's API, ref layout or credential form, the
 // service, the UI.
 export {

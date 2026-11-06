@@ -21,8 +21,8 @@ import {
   problems,
   REVIEW_KEY,
   REVIEWERS_TEXT,
+  reviewList,
   sendElsewhere,
-  status,
 } from "./view-model/select.ts";
 import { settingValueText } from "./view-model/settings.ts";
 import { atLoginDetail } from "./view-model/start-at-login.ts";
@@ -411,11 +411,8 @@ export function Palette({ mode, onClose }: { mode: "all" | "review" | null; onCl
 
   const all = useMemo<PaletteItem[]>(() => {
     const go = (to: string) => () => navigate(to);
-    const reviewable = changeReviews(state).filter(
-      (it) =>
-        mode !== "review" ||
-        (it.change.author !== "other" && !["running", "waiting"].includes(status(it).kind)),
-    );
+    // Review a pull request…: the person's first, then others' (ADR 0078), none that runs or waits.
+    const reviewable = mode === "review" ? reviewList(changeReviews(state)) : changeReviews(state);
     const changes: PaletteItem[] = reviewable.map((it) => {
       const c = chip(it);
       return {

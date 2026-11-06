@@ -1,11 +1,12 @@
 // S10 "A quiet day" (ADR 0046): one repository, a morning of reviews already done when the app opens, more of
 // them than Home lists before it offers to search. First thing, #135, the owner's, reviewed clean; #137, a
-// colleague's, skipped; #139, the owner's, one finding Codex confirmed, still to fix. Then, the last hour: #141,
-// the owner's own, reviewed clean; #144, dependabot's, skipped; #146, written by Claude, found by Codex and
-// confirmed by Claude, its two findings fixed by the agent and verified in round 2: settled. Nothing waits. Two
-// more changes the script never opens are there for the drawer's faults: #149, the agent's, and #150, a
-// colleague's. main holds a REVIEW.md of three rules: #139's finding follows the first, #146's first finding the
-// second, so Settings lists them with their counts. Every diff is hand-written fixture data a review reads; nothing here is a real recording.
+// colleague's, not asked: nothing posted (ADR 0078); #139, the owner's, one finding Codex confirmed, still to fix.
+// Then, the last hour: #141, the owner's own, reviewed clean; #144, dependabot's, not asked either; #146, written by
+// Claude, found by Codex and confirmed by Claude, its two findings fixed by the agent and verified in round 2:
+// settled. Nothing waits. Two more changes the script never opens are there for the drawer's faults: #149, the
+// agent's, and #150, a colleague's. main holds a REVIEW.md of three rules: #139's finding follows the first, #146's
+// first finding the second, so Settings lists them with their counts. Every diff is hand-written fixture data a review
+// reads; nothing here is a real recording.
 import { commitSha } from "@lookover/contracts";
 import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import {
@@ -507,11 +508,11 @@ const pr = on(SANDBOX.repo);
 export const S10: Scenario = {
   id: "S10",
   title: "A quiet day",
-  what: "Six pull requests seen since early morning: three clean or settled, one with a finding to fix, two skipped. Nothing waits.",
+  what: "Six pull requests seen since early morning: three clean or settled, one with a finding to fix, two of others' nobody asked about. Nothing waits.",
   steps: [
     "Home shows the day: nothing waiting, six pull requests earlier today.",
     "Open #146: two findings, fixed by the agent and verified in round 2.",
-    "Open #144: skipped, and why.",
+    "Open #144, dependabot's: nothing was posted on it, since you didn't ask.",
     "Search today's reviews for “rates”, then open “All reviews”.",
   ],
   later: "",

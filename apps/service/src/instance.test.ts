@@ -16,26 +16,31 @@ const newHome = () => {
 const userOnly = async () => {};
 
 afterEach(() => {
-  for (const home of homes.splice(0)) {
-    try {
-      rmSync(home, { recursive: true, force: true });
-    } catch (error) {
-      // A lock this process still holds (the first test drops its handle) keeps its file busy on Windows until the
-      // test worker exits: the folder goes with the run's temp folder, which `scripts/test-run.ts` removes then.
-      if (!(error instanceof Error && "code" in error && error.code === "EBUSY")) throw error;
-    }
-  }
+  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
-test("an instance whose handle is dropped stays held through a garbage collection", () => {
+test("an instance whose handle is dropped stays held through a garbage collection", async () => {
   const home = newHome();
-  // Taken in a frame of its own, so nothing this test keeps references the handle.
-  (() => {
-    takeInstance(home, userOnly);
-  })();
-  Bun.gc(true);
-  Bun.gc(true);
-  expect(probeInstance(home)).toBe("held");
+  // In a process of its own: a handle dropped in the test worker would keep the lock file busy on Windows until the
+  // worker exits, and the folder could not be removed after the test.
+  const holder = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `const { probeInstance, takeInstance } = await import(${JSON.stringify(join(import.meta.dir, "index.ts"))});
+       // Taken in a frame of its own, and a turn later: nothing here, on the stack included, references the handle.
+       (() => {
+         takeInstance(${JSON.stringify(home)}, async () => {});
+       })();
+       await Bun.sleep(1);
+       Bun.gc(true);
+       Bun.gc(true);
+       console.log(probeInstance(${JSON.stringify(home)}));`,
+    ],
+    { stdout: "pipe", stderr: "inherit" },
+  );
+  expect((await new Response(holder.stdout).text()).trim()).toBe("held");
+  expect(await holder.exited).toBe(0);
 });
 
 test("a held instance lock leaves no journal beside it, and a hot one some writer left reads as free", () => {

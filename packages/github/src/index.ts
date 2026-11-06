@@ -61,24 +61,25 @@
 // adapter's life. A `304` is no error: it gives that answer back, and a listing every page of which was `304` is
 // `unchanged`. ETags are bound to the token, so a renewed token costs one full answer per page. The commits
 // between two heads are GitHub's compare: `ahead_by`, diverged when `from` is no ancestor of `to` (GitHub's
-// `diverged` or `behind`), and the messages of the first 100 commits. A review's and a check's lookups read
-// every page too, without counting on `unchanged`; `view` still reads its first 100 items and no page after.
+// `diverged` or `behind`), the messages of the first 100 commits, and the merge base (`merge_base_commit`). A
+// review's and a check's lookups read every page too, without counting on `unchanged`; `view` still reads its first
+// 100 items and no page after.
 // Ordering: every call checks the allow-list before anything else, then takes the session's token, then makes its
 // requests. Calls are independent: the check's lifecycle and a round's post order (review → status block → check
 // completed) are the caller's, as the `HostWriter` port states them; updating or completing a check needs the id its
 // creation gave. A listing's `unchanged` is about this adapter's last read of it, whoever asked: a hint, never a
 // reason to skip its items.
 // Error modes: everything it throws is a `HostError`. `not_found` for a repository or change GitHub has not, for one
-// off the list (before any request), for a commit compare doesn't know and for a comment a reaction can't find;
-// `unauthorized` for a token or permission GitHub rejects, never for a secondary limit; `rate_limited` when GitHub
-// asks to wait (a 429, `retry-after`, `x-ratelimit-remaining: 0`, or a 403 whose words name a secondary limit), its
-// `retryAt` when GitHub said (`retry-after` from now, else the `x-ratelimit-reset` time); `unplaceable_comment` for an
-// inline comment GitHub can't put on the diff ("could not be resolved", "must be part of the diff", "… of the same
-// hunk"; nothing of the review is posted); `too_large` for a check output over `CHECK_OUTPUT_MAX_BYTES` or a review
-// body, comment or reply over `COMMENT_MAX_BYTES` (nothing is sent), and for GitHub's own 422 "Body is too long";
-// `unavailable` for a network failure, a
-// server error, GitHub's 422 "An internal error occurred, please try again" (seen to save the review all the same) or a
-// payload of a shape it doesn't know; `invalid` for any other `422`. Nothing here retries but a token GitHub no longer
+// off the list (before any request), for a commit compare doesn't know or two with no common history, and for a
+// comment a reaction can't find; `unauthorized` for a token or permission GitHub rejects, never for a secondary
+// limit; `rate_limited` when GitHub asks to wait (a 429, `retry-after`, `x-ratelimit-remaining: 0`, or a 403 whose
+// words name a secondary limit), its `retryAt` when GitHub said (`retry-after` from now, else the
+// `x-ratelimit-reset` time); `unplaceable_comment` for an inline comment GitHub can't put on the diff ("could not be
+// resolved", "must be part of the diff", "… of the same hunk"; nothing of the review is posted); `too_large` for a
+// check output over `CHECK_OUTPUT_MAX_BYTES` or a review body, comment or reply over `COMMENT_MAX_BYTES` (nothing is
+// sent), and for GitHub's own 422 "Body is too long"; `unavailable` for a network failure, a server error, GitHub's
+// 422 "An internal error occurred, please try again" (seen to save the review all the same) or a payload of a shape it
+// doesn't know; `invalid` for any other `422`. Nothing here retries but a token GitHub no longer
 // takes: `publish` does. `view` shows an inline comment as GitHub does after a push: `line` (and a range's `endLine`)
 // null once outdated, `originalLine` where it was posted.
 // Signing in's errors: GitHub's OAuth endpoints answer their refusals with status 200 and an `error` field; the device

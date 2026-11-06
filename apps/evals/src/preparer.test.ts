@@ -26,7 +26,7 @@ test("builds the case in the build root's repos folder, then prepares that repos
         cwd: join(temp, "build", "retrieval", "worktrees", "w"),
         diff: "the diff",
         rules: [],
-        mergeBase: request.base,
+        mergeBase: request.mergeBase,
         diffFile: ".lookover-change.diff",
         dispose: () => Promise.resolve(),
       });

@@ -56,6 +56,7 @@ import {
   engineStateText,
 } from "./health.ts";
 import { runLine } from "./run.ts";
+import { inTab, isMine, neverAsked, type Scope } from "./scope.ts";
 import { FINISHING, SIGN_IN_TEXT, waitingText } from "./sign-in.ts";
 import { atLoginMismatch } from "./start-at-login.ts";
 import { type DisplayStatus, displayStatus, FILTER_OF, failureText } from "./status.ts";
@@ -136,9 +137,13 @@ export function writerName(change: Change): string | null {
   return change.writtenBy ? engineName(change.writtenBy) : null;
 }
 
+/**
+ * Who opened it, then who wrote it when an agent did: "sasensi · written by Claude" (ADR 0078). Your own with no
+ * writer known reads "by sasensi".
+ */
 export function authorLabel(change: Change): string {
   const writer = writerName(change);
-  if (writer) return `written by ${writer}`;
+  if (writer) return `${change.openedBy} · written by ${writer}`;
   return change.author === "you" ? `by ${change.openedBy}` : change.openedBy;
 }
 
@@ -387,18 +392,24 @@ function codexOnly(it: ChangeReview): boolean {
   return it.repo.settings.reviewers.value === "codex";
 }
 
+/**
+ * Why another author's pull request isn't reviewed by itself (ADR 0078), then what came of it (`then`, from its
+ * comma or "and" on): the skip's card and the never-asked one say the same rule.
+ */
+const openedByOther = (it: ChangeReview, then: string): string =>
+  `By itself, Lookover reviews only the pull requests opened by you or by your coding agents. This one was opened by ${it.change.openedBy}${then}`;
+
+/** How a request is said, by who would review: anyone, or Claude alone on a fork (ADR 0048). */
+const ASK_LEAD = { any: "To have it reviewed, comment", fork: "To have Claude review it, comment" } as const;
+
 const SKIP_WHY = {
   "not-yours": (it) =>
-    claudeOnly(
-      it,
-      `By itself, Lookover reviews only the pull requests opened by you or by your coding agents. This one was opened by ${it.change.openedBy} and nobody asked for a review, so it was skipped.`,
-      "To have it reviewed, comment",
-    ),
+    claudeOnly(it, openedByOther(it, " and nobody asked for a review, so it was skipped."), ASK_LEAD.any),
   fork: (it) =>
     claudeOnly(
       it,
-      "It comes from a fork, so its code could try to steer the reviewer. Lookover never reviews a pull request from a fork by itself, whoever opened it.",
-      "To have Claude review it, comment",
+      "It comes from a fork, so its code could try to steer the reviewer. Lookover never reviews a pull request from a fork by itself.",
+      ASK_LEAD.fork,
     ),
   draft: () => ({ text: "Drafts are skipped. It is reviewed when it is marked ready.", ask: null }),
   "repo-off": ({ repo }) => ({
@@ -417,15 +428,61 @@ export function skipWhy(it: ChangeReview, reason: SkipReason): SkipWhy {
   return SKIP_WHY[reason](it);
 }
 
+/** The review page's "Not reviewed" card: "Not reviewed: <title>.", then why at length. */
+export interface NotReviewedCard {
+  title: string;
+  why: SkipWhy;
+}
+
+/**
+ * The "Not reviewed" card of a change skipped or never asked about; null for any other. Never asked about in a
+ * repository switched off, it says the repository is off: a request there is skipped too. Another author's pull
+ * request the person hasn't asked about got nothing (ADR 0078): it says so, and how to ask; a teammate's own comment
+ * doesn't ask. The person's own with no job was opened with reviews on open off.
+ */
+export function notReviewed(it: ChangeReview): NotReviewedCard | null {
+  const s = status(it);
+  if (s.kind === "skipped") return { title: skipText(s.reason), why: skipWhy(it, s.reason) };
+  if (s.kind !== "not-asked") return null;
+  if (!it.repo.enabled) return { title: skipText("repo-off"), why: skipWhy(it, "repo-off") };
+  if (!neverAsked(it)) return { title: skipText("on-open-off"), why: skipWhy(it, "on-open-off") };
+  const opened = openedByOther(it, ", so nothing was posted on it.");
+  const text = it.change.fork ? `${opened} It comes from a fork, so only Claude would review it.` : opened;
+  return { title: "you haven't asked", why: claudeOnly(it, text, ASK_LEAD[it.change.fork ? "fork" : "any"]) };
+}
+
+/**
+ * Whether a request reviews a change never asked about: not in a repository switched off (a request there is
+ * skipped `repo-off`), and not another author's where only Codex reviews (Codex never reviews another's, ADR 0078).
+ * The review page's button and the row's action both follow it.
+ */
+function askable(it: ChangeReview): boolean {
+  return it.repo.enabled && !(neverAsked(it) && codexOnly(it));
+}
+
+/**
+ * "Review a pull request…": what can be asked for now (nothing that runs or waits), the person's first, then others'
+ * a request would review (`askable`, as their rows' Review now), each in the list's order.
+ */
+export function reviewList(items: readonly ChangeReview[]): ChangeReview[] {
+  const free = items.filter((i) => {
+    const { kind } = status(i);
+    return kind !== "running" && kind !== "waiting";
+  });
+  return [...free.filter(isMine), ...free.filter((i) => neverAsked(i) && askable(i))];
+}
+
 /**
  * Whether the review page offers its review button (`reviewLabel`). Asked in person, a change skipped because nobody asked is reviewed:
  * another author's (ADR 0043), a fork's, by Claude (ADR 0048), or one opened with reviews on open off. Not where only
- * Codex reviews another author's change or a fork, and not while a review runs or waits.
+ * Codex reviews another author's change or a fork, skipped or never asked about (ADR 0078), not on one never asked
+ * about in a repository switched off (`askable`), and not while a review runs or waits.
  */
 export function canReviewAgain(it: ChangeReview): boolean {
   const s = status(it);
   if (s.kind === "skipped")
     return ASKED_IN_PERSON_REVIEWS[s.reason] && !(CLAUDE_ONLY[s.reason] && codexOnly(it));
+  if (s.kind === "not-asked") return askable(it);
   return s.kind !== "running" && s.kind !== "waiting";
 }
 
@@ -543,28 +600,42 @@ export interface RowAction {
   command: Command;
 }
 
-/** At most one action per row, and never one that only opens the row: the row itself does that. */
+/**
+ * At most one action per row, and never one that only opens the row: the row itself does that. Review again on
+ * findings with new commits; Review now on another author's pull request never asked about, where a request
+ * reviews it, as its page's button (`askable`, ADR 0078). An old skip of another's keeps its row as it was: no action.
+ */
 export function rowAction(it: ChangeReview): RowAction | null {
   const kind = status(it).kind;
+  const request = { type: "review.request", changeId: it.change.id } as const;
   if ((kind === "to-fix" || kind === "preview") && it.change.newCommits > 0) {
-    return { label: REVIEW_BUTTON.again, command: { type: "review.request", changeId: it.change.id } };
+    return { label: REVIEW_BUTTON.again, command: request };
   }
+  if (kind === "not-asked" && neverAsked(it) && askable(it))
+    return { label: REVIEW_BUTTON.now, command: request };
   return null;
 }
 
 export interface HomeGroups {
+  /** Every row of the tab, grouped or not: what All reviews holds under it. */
+  tab: ChangeReview[];
   needs: ChangeReview[];
   running: ChangeReview[];
   waiting: ChangeReview[];
   earlier: ChangeReview[];
+  /** Everyone's only: other authors' pull requests nobody asked about. */
+  notReviewed: ChangeReview[];
 }
 
 const EARLIER: DisplayStatus["kind"][] = ["to-fix", "settled", "skipped", "cancelled"];
 
-export function homeGroups(state: State): HomeGroups {
-  const all = changeReviews(state);
+/** Home's groups, of the person's pull requests (Mine) or of every open one (Everyone, ADR 0078). */
+export function homeGroups(state: State, scope: Scope): HomeGroups {
+  const all = inTab(scope, changeReviews(state));
   const kind = (i: ChangeReview) => status(i).kind;
   return {
+    tab: all,
+    notReviewed: all.filter((i) => kind(i) === "not-asked" && neverAsked(i)),
     // The Needs you filter's statuses: a preview's findings are on no pull request, only the owner reads them (ADR 0072).
     needs: all.filter((i) => FILTER_OF[kind(i)] === "needs"),
     running: all.filter((i) => kind(i) === "running"),
@@ -951,7 +1022,8 @@ function pauseUntil(state: State): string | null {
 }
 
 export function sentence(state: State): { title: string; small: string } {
-  const g = homeGroups(state);
+  // The sentence tells the person's day: their own pull requests, whatever scope Reviews shows.
+  const g = homeGroups(state, "mine");
   const list = problems(state);
   const reviewed = changeReviews(state).filter(
     (i) => i.review.rounds.length > 0 && isToday(state.now, i.review.updatedAt),

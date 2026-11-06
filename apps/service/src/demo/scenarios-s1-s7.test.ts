@@ -445,22 +445,23 @@ test("S7, too noisy: #148's round 1 counted at load; turning F2's rule off, then
   ]);
 });
 
-test("S5, skipped on purpose: dependabot's #150 skipped as not yours, Mira's #152 from her fork as a fork, nothing run", async () => {
+test("S5, skipped on purpose: dependabot's #150 and Mira's #152 from her fork not asked, the owner's #153 from a fork skipped, nothing run", async () => {
   await loaded("S5");
   const first = await after(30_000);
-  expect(first.changes[id(150)]).toMatchObject({ author: "other", openedBy: "dependabot[bot]" });
-  expect(first.reviews[id(150)]?.job).toMatchObject({ state: "skipped", skip: "not-yours" });
+  expect(first.changes[id(150)]).toMatchObject({ author: "other", openedBy: "dependabot[bot]", fork: false });
+  expect(first.reviews[id(150)]?.job).toBeNull();
 
-  const both = await after(MIN);
-  expect(both.changes[id(152)]).toMatchObject({ author: "other", openedBy: "mira", fork: true });
-  expect(both.changes[id(150)]).toMatchObject({ fork: false });
-  for (const [n, skip] of [
-    [150, "not-yours"],
-    [152, "fork"],
-  ] as const) {
-    expect(both.reviews[id(n)]?.job).toMatchObject({ trigger: "opened", state: "skipped", skip });
-    expect(both.reviews[id(n)]?.rounds).toEqual([]);
-    expect(both.reviews[id(n)]?.run).toBeNull();
+  const own = await after(20_000);
+  expect(own.changes[id(153)]).toMatchObject({ author: "you", openedBy: "sasensi", fork: true });
+  expect(own.reviews[id(153)]?.job).toMatchObject({ trigger: "opened", state: "skipped", skip: "fork" });
+
+  const all = await after(MIN);
+  expect(all.changes[id(152)]).toMatchObject({ author: "other", openedBy: "mira", fork: true });
+  // A teammate's pull request gets nothing unless the owner asks (ADR 0078): no job, so no check either.
+  for (const n of [150, 152]) expect(all.reviews[id(n)]?.job).toBeNull();
+  for (const n of [150, 152, 153]) {
+    expect(all.reviews[id(n)]?.rounds).toEqual([]);
+    expect(all.reviews[id(n)]?.run).toBeNull();
   }
 
   // Asked for by hand, the fork is reviewed by Claude alone (ADR 0048).

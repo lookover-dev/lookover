@@ -4,9 +4,11 @@
 //                                          writes <dir>/ready, then stays alive, printing "tick" every <tickMs>
 //                                          ms (never when 0)
 //   child.ts leave <dir> <n>               spawns <n> lingering grandchildren, prints their pids, exits 0 at once
+//   child.ts whisper <dir>                 writes <dir>/ready, then stays alive, writing one progress line to
+//                                          stderr (never stdout) each time <dir>/poke appears, which it removes
 // Grandchildren inherit stdout, so they keep the pipe open after the child is gone.
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const [mode, ...rest] = process.argv.slice(2);
@@ -51,4 +53,14 @@ if (mode === "echo") {
   announce(grandchildren(Number(n ?? "0")));
   if (dir) writeFileSync(join(dir, "ready"), "");
   process.exit(0);
+} else if (mode === "whisper") {
+  const [dir = ""] = rest;
+  writeFileSync(join(dir, "ready"), "");
+  const poke = join(dir, "poke");
+  setInterval(() => {
+    if (!existsSync(poke)) return;
+    rmSync(poke);
+    // As git writes its progress: a line it rewrites, ended by a carriage return.
+    process.stderr.write("Receiving objects:  50% (1/2)\r");
+  }, 10);
 }

@@ -16,6 +16,7 @@ import {
   openApp,
   post,
   pr1,
+  pr2,
   roundWritten,
   SANDBOX,
   SHA1,
@@ -430,6 +431,21 @@ test("a first review of a pull request the service doesn't know is refused, and 
   });
   expect(asked.status).toBe(404);
   expect((await snapshot(service, cookie)).setup.firstReviewChange).toBeNull();
+});
+
+test("a first review of another author's pull request is refused as no such change: nothing kept, asked or posted (ADR 0078)", async () => {
+  // #2 is octocat's.
+  const { service, host } = await start({ changes: [pr1, pr2], engines: fakeEngines({ reviews: 1 }) });
+  const cookie = await openApp(service);
+  const theirs = changeId("sasensi/lookover-sandbox#2");
+  for (const preview of [true, false]) {
+    const asked = await post(service, cookie, { type: "setup.firstReview", changeId: theirs, preview });
+    expect(asked.status).toBe(404);
+  }
+  const state = await snapshot(service, cookie);
+  expect(state.setup.firstReviewChange).toBeNull();
+  expect(state.reviews[theirs]?.job).toBeNull();
+  expect(host.posts).toEqual([]);
 });
 
 test("a preview first review in a repository switched off is a skip with no check on the host", async () => {

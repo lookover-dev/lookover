@@ -2,6 +2,20 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.10.0](https://github.com/lookover-dev/lookover/compare/v0.9.0...v0.10.0) (2026-11-06)
+
+### Features
+
+- **reviews:** a pull request opened by someone else gets nothing from Lookover on GitHub, no check and no comment, until you ask with `/lookover review` or **Review now**. Your own fork's pull requests are still skipped and say so.
+- **reviews:** Home and All reviews start at your own pull requests, under **Mine**, with **Everyone** beside it and a count on each; a teammate's pull request offers **Review now**.
+- **reviews:** each row names who opened the pull request, then who wrote it, as in "sasensi · written by Claude".
+- **agent:** the review loop's skill says a colleague's pull request has no check of yours until you ask.
+
+### Bug Fixes
+
+- **review:** a large repository can be reviewed: the first fetch takes one commit deep instead of the whole history, and git is stopped only when it goes silent, not when it is slow.
+- **review:** a fetch that fails or is stopped no longer leaves its partial download behind, and the next one clears what an earlier one left.
+
 ## [0.9.0](https://github.com/lookover-dev/lookover/compare/v0.8.0...v0.9.0) (2026-11-04)
 
 ### Bug Fixes

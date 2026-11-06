@@ -134,8 +134,9 @@ Lookover's `wait` is optional. With `gh` and `jq` alone (`N` is the pull request
    ```
 
    A check that is `completed` with a result (step 4) whose `run.state` is `skipped`, `run.trigger` `opened` or
-   `push` and `state_reason` `not_yours`, `draft`, `repo_off` or `on_open_off` doesn't count: nobody asked
-   (Lookover skipped a colleague's pull request when it opened, say). Leave it out here and in step 3. A skip
+   `push` and `state_reason` `not_yours`, `draft`, `repo_off` or `on_open_off` doesn't count: nobody asked (a
+   draft skipped when it opened, say). Leave it out here and in step 3. A colleague's pull request has no check of
+   yours until you ask: Lookover posts nothing there by itself (`not_yours` is only on older versions' checks). A skip
    with `state_reason` `fork` does count: a pull request from a fork is reviewed only when the owner asks, so
    never ask past it; it is skipped (6), and you ask the owner.
 

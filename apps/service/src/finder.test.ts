@@ -108,7 +108,11 @@ test("another author's pull request written by Claude is found by Claude, when t
   const theirs = opened(6, { author: { id: 583231, login: "octocat" } });
   host.open({ ...theirs, head: { ...theirs.head, ref: "claude/fix" } });
   await time.advance(MIN);
-  expect((await until(stream, "job.changed")).at(-1)).toMatchObject({ job: { skip: "not-yours" } });
+  // Not asked: listed, nothing posted (ADR 0078).
+  expect((await until(stream, "change.opened")).at(-1)).toMatchObject({
+    change: { id: idOf(6), author: "other" },
+  });
+  expect(host.posts).toEqual([]);
   host.seedComment({ repo: SANDBOX, number: 6 }, { author: OWNER, body: "/lookover review" });
   await time.advance(MIN);
   const events = await until(stream, "round.finished");
@@ -140,7 +144,9 @@ test("on an organisation's repository, the person's change written by Claude is 
   const theirs = opened(6, { author: { id: 583231, login: "octocat" }, messages: [CLAUDE_CODE] });
   host.open(onAcmeWeb(theirs));
   await time.advance(MIN);
-  expect((await until(stream, "job.changed")).at(-1)).toMatchObject({ job: { skip: "not-yours" } });
+  // Not asked: listed, nothing posted on it (ADR 0078).
+  expect((await until(stream, "change.opened")).at(-1)).toMatchObject({ change: { author: "other" } });
+  expect(host.view({ repo: ACME_WEB, number: 6 }).checks).toEqual([]);
   host.seedComment({ repo: ACME_WEB, number: 6 }, { author: OWNER, body: "/lookover review" });
   await time.advance(MIN);
   expect(startedBy(await until(stream, "round.finished"))).toEqual(["claude"]);

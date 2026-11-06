@@ -93,7 +93,10 @@ export function displayStatus(review: Review): DisplayStatus {
     case "running":
       return { kind: "running", round: review.rounds.length + 1, step: review.run?.step ?? "preparing" };
     case "skipped":
-      return { kind: "skipped", reason: job.skip ?? "not-yours" };
+      // A skip that never said why is shown as not reviewed, never as another author's (ADR 0078).
+      return job.skip === null
+        ? fromLoop(review, { kind: "not-asked" })
+        : { kind: "skipped", reason: job.skip };
     case "done":
       return fromLoop(review, { kind: "not-asked" });
     case "cancelled":

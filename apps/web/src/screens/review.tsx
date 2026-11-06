@@ -1,5 +1,5 @@
 // Review detail: the verdict first, then the open findings. Everything else is one click down.
-import { type Finding, type SkipReason, type State, shortSha, skipText } from "@lookover/contracts";
+import { type Finding, type State, shortSha } from "@lookover/contracts";
 import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { usePageKeys } from "../shell.tsx";
@@ -58,6 +58,7 @@ import {
   differences,
   lookedOver,
   nextStep,
+  notReviewed,
   openVerdict,
   REVIEW_BUTTON,
   reviewAgainNote,
@@ -65,7 +66,6 @@ import {
   reviewerOf,
   reviewLabel,
   settledVerdict,
-  skipWhy,
   status,
   unsettledFindings,
   waitNotice,
@@ -298,11 +298,13 @@ function ClosedRow({ finding }: { finding: Finding }) {
   );
 }
 
-function NotReviewed({ it, reason }: { it: ChangeReview; reason: SkipReason }) {
-  const why = skipWhy(it, reason);
+function NotReviewed({ it }: { it: ChangeReview }) {
+  const card = notReviewed(it);
+  if (!card) return null;
+  const { why } = card;
   return (
     <Card className="verdict">
-      <b>Not reviewed: {skipText(reason)}.</b>
+      <b>Not reviewed: {card.title}.</b>
       <Disclosure summary="Why wasn't it reviewed?">
         <p>
           {why.text}
@@ -391,9 +393,8 @@ function Verdict({ it, state }: { it: ChangeReview; state: State }) {
         </Notice>
       );
     case "skipped":
-      return <NotReviewed it={it} reason={s.reason} />;
     case "not-asked":
-      return <NotReviewed it={it} reason="on-open-off" />;
+      return <NotReviewed it={it} />;
     case "settled":
       return <SettledVerdict it={it} state={state} clean={s.clean} />;
     case "to-fix":

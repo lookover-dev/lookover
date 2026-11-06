@@ -27,7 +27,8 @@ export interface ScriptedPrepareRequest {
   repo: RepositoryRef;
   job: JobId;
   head: CommitSha;
-  base: CommitSha;
+  /** Where the diff starts: the merge base the host gave. */
+  mergeBase: CommitSha;
   fetch: FetchSpec;
 }
 
@@ -119,7 +120,7 @@ export class ScriptedRetrieval {
       cwd: scripted ? this.worktreeOf(scripted.change, request.head) : join(this.root, request.job),
       diff: scripted ? scripted.diff : this.diff,
       rules: this.rules.get(repoKey(request.repo)) ?? [],
-      mergeBase: request.base,
+      mergeBase: request.mergeBase,
       diffFile: ".lookover-change.diff",
       dispose: () => {
         this.disposed.push(request.job);

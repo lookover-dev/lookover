@@ -159,7 +159,7 @@ test("a default branch renamed on the host, main to main/v2 and back, gives each
       repo: REPO,
       job: jobId(job),
       head,
-      base: first,
+      mergeBase: first,
       fetch: { cloneUrl: origin, defaultBranch, credentials },
     });
     await prepared.dispose();

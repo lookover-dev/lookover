@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
   CommitSha,
@@ -32,8 +32,11 @@ export interface PrepareRequest {
   job: JobId;
   /** The change's head commit: what the worktree is at. */
   head: CommitSha;
-  /** The base branch's commit: the diff starts at its merge base with `head`. */
-  base: CommitSha;
+  /**
+   * The merge base of the change's head and its base branch, as the host gives it: the diff starts there. The caller's
+   * to find: the fetch is one commit deep, so git can't.
+   */
+  mergeBase: CommitSha;
   fetch: FetchSpec;
 }
 
@@ -138,6 +141,10 @@ const KINDS: Record<string, string> = {
   "040000": "is a folder",
 };
 
+/**
+ * The fetch's limits, and the checkout's (a large tree takes its time too). The fetch writes its progress on stderr,
+ * which starts the runner's idle count over: two minutes idle means two minutes of git saying nothing.
+ */
 const FETCH_LIMITS: ProcessLimits = { wallClockMs: 10 * 60_000, idleMs: 2 * 60_000 };
 const QUICK_LIMITS: ProcessLimits = { wallClockMs: 60_000, idleMs: 60_000 };
 const HIDDEN = "<hidden>";
@@ -174,6 +181,25 @@ const missingBranch = (error: unknown, branch: string) =>
   error.detail
     .split("\n")
     .some((line) => line.trimEnd().endsWith(`couldn't find remote ref refs/heads/${branch}`));
+
+/** A line of git's progress that isn't rewritten: the one each step ends on, the host's (`remote: `) or git's own. */
+const PROGRESS_LINE =
+  /^(?:remote: *)?(?:Enumerating|Counting|Compressing|Receiving|Resolving|Unpacking) (?:objects|deltas)\b/;
+
+/**
+ * Git's own words in what it wrote on stderr, its progress dropped: each line's text after its last carriage return
+ * (what git rewrote before is progress, and so is a line it rewrote down to nothing), then every progress line.
+ */
+function withoutProgress(stderr: string): string {
+  return stderr
+    .replaceAll("\r\n", "\n")
+    .split("\n")
+    .map((line) => ({ rewritten: line.includes("\r"), text: line.slice(line.lastIndexOf("\r") + 1) }))
+    .filter(({ rewritten, text }) => !(rewritten && text.trim() === "") && !PROGRESS_LINE.test(text))
+    .map(({ text }) => text)
+    .join("\n")
+    .trim();
+}
 
 type ConfigEntry = [key: string, value: string];
 
@@ -216,8 +242,8 @@ const redact = (text: string, secrets: string[]) =>
 
 const safeName = (job: JobId) => job.replaceAll(/[^A-Za-z0-9._-]/g, "_");
 
-/** A job's own refs in the mirror, where its fetch puts the head and base commits: `refs/lookover/jobs/<job>/head|base`. */
-const jobRef = (job: JobId, which: "head" | "base") => `refs/lookover/jobs/${safeName(job)}/${which}`;
+/** A job's own refs in the mirror, where its fetch puts its two commits: `refs/lookover/jobs/<job>/head|merge-base`. */
+const jobRef = (job: JobId, which: "head" | "merge-base") => `refs/lookover/jobs/${safeName(job)}/${which}`;
 
 /**
  * Where the default branch is fetched, whatever its name: one ref, never under `refs/heads/`, so a branch the host
@@ -285,7 +311,7 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
     signal?.removeEventListener("abort", kill);
     const code = result.exitCode === null ? "" : ` ${result.exitCode}`;
     log(redact(`git ${r.args.join(" ")}: ${result.end}${code} in ${result.tookMs} ms`, secrets));
-    const stderr = redact(result.stderr.trim(), secrets);
+    const stderr = redact(withoutProgress(result.stderr), secrets);
     switch (result.end) {
       case "exited":
         if (result.exitCode === 0) return result;
@@ -300,6 +326,62 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
     }
   }
 
+  /** The names in a folder, none when it can't be read (most often: it isn't there). */
+  function namesIn(dir: string): string[] {
+    try {
+      return readdirSync(dir);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Removes what a killed git leaves in the mirror, and nothing else: temporary packs and objects
+   * (`objects/pack/tmp_*`, `objects/??/tmp_obj_*`) and stale locks (`shallow.lock`, `packed-refs.lock`, `*.lock`
+   * under `refs/`). Run inside the mirror's turn, so no git of Lookover's that writes objects or refs runs in it (a
+   * job's `dispose` runs outside it, and writes neither): a lock there is stale, and a stale `shallow.lock` or ref
+   * lock refuses every later fetch. A file that can't be removed is logged, never thrown: the fetch then says what is
+   * wrong.
+   */
+  function clearLeftovers(mirror: string): void {
+    const objects = join(mirror, "objects");
+    const pack = join(objects, "pack");
+    const refs = join(mirror, "refs");
+    const leftovers = [
+      ...namesIn(pack)
+        .filter((name) => name.startsWith("tmp_"))
+        .map((name) => join(pack, name)),
+      ...namesIn(objects)
+        .filter((name) => /^[0-9a-f]{2}$/.test(name))
+        .flatMap((dir) =>
+          namesIn(join(objects, dir))
+            .filter((name) => name.startsWith("tmp_obj_"))
+            .map((name) => join(objects, dir, name)),
+        ),
+      join(mirror, "shallow.lock"),
+      join(mirror, "packed-refs.lock"),
+      ...locksUnder(refs),
+    ];
+    for (const path of leftovers) {
+      try {
+        rmSync(path, { force: true });
+      } catch (error) {
+        log(`mirror: ${path} left by an earlier git not removed: ${wordsOf(error)}`);
+      }
+    }
+  }
+
+  /** Every `*.lock` file under `dir`, at any depth. */
+  function locksUnder(dir: string): string[] {
+    try {
+      return readdirSync(dir, { recursive: true, encoding: "utf8" })
+        .filter((path) => path.endsWith(".lock"))
+        .map((path) => join(dir, path));
+    } catch {
+      return [];
+    }
+  }
+
   async function ensureMirror(mirror: string, signal?: AbortSignal): Promise<void> {
     if (existsSync(join(mirror, "HEAD"))) return;
     await attempt("mirror_failed", "the mirror's folder can't be made", () =>
@@ -309,8 +391,9 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
   }
 
   /**
-   * Fetches what the review needs and nothing else (ADR 0068): its head and base commits, by commit, into the job's
-   * own refs, and the default branch, for its rules files, into `DEFAULT_REF`. Tells whether the default branch came,
+   * Fetches what the review needs and nothing else (ADR 0068), each one commit deep (`--depth=1`: the mirror stays
+   * shallow, nothing deepens it): its head and merge base, by commit, into the job's own refs, and the default
+   * branch's tip, for its rules files, into `DEFAULT_REF`. Tells whether the default branch came,
    * exactly as `refs/heads/<name>` on the host. One fetch: a branch the host doesn't have fails it, so on git's words for that
    * failure alone it runs again without the branch (the second failure is the one thrown; any other is thrown as it
    * is, never a fetch without the rules); a missing `refs/heads/<name>` is guessed by git from the
@@ -322,10 +405,12 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
     const credentials = await attempt("fetch_failed", "no credentials from the host", () =>
       spec.credentials(),
     );
-    const fetchOnce = (refspecs: string[]) =>
-      run(
+    // What an earlier git left is removed before each fetch, and what this one left after it fails.
+    const fetchOnce = (refspecs: string[]) => {
+      clearLeftovers(mirror);
+      return run(
         {
-          args: ["fetch", "--quiet", "--no-tags", spec.cloneUrl, ...refspecs],
+          args: ["fetch", "--depth=1", "--progress", "--no-tags", spec.cloneUrl, ...refspecs],
           cwd: mirror,
           problem: "fetch_failed",
           limits: FETCH_LIMITS,
@@ -336,14 +421,21 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
             ["credential.helper", ""],
             // A local folder is a clone URL too (evals, demo mode, tests): the file protocol for this fetch only.
             ["protocol.file.allow", "user"],
+            // Maintenance the fetch starts runs inside it, under its limits: never after it, racing the cleanup.
+            ["gc.autoDetach", "false"],
+            ["maintenance.autoDetach", "false"],
           ],
           secrets: formsOf(credentials),
         },
         signal,
-      );
+      ).catch((error: unknown) => {
+        clearLeftovers(mirror);
+        throw error;
+      });
+    };
     const own = [
       `+${request.head}:${jobRef(request.job, "head")}`,
-      `+${request.base}:${jobRef(request.job, "base")}`,
+      `+${request.mergeBase}:${jobRef(request.job, "merge-base")}`,
     ];
     const branch = spec.defaultBranch;
     if (!isBranchName(branch)) {
@@ -380,7 +472,7 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
    * harmless.
    */
   async function dropRefs(mirror: string, job: JobId, stale: boolean): Promise<void> {
-    const refs = [jobRef(job, "head"), jobRef(job, "base")];
+    const refs = [jobRef(job, "head"), jobRef(job, "merge-base")];
     if (stale) refs.push(DEFAULT_REF);
     await run({
       args: ["update-ref", "--stdin"],
@@ -445,6 +537,7 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
         args: ["worktree", "add", "--quiet", "--force", "--detach", worktree, head],
         cwd: mirror,
         problem: "worktree_failed",
+        limits: FETCH_LIMITS,
       },
       signal,
     );
@@ -570,7 +663,7 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
     }
   }
 
-  /** The prepare once the fetch brought the commits: they are checked, then rules, merge base, worktree and diff. */
+  /** The prepare once the fetch brought the commits: they are checked, then rules, worktree and diff. */
   async function fromMirror(
     request: PrepareRequest,
     mirror: string,
@@ -578,17 +671,11 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
     branchCame: boolean,
     signal?: AbortSignal,
   ): Promise<Prepared> {
-    await checkCommits(mirror, [request.head, request.base], signal);
+    const { head, mergeBase } = request;
+    await checkCommits(mirror, [head, mergeBase], signal);
     const branch = request.fetch.defaultBranch;
     const rules = branchCame ? await readRules(mirror, branch, signal) : noRules(branch);
-    const base = await run(
-      { args: ["merge-base", request.base, request.head], cwd: mirror, problem: "diff_failed" },
-      signal,
-    );
-    const mergeBase = await attempt("diff_failed", "git gave no merge base", () =>
-      commitSha(base.stdout.trim()),
-    );
-    await addWorktree(mirror, worktree, request.head, signal);
+    await addWorktree(mirror, worktree, head, signal);
     const diff = await run(
       {
         args: [
@@ -599,7 +686,7 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
           "--dst-prefix=b/",
           "-M",
           mergeBase,
-          request.head,
+          head,
         ],
         cwd: mirror,
         problem: "diff_failed",

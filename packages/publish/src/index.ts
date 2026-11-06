@@ -15,7 +15,7 @@
 // why it waits (its turn, or the app's words for a deferral: "Waiting: Claude is signed out"; an engine's limit with
 // its reset known gives it in the service's time with its offset, from `offset`, ADR 0055), `in_progress` while
 // it runs, completed by the round; or, for a job that ended without a round, completed `skipped` (a newer commit or
-// a newer review took its place, the pull request closed, a skip rule such as "Not your pull request") or `neutral`
+// a newer review took its place, the pull request closed, a skip rule such as "it comes from a fork") or `neutral`
 // (the review failed), never `failure` (ADR 0006), with a result block holding the run's state and its reason
 // (snake_case), no verdict, no findings and every count at zero. The result's bytes are counted before posting: when
 // every finding doesn't fit, the result keeps the first findings that do, whole, in urgency order (open on the pull

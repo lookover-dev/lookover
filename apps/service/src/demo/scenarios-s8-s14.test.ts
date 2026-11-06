@@ -139,7 +139,7 @@ test("S8, pause and resume: two pull requests arrive while paused and wait; resu
   ]);
 });
 
-test("S10, a quiet day: six pull requests seen since early morning, more than Home lists without its search; the last hour's three, one clean, one settled after two rounds, one skipped; nothing waits", async () => {
+test("S10, a quiet day: six pull requests seen since early morning, more than Home lists without its search; the last hour's three, one clean, one settled after two rounds, one not asked; nothing waits", async () => {
   const state = await loaded("S10");
   // The seed is two and a half hours long: the service has run since then.
   expect(state.service.since).toBe(T0 - 150 * MIN);
@@ -148,22 +148,22 @@ test("S10, a quiet day: six pull requests seen since early morning, more than Ho
   // and six is more than the four Home lists before it offers to search.
   const reviews = Object.values(state.reviews);
   expect(reviews.every((r) => r.run === null && T0 - r.updatedAt < 150 * MIN)).toBe(true);
-  expect(reviews.map((r) => r.job?.state).sort()).toEqual([
+  expect(reviews.map((r) => r.job?.state ?? "not asked").sort()).toEqual([
     "done",
     "done",
     "done",
     "done",
-    "skipped",
-    "skipped",
+    "not asked",
+    "not asked",
   ]);
 
   // #135, the owner's, first thing: one clean round.
   expect(state.changes[id(135)]).toMatchObject({ author: "you", openedAt: T0 - 149 * MIN });
   expect(state.reviews[id(135)]?.rounds.map((r) => [r.reviewer, r.raised])).toEqual([["claude", 0]]);
   expect(state.reviews[id(135)]?.loop).toBe("settled");
-  // #137, mira's: skipped.
+  // #137, mira's: not asked, so no job and nothing posted (ADR 0078).
   expect(state.changes[id(137)]).toMatchObject({ author: "other", openedBy: "mira" });
-  expect(state.reviews[id(137)]?.job).toMatchObject({ state: "skipped", skip: "not-yours" });
+  expect(state.reviews[id(137)]?.job).toBeNull();
   // #139, the owner's: Claude found one, Codex confirmed it; no commit since, so it is still to fix.
   const left = state.reviews[id(139)];
   expect(left?.rounds.map((r) => [r.reviewer, r.confirmer, r.raised, r.open])).toEqual([
@@ -206,9 +206,9 @@ test("S10, a quiet day: six pull requests seen since early morning, more than Ho
   expect(clean?.findings).toEqual([]);
   expect(clean?.loop).toBe("settled");
 
-  // #144, dependabot's: skipped when it opened, and the check says why.
+  // #144, dependabot's: not asked when it opened, so nothing posted on it.
   expect(state.changes[id(144)]).toMatchObject({ author: "other", openedBy: "dependabot[bot]" });
-  expect(state.reviews[id(144)]?.job).toMatchObject({ state: "skipped", skip: "not-yours" });
+  expect(state.reviews[id(144)]?.job).toBeNull();
   expect(state.reviews[id(144)]?.rounds).toEqual([]);
 
   // #146, written by Claude: Codex found two, Claude confirmed both; the agent pushed the fix and asked again;

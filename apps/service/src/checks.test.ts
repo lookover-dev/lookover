@@ -8,12 +8,15 @@ import {
   checkExternalId,
   commitSha,
   HostError,
+  jobId,
   readCheckExternalId,
   readResult,
+  type SkipReason,
   statusOf,
 } from "@lookover/contracts";
 import { RetrievalError } from "@lookover/retrieval";
-import { DemoClock, FakeGitHost, type HostPost, ScriptedRetrieval } from "@lookover/testkit";
+import { openStore } from "@lookover/store";
+import { DemoClock, type FakeChange, FakeGitHost, type HostPost, ScriptedRetrieval } from "@lookover/testkit";
 import {
   api,
   fakeEngines,
@@ -42,6 +45,7 @@ import {
 setDefaultTimeout(TEST_LIMIT_MS);
 afterEach(stopAll);
 
+const MIN = 60_000;
 const PR = { repo: SANDBOX, number: 1 };
 const SECOND = changeId("sasensi/lookover-sandbox#2");
 const SIGNED_IN = { installed: true, version: "2.4.1", signedIn: true };
@@ -495,14 +499,14 @@ test("an end whose check was created and whose completion was refused completes 
   });
   const cookie = await openApp(service);
   const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
-  // Another author's pull request: skipped, its check created and then refused its completion.
+  // The person's pull request from a fork: skipped, its check created and then refused its completion.
   const other = { repo: SANDBOX, number: 6 };
   host.open({
     ...pr1,
     number: 6,
     url: pr1.url.replace(/\/1$/, "/6"),
-    author: { id: 583231, login: "octocat" },
-    head: { ref: "branch-6", sha: commitSha("6".repeat(40)) },
+    head: { ref: "fork-6", sha: commitSha("6".repeat(40)) },
+    fork: true,
   });
   await time.advance(60_000);
   await until(stream, "job.changed");
@@ -514,8 +518,86 @@ test("an end whose check was created and whose completion was refused completes 
   await until(stream, "round.finished");
   await time.advance(0);
   expect(host.view(other).checks.map((c) => `${c.status} ${c.conclusion}: ${c.output.title}`)).toEqual([
-    "completed skipped: Not your pull request",
+    "completed skipped: Not reviewed: it comes from a fork",
   ]);
+});
+
+test("an old skip's end owed on another author's pull request is never sent, but marked sent, unless its check was created; the person's fork's is sent (ADR 0078)", async () => {
+  const dir = home();
+  const time = new DemoClock({ at: T0 });
+  const TEAMMATE = { id: 583231, login: "octocat" };
+  const pull = (number: number, more: Partial<FakeChange>): FakeChange => ({
+    ...pr1,
+    number,
+    url: pr1.url.replace(/\/1$/, `/${number}`),
+    head: { ref: `fork-${number}`, sha: commitSha(`${number}`.repeat(40)) },
+    ...more,
+  });
+  // Before ADR 0078: a teammate's pull request skipped `not-yours`, a teammate's fork and the person's skipped `fork`.
+  const theirs = pull(5, { author: TEAMMATE });
+  const theirFork = pull(6, { author: TEAMMATE, fork: true });
+  const ownFork = pull(7, { fork: true });
+  // And the person's fork closed since: the store keeps no closed change, so its author can't be known.
+  const closedFork = pull(8, { fork: true });
+  // And a teammate's pull request whose skip created its check, queued, and then had its completion refused.
+  const theirQueued = pull(9, { author: TEAMMATE });
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1, theirs, theirFork, ownFork, closedFork, theirQueued],
+    clock: time,
+  });
+  host.close({ repo: SANDBOX, number: closedFork.number });
+  const first = await start({ home: dir, host, time });
+  await first.service.stop();
+  const store = openStore({ home: dir, durable: false });
+  const old: [FakeChange, SkipReason][] = [
+    [theirs, "not-yours"],
+    [theirFork, "fork"],
+    [ownFork, "fork"],
+    [closedFork, "fork"],
+    [theirQueued, "not-yours"],
+  ];
+  for (const [change, skip] of old)
+    store.jobs.skipped(changeId(`sasensi/lookover-sandbox#${change.number}`), {
+      sha: change.head.sha,
+      trigger: "opened",
+      skip,
+      id: () => jobId(`old-${change.number}`),
+    });
+  const queued = await host.createCheck(
+    SANDBOX,
+    theirQueued.head.sha,
+    "queued",
+    { title: "Queued", summary: "Queued.", text: "" },
+    "old-9",
+  );
+  store.jobs.checked(jobId("old-9"), { id: queued, sha: theirQueued.head.sha });
+  store.close();
+
+  // The upgrade starts on that data folder: only the person's own open fork gets its end, a closed one's is worth
+  // nothing; a check already created is completed, never left queued, and no other is created.
+  await start({ home: dir, host, time, idsFrom: 100 });
+  await time.advance(0);
+  await time.advance(MIN);
+  const on = (change: FakeChange) =>
+    host
+      .view({ repo: SANDBOX, number: change.number }, change.head.sha)
+      .checks.map((c) => `${c.status} ${c.conclusion}: ${c.output.title}`);
+  expect([on(theirs), on(theirFork), on(ownFork), on(closedFork), on(theirQueued)]).toEqual([
+    [],
+    [],
+    ["completed skipped: Not reviewed: it comes from a fork"],
+    [],
+    ["completed skipped: Not your pull request"],
+  ]);
+  expect(host.view({ repo: SANDBOX, number: theirQueued.number }, theirQueued.head.sha).checks[0]?.id).toBe(
+    queued,
+  );
+  const after = openStore({ home: dir, durable: false });
+  expect(after.jobs.checksEnding()).toEqual([]);
+  after.close();
 });
 
 test("a round that created its check, refused before it completed it, completes that check with the failure: never a second", async () => {

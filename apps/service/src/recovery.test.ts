@@ -4,7 +4,10 @@
 // prepare that fails, during a run fails the job, recorded and shown.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
+  type CommitCount,
+  type CommitSha,
   changeId,
+  commitSha,
   type Event,
   HostError,
   jobId,
@@ -12,7 +15,7 @@ import {
   type State,
   statusOf,
 } from "@lookover/contracts";
-import { RetrievalError } from "@lookover/retrieval";
+import { type PrepareRequest, type Retrieval, RetrievalError } from "@lookover/retrieval";
 import { openStore } from "@lookover/store";
 import { type FakeChange, FakeGitHost, ScriptedRetrieval } from "@lookover/testkit";
 import {
@@ -60,6 +63,63 @@ class HostDown extends FakeGitHost {
 class FetchRefused extends FakeGitHost {
   override fetchSpec(): Promise<never> {
     return Promise.reject(new HostError("unauthorized", "GitHub answered 403"));
+  }
+}
+
+/**
+ * A host whose compares, once a run read the change (`getChange`: the poller never does), give `mergeBase` as the merge
+ * base, as GitHub does for a change whose base branch moved on after it branched, or refuse with `refuseWith`;
+ * `counted` keeps what each of those compares asked, from and to.
+ */
+class GivenMergeBase extends FakeGitHost {
+  mergeBase: CommitSha | null = null;
+  refuseWith: HostError | null = null;
+  readonly counted: [CommitSha, CommitSha][] = [];
+  private running = false;
+
+  override getChange(...args: Parameters<FakeGitHost["getChange"]>): ReturnType<FakeGitHost["getChange"]> {
+    this.running = true;
+    return super.getChange(...args);
+  }
+
+  override countCommits(...args: Parameters<FakeGitHost["countCommits"]>): Promise<CommitCount> {
+    if (!this.running) return super.countCommits(...args);
+    const [, from, to] = args;
+    this.counted.push([from, to]);
+    if (this.refuseWith !== null) return Promise.reject(this.refuseWith);
+    const given = this.mergeBase;
+    return super
+      .countCommits(...args)
+      .then((count) => (given === null ? count : { ...count, mergeBase: given }));
+  }
+}
+
+/** A merge base on main before its tip, `BASE`: where pr1 branched. */
+const MERGE_BASE = commitSha("f0f1f2f3f4f5f6f7f8f9a0a1a2a3a4a5a6a7a8a9");
+
+/** Scripted retrieval that keeps each request it was asked. */
+function asking(): { retrieval: Retrieval; asked: PrepareRequest[] } {
+  const scripted = new ScriptedRetrieval();
+  const asked: PrepareRequest[] = [];
+  return {
+    asked,
+    retrieval: {
+      prepare: (request) => {
+        asked.push(request);
+        return scripted.prepare(request);
+      },
+    },
+  };
+}
+
+/** The job's next change that is neither queued nor running: how it ended. */
+async function ending(events: ReturnType<typeof messages>): Promise<Event> {
+  for (;;) {
+    const seen = await until(events, "job.changed");
+    const ended = seen.find(
+      (e) => e.type === "job.changed" && e.job.state !== "queued" && e.job.state !== "running",
+    );
+    if (ended) return ended;
   }
 }
 
@@ -755,6 +815,62 @@ test("a host that lists the change but refuses to say how to fetch it fails the 
     job: { id: "id-1", state: "failed", failure: { kind: "host_failed", detail: "unauthorized" } },
   });
   expect((await snapshot(service, cookie)).reviews[PLANTED]?.run).toBeNull();
+});
+
+test("retrieval is asked for the merge base the host's compare gives, from the change's base to the job's commit", async () => {
+  const host = new GivenMergeBase({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
+  const { retrieval, asked } = asking();
+  const { service } = await start({ host, retrieval });
+  host.mergeBase = MERGE_BASE;
+  const cookie = await openApp(service);
+  const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+
+  expect((await review(service, cookie)).status).toBe(200);
+  // Its engines answer nothing: the run ends after the prepare, which is what this test reads.
+  await ending(events);
+
+  expect(host.counted).toEqual([[pr1.base.sha, SHA1]]);
+  expect(asked.map((r) => [r.head, r.mergeBase])).toEqual([[SHA1, MERGE_BASE]]);
+});
+
+test("a change whose commits the host can't relate fails the job as a prepare that failed, in the host's words", async () => {
+  const host = new GivenMergeBase({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
+  const { retrieval, asked } = asking();
+  const { service } = await start({ host, retrieval });
+  host.refuseWith = new HostError("not_found", "No common ancestor between main and planted-bugs");
+  const cookie = await openApp(service);
+  const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+
+  expect((await review(service, cookie)).status).toBe(200);
+
+  expect(await ending(events)).toMatchObject({
+    changeId: PLANTED,
+    job: {
+      state: "failed",
+      failure: {
+        kind: "prepare_failed",
+        detail: "not_found: No common ancestor between main and planted-bugs",
+      },
+    },
+  });
+  expect(asked).toEqual([]);
+});
+
+test("a compare the host can't answer as the round prepares fails the job as the host's failure, not as no history", async () => {
+  const host = new GivenMergeBase({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
+  const { retrieval, asked } = asking();
+  const { service } = await start({ host, retrieval });
+  host.refuseWith = new HostError("unavailable", "GitHub answered 503");
+  const cookie = await openApp(service);
+  const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+
+  expect((await review(service, cookie)).status).toBe(200);
+
+  expect(await ending(events)).toMatchObject({
+    changeId: PLANTED,
+    job: { state: "failed", failure: { kind: "host_failed", detail: "unavailable" } },
+  });
+  expect(asked).toEqual([]);
 });
 
 test("a prepare that fails fails the job as a prepare that failed, in retrieval's words", async () => {

@@ -16,6 +16,8 @@ import { openOf, Refused } from "./api/http.ts";
 import type { WebMode } from "./dev/mode.ts";
 import { THEME_KEY } from "./theme-key.ts";
 import { type Refusal, refusalOf } from "./view-model/refusal.ts";
+import { ListScope, type ScopeChoice } from "./view-model/scope.ts";
+import { changeReviews } from "./view-model/select.ts";
 
 /** What the HTTP client adds to `LookoverApi`: it says when the service no longer knows the session. */
 export interface SessionAware {
@@ -39,6 +41,8 @@ export class Store {
   /** Events that arrived before the first snapshot: applied on it once it comes. */
   private early: Event[] = [];
   private listeners = new Set<() => void>();
+  /** Mine or Everyone, one choice for Home and All reviews while the page is open (ADR 0078). */
+  readonly scope = new ListScope();
 
   readonly api: LookoverApi;
 
@@ -94,6 +98,7 @@ export class Store {
   }
 
   private changed(): void {
+    if (this.state) this.scope.see(changeReviews(this.state));
     for (const l of this.listeners) l();
   }
 
@@ -192,6 +197,13 @@ export function useAppState(): State {
 }
 
 export const useSend = () => useApp().send;
+
+/** The list's Mine or Everyone, and the way to choose it: one for Home and All reviews (ADR 0078). */
+export function useListScope(): ScopeChoice & { choose: ListScope["choose"] } {
+  const { scope } = useApp().store;
+  const choice = useSyncExternalStore(scope.subscribe, scope.get);
+  return { ...choice, choose: scope.choose };
+}
 
 export type Theme = "dark" | "light" | "system";
 

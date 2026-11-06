@@ -1,9 +1,11 @@
 // @lookover/core: Lookover's rules (ADR 0028, ADR 0033, ADR 0037).
 // The decision it hides: the rules that make a review loop settle, and who reviews. Whether a change gets a review job
-// or is skipped (`intake`: a push with "review after every push" off asks nothing, whoever's change it is, ADR 0043; a
-// fork change is skipped `fork` unless asked by hand, whoever wrote it, ADR 0048), and what a skip leads to
-// (`skipOutcome`: an automatic trigger's recorded with its check only for another author's change or a fork change,
-// ADR 0043, ADR 0048; a request's always answered, recorded, or joining the change's pending job, ADR 0047); how often
+// or is skipped (`intake`: a push with "review after every push" off asks nothing, whoever's change it is, ADR 0043;
+// nor does a trigger nobody asked in person on another author's change, fork or not, ADR 0078; the owner's fork change
+// is skipped `fork` unless asked by hand, ADR 0048), what a skip leads to (`skipOutcome`: an automatic trigger's
+// recorded with its check only for a fork change, ADR 0043, ADR 0048; a request's always answered, recorded, or joining
+// the change's pending job, ADR 0047), and whether an old skip's end still owed is never sent (`endUnsent`: one on
+// another author's change nobody asked in person, whose check was never created, ADR 0078); how often
 // a watched repository is polled (`pollEvery`: 10 s while a review is asked, waits or runs, or was posted in the last
 // 30 minutes, or while setup shows Repositories or First review, else 60 s, ADR 0043, ADR 0068); who wrote a change
 // (`writerOf`: its commits' `Co-authored-by` trailers and its branch prefix, the newest signal winning, ADR 0044); who
@@ -89,7 +91,7 @@
 // It imports only @lookover/contracts, and no node: or bun: module.
 export { type ConfirmApplied, confirmPolicy, type Judged, toConfirm, unconfirmed } from "./confirm.ts";
 export { type Identity, sameFinding } from "./identity.ts";
-export { type Intake, intake, type SkipOutcome, skipOutcome } from "./intake.ts";
+export { endUnsent, type Intake, intake, type SkipOutcome, skipOutcome } from "./intake.ts";
 export { findingsAfterDismissal, loopState, standing } from "./loop.ts";
 export { mergeFinds } from "./merge.ts";
 export { pausedAt, pauseOf } from "./pause.ts";

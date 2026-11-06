@@ -14,8 +14,9 @@
 // open changes' listing, as a pull request's last update does. One the person may not edit (`forbidDescription`) is
 // refused `invalid`, as GitHub's 403 reaches the port.
 // It is brought to refuse as GitHub does on a bad day: every call (`refuse`), the check writes (`refuseChecks`), the
-// compare (`refuseCounts`), or the next post once (`refuseNext`), kept on the host or not: GitHub answered a review
-// it had saved "422 An internal error occurred".
+// compare, merge base included (`refuseCounts`), or the next post once (`refuseNext`), kept on the host or not:
+// GitHub answered a review it had saved "422 An internal error occurred". The compare answers from the commits'
+// lineage: the nearest commit both hold is the merge base; two with none in common are `not_found`, as on GitHub.
 // The repository ports post as the person signed in to the shared App (ADR 0066, ADR 0073), as spike 20 saw GitHub
 // do it: the review, its line comments, the replies, the reactions and the description's status block are theirs,
 // with no bot flag; the checks are the App's. Lookover's threads are the person's roots holding a finding
@@ -136,8 +137,8 @@ export interface FakeChange extends Omit<HostChange, "host" | "fork" | "openedAt
   /** What its author wrote as its description: none (GitHub's null, read as "") when not given. */
   description?: string | null;
   /**
-   * Its own commits' messages, oldest first: its head then sits on its base with that many commits, which the
-   * compare from its base counts and gives. None: the head is a commit of its own, related to nothing.
+   * Its own commits' messages, oldest first, which the compare from its base counts and gives. Its head sits on its
+   * base either way (their merge base is the base, as the planted sandbox's are); none, and no commit is counted.
    */
   messages?: string[];
 }
@@ -797,8 +798,14 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
     const openedAt = toSecond(change.openedAt ?? this.clock.now());
     this.changes.push({ ...held, repo, openedAt, diff: [...change.diff], closed: false });
     this.descriptions.set(changeKey({ repo, number: change.number }), description ?? "");
-    if (messages && !this.history.has(change.head.sha))
-      this.history.set(change.head.sha, { parent: change.base.sha, commits: messages.length, messages });
+    // The head sits on the base, as a pull request's branch does: their merge base is the base. Without its commits'
+    // messages, none are counted.
+    if (change.head.sha !== change.base.sha && !this.history.has(change.head.sha))
+      this.history.set(change.head.sha, {
+        parent: change.base.sha,
+        commits: messages?.length ?? 0,
+        messages: messages ?? [],
+      });
     for (const sha of [change.base.sha, change.head.sha])
       if (!this.history.has(sha)) this.history.set(sha, { parent: null, commits: 0, messages: [] });
     this.moved(repo, "changes");
@@ -1161,17 +1168,14 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
       let commits = 0;
       // Nearest push first, each push's messages oldest first: the pushes are put back in order at the end.
       const pushes: string[][] = [];
-      const counted = (diverged: boolean): CommitCount => ({
-        commits,
-        diverged,
-        messages: pushes.reverse().flat(),
-      });
+      // The first commit of `to`'s lineage that `from`'s holds is where both meet: the merge base.
       for (const [sha, commit] of this.lineage(to)) {
-        if (ancestors.has(sha)) return counted(sha !== from);
+        if (ancestors.has(sha))
+          return { commits, diverged: sha !== from, messages: pushes.reverse().flat(), mergeBase: sha };
         commits += commit.commits;
         pushes.push(commit.messages);
       }
-      return counted(true);
+      throw new HostError("not_found", `No common ancestor between ${from} and ${to}`);
     });
   }
 

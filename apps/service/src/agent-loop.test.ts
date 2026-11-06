@@ -218,18 +218,19 @@ test("the pull request opens, round 1 posts by itself, wait says fix; the fix is
   expect(retrieval.prepared).toHaveLength(2);
 });
 
-test("on a colleague's pull request, skipped when it opened, wait asks anyway; the request is reviewed and wait reads its round", async () => {
+test("on a colleague's pull request, which got nothing when it opened, wait asks; the request is reviewed and wait reads its round", async () => {
   const engines = fakeEngines();
   engines.answer(ROUND_1, CONFIRM_1);
   const { host, time } = await start({ changes: [], engines });
   const agent = agentOn(host, time);
 
-  // A colleague opens it: nobody asked, so it is skipped with the reason on its check (ADR 0016).
+  // A colleague opens it: nobody asked, so nothing is posted on it (ADR 0078).
   host.open({ ...pr1, author: { id: 583231, login: "octocat" } });
   await time.advance(MIN);
-  expect(host.posts.map(line)).toEqual(["check queued", "check skipped"]);
+  expect(host.posts.map(line)).toEqual([]);
 
-  // The owner's agent waits on it: that skip answers nobody, so `wait` asks, and the request is reviewed.
+  // The owner's agent waits on it: no check of the person's names the commit, so `wait` asks, and the request is
+  // reviewed.
   const posted = host.posts.length;
   const waited = await agent.wait();
   expect(waited.err[0]).toBe("Asked Lookover to review a1b2c3d (pull request #1).");

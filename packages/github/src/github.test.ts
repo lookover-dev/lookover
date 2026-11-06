@@ -1516,8 +1516,20 @@ test("a comment whose author's account is gone is left out: it can be no one's r
   expect((await github.intake.listComments(SANDBOX_REPO, AT)).items.map((c) => c.id)).toEqual(["1"]);
 });
 
-/** GitHub's compare of `EARLIER...SHA`, as it answers it: the commits `SHA` has, oldest first, with their messages. */
-const compare = (status: string, ahead: number, behind: number, messages: string[] = []): Route =>
+/** A commit before `EARLIER`, where a history moved off it starts again. */
+const BEFORE_EARLIER = commitSha("5f1c0de4a1b2c3d4e5f60718293a4b5c6d7e8f90");
+
+/**
+ * GitHub's compare of `EARLIER...SHA`, as it answers it: the commits `SHA` has, oldest first, with their messages,
+ * and the nearest commit both hold.
+ */
+const compare = (
+  status: string,
+  ahead: number,
+  behind: number,
+  messages: string[] = [],
+  mergeBase: string = EARLIER,
+): Route =>
   withToken(TOKEN, (call) =>
     call.path === `${SANDBOX}/compare/${EARLIER}...${SHA}?per_page=100`
       ? {
@@ -1527,6 +1539,7 @@ const compare = (status: string, ahead: number, behind: number, messages: string
             ahead_by: ahead,
             behind_by: behind,
             total_commits: ahead,
+            merge_base_commit: { sha: mergeBase, commit: { message: "Where both start" } },
             commits: messages.map((message, i) => ({
               sha: `${i}`.padStart(40, "0"),
               commit: { message, author: { name: "sam" } },
@@ -1537,16 +1550,25 @@ const compare = (status: string, ahead: number, behind: number, messages: string
       : undefined,
   );
 
-test("the commits between two heads are GitHub's compare: ahead counted with their messages, a history moved off `from` diverged", async () => {
+test("the commits between two heads are GitHub's compare: ahead counted with their messages, a history moved off `from` diverged, both from their merge base", async () => {
   const messages = ["Fix the retry", "Stop on 4xx\n\nCo-authored-by: Claude <noreply@anthropic.com>"];
   const cases = [
-    { answer: compare("ahead", 2, 0, messages), count: { commits: 2, diverged: false, messages } },
-    { answer: compare("identical", 0, 0), count: { commits: 0, diverged: false, messages: [] } },
     {
-      answer: compare("diverged", 1, 1, ["Rewrite"]),
-      count: { commits: 1, diverged: true, messages: ["Rewrite"] },
+      answer: compare("ahead", 2, 0, messages),
+      count: { commits: 2, diverged: false, messages, mergeBase: EARLIER },
     },
-    { answer: compare("behind", 0, 3), count: { commits: 0, diverged: true, messages: [] } },
+    {
+      answer: compare("identical", 0, 0),
+      count: { commits: 0, diverged: false, messages: [], mergeBase: EARLIER },
+    },
+    {
+      answer: compare("diverged", 1, 1, ["Rewrite"], BEFORE_EARLIER),
+      count: { commits: 1, diverged: true, messages: ["Rewrite"], mergeBase: BEFORE_EARLIER },
+    },
+    {
+      answer: compare("behind", 0, 3, [], SHA),
+      count: { commits: 0, diverged: true, messages: [], mergeBase: SHA },
+    },
   ];
   for (const { answer, count } of cases) {
     const api = stubGitHub(answer);
@@ -1560,19 +1582,23 @@ test("the commits between two heads are GitHub's compare: ahead counted with the
   }
 });
 
-test("a commit GitHub doesn't have is not found", async () => {
-  const api = stubGitHub(
-    withToken(TOKEN, () => ({ status: 404, body: { message: `No commit found for SHA: ${SHA}` } })),
-  );
-  const github = createGitHub({
-    session: SESSION,
-    repositories: LISTED,
-    fetch: api.fetch,
-    clock: { now: () => AT },
-  });
-  await expect(github.intake.countCommits(SANDBOX_REPO, EARLIER, SHA)).rejects.toMatchObject({
-    failure: "not_found",
-  });
+test("a commit GitHub doesn't have, or two with no common history, is not found", async () => {
+  // GitHub's 404s for each, as it words them.
+  for (const message of [
+    `No commit found for SHA: ${SHA}`,
+    `No common ancestor between ${EARLIER} and ${SHA}.`,
+  ]) {
+    const api = stubGitHub(withToken(TOKEN, () => ({ status: 404, body: { message } })));
+    const github = createGitHub({
+      session: SESSION,
+      repositories: LISTED,
+      fetch: api.fetch,
+      clock: { now: () => AT },
+    });
+    await expect(github.intake.countCommits(SANDBOX_REPO, EARLIER, SHA)).rejects.toMatchObject({
+      failure: "not_found",
+    });
+  }
 });
 
 test("a reaction is posted on the comment as GitHub names it; a repeat GitHub answers 200 is no error", async () => {

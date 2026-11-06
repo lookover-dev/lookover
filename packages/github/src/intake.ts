@@ -232,6 +232,7 @@ export function createIntake(api: GitHubApi, session: Session, allowed: Allowed)
           commits: compared.ahead_by,
           diverged: compared.status === "diverged" || compared.status === "behind",
           messages: compared.commits.map((c) => c.commit.message),
+          mergeBase: commitSha(compared.merge_base_commit.sha),
         };
       });
     },

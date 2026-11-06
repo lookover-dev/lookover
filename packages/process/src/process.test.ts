@@ -22,8 +22,11 @@ const made: string[] = [];
 class HeldTimers implements Timers {
   private at = 0;
   private pending: { due: number; fire: () => void }[] = [];
+  /** How many timers were ever asked for: the runner asks for one more each time the program writes. */
+  scheduled = 0;
   now = () => this.at;
   after = (ms: number, fire: () => void) => {
+    this.scheduled++;
     const timer = { due: this.at + ms, fire };
     this.pending.push(timer);
     return () => {
@@ -151,6 +154,38 @@ test("the idle limit ends a run that stops writing, and leaves no process of the
   const grandchildren = announcedPids(result.stdout);
   expect(grandchildren).toHaveLength(2);
   await expectAllGone([started.pid, ...grandchildren]);
+});
+
+test("a program writing only to stderr, once a minute for five minutes, is never idle; silence past the limit is", async () => {
+  const dir = folder();
+  const timers = new HeldTimers();
+  const started = startChild(
+    dir,
+    ["whisper", dir],
+    { wallClockMs: 10 * 60_000, idleMs: 2 * 60_000 },
+    "",
+    timers,
+  );
+  await until(() => existsSync(join(dir, "ready")));
+
+  for (let minute = 1; minute <= 5; minute++) {
+    timers.advance(60_000);
+    const scheduled = timers.scheduled;
+    writeFileSync(join(dir, "poke"), "");
+    // The runner saw the line once it starts the idle count over: one timer more.
+    await until(() => timers.scheduled > scheduled);
+  }
+  expect(alive(started.pid)).toBe(true);
+  timers.advance(2 * 60_000 - 1);
+  expect(alive(started.pid)).toBe(true);
+  timers.advance(1);
+  const result = await started.result;
+
+  expect(result.end).toBe("idle");
+  expect(result.tookMs).toBe(7 * 60_000);
+  expect(result.stdout).toBe("");
+  expect(result.stderr.split("\r").filter(Boolean)).toHaveLength(5);
+  await expectAllGone([started.pid]);
 });
 
 test("kill ends the run as killed and leaves no process of the tree; a second kill changes nothing", async () => {

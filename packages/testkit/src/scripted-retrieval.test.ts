@@ -14,7 +14,7 @@ const fetch: FetchSpec = {
   defaultBranch: "main",
   credentials: () => Promise.resolve({ username: "x-access-token", password: "ghs_fake" }),
 };
-const request = (job: string, head = PLANTED) => ({ repo, job: jobId(job), head, base: BASE, fetch });
+const request = (job: string, head = PLANTED) => ({ repo, job: jobId(job), head, mergeBase: BASE, fetch });
 /** Pull request #1 of the sandbox, and #1 of the organisation's sandbox of the same name. */
 const pr1 = { repo, number: 1 };
 const orgPr1 = { repo: { owner: "lookover-dev", name: "lookover-sandbox" }, number: 1 };

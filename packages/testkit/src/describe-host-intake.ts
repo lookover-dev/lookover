@@ -378,13 +378,15 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       const to = await f.push(2);
       // Each commit with its message, oldest first: who wrote a change is read from them (ADR 0044).
       const messages = [expect.any(String), expect.any(String)];
-      const brought = { commits: 2, diverged: false, messages };
+      // Pushed on top of `from`, so both meet there: the merge base a diff from `from` starts at.
+      const brought = { commits: 2, diverged: false, messages, mergeBase: from };
       const count = () => f.intake.countCommits(f.repo, from, to);
       expect(await shown(count, equals(brought), "the two commits pushed")).toEqual(brought);
       expect(await f.intake.countCommits(f.repo, to, to)).toEqual({
         commits: 0,
         diverged: false,
         messages: [],
+        mergeBase: to,
       });
     });
 
@@ -405,9 +407,30 @@ export function describeHostIntake(name: string, setup: HostIntakeSetup): void {
       const f = await setup.open();
       const from = f.open.head.sha;
       const to = await f.push(1, true);
-      const diverged = { commits: 1, diverged: true, messages: [expect.any(String)] };
+      // The new head sits on the old one's parent, which both hold: neither head is the merge base, and it is the
+      // same commit read from either side.
+      const diverged = {
+        commits: 1,
+        diverged: true,
+        messages: [expect.any(String)],
+        mergeBase: expect.any(String),
+      };
       const count = () => f.intake.countCommits(f.repo, from, to);
-      expect(await shown(count, equals(diverged), "the force-push diverged")).toEqual(diverged);
+      const counted = await shown(count, equals(diverged), "the force-push diverged");
+      expect(counted).toEqual(diverged);
+      expect([from, to]).not.toContain(counted.mergeBase);
+      expect((await f.intake.countCommits(f.repo, to, from)).mergeBase).toBe(counted.mergeBase);
+    });
+
+    test("a change's head and base meet at their merge base, the base a diff of the change starts at", async () => {
+      const { intake, repo, open } = await setup.open();
+      // Bites only on GitHub, whose live change branches off a branch that moved on: on the fake, the base is the
+      // merge base.
+      // The merge base is an ancestor of both, and the nearest one: from either side, it is itself.
+      const { mergeBase } = await intake.countCommits(repo, open.base.sha, open.head.sha);
+      expect((await intake.countCommits(repo, mergeBase, open.head.sha)).diverged).toBe(false);
+      expect(await intake.countCommits(repo, mergeBase, open.base.sha)).toMatchObject({ diverged: false });
+      expect((await intake.countCommits(repo, open.head.sha, mergeBase)).mergeBase).toBe(mergeBase);
     });
 
     test("a commit the repository doesn't have is not found", async () => {

@@ -5,10 +5,13 @@ import { expect, test } from "bun:test";
 import {
   type Command,
   changeId,
+  commitSha,
   type Event,
+  emptyReview,
   GITHUB_WEB,
   type LookoverApi,
   type ResolvedSettings,
+  repositoryId,
   type State,
 } from "@lookover/contracts";
 import { Refused } from "./api/http.ts";
@@ -357,4 +360,44 @@ test("a cancelled unlock sends nothing and runs what follows a refusal, never wh
   // Nothing held, nothing to say.
   cancelHeld(null);
   expect(said).toEqual(["not saved"]);
+});
+
+/** `state` with one open pull request of `author`'s in its one repository. */
+function withPullRequest(state: State, author: "you" | "other"): State {
+  const id = changeId("sam/app#1");
+  const repo = repositoryId("sam/app");
+  return {
+    ...state,
+    repos: [{ id: repo, owner: "sam", name: "app", enabled: true, settings: DEFAULTS }],
+    changes: {
+      [id]: {
+        id,
+        repoId: repo,
+        number: 1,
+        title: "A change",
+        openedBy: author === "you" ? "sam" : "ana",
+        author,
+        writtenBy: null,
+        headSha: commitSha("a1f9c2e"),
+        openedAt: NOW,
+        draft: false,
+        fork: false,
+        newCommits: 0,
+      },
+    },
+    reviews: { [id]: emptyReview(id, NOW) },
+  };
+}
+
+test("Mine and Everyone show once another author's pull request is listed, and stay while the page is open (ADR 0078)", async () => {
+  const s = service(withPullRequest(snapshot(5, "first"), "you"));
+  const store = new Store(s.api);
+  await settled();
+  expect(store.scope.get()).toEqual({ scope: "mine", shown: false });
+  s.send({ type: "state.replaced", at: NOW, seq: 6, state: withPullRequest(snapshot(6, "x"), "other") });
+  expect(store.scope.get()).toEqual({ scope: "mine", shown: true });
+  store.scope.choose("everyone");
+  // The teammate's pull request closed: the tabs and the choice stay.
+  s.send({ type: "state.replaced", at: NOW, seq: 7, state: snapshot(7, "closed") });
+  expect(store.scope.get()).toEqual({ scope: "everyone", shown: true });
 });

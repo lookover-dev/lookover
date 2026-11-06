@@ -261,9 +261,10 @@ describe("lookover wait: asking", () => {
     expect(w.elapsed()).toBe(60_000);
   });
 
-  test("a colleague's pull request skipped when it opened, nobody asking: the request is posted, and its round read", async () => {
+  test("a colleague's pull request an older version skipped when it opened: the request is posted, and its round read", async () => {
     const w = world();
-    // The automatic "Not your pull request": an opening asked, not a person (ADR 0043: wait asks anyway).
+    // The automatic "Not your pull request" older versions posted (ADR 0078): an opening asked, not a person (ADR
+    // 0043: wait asks anyway).
     const notYours = result({
       run: { state: "skipped", state_reason: "not_yours", trigger: "opened" },
       verdict: { value: "none", conclusion: "skipped" },

@@ -5,20 +5,20 @@
 //   commit. Then the take runs. It asks as `core.intake` says, trigger "manual" (a draft and another author's change
 //   too): in a repository switched off, a job skipped "repo-off", its check saying why, unless the change has a job
 //   waiting or running, which the request joins as above (ADR 0047). The setup's first review (ADR 0047) is that
-//   request with trigger "first-review", asked as a preview when the owner said "preview here only": its run posts
-//   nothing (the run's header), and the preview sticks to the job it joins (the store's). One that posts, asked
-//   while a review of its head commit runs that posts (the poll's, a request's, a first review's: not a preview's,
-//   whatever its trigger), follows that run: no follow-up; asked once that commit's round was posted (the change's
-//   latest job done on it, not a preview's), it follows that round: no run (#425). A preview, or a review of an older
-//   commit, still asks its own; so do "Review now" and the owner's `/lookover review` on a reviewed commit (below).
+//   request with trigger "first-review" (on another author's change, not asked: no such change, ADR 0078), asked as
+//   a preview when the owner said "preview here only": its run posts nothing (the run's header), and the preview
+//   sticks to the job it joins (the store's). One that posts, asked while a review of its head commit runs that
+//   posts (the poll's, a request's, a first review's: not a preview's, whatever its trigger), follows that run: no
+//   follow-up; asked once that commit's round was posted (the change's latest job done on it, not a preview's), it
+//   follows that round: no run (#425). A preview, or a review of an older commit, still asks its own; so do "Review
+//   now" and the owner's `/lookover review` on a reviewed commit (below).
 // - What the poll sees (ADR 0043, the poller's header): a change opened or a draft marked ready asks, trigger
 //   "opened", as `core.intake` says with the repository's switches: a review (joining the waiting job, as a request
-//   does), a job skipped with its reason from the start (another author's or a fork's: its check says why, ADR 0016,
-//   ADR 0048), or nothing
-//   (a draft, a switch off: nothing was asked, no check; `core.skipOutcome`; nor beside a job waiting or running,
-//   such as the owner's request on another author's change: the skip would be the job shown). A push moves the
-//   change's waiting job to the new head as it waits, then asks, trigger "push", the same way (a review only with
-//   "review after every push" on). The poll's caller takes.
+//   does), a job skipped with its reason from the start (the owner's fork: its check says why, ADR 0048), or nothing
+//   (another author's change, whatever else holds: nothing on GitHub, ADR 0078; a draft, a switch off: nothing was
+//   asked, no check; `core.skipOutcome`; nor beside a job waiting or running, such as the owner's request on their
+//   fork: the skip would be the job shown). A push moves the change's waiting job to the new head as it waits, then
+//   asks, trigger "push", the same way (a review only with "review after every push" on). The poll's caller takes.
 // - The owner's review request comment the poll saw asks, trigger "comment", as `core.intake` says: on a draft and on
 //   another author's change too (ADR 0016's "requested by the owner"). It joins the change's waiting job (never a
 //   preview: beside the owner's waiting preview it is a review of its own, which posts, behind it), queues a
@@ -133,6 +133,7 @@ import {
 import {
   afterRestart,
   type EngineHold,
+  type Intake,
   intake,
   pausedAt,
   pauseOf,
@@ -223,14 +224,17 @@ export interface Queue {
   request(changeId: ChangeId): Promise<"ok" | "no_such_change">;
   /**
    * The setup's first review of the change (ADR 0047): "Review now" with trigger "first-review", its job a preview
-   * when `preview` says so, whose run posts nothing.
+   * when `preview` says so, whose run posts nothing. `no_such_change` for a change no longer open, and for an open
+   * one another author opened too: `core.intake` says setup's first review doesn't ask there (ADR 0078), and setup
+   * never offers one.
    */
   firstReview(changeId: ChangeId, preview: boolean): Promise<"ok" | "no_such_change">;
   /**
    * The poll saw the change opened, or a draft marked ready: a review of its head commit, trigger "opened", as
    * `core.intake` says with the repository's switches. Skipped, the job is recorded so with its reason (its check
-   * says why) only where `core.skipOutcome` says (another author's, a fork's): a draft or a switch off asked
-   * nothing (ADR 0043). Not taken: the poll's caller takes.
+   * says why) only where `core.skipOutcome` says (the owner's fork): a draft or a switch off asked nothing (ADR
+   * 0043), nor does another author's change, which gets nothing on GitHub (ADR 0078). Not taken: the poll's caller
+   * takes.
    */
   opened(changeId: ChangeId): void;
   /**
@@ -783,18 +787,24 @@ export function createQueue(d: QueueDeps): Queue {
     if (asked.changed) changed({ changeId, job: asked.job });
   }
 
+  /** What `core.intake` says the trigger asks of the open change, with its repository's switches now. */
+  function decided(change: ChangeFacts, trigger: Trigger): Intake {
+    const repository = d.settings(change.repoId);
+    return intake(change, { enabled: repository.enabled, settings: repository.values }, trigger);
+  }
+
   /**
    * What a trigger asks of an open change's head commit (the poll's, or "Review now"), as `core.intake` says: a
-   * review; a job skipped with its reason, when `core.skipOutcome` says so (another author's, a fork's, or a
-   * request's: a repository switched off); the change's pending job joined (a request beside it); or nothing (a draft, a switch
-   * off, or an automatic skip while the change has a job waiting or running, which it would hide). A review request
+   * review; a job skipped with its reason, when `core.skipOutcome` says so (the owner's fork, or a request's: a
+   * repository switched off); the change's pending job joined (a request beside it); or nothing (another author's
+   * change nobody asked in person, a draft, a switch off, or an automatic skip while the change has a job waiting or
+   * running, which it would hide). A review request
    * comment is recorded with the job it led to; a preview asked is the job's.
    */
   function intakeOf(changeId: ChangeId, trigger: Trigger, asking: Asking = {}): void {
     const change = d.openChanges().get(changeId);
     if (!change) return;
-    const repository = d.settings(change.repoId);
-    const decision = intake(change, { enabled: repository.enabled, settings: repository.values }, trigger);
+    const decision = decided(change, trigger);
     if (decision.kind === "job") ask(changeId, change.headSha, trigger, asking);
     if (decision.kind !== "skipped") return;
     // A request beside a pending job joins it, as a review would; never a skip that hides it (ADR 0047).
@@ -853,8 +863,9 @@ export function createQueue(d: QueueDeps): Queue {
       if (!disconnects(error)) throw error;
     });
     const change = d.openChanges().get(changeId);
-    if (!change) {
-      // Closed since: the take cancels the job it may have left waiting.
+    // Closed since: the take cancels the job it may have left waiting. Another author's change is none setup's first
+    // review could ask (ADR 0078): setup never offers one.
+    if (!change || decided(change, trigger).kind === "not-asked") {
       take();
       return "no_such_change";
     }

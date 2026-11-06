@@ -186,11 +186,15 @@ export const repositoryComments = z.array(
   }),
 );
 
-/** A comparison of two commits: how the second stands to the first, and how many commits each has. */
+/**
+ * A comparison of two commits: how the second stands to the first, how many commits each has, and the nearest
+ * commit both hold.
+ */
 export const comparison = z.object({
   status: z.enum(["ahead", "behind", "identical", "diverged"]),
   ahead_by: z.int(),
   behind_by: z.int(),
+  merge_base_commit: z.object({ sha }),
   /** The commits the second has, oldest first, one page of them. */
   commits: z.array(z.object({ commit: z.object({ message: z.string() }) })),
 });

@@ -12,6 +12,10 @@
 // folder (`find`, `find-2`, `confirm`). The round keeps the settings it started with (ADR 0049): its plan is the
 // take's, and the repository's settings reconcile applies and its rule switches (which rules go to neither pass) are
 // read once as the run starts; a change while it goes counts from the next round.
+// The merge base (ADR 0068): before the fetch, the run asks the host's compare where the change's diff starts, since
+// the mirror is one commit deep and git can't find it there. `not_found` (a commit unknown, or no common history)
+// fails the round as `prepare_failed`, with the host's words; any other refusal fails it as `host_failed`, as any host
+// read does.
 // Claims (ADR 0052, ADR 0048): before the worktree is prepared, the run reads the change's Lookover threads (outdated
 // ones included, so a reply made before a push is still heard), and `core.readThreads` keeps, per unsettled finding,
 // the newest reply not answered yet from the owner or the change's author (the owner alone on a fork's change). The
@@ -61,6 +65,7 @@ import { join } from "node:path";
 import {
   type ChangeId,
   type Clock,
+  type CommitSha,
   type ConfirmFailure,
   type Deferral,
   type EngineActivity,
@@ -499,15 +504,32 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
     }
   }
 
+  /**
+   * The merge base of the job's commit and the change's base, as the host's compare gives it: the fetch is one commit
+   * deep, so git can't find it. A commit the host doesn't have, or no common history (`not_found`), fails the round
+   * in the host's words; any other refusal is thrown, the host's failure, so an outage never reads as no history.
+   */
+  async function mergeBaseOf(c: Carried, host: HostChange): Promise<CommitSha | End> {
+    try {
+      return (await d.intake.countCommits(d.repoOf(c.change.repoId), host.base.sha, c.job.sha)).mergeBase;
+    } catch (error) {
+      if (!(error instanceof HostError) || error.failure !== "not_found") throw error;
+      if (c.signal.aborted) return { kind: "stopped" };
+      return failed("prepare_failed", `${error.failure}: ${error.message}`);
+    }
+  }
+
   /** Prepare: the worktree and the diff for the job's commit, or why there is none. */
   async function prepare(c: Carried, host: HostChange): Promise<Prepared | End> {
+    const mergeBase = await mergeBaseOf(c, host);
+    if (typeof mergeBase !== "string") return mergeBase;
     try {
       return await d.retrieval.prepare(
         {
           repo: d.repoOf(c.change.repoId),
           job: c.job.id,
           head: c.job.sha,
-          base: host.base.sha,
+          mergeBase,
           fetch: await d.intake.fetchSpec(d.repoOf(c.change.repoId)),
         },
         c.signal,

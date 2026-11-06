@@ -28,7 +28,7 @@ describe("prepareCase", () => {
           cwd: "worktree",
           diff: "the diff",
           rules: [],
-          mergeBase: request.base,
+          mergeBase: request.mergeBase,
           diffFile: ".lookover-change.diff",
           dispose: () => Promise.resolve(),
         });
@@ -50,7 +50,7 @@ describe("prepareCase", () => {
     }).toEqual({ cwd: "worktree", diff: "the diff", diffFile: ".lookover-change.diff", head: built.head });
     const [request] = asked;
     expect(request?.head).toBe(built.head);
-    expect(request?.base).toBe(built.base);
+    expect(request?.mergeBase).toBe(built.base);
     // The case's id names its bug: the job and the repository, which the worktree's path shows, never carry it.
     expect(request?.repo).toEqual({ owner: "evals", name: "case-1234abcd" });
     expect(String(request?.job)).toBe("case-1234abcd");
