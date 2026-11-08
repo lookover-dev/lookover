@@ -33,6 +33,7 @@ const queued: ReviewJob = {
   state: "queued",
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip: null,
   cancel: null,
   failure: null,

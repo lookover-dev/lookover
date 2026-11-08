@@ -31,9 +31,15 @@ button {
   padding: 10px var(--s-5);
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+  height: var(--h-top);
   position: sticky;
   top: 0;
   z-index: 15;
+}
+/* While the status menu's scrim is up, the top bar rises over the phone's tab bar (z 15 too, later in the page), so
+   the scrim covers that bar as it covers the page; only the top bar stays bright. */
+.app > .top:has(.scrim) {
+  z-index: 16;
 }
 .top .mk {
   width: 28px;
@@ -94,6 +100,32 @@ button {
 .departed {
   display: grid;
   gap: var(--s-2);
+}
+/* The departed summary (design-system.md "Departed summary and No access"), laid out as every notice (`.banner`): its
+   sentence flush on the text column, Show and its × (Dismiss all) at the action edge, the list under them on the text
+   column (`.banner-below`), a line per repository, its name on the sentence's edge, its quiet bordered Dismiss in one
+   column at the action edge, a hairline between lines. */
+.departed-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--s-2) 0 0;
+  display: grid;
+}
+.departed-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--s-3);
+  min-height: calc(var(--h-sm) + var(--s-2));
+  min-width: 0;
+}
+.departed-list li + li {
+  border-top: var(--line-w) solid var(--line);
+}
+/* a line no heavier than the No access notice: its name in the body's weight, in ink as the sentence it opens from */
+.departed-name {
+  color: var(--ink);
+  overflow-wrap: anywhere;
 }
 .foot {
   font-size: var(--t-13);
@@ -158,8 +190,7 @@ button {
     grid-template-columns: 1fr auto;
     row-gap: 6px;
   }
-  .rowi > .chip,
-  .rowi > .sev-label {
+  .rowi > .chip {
     grid-column: 1 / -1;
     justify-self: start;
   }
@@ -174,6 +205,8 @@ button {
     left: 8px !important;
     right: 8px !important;
     top: 56px !important;
+    /* The window's width less its 8 px edges, never the 400 px it is wide on a desk. */
+    min-width: 0 !important;
   }
   .toasts {
     left: 16px;
@@ -255,7 +288,7 @@ button {
   min-width: 180px;
 }
 .sev-label {
-  font: 700 11px var(--mono);
+  font: 700 var(--t-12) var(--mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--acc-text);
@@ -263,6 +296,11 @@ button {
 }
 .sev-label.fix {
   color: var(--warn-text);
+}
+/* a done finding's severity, quieter: `--muted`, never fainter, its word still saying which (round 6, 2026-11-08:
+   pink and amber shouted on findings already closed) */
+.findings .rowi .sev-label {
+  color: var(--muted);
 }
 .dotc {
   width: 8px;
@@ -277,9 +315,43 @@ button {
   font: 600 var(--t-12) var(--mono);
   color: var(--muted);
 }
-/* The review rules' headers stay on one line, so the header row lines up ("Acted on" never wraps). */
-.tbl.rules th {
+/* The review rules' headers stay on one line, so the header row lines up ("Acted on" never wraps), and so does each
+   rule's From ("lookover-sandbox · REVIEW.md, line 3"): the rule's own words wrap instead. */
+.tbl.rules th,
+.tbl.rules td.from {
   white-space: nowrap;
+}
+/* From in two lines, the repository over its file and line, so the column is as narrow as a repository's name and
+   the rule's words get the room: a short rule keeps to one line (round 6) */
+.tbl.rules td.from > span {
+  display: block;
+}
+/* A rule held off with the rule it sits in says so under its words, never in a tooltip over the row's values. */
+.rule-held {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--t-13);
+  color: var(--muted);
+}
+.rule-held.room {
+  visibility: hidden;
+}
+/* A rule nested in another is set in under it, an elbow in --muted from the rule above to its words, so its switch,
+   held off with that rule, reads as that rule's. */
+.tbl.rules td.rule.nested {
+  position: relative;
+  padding-left: calc(var(--cell-x) + var(--s-5));
+}
+.tbl.rules td.rule.nested::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--cell-x) + var(--s-1));
+  top: 0;
+  width: var(--s-2);
+  height: calc(var(--s-3) + 0.5em);
+  border-left: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  border-bottom-left-radius: var(--r-1);
 }
 .tbl-wrap {
   overflow-x: auto;
@@ -323,14 +395,26 @@ button {
   min-width: 0;
   padding-block: calc((var(--h-sm) - 1lh) / 2);
 }
-.menu .st small,
+/* a line's detail in --ink-2, read without effort beside its line in --ink (2026-11-08: in --muted it read as
+   disabled), its last line never one word alone */
+.menu .st small {
+  display: block;
+  font-size: var(--t-12);
+  line-height: 1.5;
+  color: var(--ink-2);
+  padding-left: 15px;
+  text-wrap: pretty;
+}
+/* read, not skimmed: --ink-2 as every detail of the menu (round 6) */
 .st-note {
   display: block;
   font-size: var(--t-12);
-  color: var(--muted);
-  padding-left: 15px;
-  max-width: 34ch;
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
 }
+/* a detail and the note under Pause take the menu's width, no narrower measure: the menu stays as short as it can,
+   over as little of the page as it can */
 .st-note {
   padding: 2px 10px 8px;
 }
@@ -338,10 +422,39 @@ button {
 .menu .st small .said {
   display: inline;
 }
-/* a fix under its line and detail (an account's), in line with the text */
+/* a line's fix under its detail, every line's alike, in line with the text */
 .menu .st-fix {
   display: flex;
-  padding: var(--s-1) 0 2px 15px;
+  padding: var(--s-2) 0 0 15px;
+}
+/* every line in a well of one inset, a hairline round it, so the list has one left edge (round 5: the fine lines flush
+   beside boxed problems made it jump): the lines that lead (a problem on them) each in a well of their own on the
+   page's own ground, standing apart; the fine ones after them together in one, on the menu's surface
+   (design-system.md "Status pill menu") */
+.menu .st-block.leads,
+.menu .st-fine {
+  margin-inline: calc(-1 * var(--s-2));
+  padding: var(--s-1) var(--s-2) var(--s-2);
+  border: var(--line-w) solid var(--line-overlay);
+  border-radius: var(--r-2);
+}
+.menu .st-block.leads {
+  background: var(--bg);
+}
+.menu .st-fine {
+  display: grid;
+  gap: 2px;
+}
+/* a problem's line grows stronger, in --ink at 600, over the fine lines' --ink-2 at 400 (round 6: three wells of one
+   weight read the green group as a third problem) */
+.menu .st-block.leads > span .st-text {
+  color: var(--ink);
+  font-weight: 600;
+}
+/* under the problems, the fine well has a heading of the menu's own, "Fine", on the lines' x, the gap over it a step
+   wider than between the problems: the healthy group set apart, quieter (design-system.md "Status pill menu") */
+.menu .st-h {
+  padding: var(--s-3) 0 var(--s-1);
 }
 .menu .st-link {
   all: unset;
@@ -424,8 +537,10 @@ button {
   white-space: nowrap;
   min-width: 0;
 }
-.cmdk .menu .r {
-  white-space: nowrap;
+/* A key cap stays at the row's end (a setting's value: system.css, by `.menu .r`). */
+.cmdk .menu button > .kbd {
+  margin-left: auto;
+  color: var(--ink-2);
 }
 .cmdk-none {
   padding: var(--s-5);
@@ -480,9 +595,28 @@ button {
   align-items: center;
   flex-wrap: wrap;
 }
+/* every outcome opens with the eyes, in its tone (ADR 0083, round 6; `outcomeEyes`): green settled, amber while
+   something is left to fix, quiet where it ended without one; the failed and needs-you notices carry theirs in pink */
 .verdict .eyes {
-  color: var(--ok-text);
   flex: none;
+}
+.verdict.ok .eyes {
+  color: var(--ok-text);
+}
+.verdict.fix .eyes {
+  color: var(--warn-text);
+}
+/* a review that ended without an outcome of its own, cancelled or not reviewed: the eyes still, quiet */
+.verdict.quiet .eyes {
+  color: var(--muted);
+}
+/* a failed review's notice, under its cause: when, then what would change it or what another try may do, a line of
+   its own so the commit never runs into its time (round 6) */
+.failed-more {
+  display: block;
+  margin-top: var(--s-1);
+  font-size: var(--t-13);
+  color: var(--ink-2);
 }
 .verdict details {
   flex-basis: 100%;
@@ -507,14 +641,22 @@ button {
   font-size: var(--t-13);
   color: var(--ink-2);
 }
+/* the round card's padding reads even: its step list ends on the posting step's held second line, empty most of the
+   time, so the card takes from its bottom padding what it gives its top, the same height in all (round 4,
+   2026-11-08: the room under "Posting on GitHub" was twice the room over "Round 1") */
 .running {
   display: grid;
   gap: var(--s-4);
+  padding-block: var(--s-6) var(--s-2);
 }
 .running-head {
   display: flex;
   gap: 14px;
   align-items: center;
+}
+/* the running step and its time under "Round 1", read: `--ink-2` (round 6) */
+.running-head .t-small {
+  color: var(--ink-2);
 }
 .steplist {
   list-style: none;
@@ -528,18 +670,23 @@ button {
   grid-template-columns: 20px 1fr auto;
   gap: 10px;
   align-items: center;
-  color: var(--muted);
+  /* a step not reached yet, legible: `--ink-2`, its ring hollow (round 6: in `--muted` it read as faint) */
+  color: var(--ink-2);
 }
 .steplist li.done,
 .steplist li.active {
   color: var(--ink);
 }
-/* The posting step's text: exactly two lines held, whatever its outbox says (ADR 0055), its words centred in them
-   and cut with an ellipsis rather than move the list. */
+/* The posting step's text: exactly two lines held, whatever its outbox says (ADR 0055), its words from the first,
+   cut with an ellipsis rather than move the list. Its mark and time sit on that first line, as every step's do, so
+   the gap above it is the list's gap; the second line is held under it. */
+.steplist li:has(> .two-lines) {
+  grid-template-rows: 1lh 1lh;
+  row-gap: 0;
+}
 .steplist .two-lines {
+  grid-row: span 2;
   height: 2lh;
-  display: flex;
-  align-items: center;
 }
 .steplist .two-lines > span {
   display: -webkit-box;
@@ -551,12 +698,11 @@ button {
 .steplist li.done .ic {
   color: var(--ok-text);
 }
-.steplist .dot,
-.substep .dot {
+.steplist .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  border: 1.5px solid var(--line-2);
+  border: 1.5px solid var(--ink-2);
   justify-self: center;
   display: block;
 }
@@ -592,7 +738,7 @@ button {
   color: var(--muted);
 }
 .detail .v {
-  font-size: var(--t-12);
+  font-size: var(--t-13);
   color: var(--muted);
   display: flex;
   gap: 8px;
@@ -630,8 +776,17 @@ button {
 }
 
 /* ---- settings ---- */
+/* a settings card's padding above and below, named once: More settings' rows take it too */
+:root {
+  --setcard-y: 4px;
+}
 .setcard {
-  padding: 4px var(--s-4);
+  padding: var(--setcard-y) var(--s-4);
+}
+/* More settings' rows (Review rules) in the cards' measure above them: a settings row's padding inside a card's,
+   a card's at the sides, its line at a settings row's help size */
+.more-settings .rowi {
+  padding: calc(var(--setrow-y) + var(--setcard-y)) var(--s-4);
 }
 .setcard > div[id] {
   border-top: 1px solid var(--line);
@@ -662,11 +817,11 @@ button {
 .origin-line {
   display: block;
   margin-top: 6px;
-  font-size: var(--t-12) !important;
+  font-size: var(--t-13) !important;
   color: var(--muted);
 }
 .origin-line .t-small {
-  font-size: var(--t-12);
+  font-size: var(--t-13);
 }
 .differs a {
   color: var(--ink-2);
@@ -706,11 +861,28 @@ button {
 .setup-acts .t-small {
   margin-right: auto;
 }
-.engine .lg .ic {
-  color: var(--ok-text);
+/* what a step says it is satisfied with (or, on the GitHub step, what was refused) sits against the buttons it is
+   about, set to their side, never alone at the row's far end (design-system.md "Setup's Continue") */
+.setup-acts .setup-said {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  text-align: end;
 }
-.engine .lg .eyes {
-  color: var(--ink);
+/* held two lines tall, as the refusal line is: shorter than the 44 px buttons beside it, so a refusal moves nothing */
+.setup-acts .setup-said.held {
+  min-height: 2lh;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+/* on a phone it takes its own line over the buttons, held there whatever it says */
+@media (max-width: 640px) {
+  .setup-acts .setup-said.held {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    text-align: start;
+  }
 }
 .substep.todo {
   opacity: 0.6;
@@ -726,38 +898,217 @@ button {
   display: grid;
   gap: 2px;
 }
-/* First review's list: the radio, then the place a reviewed row's chip and link take, held on every row, hidden on
-   one that can be picked, so a row getting reviewed moves nothing (design-system.md "First review's list") */
-.first-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--s-3);
-  align-items: center;
+/* Setup's grouped checklist: an account's head, then its repositories indented to the head's label, so each box
+   lines up under the account's name; a head with no box keeps its label there too (design-system.md "Setup's grouped
+   checklist") */
+.checklist:has(> .checklist-group) {
+  gap: var(--s-6);
 }
-.first-row-reviewed {
+.checklist-group {
+  display: grid;
+  gap: var(--s-3);
+}
+/* the box and its gap: where the head's label starts */
+.checklist-group > .check:not(:first-child),
+.checklist-head {
+  margin-left: calc(var(--check) + var(--check-gap));
+}
+.checklist-head {
+  font-size: var(--t-14);
+}
+.checklist-head > span {
+  display: grid;
+  gap: 2px;
+}
+/* Each repository on one line at every size, ten or fewer too (one layout of one component, round 6): its name, then
+   its open pull requests in a column of their own at the row's right edge, so the counts read down one edge (round 4
+   had them beside the name, ragged; ten or fewer had them under it) */
+.checklist-group > .check:not(:first-child) {
   display: flex;
-  align-items: center;
+}
+.checklist-group > .check:not(:first-child) > span {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: var(--s-3);
+  min-width: 0;
+}
+.checklist-group > .check:not(:first-child) > span > b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Past ten repositories (ADR 0082, 0083): each head on the account's head band (`.group-band`), the chevron that
+   folds the group, then the account's box, its name and how many of it are ticked on one line; the rows' boxes under
+   the account's name, past the band's padding, the chevron and the box */
+.checklist-large:has(> .checklist-group) {
+  gap: var(--s-4);
+}
+.checklist-large .checklist-group {
   gap: var(--s-2);
 }
-/* the chip against its link, whichever label it shows */
-.first-row-reviewed .same-width-slot {
-  justify-content: flex-end;
+.checklist-band {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  min-height: var(--s-10);
+  padding: var(--s-1) var(--s-3) var(--s-1) var(--s-1);
+  border-radius: var(--r-2);
 }
-.first-row:not(.reviewed) .first-row-reviewed {
+.checklist-band > :is(.check, .checklist-head) {
+  flex: 1;
+  min-width: 0;
+  margin-left: 0;
+  align-items: center;
+}
+.checklist-band .checklist-head {
+  padding-left: calc(var(--check) + var(--check-gap));
+}
+.checklist-large .check > span,
+.checklist-band .checklist-head > span {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  min-width: 0;
+}
+.checklist-large .check > span > b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.checklist-large .checklist-group > .check:not(:first-child) {
+  margin-left: calc(var(--s-1) + var(--s-6) + var(--s-1) + var(--check) + var(--check-gap));
+  padding-right: var(--s-3);
+}
+/* a repository's open pull requests, in Repositories' words and weights: "2 open" in ink, "0 open" muted
+   (`.open-zero`), at the row's right edge */
+.checklist-open {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+/* the collapse control (`.group-toggle`), alone before the account's box, muted */
+.checklist-band > .group-toggle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--s-6);
+  height: var(--s-6);
+  color: var(--muted);
+}
+.checklist-band > .group-toggle:hover {
+  color: var(--ink);
+}
+/* Continue's footer: it sticks to the window's bottom while the list scrolls, opaque, a hairline above it */
+.setup-acts-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  min-height: var(--h-setup-footer);
+  padding-block: var(--s-3);
+  background: var(--bg);
+  box-shadow: 0 calc(-1 * var(--line-w)) 0 var(--line);
+}
+.setup-acts-footer .t-small {
+  font-variant-numeric: tabular-nums;
+}
+/* while the footer is there, whatever Tab reaches (a box, a chevron, "Why?") scrolls clear of it, with a little room */
+html:has(.setup-acts-footer) {
+  scroll-padding-bottom: calc(var(--h-setup-footer) + var(--s-2));
+}
+/* on a phone the count takes its own line, Back and Continue under it: the footer taller by that line and its gap */
+@media (max-width: 640px) {
+  .setup-acts-footer .t-small {
+    flex-basis: 100%;
+  }
+  html:has(.setup-acts-footer) {
+    scroll-padding-bottom: calc(var(--h-setup-footer) + var(--s-3) + 1.45 * var(--t-13) + var(--s-2));
+  }
+}
+/* First review's list: the radio, then the places a reviewed row's chip and link take, held on every row, hidden on
+   one that can be picked, so a row getting reviewed moves nothing (design-system.md "First review's list"). The chip
+   ends the row's title; the link stands alone at the row's right, centred on the title and the small line, its
+   column only as wide as the link and never taller than the two lines (round 6: the chip stacked over the link made
+   every row taller than its two lines, the title and its line loosened apart; at the small line's end the chip
+   wrapped onto a third line, the line's time leaving it no room).
+   The radio's label lends its pieces to the row's grid (`display: contents`), still one label: a click on its words
+   picks the row. */
+.first-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: var(--check-gap);
+  /* not a token: a title and its small line read as one item, as Repositories' group heads (`.repos-group-title`) */
+  row-gap: 2px;
+  align-items: center;
+}
+.first-row > .check,
+.first-row > .check > span {
+  display: contents;
+}
+.first-row > .check > input {
+  grid-area: 1 / 1;
+}
+.first-row > .check > span > b {
+  grid-area: 1 / 2;
+}
+.first-row > .check > span > .t-small {
+  grid-area: 2 / 2;
+}
+/* the chip after the title's last word, in the title's own line box: its margin box a line tall (the chip's padding
+   above and below its 12 px word), so the title is no taller with it and keeps its 2 px over the small line */
+.first-row-chip {
+  display: inline-flex;
+  vertical-align: top;
+  margin-block: calc((1lh - var(--t-12) - 2 * var(--chip-pad-y)) / 2);
+  margin-left: var(--s-2);
+}
+.first-row-reviewed {
+  grid-area: 1 / 3 / 3 / 4;
+  align-self: center;
+  display: flex;
+  margin-left: calc(var(--s-3) - var(--check-gap));
+}
+.first-row:not(.reviewed) :is(.first-row-chip, .first-row-reviewed) {
   visibility: hidden;
 }
+/* a reviewed row is done, not disabled: its radio can't be picked, but its title stays in ink and its line in
+   --muted, its chip saying its state */
+.first-row.reviewed .check:has(> input[type="radio"][disabled]) > span {
+  opacity: 1;
+}
+.first-row.reviewed .check:has(> input[type="radio"][disabled]) {
+  cursor: default;
+}
+/* first review's line under the list never leaves one word alone: each sentence a block of its own (the view model's
+   parts, `.held-sentence`), and one too long for its line balanced ("#148 too." alone with `pretty`, round 5;
+   `balance` across both sentences split "by / itself", round 6) */
 .first-reviewed-line {
   margin: 0;
+  text-wrap: balance;
 }
 @media (max-width: 640px) {
   .first-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--s-2);
+    grid-template-columns: auto minmax(0, 1fr);
   }
-  /* under the row's small line, at its label's start: past the radio's 18 px and its 10 px gap (`.check`) */
+  /* under the row's small line, at its label's start, held as well */
   .first-row-reviewed {
-    padding-left: 28px;
+    grid-area: 3 / 2;
+    justify-self: start;
+    margin: var(--s-1) 0 0;
   }
+}
+/* setup's last card holds still for the footer under it: every line it can say is a card in one place, only its own
+   seen, so the room the tallest takes is under the card, never inside it (design-system.md "Your coding agent") */
+.background-hold {
+  display: grid;
+}
+.background-hold > .card {
+  grid-area: 1 / 1;
+  align-self: start;
+}
+.background-hold > .held-room {
+  visibility: hidden;
 }
 .background-note {
   display: grid;
@@ -874,7 +1225,7 @@ button {
 .try-card ol {
   margin: 0;
   padding-left: 18px;
-  color: var(--muted);
+  color: var(--ink-2);
   display: grid;
   gap: 4px;
 }
@@ -984,14 +1335,36 @@ dialog.cmdk {
 .cmdk .menu button .chip {
   flex: none;
 }
-/* The chip has its own column, as in a row, so the titles line up. */
+/* The chip has its own column, as in a row, so the titles line up: as wide as the chip, whose width the design system
+   sets (`.cmdk-lead > .chip`, `--w-chip`). */
 .cmdk-lead {
   display: flex;
   flex: none;
-  width: 96px;
 }
-.cmdk-label {
-  flex: 1;
+/* A pull request's row is two lines, as a row in a list: its title whole on the first (it wraps, never cut), its
+   repository and number whole on the second, in mono and --muted as a row's meta. */
+.cmdk-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+/* Its chip is level with the title's first line, not centred on the two: the row's items sit at its top, and the chip's
+   column is one title line high, the chip centred in it. */
+.cmdk .menu button:has(.cmdk-title) {
+  align-items: flex-start;
+}
+.cmdk .menu button:has(.cmdk-title) .cmdk-lead {
+  height: calc(var(--t-14) * 1.2);
+  align-items: center;
+}
+.cmdk-title .cmdk-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.cmdk-meta {
+  font: 400 var(--t-12) / 1.3 var(--mono);
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .setrow span span,
 .setrow span a {
@@ -1060,57 +1433,15 @@ dialog.cmdk {
 /* ---- top bar: the nav runs the full height so its bar sits on the edge ---- */
 .app > .top {
   padding-block: 0;
-  min-height: 52px;
 }
 .app > .top .navsep {
   align-self: center;
 }
 
-/* ---- alert band: what needs the person, above every page, never a row ---- */
-.alerts {
-  background: var(--raised);
-  border-bottom: 1px solid var(--line-2);
-  animation: page-in var(--d-4) var(--e-out);
-}
-.alerts-in {
-  max-width: 880px;
-  margin: 0 auto;
-  padding: var(--s-2) var(--s-5);
-  display: grid;
-}
-.alert {
-  display: grid;
-  grid-template-columns: 84px 1fr auto;
-  gap: var(--s-3);
-  align-items: center;
-  padding: var(--s-2) 0;
-  font-size: var(--t-14);
-  color: var(--ink-2);
-}
-.alert + .alert {
-  border-top: 1px solid var(--line-2);
-}
-.alert b {
-  color: var(--ink);
-}
-.alert-label {
-  font: 700 11px var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--acc-text);
-}
-.alert.warn .alert-label {
-  color: var(--warn-text);
-}
-/* The button keeps its width while it waits, as wide as the widest fix: "Copy code and open GitHub" on one line. */
-.alert .btn {
-  width: var(--w-fix);
-  justify-content: center;
-}
-
-/* ---- rows: the status chip has its own column, so titles line up ---- */
+/* ---- rows: the status chip has its own column, so titles line up: as wide as the chip, whose width the design system
+   sets (`.rowi.status > .chip`, `--w-chip`) ---- */
 .rowi.status {
-  grid-template-columns: 96px 1fr auto;
+  grid-template-columns: auto 1fr auto;
 }
 .rowi.status > .chip {
   justify-self: start;
@@ -1121,9 +1452,6 @@ dialog.cmdk {
 .rowi > .ac > .ic {
   color: var(--muted);
   display: block;
-}
-.rowi:has(.sev-label) {
-  grid-template-columns: 96px 1fr auto;
 }
 
 /* ---- "All reviews": a row-sized way on, not a text link ---- */
@@ -1138,12 +1466,13 @@ dialog.cmdk {
   color: var(--ink);
   font-weight: 600;
   text-decoration: none;
+  background: var(--surface);
   transition:
     border-color var(--d-1),
     background var(--d-1);
 }
 .more-row:hover {
-  background: var(--surface);
+  background: var(--raised);
   border-color: var(--faint);
 }
 .more-row .ic {
@@ -1159,7 +1488,7 @@ dialog.cmdk {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--disc-gap);
   cursor: pointer;
   font-size: var(--t-13);
   color: var(--muted);
@@ -1198,8 +1527,9 @@ dialog.cmdk {
   overflow: hidden;
   min-height: 0;
 }
+/* what opens starts past the chevron and its gap, under the summary's words */
 .disc-in {
-  padding: 6px 0 4px 22px;
+  padding: 6px 0 4px calc(var(--ic) + var(--disc-gap));
   font-size: var(--t-13);
   color: var(--ink-2);
   max-width: 66ch;
@@ -1244,7 +1574,7 @@ dialog.cmdk {
   color: var(--ink-2);
 }
 .disc-row .disc-v {
-  font-size: var(--t-12);
+  font-size: var(--t-13);
   color: var(--muted);
   display: flex;
   gap: 8px;
@@ -1297,17 +1627,6 @@ dialog.cmdk {
   width: 14px;
   height: 14px;
 }
-/* One colour per state: a done square is green all the way, never a green tick on grey. */
-.engine .lg.done {
-  background: color-mix(in srgb, var(--ok) 14%, transparent);
-  color: var(--ok-text);
-}
-.engine .lg.done .ic {
-  color: var(--ok-text);
-}
-.engine .lg.busy {
-  color: var(--ink);
-}
 .substep.later {
   opacity: 0.55;
 }
@@ -1343,13 +1662,32 @@ dialog.cmdk {
   min-height: 24px;
 }
 .repo-setting .same {
-  color: var(--faint);
+  color: var(--muted);
 }
 .repo-setting .override {
   min-width: 240px;
 }
 .tbl.repos td .t-small {
   margin-top: 2px;
+}
+/* zero is data: "0 open" in the count's own place and words; a count of any reads stronger, in ink at 600, and zero
+   quieter by weight, at the body's, in `--muted`, never fainter, so the few rows with any stand out (Repositories'
+   Pull requests cell, setup's rows; round 6) */
+.repos-open,
+.checklist-open {
+  font-weight: 600;
+}
+.open-zero {
+  color: var(--muted);
+  font-weight: 400;
+}
+/* every switch centred on its row's text block: a box of its own height, not an inline box sitting on the line's
+   baseline (a few pixels high), centred by its cell as the name's lines are by theirs, and centred across its column
+   under the Reviewing head, itself centred (round 6: the head ran right of the switches) */
+.tbl.repos td > .switch,
+.tbl.repos .repos-group-switch {
+  display: flex;
+  justify-content: center;
 }
 .rv-acts {
   align-items: center;
@@ -1370,16 +1708,6 @@ dialog.cmdk {
   visibility: hidden;
 }
 @media (max-width: 640px) {
-  .alert {
-    grid-template-columns: 1fr;
-    gap: 6px;
-  }
-  .alert .btn {
-    justify-self: start;
-  }
-  .alerts-in {
-    padding-inline: var(--s-4);
-  }
   .rowi.status {
     grid-template-columns: 1fr auto;
   }
@@ -1481,9 +1809,15 @@ dialog.cmdk {
 }
 .tbl.repos thead th:nth-child(3) {
   width: 120px;
+  text-align: center;
 }
 .tbl.repos td {
   height: 62px;
+}
+/* the table never scrolls sideways (design-system.md, ADR 0082): a name too long for its cell wraps rather than run
+   under the switch and out of the page */
+.tbl.repos td:first-child {
+  overflow-wrap: anywhere;
 }
 /* on a phone, Pull requests kept at no width (above): the repository's name takes what Reviewing leaves, not a third
    of the screen, so "owner/name" stays on one line */
@@ -1494,6 +1828,29 @@ dialog.cmdk {
 }
 
 /* ---- saved, said quietly ---- */
+/* Review rules: the stamp on the line over the table, at its end, over the switches it confirms (design-system.md
+   "Save state") */
+.rules-intro {
+  display: flex;
+  align-items: last baseline;
+  gap: var(--s-4);
+}
+/* the page's one description, under its title as a sentence's small line sits (`.sentence small`'s 4 px): the
+   title's own line is not shown, it said the same thing (round 6). It takes back the gap `.page` (a grid,
+   `gap: var(--s-5)`) lays between its children: a change to that gap changes this one. Not the Sentence's own
+   `small`: that is inside the page's heading, and the save stamp beside it would be read as part of the title. */
+.sentence-row + .rules-intro {
+  margin-top: calc(var(--s-1) - var(--s-5));
+}
+.rules-intro > p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  text-wrap: balance;
+}
+.rules-intro .save-state {
+  justify-content: flex-end;
+}
 .save-state {
   display: inline-flex;
   align-items: center;
@@ -1501,7 +1858,7 @@ dialog.cmdk {
   width: 84px;
   flex: none;
   font-size: var(--t-12);
-  color: var(--faint);
+  color: var(--muted);
 }
 .save-state .ic {
   width: 14px;

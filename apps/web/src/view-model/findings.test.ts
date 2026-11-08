@@ -7,6 +7,7 @@ import {
   type Finding,
   type FindingStatus,
   findingId,
+  jobId,
   type Review,
   type Rule,
   repositoryId,
@@ -14,7 +15,9 @@ import {
 } from "@lookover/contracts";
 import {
   doneLine,
+  edgeNeedsYou,
   findingGroups,
+  findingMeta,
   findingTabs,
   needsYou,
   noiseChoices,
@@ -24,6 +27,7 @@ import {
   SEVERITY_LABEL,
   whyRaised,
 } from "./findings.ts";
+import { SEPARATOR } from "./format.ts";
 
 function finding(id: string, status: FindingStatus, extra: Partial<Finding> = {}): Finding {
   return {
@@ -76,6 +80,15 @@ test("a finding's place reads as publish words it on GitHub: one line or a range
   );
 });
 
+test("a finding's meta line: its category, since when it is open, and not posted when it wasn't, dots held", () => {
+  expect(findingMeta(finding("a", "open", { raisedIn: 2 }))).toBe(
+    `Correctness${SEPARATOR}open since round 2`,
+  );
+  expect(findingMeta(finding("a", "open", { posted: false }))).toBe(
+    `Correctness${SEPARATOR}open since round 1${SEPARATOR}not posted on GitHub`,
+  );
+});
+
 test("severities read Blocking, Should fix and Consider", () => {
   const all: Severity[] = ["blocking", "should_fix", "consider"];
   expect(all.map((s) => SEVERITY_LABEL[s])).toEqual(["Blocking", "Should fix", "Consider"]);
@@ -112,9 +125,60 @@ test("to do lists what matters most first, as the pull request does: blocking, s
   expect(ids(groups.todo)).toEqual(["d", "c", "b", "e", "a"]);
 });
 
-test("only an escalated finding needs you", () => {
+test("only an escalated finding posted on the pull request needs you, as the loop counts it (I-152)", () => {
   expect(needsYou(finding("a", "escalated"))).toBe(true);
   expect(needsYou(finding("a", "open"))).toBe(false);
+  expect(needsYou(finding("a", "escalated", { posted: false }))).toBe(false);
+});
+
+/** A review whose loop waits on the owner, its banner saying "Needs you", nothing running. */
+function needingYou(findings: Finding[]): Review {
+  return { ...review(findings), loop: "needs_owner" };
+}
+
+/** A review with a later round running: the page shows the running round, no banner. */
+function running(findings: Finding[]): Review {
+  return {
+    ...needingYou(findings),
+    job: {
+      id: jobId("job-2"),
+      sha: commitSha("b2e8d1f"),
+      trigger: "push",
+      state: "running",
+      deferral: null,
+      stepIn: null,
+      askedBy: null,
+      skip: null,
+      cancel: null,
+      failure: null,
+      turn: null,
+    },
+  };
+}
+
+test("a finding that needs you is marked by its edge only among open findings that don't", () => {
+  const escalated = finding("a", "escalated");
+  const open = finding("b", "open");
+  const fixed = finding("c", "verified_fixed");
+  // Among others that don't need you, the one that does is marked: the banner can't say which.
+  expect(edgeNeedsYou(needingYou([escalated, open]), escalated)).toBe(true);
+  expect(edgeNeedsYou(needingYou([escalated, open]), open)).toBe(false);
+  // Alone (done findings don't count), the banner already said it: no mark.
+  expect(edgeNeedsYou(needingYou([escalated, fixed]), escalated)).toBe(false);
+  expect(edgeNeedsYou(needingYou([escalated, finding("d", "escalated")]), escalated)).toBe(false);
+});
+
+test("with a later round running, no banner: a finding that needs you is marked by its edge, alone too", () => {
+  const escalated = finding("a", "escalated");
+  expect(edgeNeedsYou(running([escalated, finding("c", "verified_fixed")]), escalated)).toBe(true);
+  expect(edgeNeedsYou(running([escalated, finding("b", "open")]), escalated)).toBe(true);
+});
+
+test("an escalated finding kept off the pull request needs no one: no edge, banner or not", () => {
+  const kept = finding("a", "escalated", { posted: false });
+  expect(edgeNeedsYou(review([kept]), kept)).toBe(false);
+  expect(edgeNeedsYou(running([kept]), kept)).toBe(false);
+  expect(edgeNeedsYou(needingYou([kept, finding("b", "open")]), kept)).toBe(false);
 });
 
 test("the tabs are To do and Done, each only when it has findings", () => {
@@ -131,7 +195,15 @@ test("the tabs are To do and Done, each only when it has findings", () => {
 test("a finding verified fixed says on which commit, by its first seven characters, and in which round", () => {
   const whole = commitSha("9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7c6");
   const fixed = finding("a", "verified_fixed", { verifiedSha: whole, closedIn: 3 });
-  expect(doneLine(fixed)).toEqual({ kind: "verified", sha: "9f8e7d6", round: 3 });
+  // One sentence, the commit set apart from the round by a comma: "verified fixed in 9f8e7d6, round 3".
+  expect(doneLine(fixed)).toEqual({
+    kind: "verified",
+    words: ["verified fixed in ", { commit: whole }, ", round 3"],
+  });
+  expect(doneLine({ ...fixed, closedIn: null })).toEqual({
+    kind: "verified",
+    words: ["verified fixed in ", { commit: whole }],
+  });
 });
 
 test("a finding is on GitHub when it was posted, and never after a preview", () => {
@@ -205,6 +277,7 @@ test('"Too noisy?" offers turning off the rule a finding cites and posting only 
     text: "Never log a secret.",
     enabled: true,
     parentOff: false,
+    nestedIn: false,
     nested: 0,
     raised: 9,
     acted: 4,

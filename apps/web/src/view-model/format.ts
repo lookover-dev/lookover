@@ -1,5 +1,24 @@
 // Small formatting helpers for product copy. Plain words, exact numbers.
-import { dayText, twoDigits } from "@lookover/contracts";
+import { type CommitSha, dayText, type Repository, twoDigits } from "@lookover/contracts";
+
+/**
+ * Words with commits in them: text, or a commit, which a review screen draws as `Sha` and the mock GitHub view as a
+ * link to it ("Looked over ", a commit, ". Two things to fix.").
+ */
+export type Words = (string | { commit: CommitSha })[];
+
+/**
+ * Whether the text after a chip of inline code starts with punctuation (".", ",", ":", ";", "!", "?", ")"), which then
+ * sits against the chip as it would against a word (design-system.md "Inline code").
+ */
+export function punctuationNext(next: string | undefined): boolean {
+  return next !== undefined && /^[.,:;!?)]/.test(next);
+}
+
+/** "sasensi/ledger-api": a repository with its owner, as Repositories lists every account's (ADR 0066). */
+export function repositoryLabel(repo: Pick<Repository, "owner" | "name">): string {
+  return `${repo.owner}/${repo.name}`;
+}
 
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
@@ -9,6 +28,22 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 export function inSentence(items: readonly string[], word: "and" | "or"): string {
   const last = items.at(-1) ?? "";
   return items.length > 1 ? `${items.slice(0, -1).join(", ")} ${word} ${last}` : last;
+}
+
+/**
+ * The separator between a meta line's parts, " · ", its dot held to the part after it by a no-break space, so a line
+ * that wraps breaks before a dot, never after one (design-system.md "Row").
+ */
+export const SEPARATOR = " · ";
+
+/** A part's own " · ", each held as `SEPARATOR` holds its dot: for a part the screen puts beside others itself. */
+export function holdSeparators(text: string): string {
+  return text.replaceAll(" · ", SEPARATOR);
+}
+
+/** A meta line from its parts, one `SEPARATOR` between every two, and every " · " inside a part held the same way. */
+export function metaLine(parts: readonly string[]): string {
+  return parts.map(holdSeparators).join(SEPARATOR);
 }
 
 /** The word that points back at `n` things, beside `plural`: "it" for one, "them" for any other count. */
@@ -118,6 +153,19 @@ export function onDayAt(now: number, at: number, timeZone?: string): string {
   return `on ${dayText(new Date(then.day * DAY_MS))} at ${then.time}`;
 }
 
+/** "on Wed 14 Oct at 10:11" whatever the day: how `onDayAt` says `at` once its day has passed, for a line held. */
+export const onDay = (at: number, timeZone?: string): string => onDayAt(at + 2 * DAY_MS, at, timeZone);
+
+/**
+ * When a log line happened (ADR 0081): "16:02" on `now`'s day, "Sun 4 Oct 16:02" on another, in the browser's zone,
+ * which is the service's machine's by default.
+ */
+export function logStamp(now: number, at: number, timeZone?: string): string {
+  const then = local(at, timeZone);
+  if (then.day === local(now, timeZone).day) return then.time;
+  return `${dayText(new Date(then.day * DAY_MS))} ${then.time}`;
+}
+
 export function isToday(now: number, at: number): boolean {
   return now - at < 16 * 3600_000;
 }
@@ -126,11 +174,20 @@ export function isToday(now: number, at: number): boolean {
  * A sentence with a command in it: `before`, the command, `after`, joined by spaces. The UI shows the command as
  * inline code (design-system.md "Inline code"); a sentence with none is a plain string. An `after` with a command
  * of its own carries on the sentence with a second one. `kind: "device-code"`: the command is a code a person types
- * elsewhere, drawn so its look-alikes can't be taken for each other (design-system.md "Device code").
+ * elsewhere, drawn so its look-alikes can't be taken for each other (design-system.md "Device code"). `kind: "path"`:
+ * the command is a path (a folder, a file), whose spaces are its own: a line breaks only after its separators. Any
+ * other command breaks at the spaces between its words too (`ui/path.tsx`). `alone`: the sentence said instead when
+ * the command is too long to sit in one (`codePlace`, `view-model/said.ts`), ending before it, `before` and `after`
+ * folded in; the command then goes on its own line under it.
  */
 export interface WithCommand {
   before: string;
   command: string;
-  kind?: "device-code";
+  kind?: "device-code" | "path";
   after: string | WithCommand;
+  /**
+   * The sentence said when the command goes on its own line, ending before it. A string `after` is not said then:
+   * fold it in here, or it is lost. An `after` with a command of its own still follows, under the line.
+   */
+  alone?: string;
 }

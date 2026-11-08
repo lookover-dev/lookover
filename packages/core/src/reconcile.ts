@@ -4,6 +4,7 @@
 import {
   type CandidateFinding,
   type ClaimKind,
+  type CommitSha,
   type EarlierVerdict,
   type Finding,
   type FindingId,
@@ -48,6 +49,13 @@ export interface ReconcileInput {
   withheld?: FindingId[];
   /** The owner asked `/lookover review full` (ADR 0052): the round posts as a first round would. */
   full?: boolean;
+  /**
+   * The commit of the change's newest round before this one (null: none). A round on another commit follows a push
+   * (a force-push back to an older one included): a finding still present there says why on its thread (ADR 0081).
+   * A round that gave its posts up still counts as checked: a still-present reply that never landed is not sent again
+   * by a round on the same commit, the finder's reason then said nowhere on the thread. Accepted, as it is rare.
+   */
+  lastChecked: CommitSha | null;
 }
 
 /** Strictness is a posting filter (ADR 0025): it never changes what is found, only what becomes a comment. */
@@ -165,6 +173,26 @@ interface Settled {
   reply: ThreadReply | null;
 }
 
+/**
+ * What Lookover says on the thread of a finding nobody claimed anything on (ADR 0081): after a push (`pushed`), one
+ * open with its own thread and still present says the finder's reason as of now, never round 1's words again, and
+ * counts for nothing. None on the same commit, on an escalated finding (the owner's turn), on one with no thread
+ * (in the status block only, or not posted), or without a reason of the finder's own for it being present: a
+ * finding listed again but said gone is still present, but the gone verdict's reason says why it is fixed.
+ */
+function stillPresent(
+  finding: Finding,
+  said: Said,
+  verdict: EarlierVerdict | undefined,
+  pushed: boolean,
+): ThreadReply | null {
+  const why = verdict?.verdict === "present" ? verdict.why.trim() : "";
+  const threaded = finding.posted && finding.commented && finding.status === "open";
+  return pushed && threaded && said === "present" && why !== ""
+    ? { findingId: finding.id, kind: "still_present", why }
+    : null;
+}
+
 /** A finding reported again with its line's text, `again`, takes that line, range, text and suggestion (ADR 0044). */
 function movedBy(finding: Finding, again: CandidateFinding | undefined, round: number): Finding {
   if (again?.lineText == null) return finding;
@@ -189,7 +217,8 @@ function movedBy(finding: Finding, again: CandidateFinding | undefined, round: n
  * An earlier finding after the round. Settled findings never change again. `again`: the candidate that reports it
  * again, so it is present whatever the verdict says; it is never verified fixed while the reviewer still sees it.
  * With its line's text, that candidate says where the finding is now: its line, range and text are taken (ADR 0044).
- * Gone, it is verified fixed, whatever its claim. Otherwise the claim read on its thread is answered (`ANSWERS`):
+ * Gone, it is verified fixed, whatever its claim. With no claim read, a push may leave it still present
+ * (`stillPresent`). Otherwise the claim read on its thread is answered (`ANSWERS`):
  * kept counts one more keep, and the second escalates it; withdrawn and escalated take the finder's why, as every reply
  * does (else the body it reported again, else the finding's); acknowledged takes the author's reply as why it settled. An answered claim is stored on the finding (`claim`), the one place its text lives.
  */
@@ -199,6 +228,7 @@ function settle(
   outcome: RoundOutcomeInput,
   threads: ThreadReading,
   round: number,
+  pushed: boolean,
 ): Settled {
   if (!isUnsettled(finding)) return { finding, reply: null };
   const verdict = outcome.earlier.find((v) => v.id === finding.id);
@@ -220,7 +250,7 @@ function settle(
       reply: null,
     };
   }
-  if (!read) return { finding: base, reply: null };
+  if (!read) return { finding: base, reply: stillPresent(finding, said, verdict, pushed) };
   const reply = (kind: ThreadReply["kind"]): ThreadReply => ({ findingId: finding.id, kind, why });
   switch (ANSWERS[read.kind][said][finding.severity === "blocking" ? "blocking" : "other"]) {
     case "unread":
@@ -293,7 +323,8 @@ export function reconcile(prior: Finding[], outcome: RoundOutcomeInput, input: R
   const withheld = new Set(input.withheld ?? []);
   // A withheld finding still open goes on the pull request now; one settled before it got there stays off it.
   const owed = (f: Finding) => !f.posted && f.status === "open" && withheld.has(f.id);
-  const after = prior.map((f, i) => settle(f, again(i), outcome, threads, input.round));
+  const pushed = outcome.sha !== input.lastChecked;
+  const after = prior.map((f, i) => settle(f, again(i), outcome, threads, input.round, pushed));
   const settled = after.map(({ finding: f }) => (owed(f) ? { ...f, posted: true } : f));
   const reposted = settled.filter((f, i) => f.posted && prior[i]?.posted === false);
   const raised = candidates

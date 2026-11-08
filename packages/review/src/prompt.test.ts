@@ -20,6 +20,7 @@ const job: ReviewJob = {
   state: "running",
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip: null,
   cancel: null,
   failure: null,
@@ -124,9 +125,20 @@ test("round 2 carries the earlier open findings and asks, for each, whether it i
     "- F3 (should_fix, correctness), found at `src/invoice.ts` line 12 (base side: a removed line)",
   );
   // No claim, no word of one: no reply quoted, no `wrong` to answer.
-  expect(prompt).not.toContain("thread");
+  expect(prompt).not.toContain("newest reply");
+  expect(prompt).not.toContain("Reply on its thread");
+  expect(prompt).not.toContain("author's words");
   expect(prompt).not.toContain("wrong");
   expect(prompt).toMatchSnapshot();
+});
+
+test("every earlier finding's `why` is written to the author about the code now, and one still there in another form is never listed again (ADR 0081)", async () => {
+  const prompt = await promptOf({ ...policy, round: 2, earlier: EARLIER });
+  // With no claim at all, `why` still goes to the author: Lookover posts it on a finding still present.
+  expect(prompt).toContain("write it to the author, about the code as it is now");
+  expect(prompt).toContain("is answered in `earlier`, never listed again under `findings`");
+  expect(prompt).toContain('{ "id": "F1", "present": true, "why": "to the author, about the code now" }');
+  expect(prompt).not.toContain("one sentence");
 });
 
 test("a claim is quoted under its finding as the author's words, with what is asked of it", async () => {
@@ -154,7 +166,9 @@ test("a dispute is offered `wrong`, in the section and in the block's shape", as
   expect(prompt).toContain(
     "  Judge the dispute on the code. Answer `wrong`: true only if the finding was a mistake, and say why in `why`; if it stands, `wrong`: false, `present` as for any finding, and say in `why` why it stands.",
   );
-  expect(prompt).toContain('{ "id": "F1", "present": true, "wrong": false, "why": "one sentence" }');
+  expect(prompt).toContain(
+    '{ "id": "F1", "present": true, "wrong": false, "why": "to the author, about the code now" }',
+  );
   expect(prompt).toMatchSnapshot();
 });
 

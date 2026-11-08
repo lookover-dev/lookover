@@ -45,9 +45,13 @@ const job = (state: JobState): ReviewJob => ({
   state,
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip: state === "skipped" ? "on-open-off" : null,
   cancel: state === "cancelled" ? "closed" : null,
-  failure: state === "failed" ? { kind: "review_failed", engine: "claude", detail: "it stopped" } : null,
+  failure:
+    state === "failed"
+      ? { kind: "review_failed", engine: "claude", detail: "it stopped", cause: null, limitMs: null }
+      : null,
   turn: null,
 });
 

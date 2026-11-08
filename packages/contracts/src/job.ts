@@ -14,6 +14,18 @@ export type JobState = "queued" | "deferred" | "running" | "done" | "skipped" | 
 export type Trigger = "opened" | "push" | "comment" | "manual" | "first-review";
 
 /**
+ * Who wrote a review request comment (ADR 0081): `agent`, one with the marker `lookover wait` writes; `person`, the
+ * command written by hand.
+ */
+export type AskedBy = "agent" | "person";
+
+/**
+ * Who pushed new commits (ADR 0081): `agent` when a coding agent signed every one GitHub listed; else null, no one
+ * named (GitHub doesn't say who pushed).
+ */
+export type PushedBy = "agent" | null;
+
+/**
  * Why a job was skipped. `not-yours`: another author's change nobody asked for in person (ADR 0016), only on the
  * skips recorded before ADR 0078: no new skip carries it, another author's change is not asked then.
  * `codex-not-yours`: another author's change, or a change from a fork asked for in person (ADR 0048), in a
@@ -118,12 +130,41 @@ export type JobFailureKind =
   | "host_failed"
   | "unexpected";
 
+/**
+ * What a failure came from, finer than its kind, set where the error is still typed (ADR 0081), never parsed out of
+ * `detail`. `git_silent`: git said nothing for retrieval's idle limit; `git_time_limit`: a git command ran past its
+ * whole limit, in any step of getting the code ready (the fetch, the worktree, the diff, the commit check);
+ * `engine_time_limit`: the engine ran past its limit; `base_not_found`: the commit and its base share no history, or
+ * the host no longer has one of them; `path_too_long`: git refused a path too long for the machine; `git_missing`: no
+ * git where the service runs; `network`: the host didn't answer (a rate limit has no cause); `engine_answer`:
+ * the engine crashed or gave an answer that could not be read.
+ */
+export type FailureCause =
+  | "git_silent"
+  | "git_time_limit"
+  | "engine_time_limit"
+  | "base_not_found"
+  | "path_too_long"
+  | "git_missing"
+  | "network"
+  | "engine_answer";
+
 export interface JobFailure {
   kind: JobFailureKind;
   /** What the module that failed said (git's words, the host's failure code…), for the record; never shown as is. */
   detail: string;
   /** The engine that was reviewing when it failed; null when no run had started. */
   engine: EngineId | null;
+  /**
+   * What it came from, when known; null otherwise. An event stored before ADR 0081 has no such field: a reader
+   * treats `undefined` as unknown, the same as null (`failure.cause ?? null`).
+   */
+  cause: FailureCause | null;
+  /**
+   * The time limit that ran out, in ms, as it was configured; null for any other cause. `undefined` on an event
+   * stored before ADR 0081: unknown, as for `cause`.
+   */
+  limitMs: number | null;
 }
 
 export interface ReviewJob {
@@ -148,6 +189,11 @@ export interface ReviewJob {
   failure: JobFailure | null;
   /** What it waits behind, set only while the job is queued (ADR 0055); null otherwise. */
   turn: Turn | null;
+  /**
+   * Who wrote the review request comment that asked for it, or the first that joined it (ADR 0081); null when no
+   * request did. Missing on a job an event stored before ADR 0081 carries: read as null.
+   */
+  askedBy: AskedBy | null;
 }
 
 /** A job that has not started: waiting its turn (queued) or deferred. */

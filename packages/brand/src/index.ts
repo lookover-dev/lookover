@@ -16,10 +16,12 @@
 // as offsets from its rest. `siteModule` and `siteStylesheet` render the site's two copies: the module that holds
 // those drawings for its pages and scripts, and the stylesheet that shows each in its theme and moves the loader
 // and the mark's states, through the formatter as the app's are.
-// `COPIES` lists every copy of the eyes elsewhere in the checkout as `{path, render}`; `writeCopies` writes them
-// (`bun run brand`, through the `./write` entry) and `driftedCopies` lists those on disk that differ from what
-// the source renders, one line each naming the file and saying to run `bun run brand`. Both are async and take
-// the formatter (Biome's unless given): a copy is compared with what the same formatter makes of the source.
+// `COPIES` lists every copy of the eyes elsewhere in the checkout as `{path, render}`, or `{path, picture}` for
+// the one picture, the GitHub App's logo, full bleed (a PNG drawn pixel by pixel from the mark's numbers);
+// `writeCopies` writes them (`bun run brand`, through the `./write` entry) and `driftedCopies` lists those on disk
+// that differ from what the source renders, one line each naming the file and saying to run `bun run brand`. Both
+// are async and take the formatter (Biome's unless given): a copy is compared with what the same formatter makes
+// of the source, a picture by its pixels, never its compressed bytes.
 // Invariants: every number a drawing prints is rounded to two decimals; the loader's pupils never rise above the
 // centre of their eye; a copy under `docs/` is written and checked only where `docs/` exists (the public tree has
 // none); text on disk is compared with CRLF read as LF; an addressable drawing without its stylesheet is the flat
@@ -38,6 +40,7 @@
 // It imports no other package; it is not pure (it reads and writes the copies).
 export { addressableLoader, addressableMark, addressableWordmark } from "./addressable.ts";
 export { appStylesheet, EYES_MODULE, eyesModule, STYLESHEET } from "./app.ts";
+export { APP_ICON, APP_ICON_SIZE, appIcon, MARK_REACH } from "./app-icon.ts";
 export { COPIES, type CopiesOptions, type Copy, driftedCopies, writeCopies } from "./copies.ts";
 export { type BiomeOptions, biomeFormatter, type Formatter } from "./format.ts";
 export { icon, type MarkParts, markParts } from "./icon.ts";

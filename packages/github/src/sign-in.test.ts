@@ -12,7 +12,7 @@ import {
   type SignIn,
   type SignInKeeper,
 } from "@lookover/contracts";
-import { AT, type Call, type Route, stubGitHub } from "./github.test-support.ts";
+import { AT, type Call, fakeWaits, noWaits, type Route, stubGitHub } from "./github.test-support.ts";
 import { createGitHub, createHostSignIn } from "./index.ts";
 
 const WEB = "https://github.com";
@@ -108,12 +108,15 @@ const GRANT: DeviceGrant = {
 function signInOver(...routes: Route[]) {
   const api = stubGitHub(...routes);
   const secrets: string[] = [];
+  const waits = fakeWaits();
   const signIn = createHostSignIn({
     fetch: api.fetch,
     clock: { now: () => AT },
+    sleep: waits.sleep,
+    deadline: waits.deadline,
     secret: (s) => secrets.push(s),
   });
-  return { signIn, calls: api.calls, secrets };
+  return { signIn, calls: api.calls, secrets, waits };
 }
 
 async function refusal(call: Promise<unknown>): Promise<HostError> {
@@ -215,6 +218,9 @@ describe("the device flow", () => {
   test("whose a token is, GitHub failing, is unavailable; a token it refuses is unauthorized", async () => {
     const failing = signInOver((call) => (call.path === "/user" ? { status: 502, body: {} } : undefined));
     expect((await refusal(failing.signIn.person("ghu_first"))).failure).toBe("unavailable");
+    // A read: tried 3 times in all, 1 s then 3 s apart (ADR 0080).
+    expect(failing.calls.filter((c) => c.path === "/user")).toHaveLength(3);
+    expect(failing.waits.sleeps).toEqual([1000, 3000]);
     const refused = signInOver((call) =>
       call.path === "/user" ? { status: 401, body: { message: "Bad credentials" } } : undefined,
     );
@@ -354,7 +360,7 @@ function session(first: SignIn | null, ...routes: Route[]) {
   const api = stubGitHub(...routes);
   const writes: { token: string; atCall: number }[] = [];
   const memory = memoryKeeper(first, (s) => writes.push({ token: s.token, atCall: api.calls.length }));
-  const github = createGitHub({ keeper: memory.keeper, fetch: api.fetch, clock });
+  const github = createGitHub({ keeper: memory.keeper, fetch: api.fetch, clock, ...noWaits() });
   const refreshes = () =>
     api.calls.filter((c) => c.origin === WEB && bodyOf(c).grant_type === "refresh_token").length;
   const bearers = () => api.calls.filter((c) => c.path.startsWith("/repos/")).map((c) => c.authorization);

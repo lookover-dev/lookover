@@ -2,8 +2,9 @@
 // 0053), chose the first review". Its users are the snapshot's base, which reads it, and the setup commands, which write a patch and
 // send what they get back. One row at most, written whole; before the first write the setup is at its first step,
 // nothing done. The furthest step reached is kept with the step: a step gone on to past it is the furthest now,
-// and going back never loses it (the same rule as `apply`'s, so a UI that follows the events and one that loads
-// the snapshot agree). In live mode the service writes "done" at the first start of a data folder; in demo mode the
+// and going back to a step never loses it (the same rule as `apply`'s, so a UI that follows the events and one
+// that loads the snapshot agree). A patch naming `reached` sets it: a start with the sign-in gone sends it back
+// to the GitHub step, so whoever signs in next chooses the repositories again (ADR 0079). In live mode the service writes "done" at the first start of a data folder; in demo mode the
 // scenario decides. Beside it, start at login (ADR 0049): the owner's choice, the machine's, off until chosen, kept
 // in its own row so choosing it never makes the setup kept. Nothing registers it before row 8.
 import type { Database } from "bun:sqlite";
@@ -24,7 +25,7 @@ export interface Setup {
   kept(): boolean;
   /**
    * Changes what `patch` names, keeps the rest, and gives the setup as it now is. A step past the furthest reached
-   * is the furthest now.
+   * is the furthest now; a patch naming `reached` sets it, as a start with the sign-in gone does (ADR 0079).
    */
   write(patch: Partial<SetupState>): SetupState;
   /** Whether the owner chose to start Lookover at login: on until chosen (ADR 0054). */

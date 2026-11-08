@@ -10,8 +10,6 @@ import {
   type Event,
   type HostAccount,
   type RepositoryRef,
-  type Setup,
-  type SetupStep,
   type SignIn,
   type State,
 } from "@lookover/contracts";
@@ -28,6 +26,7 @@ import {
   post,
   pr1,
   SANDBOX,
+  setupOn,
   snapshot,
   start,
   stopAll,
@@ -41,15 +40,6 @@ afterEach(stopAll);
 
 /** The hot cadence: a new pull request shows within it. */
 const HOT = 10_000;
-
-/** Setup on `step`, the App installed with its repositories, nothing else done. */
-const setupOn = (step: SetupStep): Setup => ({
-  done: false,
-  step,
-  reached: step,
-  github: "done",
-  firstReviewChange: null,
-});
 
 /** Another pull request of the owner's on `repo`, on commits of its own. */
 const another = (repo: RepositoryRef, number: number): FakeChange => ({

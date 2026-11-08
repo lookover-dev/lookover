@@ -306,14 +306,14 @@ test("S7: waiting for the AI's limit, under the author's description, with its r
   );
 });
 
-test("S8: the review failed: Couldn't look over, and how to try again", async () => {
+test("S8: the review failed: Couldn't look over, its cause (the engine crashed), and how to try again", async () => {
   const w = await opening(opened(), [{ outcome: "crashed", text: "" }]);
   expect(w.description()).toBe(
     describe(
       "",
       block(
         `Couldn't look over ${at(1, SHA_1)}`,
-        "Claude stopped before it finished. Push again, or comment `/lookover review`, to try again.",
+        "Claude gave no usable review. Push again, or comment `/lookover review`, to try again.",
       ),
     ),
   );
@@ -446,7 +446,7 @@ test("a failed review's block GitHub refused for a moment is written at the next
       "",
       block(
         `Couldn't look over ${at(1, SHA_1)}`,
-        "Claude stopped before it finished. Push again, or comment `/lookover review`, to try again.",
+        "Claude gave no usable review. Push again, or comment `/lookover review`, to try again.",
       ),
     ),
   );

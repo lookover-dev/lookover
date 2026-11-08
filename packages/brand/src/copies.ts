@@ -2,20 +2,25 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { appStylesheet, EYES_MODULE, eyesModule, STYLESHEET } from "./app.ts";
+import { APP_ICON, appIcon } from "./app-icon.ts";
 import { ROOT } from "./checkout.ts";
 import { biome, type Formatter } from "./format.ts";
 import { icon } from "./icon.ts";
 import { COLOURS } from "./numbers.ts";
+import { decodePng, encodePng, type Image } from "./png.ts";
 import { SHEET, sheet } from "./sheet.ts";
 import { SITE_FAVICON, SITE_MODULE, SITE_STYLESHEET, siteIcon, siteModule, siteStylesheet } from "./site.ts";
 import { wordmark } from "./wordmark.ts";
 
 /**
- * A copy: its path from the checkout's root, and its text as the source renders it. `render` is given the copy's
- * text on disk ("" when it is missing), so a copy that is only partly generated keeps its hand-written rest, and
- * the formatter the copies Biome formats go through.
+ * A copy: its path from the checkout's root, and either its text as the source renders it or its picture. `render`
+ * is given the copy's text on disk ("" when it is missing), so a copy that is only partly generated keeps its
+ * hand-written rest, and the formatter the copies Biome formats go through. A picture is written as a PNG and
+ * compared by its pixels.
  */
-export type Copy = { path: string; render: (current: string, format: Formatter) => string | Promise<string> };
+export type Copy =
+  | { path: string; render: (current: string, format: Formatter) => string | Promise<string> }
+  | { path: string; picture: () => Image };
 
 /** Where the copies are written or checked, and how those Biome formats are formatted. */
 export type CopiesOptions = {
@@ -40,6 +45,8 @@ export const COPIES: readonly Copy[] = [
   { path: `${BRAND}/lookover-mark.svg`, render: () => icon(null, ink, accent, false) },
   { path: `${BRAND}/lookover-mark-on-dark.svg`, render: () => icon(null, paper, accent, true) },
   { path: `${BRAND}/lookover-favicon.svg`, render: () => icon(ink, paper, accent, true) },
+  // The GitHub App's logo, full bleed: uploaded by hand on the App's page, its badge colour the ink (brand.md).
+  { path: APP_ICON, picture: appIcon },
   { path: "apps/web/public/favicon.svg", render: () => icon(ink, paper, accent, true) },
   { path: EYES_MODULE, render: (_, format) => eyesModule(format) },
   { path: STYLESHEET, render: appStylesheet },
@@ -72,8 +79,35 @@ function copiesIn(root: string, copies: readonly Copy[]): readonly Copy[] {
 
 const onDisk = (root: string, copy: Copy) => {
   const file = join(root, copy.path);
-  return existsSync(file) ? readFileSync(file, "utf8") : undefined;
+  return existsSync(file) ? readFileSync(file) : undefined;
 };
+
+/** What the source renders for `copy`, given its bytes on disk: its text, or its picture as a PNG. */
+async function rendered(
+  copy: Copy,
+  current: Buffer | undefined,
+  format: Formatter,
+): Promise<string | Uint8Array> {
+  return "picture" in copy
+    ? encodePng(copy.picture())
+    : copy.render(lf(current?.toString("utf8") ?? ""), format);
+}
+
+/** Whether the bytes on disk are what the source renders: the same text, or the same pixels. */
+async function same(copy: Copy, current: Buffer, format: Formatter): Promise<boolean> {
+  if ("picture" in copy) {
+    const want = copy.picture();
+    const got = decodePng(current);
+    return (
+      got !== undefined &&
+      got.width === want.width &&
+      got.height === want.height &&
+      Buffer.from(got.rgba).equals(Buffer.from(want.rgba))
+    );
+  }
+  const text = lf(current.toString("utf8"));
+  return text === lf(await copy.render(text, format));
+}
 
 /**
  * Writes every copy that belongs in `root` (this checkout unless a test names another) as the source renders it,
@@ -83,23 +117,23 @@ export async function writeCopies(
   root: string = ROOT,
   { format = biome, copies = COPIES }: CopiesOptions = {},
 ): Promise<string[]> {
-  const rendered = await Promise.all(
+  const written = await Promise.all(
     copiesIn(root, copies).map(async (copy) => ({
       path: copy.path,
-      text: await copy.render(lf(onDisk(root, copy) ?? ""), format),
+      content: await rendered(copy, onDisk(root, copy), format),
     })),
   );
-  return rendered.map(({ path, text }) => {
+  return written.map(({ path, content }) => {
     const file = join(root, path);
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, text);
+    writeFileSync(file, content);
     return path;
   });
 }
 
 /**
- * One line per copy in `root` that is not what the source renders (line endings aside, for a checkout with CRLF),
- * naming it and saying to run `bun run brand`; none when every copy is.
+ * One line per copy in `root` that is not what the source renders (line endings aside, for a checkout with CRLF;
+ * a picture by its pixels), naming it and saying to run `bun run brand`; none when every copy is.
  */
 export async function driftedCopies(
   root: string = ROOT,
@@ -107,10 +141,9 @@ export async function driftedCopies(
 ): Promise<string[]> {
   const lines = await Promise.all(
     copiesIn(root, copies).map(async (copy) => {
-      const text = onDisk(root, copy);
-      if (text === undefined) return [`${copy.path} is missing: run \`bun run brand\`.`];
-      const current = lf(text);
-      return current === lf(await copy.render(current, format))
+      const current = onDisk(root, copy);
+      if (current === undefined) return [`${copy.path} is missing: run \`bun run brand\`.`];
+      return (await same(copy, current, format))
         ? []
         : [`${copy.path} is not what the source draws: run \`bun run brand\`.`];
     }),

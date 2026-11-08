@@ -1,5 +1,22 @@
 import { expect, test } from "bun:test";
-import { duration, inSentence, itOrThem, LONGEST_RUNNING_TIMES, startsAt, until } from "./format.ts";
+import {
+  duration,
+  holdSeparators,
+  inSentence,
+  itOrThem,
+  LONGEST_RUNNING_TIMES,
+  metaLine,
+  punctuationNext,
+  SEPARATOR,
+  startsAt,
+  until,
+} from "./format.ts";
+
+test("punctuation next to a chip: a full stop, a comma, a colon, a closing bracket; not a space, a word or nothing", () => {
+  for (const next of [".", ". Two things.", ",", ":", ";", "!", "?", ")"])
+    expect(punctuationNext(next)).toBe(true);
+  for (const next of [" 3 min ago", "and", "", undefined]) expect(punctuationNext(next)).toBe(false);
+});
 
 const PARIS = "Europe/Paris";
 const NEW_YORK = "America/New_York";
@@ -80,4 +97,18 @@ test("a list in a sentence: one item alone, the last joined by its word, the res
   expect(inSentence(["a"], "or")).toBe("a");
   expect(inSentence(["a", "b"], "or")).toBe("a or b");
   expect(inSentence(["F2", "F3", "F5"], "and")).toBe("F2, F3 and F5");
+});
+
+test("a meta line holds each separator's dot to the part after it, inside a part too: it never wraps after a dot", () => {
+  // " ·" then a no-break space: the only place to break is before the dot.
+  expect(SEPARATOR).toBe(" · ");
+  expect(metaLine(["sasensi/app #12", "sasensi · written by Claude", "6 min ago"])).toBe(
+    "sasensi/app #12 · sasensi · written by Claude · 6 min ago",
+  );
+  expect(metaLine(["alone"])).toBe("alone");
+});
+
+test("a part's own separators are held the same way, alone or in a meta line", () => {
+  expect(holdSeparators("sasensi · written by Claude")).toBe("sasensi · written by Claude");
+  expect(holdSeparators("no dot")).toBe("no dot");
 });

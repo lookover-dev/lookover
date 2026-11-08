@@ -67,8 +67,18 @@ export type Command =
   | { type: "agent.check" }
   | { type: "settings.set"; key: SettingKey; value: SettingValue }
   | { type: "repo.setEnabled"; repoId: RepositoryId; enabled: boolean }
+  /**
+   * Many repositories' switches at once (ADR 0082): an account's switch, or setup's checkbox for an account. Each
+   * named repository still watched whose switch differs is set; one no longer watched is passed over. Refused when
+   * none is watched. Never an empty list.
+   */
+  | { type: "repos.setEnabled"; repoIds: [RepositoryId, ...RepositoryId[]]; enabled: boolean }
   | { type: "repo.setSetting"; repoId: RepositoryId; key: SettingKey; value: SettingValue }
   | { type: "repo.resetSetting"; repoId: RepositoryId; key: SettingKey }
-  /** A repository said departed (ADR 0059) no longer said: Repositories' × on its notice. Refused when none is said. */
-  | { type: "repo.dismiss"; repoId: RepositoryId }
+  /**
+   * Repositories said departed (ADR 0059) no longer said (ADR 0082): Repositories' × on one notice, or Dismiss all
+   * naming those its line showed. One named but not said departed is passed over; refused when none is said. Never an
+   * empty list.
+   */
+  | { type: "repos.dismiss"; repoIds: [RepositoryId, ...RepositoryId[]] }
   | { type: "rule.setEnabled"; ruleId: string; enabled: boolean };

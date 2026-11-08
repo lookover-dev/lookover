@@ -1,12 +1,14 @@
 // A review request (ADR 0021, ADR 0043, ADR 0052): a conversation comment on a change whose first line, trimmed, is
 // `/lookover review`, or `/lookover review full` (a full round: the round posts as a first round would), in any case.
-// `lookover wait` writes one with a hidden marker under it, `<!-- lookover:request {json} -->`, naming the commit it
+// `lookover wait` writes one with a line saying the coding agent asked, then a hidden marker,
+// `<!-- lookover:request {json} -->`, naming the commit it
 // asks about (`REQUEST_MARKER`), so it can tell later whether that commit was asked about, and the reply on a Lookover
 // thread it asks to have answered, when it asks again on a commit already reviewed; a person writes the command alone,
 // which names no commit (the change's head when it is read) and no reply. A comment holding any other `lookover:`
 // marker is Lookover's own or quotes it, never a request. Who may ask (the owner, not the App), and which comments
 // count (new ones, on open changes), is the service's rule; this file only reads and writes the text.
 import { z } from "zod";
+import { shortSha } from "./copy.ts";
 import { MARKER_PREFIX, REQUEST_MARKER } from "./frozen.ts";
 import { type CommitSha, commitSha } from "./ids.ts";
 
@@ -26,11 +28,16 @@ export interface ReviewRequestText {
 }
 
 /**
- * The request `lookover wait` posts for `sha`: the command, then the hidden marker naming the commit and, when given,
- * the reply it asks to have answered.
+ * The request `lookover wait` posts for `sha`: the command, a line for the people on the pull request saying the
+ * coding agent asked (ADR 0081: text nothing reads), then the hidden marker naming the commit and, when given, the
+ * reply it asks to have answered.
  */
 export const reviewRequest = (sha: CommitSha, asking: { reply?: number } = {}): string =>
-  `${COMMAND}\n${REQUEST_MARKER}${JSON.stringify({ v: 1, commit: sha, reply: asking.reply })}${MARKER_END}`;
+  [
+    COMMAND,
+    `Asked by the coding agent, for \`${shortSha(sha)}\`. Lookover hides this comment once its review is posted.`,
+    `${REQUEST_MARKER}${JSON.stringify({ v: 1, commit: sha, reply: asking.reply })}${MARKER_END}`,
+  ].join("\n");
 
 const SHA = /^[0-9a-f]{7,40}$/;
 // Each field read on its own: a field Lookover doesn't write is no commit or no reply, never a refusal of the rest.

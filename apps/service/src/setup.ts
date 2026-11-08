@@ -8,7 +8,8 @@
 // "nothing granted" or done, the repositories reached; the step itself moves only by the owner's `goto` (ADR 0058).
 // The first review is the queue's request (trigger
 // "first-review", a preview when the owner said "preview here only"); the setup keeps the change it was asked for,
-// once the queue knows it.
+// once the queue knows it. Moving the furthest step reached past Repositories (`chooseRepos`, or a `goto` beyond it)
+// is the choice of the repositories: until then nothing asks a review by itself (ADR 0079, `reposChosen`).
 // It must never know: the host (the installations are read by `installation.ts`), or
 // what a switch turned off does to a review (`core.intake`'s, through the queue).
 import type {
@@ -43,13 +44,17 @@ export interface SetupFlow {
   goto(step: SetupStep): void;
   /**
    * "Choose repositories": every repository's switch, on for those in `enabled` and off for the others; then the
-   * first review's step.
+   * first review's step. From then on, the repositories kept on are reviewed by themselves (ADR 0079).
    */
   chooseRepos(enabled: RepositoryId[]): void;
   /** The setup is done. */
   finish(): void;
-  /** The owner turned a repository's switch on or off; refused for a repository the service doesn't watch. */
-  setEnabled(repoId: RepositoryId, enabled: boolean): "ok" | "no_such_repository";
+  /**
+   * The owner turned repositories' switches on or off, one or many at once (ADR 0082): each named repository the
+   * service watches, in the order it watches them, sent when its switch moved; one it doesn't watch is passed over.
+   * Refused when it watches none of them.
+   */
+  setEnabled(repoIds: readonly RepositoryId[], enabled: boolean): "ok" | "no_such_repository";
   /**
    * A sign-in to the shared App made (ADR 0066), kept by the service, the connection naming the person already (the
    * installation's `signedIn` sent it): unless it is installed already, the install is waited for.
@@ -87,10 +92,10 @@ export function createSetup(d: SetupDeps): SetupFlow {
       write({ step: "first-review" });
     },
     finish: () => write({ done: true }),
-    setEnabled: (repoId, enabled) => {
-      const repo = d.repos().find((r) => repoIdOf(r) === repoId);
-      if (repo === undefined) return "no_such_repository";
-      switched(repo, enabled);
+    setEnabled: (repoIds, enabled) => {
+      const named = d.repos().filter((r) => repoIds.includes(repoIdOf(r)));
+      if (named.length === 0) return "no_such_repository";
+      for (const repo of named) switched(repo, enabled);
       return "ok";
     },
     signedIn: () => {

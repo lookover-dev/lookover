@@ -14,6 +14,8 @@ import {
   engineName,
   type Finding,
   type FixAction,
+  failedHead,
+  failureWords,
   isUnsettled,
   type Repository,
   type RepositoryId,
@@ -41,12 +43,16 @@ import {
   ago,
   agoSentence,
   clock,
+  holdSeparators,
   inSentence,
   isToday,
   itOrThem,
+  metaLine,
   plural,
+  repositoryLabel,
   until,
   type WithCommand,
+  type Words,
 } from "./format.ts";
 import {
   causeText,
@@ -54,12 +60,20 @@ import {
   ENGINE_CHECK_AGAIN,
   ENGINE_TRY_AGAIN,
   engineStateText,
+  serviceStatus,
 } from "./health.ts";
-import { runLine } from "./run.ts";
+import { type RunLineParts, runLine, runLineParts } from "./run.ts";
 import { inTab, isMine, neverAsked, type Scope } from "./scope.ts";
 import { FINISHING, SIGN_IN_TEXT, waitingText } from "./sign-in.ts";
 import { atLoginMismatch } from "./start-at-login.ts";
-import { type DisplayStatus, displayStatus, FILTER_OF, failureText } from "./status.ts";
+import {
+  type DisplayStatus,
+  displayStatus,
+  FILTER_OF,
+  failedWords,
+  retryHelps,
+  retryNote,
+} from "./status.ts";
 
 /** A change with its review and the repository it belongs to: one row on Home, one review page. */
 export interface ChangeReview {
@@ -100,11 +114,6 @@ export function changeLabel(change: Change): string {
   return `${change.repoId} #${change.number}`;
 }
 
-/** "sasensi/ledger-api": a repository with its owner, as Repositories lists every account's (ADR 0066). */
-export function repositoryLabel(repo: Pick<Repository, "owner" | "name">): string {
-  return `${repo.owner}/${repo.name}`;
-}
-
 /**
  * Home's empty state, the sentence under "Nothing reviewed yet": with no repository listed (the App sees none, or was
  * uninstalled), it waits for one; with none turned on, it says where to turn one on; else the repositories turned on,
@@ -133,18 +142,18 @@ export const REVIEWERS_TEXT: Record<Reviewers, string> = {
 };
 
 /** "Claude": the coding agent that wrote a change, named after its program. */
-export function writerName(change: Change): string | null {
+function writerName(change: Change): string | null {
   return change.writtenBy ? engineName(change.writtenBy) : null;
 }
 
 /**
- * Who opened it, then who wrote it when an agent did: "sasensi · written by Claude" (ADR 0078). Your own with no
- * writer known reads "by sasensi".
+ * Who opened it, then who wrote it when an agent did: "by sasensi · written by Claude" (ADR 0078). Every row says
+ * "by" the same way, the person's own, an agent's and a teammate's (round 5: "sasensi" bare on one row beside
+ * "by sasensi" on the next read as two different things).
  */
 export function authorLabel(change: Change): string {
   const writer = writerName(change);
-  if (writer) return `${change.openedBy} · written by ${writer}`;
-  return change.author === "you" ? `by ${change.openedBy}` : change.openedBy;
+  return writer ? `by ${change.openedBy} · written by ${writer}` : `by ${change.openedBy}`;
 }
 
 export function unsettledFindings(review: Review): Finding[] {
@@ -187,18 +196,35 @@ export function settledVerdict(review: Review): { closed: string; rest: string }
 
 /**
  * The verdict of a review that left findings open: to fix once posted, found after a preview, which posted nothing
- * (ADR 0072).
+ * (ADR 0072). Its words hold the commit, which the page draws as a commit, as the failed notice's `head`.
  */
-export function openVerdict(it: ChangeReview): string {
+export function openVerdict(it: ChangeReview): Words {
   const { open, blocking } = openCounts(unsettledFindings(it.review));
+  // The counts one way: in words for one ("One thing to fix, one blocking"), else in digits throughout.
+  const said = (n: number) => (open === 1 ? "one" : `${n}`);
   const things = open === 1 ? "One thing" : `${open} things`;
   const how = it.review.preview ? "found" : "to fix";
-  return `Looked over ${lookedOver(it)}. ${things} ${how}${blocking > 0 ? `, ${blocking} blocking` : ""}.`;
+  const commit = it.review.rounds.at(-1)?.sha ?? it.change.headSha;
+  return [
+    "Looked over ",
+    { commit },
+    `. ${things} ${how}${blocking > 0 ? `, ${said(blocking)} blocking` : ""}.`,
+  ];
 }
 
 /** How many findings are open, of those given, and how many of them are blocking. */
 export function openCounts(open: readonly Finding[]): { open: number; blocking: number } {
   return { open: open.length, blocking: open.filter((f) => f.severity === "blocking").length };
+}
+
+/**
+ * The line under a review's title (`metaLine`): who opened it and who wrote it, said as its row says them
+ * (`authorLabel`), then who reviews or reviewed it, "by sasensi · written by Claude · reviewed by Codex" (round 4,
+ * 2026-11-08: a comma then a wide gap read as two separators; "opened by" here beside "by" on the rows read as two
+ * different things).
+ */
+export function reviewMeta(change: Change, reviewer: string | null): string {
+  return metaLine([authorLabel(change), ...(reviewer ? [`reviewed by ${reviewer}`] : [])]);
 }
 
 /** The AI reviewing now, or the one that reviewed last. */
@@ -223,7 +249,8 @@ export interface StateChip {
 export const CHIPS = {
   "needs-you": { tone: "need", label: "Needs you" },
   failed: { tone: "need", label: "Failed" },
-  waiting: { tone: "warn", label: "Waiting" },
+  // Not under way yet: To fix's amber, told apart by its dot, a ring.
+  waiting: { tone: "wait", label: "Waiting" },
   clean: { tone: "ok", label: "Clean" },
   settled: { tone: "ok", label: "Settled" },
   // Findings open: the ball is with the author.
@@ -342,26 +369,59 @@ export interface SkipWhy {
 
 /**
  * The labels of the review page's review button, one per state it can be in: asking for a first review, asking for
- * one more, or showing the review that runs or waits. One place for each, so the page, its notes and the shortcut
- * list say the same words.
+ * one more, asking again after a failure another try can help, or showing the review that runs or waits. One place
+ * for each, so the page, its notes and the shortcut list say the same words.
  */
 export const REVIEW_BUTTON = {
   now: "Review now",
   again: "Review again",
+  retry: "Try again",
   running: "Reviewing…",
   waiting: "Waiting…",
 } as const;
 
 export type ReviewButton = keyof typeof REVIEW_BUTTON;
 
-/** What R does on a review, in the shortcut list: the review button, whichever it asks for. */
-export const REVIEW_KEY = `${REVIEW_BUTTON.now} or again`;
+/** The review button's labels R presses: every one that asks for a review. */
+const REVIEW_KEY_LABELS = [REVIEW_BUTTON.now, REVIEW_BUTTON.again, REVIEW_BUTTON.retry];
 
-/** Which label the review button shows: the review running or waiting, else what pressing it asks for. */
+/** What R does on a review, in the shortcut list: the review button, whichever it asks for, each label said. */
+export const REVIEW_KEY = `${REVIEW_KEY_LABELS.slice(0, -1).join(", ")} or ${REVIEW_KEY_LABELS.at(-1)}`;
+
+/**
+ * Which label the review button shows: the review running or waiting, else what pressing it asks for; "Try again"
+ * when the newest review failed and another try can help, the plain answer to the failed notice under it.
+ */
 export function reviewButton(it: ChangeReview): ReviewButton {
   const { kind } = status(it);
   if (kind === "running" || kind === "waiting") return kind;
+  const { job } = it.review;
+  if (job?.state === "failed" && retryHelps(job.failure)) return "retry";
   return it.review.rounds.length === 0 ? "now" : "again";
+}
+
+/**
+ * Whether the review button is the page's filled primary: only when pressing it is what the person is needed for
+ * (design-system.md "Button"): "Try again" after a failure another try can help, "Review now" before any round, or
+ * "Review again" on commits nobody looked at or on a preview to post. While nothing needs them (the agent works on
+ * the findings, the review settled, a finding only they can settle, which the button doesn't) it is a secondary.
+ * After a failure another try can't cure, before round 1 too, only new commits make it the answer.
+ */
+export function reviewButtonPrimary(it: ChangeReview): boolean {
+  const shown = reviewButton(it);
+  if (shown === "retry") return true;
+  if (shown !== "now" && shown !== "again") return false;
+  if (it.review.job?.state === "failed") return it.change.newCommits > 0;
+  if (shown === "now") return true;
+  return it.change.newCommits > 0 || (it.review.preview && unsettledFindings(it.review).length > 0);
+}
+
+/**
+ * Whether Open on GitHub is the page's filled primary: on a review that needs the person, where they settle the
+ * thread (design-system.md "Button"), unless the review button already is, on commits nobody looked at.
+ */
+export function gitHubPrimary(it: ChangeReview): boolean {
+  return status(it).kind === "needs-you" && !reviewButtonPrimary(it);
 }
 
 /** What the review button asks for: "Review now" before any round ran, "Review again" after. */
@@ -473,10 +533,33 @@ export function reviewList(items: readonly ChangeReview[]): ChangeReview[] {
 }
 
 /**
- * Whether the review page offers its review button (`reviewLabel`). Asked in person, a change skipped because nobody asked is reviewed:
- * another author's (ADR 0043), a fork's, by Claude (ADR 0048), or one opened with reviews on open off. Not where only
- * Codex reviews another author's change or a fork, skipped or never asked about (ADR 0078), not on one never asked
- * about in a repository switched off (`askable`), and not while a review runs or waits.
+ * The newest review failed (ADR 0081): the review screen's notice, above the round when there was one, whose verdict
+ * and pill keep following the loop (ADR 0029). The commit it couldn't look over ("Couldn't look over b2e8d1f") and
+ * why; under them, when, from the review's history ("3 min ago", kept apart from the commit, round 6), and what would
+ * change it, or how likely another try works where that is known (`retryNote`), else nothing; null when the newest
+ * review didn't fail.
+ */
+export function failedNotice(
+  it: ChangeReview,
+  now: number,
+): { head: Words; sentence: string; when: string | null; next: string | null } | null {
+  const { job, timeline } = it.review;
+  if (job?.state !== "failed") return null;
+  const at = timeline.findLast((t) => t.kind === "failed" && t.sha === job.sha)?.at;
+  const { sentence, next } = failedWords(job.failure);
+  return {
+    head: failedHead({ commit: job.sha }),
+    sentence,
+    when: at === undefined ? null : agoSentence(now, at),
+    next: next ?? retryNote(job.failure),
+  };
+}
+
+/**
+ * Whether the review page offers its review button (`reviewLabel`). Asked in person, a change skipped because nobody
+ * asked is reviewed: another author's (ADR 0043), a fork's, by Claude (ADR 0048), or one opened with reviews on open
+ * off. Not where only Codex reviews another author's change or a fork, skipped or never asked about (ADR 0078), not on
+ * one never asked about in a repository switched off (`askable`), and not while a review runs or waits.
  */
 export function canReviewAgain(it: ChangeReview): boolean {
   const s = status(it);
@@ -538,7 +621,7 @@ export function statusLine(state: State, it: ChangeReview, now = state.now): str
       return `${n} ${n === 1 ? "finding needs" : "findings need"} your decision`;
     }
     case "failed":
-      return failureText(s.failure);
+      return failureWords(s.failure).phrase;
     case "running":
       return runLine(now, review);
     case "waiting":
@@ -960,24 +1043,85 @@ export function problems(state: State): Problem[] {
 }
 
 /**
- * The status menu's GitHub line (ADR 0067): what the connection is ("connected as sam"), whether its dot is on (a
- * wait GitHub asked for is no fault: only a cause turns it off), its colour when off (the pill's, `worstTone`), and
- * every GitHub problem under it, each with its one fix: the connection's, then each account's, in GitHub's order.
+ * A status line's dot: green when what it says is fine, else its problem's tone, as the band says it (ADR 0070); grey
+ * for an AI that doesn't review and isn't ready, since the band says nothing of it.
  */
-export function githubStatus(state: State): {
-  ok: boolean;
+export type StatusDot = "ok" | Problem["tone"] | "mute";
+
+/**
+ * One line of the status menu: its words ("Codex: signed out"), its dot and the problem it says with its one fix. An
+ * account's problem on the shared App (ADR 0067) is a line of its own, at the level of every other.
+ */
+export interface StatusMenuLine {
+  id: string;
   text: string;
-  tone: Problem["tone"] | null;
-  problems: Problem[];
-} {
-  const { connection } = state;
-  const list = problems(state).filter((p) => p.id === "connection" || p.account !== undefined);
-  return {
-    ok: connection.state === "connected" && list.every((p) => p.account === undefined),
-    text: connectionText(connection),
-    tone: worstTone(list),
-    problems: list,
+  dot: StatusDot;
+  problem: Problem | null;
+  /** One of the lines that lead (a problem on it): the menu sets these apart from the fine ones. */
+  leads: boolean;
+}
+
+/** A line's dot: green when it is fine, its problem's tone when it has one, amber when it is not fine with none. */
+function dotOf(fine: boolean, problem: Problem | undefined): StatusDot {
+  if (problem) return problem.tone;
+  return fine ? "ok" : "warn";
+}
+
+/**
+ * The status menu's lines: each AI, GitHub, the service, and each account's problem on the shared App. Each dot judges
+ * its own words: GitHub's line says the connection only ("connected as sam", amber while GitHub asks to wait); an
+ * account's problem is its own line, its dot and fix, never nested in GitHub's (2026-11-08: nested, it read as less
+ * than the problem beside it). The lines with a problem lead, in the alert band's order, every one at one level; the
+ * fine ones follow in the menu's: the AIs, GitHub, the service. An AI that doesn't review is grey, with them.
+ */
+export function statusMenuLines(state: State): StatusMenuLine[] {
+  const list = problems(state);
+  // `of`: the id of the problem the line says, its fix on the line.
+  const line = (id: string, of: string, text: string, fine: boolean): StatusMenuLine => {
+    const problem = list.find((p) => p.id === of);
+    return { id, text, dot: dotOf(fine, problem), problem: problem ?? null, leads: false };
   };
+  const { connection } = state;
+  const accounts = list
+    .filter((p) => p.account !== undefined)
+    .map((p): StatusMenuLine => ({ id: p.id, text: p.title, dot: p.tone, problem: p, leads: false }));
+  const service = serviceStatus(state.service);
+  const lines = [
+    ...Object.values(state.engines).map((e) => {
+      const said = line(e.id, e.id, `${e.name}: ${engineStateText(e)}`, e.state === "ready");
+      // Not one of the reviewers: no problem in the band, so none here; grey, among the fine lines.
+      return engineUsed(state, e.id) || said.dot === "ok" ? said : { ...said, dot: "mute" as const };
+    }),
+    line("github", "connection", `GitHub: ${connectionText(connection)}`, connection.state === "connected"),
+    ...accounts,
+    line("service", "login", `Service: ${service.text}`, service.ok),
+  ];
+  const troubled = (l: StatusMenuLine) => l.dot !== "ok" && l.dot !== "mute";
+  // The lines with a problem in the band's order, which they sit under; one not fine with none after them.
+  const place = (l: StatusMenuLine) => {
+    const at = l.problem ? list.indexOf(l.problem) : -1;
+    return at === -1 ? list.length : at;
+  };
+  const first = lines
+    .filter(troubled)
+    .sort((a, b) => place(a) - place(b))
+    .map((l) => ({ ...l, leads: true }));
+  return [...first, ...lines.filter((l) => !troubled(l))];
+}
+
+/**
+ * The status menu's two groups (design-system.md "Status pill menu"): the lines that lead, each in a well of its own,
+ * then the fine ones in one well, headed "Fine" only under a problem (round 6: three wells of one weight read the green
+ * group as a third problem); with no problem the menu's "Status" already says it, and with no fine line there is none.
+ */
+export function statusMenuGroups(lines: readonly StatusMenuLine[]): {
+  leads: StatusMenuLine[];
+  fine: StatusMenuLine[];
+  fineHeading: string | null;
+} {
+  const leads = lines.filter((l) => l.leads);
+  const fine = lines.filter((l) => !l.leads);
+  return { leads, fine, fineHeading: leads.length > 0 && fine.length > 0 ? "Fine" : null };
 }
 
 /** Several problems said as one (ADR 0070): pink when any needs the person, amber when every one only waits. */
@@ -1033,22 +1177,19 @@ export function sentence(state: State): { title: string; small: string } {
   // Under what needs you, a pause is still said: the pill and the band speak of the problem, not of it.
   const small = (pausedFor ? [`paused ${pausedFor}`, ...parts] : parts).join(" · ");
 
-  // Problems are said by the alert band above every page; Home counts them with the pull requests.
-  // A review waiting because of a listed problem is that problem's effect, not one more thing to do.
+  // Problems are said once, by the alert band above every page (round 5: named here too, the pill, the band and the
+  // headline said them three times). The headline speaks of the reviews: the person's own that need them, else
+  // "Nothing else needs you." under a problem. A review waiting because of a listed problem is that problem's effect.
   const blocking = list.filter((p) => p.tone === "need");
   const own = g.needs;
-  if (own.length > 0 && blocking.length === 0 && own.every((i) => status(i).kind === "preview")) {
-    const n = own.length;
-    return { title: `${plural(n, "preview")} to read.`, small };
+  if (own.length > 0 && own.every((i) => status(i).kind === "preview")) {
+    return { title: `${plural(own.length, "preview")} to read.`, small };
   }
-  if (own.length > 0 && blocking.length === 0) {
+  if (own.length > 0) {
     const n = own.length;
     return { title: `${n} pull ${n === 1 ? "request needs" : "requests need"} you.`, small };
   }
-  if (own.length + blocking.length > 0) {
-    const n = own.length + blocking.length;
-    return { title: `${n} ${n === 1 ? "thing needs" : "things need"} you.`, small };
-  }
+  if (blocking.length > 0) return { title: "Nothing else needs you.", small };
   if (pausedFor) return { title: "Reviews are paused.", small: [pausedFor, ...parts].join(" · ") };
   if (g.running.length > 0 || g.waiting.length > 0) return { title: "Nothing needs you.", small };
   const last = reviewed[0];
@@ -1061,8 +1202,33 @@ export function sentence(state: State): { title: string; small: string } {
 }
 
 /** "12 min", shown at the end of a finished row. */
-export function rowAge(state: State, it: ChangeReview): string {
+function rowAge(state: State, it: ChangeReview): string {
   return ago(state.now, it.review.updatedAt);
+}
+
+/** A part of a row's meta line: the pull request (in mono), words, or the running round's step and its running time. */
+export type RowMetaPart =
+  | { kind: "change"; text: string }
+  | { kind: "text"; text: string }
+  | ({ kind: "running" } & RunLineParts);
+
+/**
+ * A review row's meta line, part by part: the pull request, who opened and wrote it, where its review stands (the
+ * running step and its time, `now` the screen's ticking one), and how long ago for a finished one. The screen puts
+ * one `SEPARATOR` between every two, and a part's own " · " is held the same way, so the line reads the same all
+ * along and never wraps after a dot.
+ */
+export function rowMeta(state: State, it: ChangeReview, now = state.now): RowMetaPart[] {
+  const s = status(it);
+  const finished = s.kind === "settled" || s.kind === "skipped" || s.kind === "cancelled";
+  return [
+    { kind: "change", text: changeLabel(it.change) },
+    { kind: "text", text: holdSeparators(authorLabel(it.change)) },
+    s.kind === "running"
+      ? { kind: "running", ...runLineParts(now, it.review) }
+      : { kind: "text", text: holdSeparators(statusLine(state, it, now)) },
+    ...(finished ? [{ kind: "text" as const, text: rowAge(state, it) }] : []),
+  ];
 }
 
 /** The settings a repository has of its own, the ones its page says differ from the owner's defaults. */
@@ -1071,10 +1237,6 @@ export function differences(repo: Repository): SettingKey[] {
   return Object.keys(settings)
     .filter((k): k is SettingKey => k in settings)
     .filter((k) => settings[k].origin === "owner-repository");
-}
-
-export function openChangeCount(state: State, repoId: RepositoryId): number {
-  return Object.values(state.changes).filter((p) => p.repoId === repoId).length;
 }
 
 export function lastReviewAt(state: State, repoId: RepositoryId): number | null {

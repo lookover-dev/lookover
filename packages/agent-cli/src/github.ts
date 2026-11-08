@@ -38,9 +38,71 @@ export interface AgentHostOptions {
   fetch?: Fetch;
   /** The time, to say when a rate-limited GitHub may be asked again; the real time by default. */
   now?: () => number;
+  /** A pause of `ms` between two tries of a request that failed on the way (ADR 0080); a real timer by default. */
+  sleep?(ms: number): Promise<void>;
+  /**
+   * A try's time limit of `ms`: a signal that aborts when it runs out, and how to clear it once the try is over
+   * (ADR 0080); a real timer, cleared at the try's end, by default.
+   */
+  deadline?(ms: number): Deadline;
+}
+
+/** A try's time limit: a signal that aborts when it runs out, and how to clear it once the try is over. */
+interface Deadline {
+  signal: AbortSignal;
+  clear(): void;
 }
 
 const BASE = "https://api.github.com";
+
+// A brief network failure is tried again (ADR 0080), by this package's own copy of the `github` adapter's rules: each
+// try has a time limit, the body read included; a read (a GET, or a GraphQL query) is tried 3 times in all, 1 s then
+// 3 s apart, after any failure of the connection or GitHub's 502, 503 or 504; a write only after a failure that means
+// nothing was sent. A limit or a refusal GitHub answers is never tried again here, nor a 502, 503 or 504 that carries
+// a limit's headers (`retry-after`, `x-ratelimit-remaining: 0`).
+
+/** How many times a request is tried in all, and the pause before each try after the first. */
+const TRIES = 3;
+const PAUSES_MS = [1000, 3000];
+/** A try's time limit: GitHub cuts its own requests at 10 s; a write isn't tried again, so it gets longer. */
+const READ_LIMIT_MS = 30_000;
+const WRITE_LIMIT_MS = 60_000;
+/** GitHub's answers that say it failed on the way, not that it refused: a read is tried again after them. */
+const GATEWAY_FAILED = new Set([502, 503, 504]);
+/**
+ * The failures that mean a request never reached GitHub, by their code (Bun's names): no address, no connection, or
+ * the server's certificate refused during the handshake, before any byte of the request is written. Only after one
+ * of these is a write tried again.
+ */
+const NOTHING_SENT = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ConnectionRefused",
+  "FailedToOpenSocket",
+  "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "CERT_HAS_EXPIRED",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+]);
+
+/** A failure's code, as Bun's `fetch` throws it: the error's own, else its cause's. */
+function codeOf(error: unknown): string | undefined {
+  const own = (e: unknown) =>
+    typeof e === "object" && e !== null && "code" in e && typeof e.code === "string" ? e.code : undefined;
+  const cause = typeof error === "object" && error !== null && "cause" in error ? error.cause : undefined;
+  return own(error) ?? own(cause);
+}
+
+/** A real time limit: a timer that aborts the signal, cleared when the try ends so none outlives a call. */
+function realDeadline(ms: number): Deadline {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new DOMException("The operation timed out.", "TimeoutError")),
+    ms,
+  );
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
 
 /** The token's account, as `GET /user` gives it. */
 const account = z.object({ id: z.int(), login: z.string() });
@@ -248,6 +310,46 @@ interface Answer {
   headers: Headers;
 }
 
+/**
+ * How a request is sent: its method, its body, whether it only reads (a GET does; a POST only when its caller says so:
+ * a GraphQL query, never told from its text), and what its 422 means.
+ */
+interface Sent {
+  method?: "GET" | "POST";
+  body?: unknown;
+  read?: boolean;
+  unprocessable?: HostError;
+}
+
+/** A request as it is sent: its method said, GET when its caller said none. */
+type Sending = Sent & { method: "GET" | "POST" };
+
+/** A try that got no answer: why, in words, and whether the request surely never reached GitHub. */
+interface Failed {
+  words: string;
+  nothingSent: boolean;
+}
+
+/** An answer carries the headers of a limit: `retry-after`, or `x-ratelimit-remaining: 0`. */
+const limitHeaders = (headers: Headers): boolean =>
+  headers.get("retry-after") !== null || headers.get("x-ratelimit-remaining") === "0";
+
+/**
+ * Whether a try calls for another: a read after GitHub's 502, 503 or 504 without the headers of a limit (its wait is
+ * GitHub's to say) or any failure of the connection, a write only after a failure that sent nothing.
+ */
+const tryAgain = (outcome: Answer | Failed, read: boolean): boolean =>
+  "status" in outcome
+    ? read && GATEWAY_FAILED.has(outcome.status) && !limitHeaders(outcome.headers)
+    : read || outcome.nothingSent;
+
+/** The last try's answer, or, when none came, `unavailable` in its words and with the tries it took. */
+function answered(outcome: Answer | Failed, tries: number): Answer {
+  if ("status" in outcome) return outcome;
+  const after = tries === 1 ? "" : ` after ${tries} tries`;
+  throw new HostError("unavailable", `GitHub could not be reached${after}: ${outcome.words}`);
+}
+
 /** What a request that GitHub refused throws. `unprocessable` says what its 422 means. */
 function refusal(where: string, answer: Answer, now: number, unprocessable?: HostError): HostError {
   const said = refusalBody.safeParse(answer.body);
@@ -255,10 +357,7 @@ function refusal(where: string, answer: Answer, now: number, unprocessable?: Hos
   const detail = `${answer.status}${words}`;
   const { status, headers } = answer;
   if (status === 401) return new HostError("unauthorized", `GitHub refused the token (${detail})`);
-  if (
-    (status === 403 || status === 429) &&
-    (headers.has("retry-after") || headers.get("x-ratelimit-remaining") === "0")
-  ) {
+  if ((status === 403 || status === 429) && limitHeaders(headers)) {
     const at = retryAt(headers, now);
     return new HostError(
       "rate_limited",
@@ -275,17 +374,17 @@ function refusal(where: string, answer: Answer, now: number, unprocessable?: Hos
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const send = options.fetch ?? ((input, init) => fetch(input, init));
   const now = options.now ?? (() => Date.now());
+  const sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const deadline = options.deadline ?? realDeadline;
 
-  async function request(
-    path: string,
-    init: { method?: "GET" | "POST"; body?: unknown; unprocessable?: HostError } = {},
-  ): Promise<Answer> {
-    const method = init.method ?? "GET";
-    const where = `${method} ${path.replace(BASE, "")}`;
-    let answer: Answer;
+  /** One try, within its time limit (`limitMs`): GitHub's answer, or why none came. */
+  async function once(url: string, init: Sending, limitMs: number): Promise<Answer | Failed> {
+    const limit = deadline(limitMs);
+    // The answer is read whole inside the guard and the time limit: a connection that breaks off mid-body, or a body
+    // that never ends, is GitHub unreachable too.
     try {
-      const response = await send(path.startsWith("http") ? path : `${BASE}${path}`, {
-        method,
+      const response = await send(url, {
+        method: init.method,
         headers: {
           accept: "application/vnd.github+json",
           authorization: `Bearer ${options.token}`,
@@ -294,14 +393,39 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           ...(init.body === undefined ? {} : { "content-type": "application/json" }),
         },
         body: init.body === undefined ? null : JSON.stringify(init.body),
+        signal: limit.signal,
       });
       const text = await response.text();
-      answer = { status: response.status, body: text === "" ? null : parse(text), headers: response.headers };
+      return { status: response.status, body: text === "" ? null : parse(text), headers: response.headers };
     } catch (error) {
-      throw new HostError("unavailable", `GitHub could not be reached: ${message(error)}`);
+      // A try past its time limit may have reached GitHub: only a read is tried again after it.
+      if (limit.signal.aborted) return { words: `no answer within ${limitMs / 1000} s`, nothingSent: false };
+      const code = codeOf(error);
+      return { words: message(error), nothingSent: code !== undefined && NOTHING_SENT.has(code) };
+    } finally {
+      limit.clear();
     }
+  }
+
+  /**
+   * The request, tried again as ADR 0080 says: GitHub's answer, whatever its status, once one is final; a failure of
+   * the connection on the last try, or on a write that may have reached GitHub, is `unavailable`.
+   */
+  async function finalAnswer(url: string, init: Sending): Promise<Answer> {
+    const read = init.method === "GET" || init.read === true;
+    for (let tries = 1; ; tries++) {
+      const outcome = await once(url, init, read ? READ_LIMIT_MS : WRITE_LIMIT_MS);
+      if (tries === TRIES || !tryAgain(outcome, read)) return answered(outcome, tries);
+      await sleep(PAUSES_MS[tries - 1] ?? 0);
+    }
+  }
+
+  /** One request. Throws `HostError` for any answer that isn't a success. */
+  async function request(path: string, init: Sent = {}): Promise<Answer> {
+    const sending: Sending = { ...init, method: init.method ?? "GET" };
+    const answer = await finalAnswer(path.startsWith("http") ? path : `${BASE}${path}`, sending);
     if (answer.status >= 200 && answer.status < 300) return answer;
-    throw refusal(where, answer, now(), init.unprocessable);
+    throw refusal(`${sending.method} ${path.replace(BASE, "")}`, answer, now(), init.unprocessable);
   }
 
   /** Every item of a listing, page after page. */
@@ -318,17 +442,21 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
   /**
    * GraphQL's data for `query`, read by `schema`; its first error, when it gives any, thrown as the refusal of what
-   * it was asked `to` do ("read the threads of …"), in GitHub's own words.
+   * it was asked `to` do ("read the threads of …"), in GitHub's own words. `read` says the query only reads, so it is
+   * tried again like a GET; a mutation says false (ADR 0080).
    */
   async function graphql<T>(
-    to: string,
-    query: string,
+    { to, query, read }: { to: string; query: string; read: boolean },
     variables: Record<string, unknown>,
     schema: z.ZodType<T>,
   ): Promise<T> {
-    const answer = await request(`${BASE}/graphql`, { method: "POST", body: { query, variables } });
-    const read = graphqlAnswer.parse(answer.body);
-    const error = read.errors?.[0];
+    const answer = await request(`${BASE}/graphql`, {
+      method: "POST",
+      body: { query, variables },
+      read,
+    });
+    const parsed = graphqlAnswer.parse(answer.body);
+    const error = parsed.errors?.[0];
     if (error) {
       const failure = GRAPHQL_FAILURES[error.type ?? ""] ?? "invalid";
       const at = failure === "rate_limited" ? retryAt(answer.headers, now()) : undefined;
@@ -338,7 +466,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         at === undefined ? {} : { retryAt: at },
       );
     }
-    return schema.parse(read.data);
+    return schema.parse(parsed.data);
   }
 
   /** Every comment of the thread past its first page. */
@@ -348,8 +476,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     while (cursor !== null) {
       const variables = { id: node.id, after: cursor };
       const read: z.infer<typeof moreCommentsAnswer> = await graphql(
-        `read thread ${node.id}`,
-        MORE_COMMENTS,
+        { to: `read thread ${node.id}`, query: MORE_COMMENTS, read: true },
         variables,
         moreCommentsAnswer,
       );
@@ -371,7 +498,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const { repo, number } = change;
     const to = `read the threads of ${changeName({ repo, number })}`;
     const variables = { owner: repo.owner, name: repo.name, number, after };
-    const pull = (await graphql(to, THREADS, variables, threadsAnswer)).repository?.pullRequest;
+    const pull = (await graphql({ to, query: THREADS, read: true }, variables, threadsAnswer)).repository
+      ?.pullRequest;
     if (!pull) throw new HostError("not_found", `GitHub has no pull request ${changeName({ repo, number })}`);
     const threads: AgentThread[] = [];
     for (const node of pull.reviewThreads.nodes) {
@@ -493,7 +621,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     },
 
     async resolve(threadId) {
-      const read = await graphql(`resolve thread ${threadId}`, RESOLVE, { id: threadId }, resolvedAnswer);
+      const read = await graphql(
+        { to: `resolve thread ${threadId}`, query: RESOLVE, read: false },
+        { id: threadId },
+        resolvedAnswer,
+      );
       if (!read.resolveReviewThread?.thread.isResolved)
         throw new HostError("invalid", `GitHub did not resolve thread ${threadId}`);
     },

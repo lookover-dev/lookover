@@ -1,5 +1,5 @@
 // Whether a change that asks for a review gets a review job, or is skipped and why (ADR 0016, ADR 0026).
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { Change, SettingValues, SkipReason, Trigger } from "@lookover/contracts";
 import { endUnsent, type Intake, intake, skipOutcome } from "./index.ts";
 
@@ -16,11 +16,13 @@ function ask(
   trigger: Trigger,
   change: Partial<Pick<Change, "author" | "draft" | "fork">> = {},
   repository: { enabled?: boolean; settings?: Partial<SettingValues> } = {},
+  reposChosen = true,
 ): Intake {
   return intake(
     { author: change.author ?? "you", draft: change.draft ?? false, fork: change.fork ?? false },
     { enabled: repository.enabled ?? true, settings: { ...DEFAULTS, ...repository.settings } },
     trigger,
+    { reposChosen },
   );
 }
 
@@ -178,4 +180,54 @@ test("an old skip's end owed on another author's change, nobody asked in person,
     endUnsent(skipped("not-yours"), "other", { created: true }),
     endUnsent(skipped("fork"), null, { created: true }),
   ]).toEqual([true, true, true, false, false, true, false, false, false, false, false]);
+});
+
+describe("before the repositories are chosen, nothing asks by itself (ADR 0079)", () => {
+  type Case = [
+    string,
+    Partial<Pick<Change, "author" | "draft" | "fork">>,
+    { enabled?: boolean; settings?: Partial<SettingValues> },
+  ];
+  const cases: Case[] = [
+    ["the owner's change", { author: "you" }, {}],
+    ["the owner's agent's change", { author: "agent" }, {}],
+    ["a teammate's change", { author: "other" }, {}],
+    ["the owner's fork change, never told", { author: "you", fork: true }, {}],
+    ["a teammate's fork change", { author: "other", fork: true }, {}],
+    ["a draft", { draft: true }, {}],
+    ["in a repository switched off", {}, { enabled: false }],
+    ["with reviews on open switched off", {}, { settings: { onOpen: false } }],
+  ];
+
+  test("a change opened or marked ready, and a push, are not asked, before every other rule", () => {
+    for (const trigger of ["opened", "push"] as const) {
+      for (const [name, change, repository] of cases) {
+        const pushes = { ...repository, settings: { onPush: true, ...repository.settings } };
+        expect([trigger, name, ask(trigger, change, pushes, false)]).toEqual([
+          trigger,
+          name,
+          { kind: "not-asked" },
+        ]);
+      }
+    }
+  });
+
+  test("once chosen, the same changes are asked as the other rules say", () => {
+    expect(ask("opened", { author: "you" }, {}, true)).toEqual({ kind: "job" });
+    expect(ask("push", { author: "agent" }, { settings: { onPush: true } }, true)).toEqual({ kind: "job" });
+    expect(ask("opened", { author: "you", fork: true }, {}, true)).toEqual({
+      kind: "skipped",
+      reason: "fork",
+    });
+    expect(ask("opened", { author: "other" }, {}, true)).toEqual({ kind: "not-asked" });
+  });
+
+  test("asked in person, it is answered as before: a request, Review now, setup's first review", () => {
+    expect(ask("comment", { author: "you" }, {}, false)).toEqual({ kind: "job" });
+    expect(ask("manual", { author: "other" }, {}, false)).toEqual({ kind: "job" });
+    expect(ask("comment", { author: "you", fork: true }, {}, false)).toEqual({ kind: "job" });
+    expect(ask("manual", {}, { enabled: false }, false)).toEqual({ kind: "skipped", reason: "repo-off" });
+    expect(ask("first-review", { author: "you" }, {}, false)).toEqual({ kind: "job" });
+    expect(ask("first-review", { author: "other" }, {}, false)).toEqual({ kind: "not-asked" });
+  });
 });

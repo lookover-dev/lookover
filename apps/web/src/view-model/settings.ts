@@ -77,19 +77,20 @@ export function pickOf(
 
 /**
  * Where a rule is from: the owner, or a repository's file at a line (contracts' `ruleText`), the number never
- * wrapped from its word, after the repository's name while it is listed.
+ * wrapped from its word, under the repository's name while it is listed (`repo`, null otherwise): two lines, so the
+ * From column is no wider than a name and the rule's words get the room (round 6).
  */
-export function ruleSourceText(
+export function ruleSource(
   repos: Pick<Repository, "id" | "name">[],
   rule: Pick<Rule, "source" | "repoId" | "line">,
-): string {
-  if (rule.source === "yours") return "you";
+): { repo: string | null; where: string } {
+  if (rule.source === "yours") return { repo: null, where: "you" };
   const where =
     rule.line === null
       ? rule.source
       : ruleText({ file: rule.source, line: rule.line }).replace(/ (\d+)$/, " $1");
   const repo = repos.find((r) => r.id === rule.repoId);
-  return repo ? `${repo.name} · ${where}` : where;
+  return { repo: repo?.name ?? null, where };
 }
 
 /**
@@ -100,10 +101,15 @@ export function ruleSwitch(rule: Pick<Rule, "enabled" | "parentOff">): {
   checked: boolean;
   why: string | null;
 } {
-  return rule.parentOff
-    ? { checked: false, why: "Off with the rule it sits in." }
-    : { checked: rule.enabled, why: null };
+  return rule.parentOff ? { checked: false, why: HELD_WHY } : { checked: rule.enabled, why: null };
 }
+
+/** Why a rule's switch is held: a rule it sits in is off. */
+export const HELD_WHY = "Off with the rule it sits in.";
+
+/** The rules page's one description, over its table: what the rules are and where they are read from. */
+export const RULES_INTRO =
+  "What the reviewer checks, read from REVIEW.md, AGENTS.md and CLAUDE.md on each repository's default branch.";
 
 /**
  * Each setting's title, and the help under it (empty when the title says it all).

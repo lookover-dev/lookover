@@ -5,6 +5,7 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   changeId,
+  commitSha,
   HostError,
   type Reaction,
   type RepositoryRef,
@@ -23,6 +24,7 @@ import {
   OWNER,
   openApp,
   PLANTED,
+  post,
   pr1,
   pr2,
   refusingEnds,
@@ -528,4 +530,143 @@ test("a request whose run a restart cut, behind a follow-up, is answered by the 
     `rocket ${cut}`,
     `rocket ${behind}`,
   ]);
+});
+
+// ---- who asked, who pushed (ADR 0081) ----
+
+test("the agent's request says the agent asked, a person's that you asked on GitHub, in the event and the log", async () => {
+  const { service, host, time, logged } = await start({
+    changes: [pr1, pr2],
+    engines: fakeEngines({ reviews: 2 }),
+  });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  await time.advance(5_000);
+  host.seedComment(ref(1), { author: OWNER, body: reviewRequest(SHA1) });
+  host.seedComment(ref(2), { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  const events = await until(stream, "job.changed");
+  expect(events.find((e) => e.type === "job.changed")).toMatchObject({
+    changeId: PLANTED,
+    job: { trigger: "comment", askedBy: "agent" },
+  });
+  await time.advance(0);
+  expect(logged.filter((l) => l.includes("queued"))).toEqual([
+    "sasensi/lookover-sandbox#1 review queued (asked by the agent on GitHub) for a1b2c3d",
+    "sasensi/lookover-sandbox#2 review queued (asked on GitHub) for b2c3d4e",
+  ]);
+  const { reviews } = await snapshot(service, cookie);
+  expect(reviews[PLANTED].timeline).toContainEqual(
+    expect.objectContaining({ kind: "queued", trigger: "comment", by: "agent" }),
+  );
+  expect(reviews[DRAFT].timeline).toContainEqual(
+    expect.objectContaining({ kind: "queued", trigger: "comment", by: "person" }),
+  );
+});
+
+test("a request joining the review waiting since the pull request opened says who asked, once", async () => {
+  const { service, host, time, logged } = await start({
+    changes: [],
+    engines: fakeEngines({ signedIn: false }),
+  });
+  const cookie = await openApp(service);
+  await time.advance(5_000);
+  host.open(pr1);
+  await time.advance(MIN);
+  host.seedComment(ref(1), { author: OWNER, body: reviewRequest(SHA1) });
+  host.seedComment(ref(1), { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  await time.advance(0);
+  const lines = logged.filter((l) => l.startsWith("sasensi/lookover-sandbox#1 review"));
+  expect(lines[0]).toBe("sasensi/lookover-sandbox#1 review queued (on opening) for a1b2c3d");
+  // The agent's request joined it; the person's after it names no one new.
+  expect(lines.filter((l) => l.includes("asked"))).toEqual([
+    "sasensi/lookover-sandbox#1 review asked for by the agent on GitHub, back in the queue",
+  ]);
+  const { reviews } = await snapshot(service, cookie);
+  const timeline: { kind: string }[] = reviews[PLANTED].timeline;
+  expect(timeline.filter((t) => t.kind === "queued" || t.kind === "asked")).toEqual([
+    expect.objectContaining({ kind: "queued", trigger: "opened", by: null }),
+    expect.objectContaining({ kind: "asked", by: "agent" }),
+  ]);
+});
+
+test("a follow-up no request asked for, taking the place of the agent's cut run, says the agent asked, in the app", async () => {
+  const dir = home();
+  const held = heldRuns(fakeEngines());
+  const first = await start({ home: dir, changes: [pr1], engines: held.engines });
+  const cookie = await openApp(first.service);
+  const stream = messages(await fetch(api(first.service, "/events"), { headers: { cookie } }));
+  await first.time.advance(5_000);
+  first.host.seedComment(ref(1), { author: OWNER, body: reviewRequest(SHA1) });
+  await first.time.advance(MIN);
+  await until(stream, "run.started");
+  // A push during the run, and "Review now" on it: a follow-up nobody asked for by a comment.
+  first.host.push(ref(1), SHA1_PUSHED, []);
+  await first.time.advance(MIN);
+  expect((await post(first.service, cookie, { type: "review.request", changeId: PLANTED })).status).toBe(200);
+  await first.service.stop();
+
+  // The cut run would run again: the follow-up takes its place, with the agent's request and who asked.
+  const { service, time } = await start({
+    home: dir,
+    host: first.host,
+    time: first.time,
+    idsFrom: 100,
+    engines: heldRuns(fakeEngines()).engines,
+  });
+  await time.advance(5_000);
+  const { reviews } = await snapshot(service, await openApp(service));
+  // The store handed who asked over in the run's end: the UI heard of it, as the change's follow-up shown after it.
+  expect(reviews[PLANTED].job).toMatchObject({ sha: SHA1_PUSHED, askedBy: "agent" });
+  const timeline: { kind: string }[] = reviews[PLANTED].timeline;
+  expect(timeline.filter((t) => t.kind === "queued").at(-1)).toMatchObject({
+    trigger: "manual",
+    by: "agent",
+  });
+});
+
+/** Who `change.pushed` named, and how many commits it counted, for the push the poll saw. */
+async function pushedBy(stream: Awaited<ReturnType<typeof messages>>) {
+  const events = await until(stream, "change.pushed");
+  return events.flatMap((e) => (e.type === "change.pushed" ? [[e.commits, e.by]] : []))[0];
+}
+
+test("a push is the agent's only when an agent signed every commit GitHub listed; any other names no one", async () => {
+  const { service, host, time, logged } = await start({ changes: [pr1], engines: fakeEngines() });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  await time.advance(5_000);
+  const signed = "Fix the total\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>";
+  const pushes: [string, { commits: number; messages: string[] }][] = [
+    ["c3d4e5f60718293a4b5c6d7e8f9012345678a1b2", { commits: 2, messages: [signed, signed] }],
+    // A person's commit among them.
+    ["d4e5f60718293a4b5c6d7e8f9012345678a1b2c3", { commits: 2, messages: [signed, "Bump the version"] }],
+    // GitHub listed only some of them: the rest are not known.
+    ["e5f60718293a4b5c6d7e8f9012345678a1b2c3d4", { commits: 3, messages: [signed, signed] }],
+  ];
+  const by: unknown[] = [];
+  for (const [sha, how] of pushes) {
+    host.push(ref(1), commitSha(sha), [], [], how);
+    await time.advance(MIN);
+    by.push(await pushedBy(stream));
+  }
+  // A compare GitHub refused: no count, no one.
+  host.refuseCounts("unavailable");
+  host.push(ref(1), commitSha("f60718293a4b5c6d7e8f9012345678a1b2c3d4e5"), []);
+  await time.advance(MIN);
+  by.push(await pushedBy(stream));
+  expect(by).toEqual([
+    [2, "agent"],
+    [2, null],
+    [3, null],
+    [0, null],
+  ]);
+  expect(logged.filter((l) => l.includes(" now at "))).toEqual([
+    "sasensi/lookover-sandbox#1 the agent pushed 2 commits, now at c3d4e5f",
+    "sasensi/lookover-sandbox#1 2 new commits, now at d4e5f60",
+    "sasensi/lookover-sandbox#1 3 new commits, now at e5f6071",
+    "sasensi/lookover-sandbox#1 new commits, now at f607182",
+  ]);
+  expect(logged.join("\n")).not.toContain("by you");
 });

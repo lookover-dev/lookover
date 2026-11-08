@@ -14,8 +14,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { asWritten } from "./brand.test-support.ts";
-import { COPIES, driftedCopies, type Formatter, writeCopies } from "./index.ts";
+import { asWritten, withPixels } from "./brand.test-support.ts";
+import { APP_ICON, COPIES, driftedCopies, type Formatter, writeCopies } from "./index.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -41,7 +41,7 @@ test.each(COPIES.map((c) => [c.path, c] as const))(
   },
 );
 
-test("the copies are the eleven brand files, the app's favicon, module, stylesheet and two wordmarks, the sheet, and the site's five", () => {
+test("the copies are the eleven brand files and the App's logo, the app's favicon, module, stylesheet and two wordmarks, the sheet, and the site's five", () => {
   expect(COPIES.map((c) => c.path)).toEqual([
     "docs/product/brand/lookover-wordmark.svg",
     "docs/product/brand/lookover-wordmark-on-dark.svg",
@@ -54,6 +54,7 @@ test("the copies are the eleven brand files, the app's favicon, module, styleshe
     "docs/product/brand/lookover-mark.svg",
     "docs/product/brand/lookover-mark-on-dark.svg",
     "docs/product/brand/lookover-favicon.svg",
+    "docs/product/brand/lookover-app-icon.png",
     "apps/web/public/favicon.svg",
     "apps/web/src/ui/eyes.generated.ts",
     "apps/web/src/styles/system.css",
@@ -105,6 +106,35 @@ test("a copy changed by one number fails, naming that file", async () => {
   expect(await driftedCopies(root, { format })).toEqual([
     `docs/product/brand/lookover-icon.svg is not what the source draws: ${run}.`,
   ]);
+});
+
+test("a picture is compared by its pixels: compressed otherwise it is the same, one pixel changed it is not", async () => {
+  const root = checkout(true);
+  await writeCopies(root, { format });
+  const file = join(root, APP_ICON);
+  const written = new Uint8Array(readFileSync(file));
+  expect([...written.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  const recompressed = withPixels(written, (rows) => rows, { level: 1 });
+  expect(Buffer.from(recompressed).equals(Buffer.from(written))).toBe(false);
+  writeFileSync(file, recompressed);
+  expect(await driftedCopies(root, { format })).toEqual([]);
+  const drifted = [`${APP_ICON} is not what the source draws: ${run}.`];
+  // Row 0's first red byte, after its filter's byte.
+  writeFileSync(
+    file,
+    withPixels(written, (rows) => rows.with(1, (rows[1] ?? 0) ^ 1)),
+  );
+  expect(await driftedCopies(root, { format })).toEqual(drifted);
+  // Row 0, all ink, filtered with Sub as an optimiser might: the same pixels, yet not the file `bun run brand`
+  // writes, which it reads with no filter, so it says to run it again.
+  const stride = 200 * 4;
+  const sub = (rows: Uint8Array) => rows.map((b, i) => (i === 0 ? 1 : i > 4 && i <= stride ? 0 : b));
+  writeFileSync(file, withPixels(written, sub));
+  expect(await driftedCopies(root, { format })).toEqual(drifted);
+  writeFileSync(file, written.subarray(0, 40));
+  expect(await driftedCopies(root, { format })).toEqual(drifted);
+  writeFileSync(file, "not a picture");
+  expect(await driftedCopies(root, { format })).toEqual(drifted);
 });
 
 test("a missing copy fails, naming that file", async () => {

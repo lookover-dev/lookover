@@ -13,7 +13,7 @@ import type {
   HostIntake,
   HostThreadReply,
   HostWriter,
-  JobFailureKind,
+  JobFailure,
   JobId,
   LoopState,
   Reconciled,
@@ -140,8 +140,14 @@ export interface ThreadRoot {
  */
 export type SkipWhy = "newer-commit" | "preview" | CancelReason | SkipReason;
 
+/**
+ * What of a failure the host is shown (ADR 0081): its kind, and its cause and the limit that ran out when known.
+ * Never its `detail`, which can name paths and echo the engine's output.
+ */
+export type ShownFailure = Pick<JobFailure, "kind" | "cause" | "limitMs">;
+
 /** Why a job ended without a round on the check's commit (ADR 0043): skipped, and why, or failed, and how. */
-export type Ended = { kind: "skipped"; why: SkipWhy } | { kind: "failed"; failure: JobFailureKind };
+export type Ended = { kind: "skipped"; why: SkipWhy } | { kind: "failed"; failure: ShownFailure };
 
 /**
  * Where the job stands on the check's commit: waiting (its turn, or why it is deferred, and until when an engine's
@@ -214,7 +220,7 @@ export type Status =
       kind: "failed";
       sha: CommitSha;
       round: number;
-      failure: JobFailureKind;
+      failure: ShownFailure;
       engine: EngineId | null;
       posted: StatusRound | null;
     };

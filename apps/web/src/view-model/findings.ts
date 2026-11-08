@@ -15,16 +15,25 @@ import {
   ruleText,
   type Severity,
   type Strictness,
-  shortSha,
 } from "@lookover/contracts";
-import { plural } from "./format.ts";
+import { metaLine, plural, type Words } from "./format.ts";
 import { inAgentLoop } from "./select.ts";
+import { displayStatus } from "./status.ts";
 
 export const SEVERITY_LABEL: Record<Severity, string> = {
   blocking: "Blocking",
   should_fix: "Should fix",
   consider: "Consider",
 };
+
+/** A finding's meta line: "Correctness · open since round 2 · not posted on GitHub", its dots held (`metaLine`). */
+export function findingMeta(finding: Finding): string {
+  return metaLine([
+    finding.category,
+    `open since round ${finding.raisedIn}`,
+    ...(finding.posted ? [] : ["not posted on GitHub"]),
+  ]);
+}
 
 /**
  * Where a finding sits, in the words `publish` posts it with on GitHub: "line 42", "lines 42 to 44"; on the base
@@ -179,9 +188,24 @@ export function noiseChoices(
   return choices;
 }
 
-/** The author and the reviewer disagree: only the owner can settle it. */
+/**
+ * The author and the reviewer disagree: only the owner can settle it. Only a finding posted on the pull request, as
+ * the loop counts it (`isCounted`, I-152): one kept off it never makes the loop need you.
+ */
 export function needsYou(finding: Finding): boolean {
-  return finding.status === "escalated";
+  return finding.status === "escalated" && isCounted(finding);
+}
+
+/**
+ * Whether a finding's card is marked as needing you by its edge, with "Needs you" in its heading for a screen reader
+ * (design-system.md "Finding card"). The page's banner says "Needs you" once (ADR 0083, round 6): under it, a card
+ * needs its own mark only when other open findings don't need the person, to tell which one does. With no banner (a
+ * later round waits or runs), the card is the one place that says it.
+ */
+export function edgeNeedsYou(review: Review, finding: Finding): boolean {
+  if (!needsYou(finding)) return false;
+  if (displayStatus(review).kind !== "needs-you") return true;
+  return review.findings.some((f) => isUnsettled(f) && !needsYou(f));
 }
 
 /** Strictness kept it off the pull request, or the last run was a preview: then GitHub has nothing to show. */
@@ -216,12 +240,16 @@ const SETTLED_TEXT: Partial<Record<FindingStatus, string>> = {
   obsolete: "No longer in the code.",
 };
 
-/** The meta line of a finding that is done. */
+/**
+ * The meta line of a finding that is done: verified fixed, one sentence with its commit in it, the round after a
+ * comma ("verified fixed in f5d6e7f, round 2": round 4, 2026-11-08, the chip and "round 2" ran together); else why.
+ */
 export function doneLine(
   finding: Finding,
-): { kind: "verified"; sha: string; round: number | null } | { kind: "why"; text: string } {
+): { kind: "verified"; words: Words } | { kind: "why"; text: string } {
   if (finding.status === "verified_fixed" && finding.verifiedSha) {
-    return { kind: "verified", sha: shortSha(finding.verifiedSha), round: finding.closedIn };
+    const round = finding.closedIn === null ? [] : [`, round ${finding.closedIn}`];
+    return { kind: "verified", words: ["verified fixed in ", { commit: finding.verifiedSha }, ...round] };
   }
   return { kind: "why", text: finding.closedWhy ?? SETTLED_TEXT[finding.status] ?? "" };
 }

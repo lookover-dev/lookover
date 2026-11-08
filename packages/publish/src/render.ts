@@ -24,7 +24,8 @@ import {
   dayText,
   deferralText,
   FINDING_MARKER,
-  failureText,
+  failedTitle,
+  failureWords,
   isCounted,
   keptText,
   replyMarker as markerOf,
@@ -395,7 +396,7 @@ const FORK_ONLY_CODEX =
  * run started.
  */
 export function endedHeadline(ended: Ended, engine: EngineId | null): string {
-  if (ended.kind === "failed") return `The review failed: ${failureText({ kind: ended.failure, engine })}`;
+  if (ended.kind === "failed") return failedTitle({ ...ended.failure, engine });
   return SKIPPED[ended.why].title;
 }
 
@@ -413,7 +414,9 @@ export function checkEnded(
   const did = `Lookover did not look over ${shortSha(sha)}`;
   const more = (why: SkipWhy) => (why === "fork" && onlyCodex ? FORK_ONLY_CODEX : SKIPPED[why].more);
   const summary =
-    ended.kind === "failed" ? `${did}. The owner sees why in Lookover.` : `${did}${more(ended.why)}`;
+    ended.kind === "failed"
+      ? `${did}. ${failureWords({ ...ended.failure, engine }).next}`
+      : `${did}${more(ended.why)}`;
   const text = [
     "Lookover posted no review of this commit. The last line of this text is the `lookover.review-result/v1` result, for coding agents.",
     resultLine(result),

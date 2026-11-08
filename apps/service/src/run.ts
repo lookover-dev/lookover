@@ -23,9 +23,10 @@
 // never given again. `core.reconcile` answers them. A refused threads read fails the run (`host_failed`), as any host
 // read does: a round never goes on without the claims made on its findings. With no posted finding unsettled (round
 // 1, a settled loop) there is no thread to hear and nothing is read. The round keeps, with its plan, the thread each
-// claim was read on (its root comment's ids: where `publish` replies, and what it minimizes once the finding is
-// withdrawn) and the global ids of the requests its job answers, from the store: a resume after a crash reads nothing
-// again, and its posts (`publish`'s `postsOf`, replies and comments minimized included) are saved owed with it.
+// claim was read on and each other finding's newest thread, where a still-present reply goes (ADR 0081): its root
+// comment's ids, where `publish` replies and what it minimizes once the finding is withdrawn. It keeps too the global
+// ids of the requests its job answers, from the store: a resume after a crash reads nothing again, and its posts
+// (`publish`'s `postsOf`, replies and comments minimized included) are saved owed with it.
 // The outbox (ADR 0044): once reconciled, the round is saved before anything is posted, in one write with the run's
 // step, publishing: the round and the ledger it leaves (its findings to post held as not posted until the round lands:
 // its review sent, or with no line comment, no review owed, its status block begun, ADR 0074), what its posts are
@@ -71,11 +72,13 @@ import {
   type EngineActivity,
   type EngineId,
   type EventBody,
+  type FailureCause,
   type Finding,
   type FindingId,
   type FindRunPass,
   type HostChange,
   HostError,
+  type HostFailure,
   type HostIntake,
   type HostThread,
   type IdGen,
@@ -84,6 +87,7 @@ import {
   type JobFailure,
   type LimitMet,
   limitMet,
+  newestThread,
   type PromptRulesFile,
   type Reconciled,
   type RepositoryId,
@@ -300,21 +304,38 @@ type Found = Extract<ReviewRun, { kind: "reviewed" }> & { secondFind: SecondFind
  */
 interface SoFar {
   n: number;
+  /** The commit of the change's newest round before this one, null for none: `core` tells a push by it (ADR 0081). */
+  lastChecked: CommitSha | null;
   ledger: Finding[];
   rules: PromptRulesFile[];
   switches: { id: string; text: string; enabled: boolean }[];
   /** The claims read on the change's threads before the finder (ADR 0052): each pass hears them, `core` answers them. */
   reading: ThreadReading;
-  /** The thread each claim was read on: where the round's reply on it goes, kept with the round (ADR 0052). */
+  /** Where the round's reply on each finding goes (`rootsOf`), kept with the round (ADR 0052, ADR 0081). */
   roots: ThreadRoot[];
 }
 
-/** The thread each claim was read on, by its reply's id: its root comment, which a reply goes under. */
+/**
+ * The thread a round's reply on each finding goes under, by its root comment: the one its claim was read on, by the
+ * reply's id; for a finding with no claim (a still-present reply, ADR 0081), its newest thread.
+ */
 function rootsOf(reading: ThreadReading, threads: HostThread[]): ThreadRoot[] {
-  return reading.claims.flatMap((claim) => {
-    const thread = threads.find((t) => t.replies.some((r) => r.commentId === claim.commentId));
-    return thread ? [{ findingId: claim.findingId, commentId: thread.commentId, nodeId: thread.nodeId }] : [];
+  const rootOf = (t: HostThread): ThreadRoot => ({
+    findingId: t.findingId,
+    commentId: t.commentId,
+    nodeId: t.nodeId,
   });
+  const claimed = reading.claims.flatMap((claim) => {
+    const thread = threads.find((t) => t.replies.some((r) => r.commentId === claim.commentId));
+    return thread ? [{ ...rootOf(thread), findingId: claim.findingId }] : [];
+  });
+  const heard = new Set(reading.claims.map((c) => c.findingId));
+  const unheard = new Set(threads.map((t) => t.findingId).filter((id) => !heard.has(id)));
+  const newest = [...unheard].flatMap((id) => {
+    const thread = newestThread(threads, id);
+    return thread ? [rootOf(thread)] : [];
+  });
+  return [...claimed, ...newest];
 }
 
 /**
@@ -336,10 +357,44 @@ function earlierOf(so: SoFar): EarlierFinding[] {
 /** The run as the job's check names it. */
 const runFacts = (c: Carried): RunFacts => ({ id: c.run.id, engine: c.engine, startedAt: c.run.startedAt });
 
-const failed = (kind: JobFailure["kind"], detail: string): End => ({
-  kind: "failed",
-  failure: { kind, detail },
-});
+/** A failure, with its cause and the limit that ran out (ADR 0081) when known. */
+const failed = (
+  kind: JobFailure["kind"],
+  detail: string,
+  cause: FailureCause | null = null,
+  limitMs: number | null = null,
+): End => ({ kind: "failed", failure: { kind, detail, cause, limitMs } });
+
+/**
+ * The cause of a host's refusal (ADR 0081): it didn't answer, `network`; none for the others, a rate limit included
+ * (GitHub answered and asked to wait: each kind keeps its own words).
+ */
+const hostCause = (failure: HostFailure): FailureCause | null =>
+  failure === "unavailable" ? "network" : null;
+
+/**
+ * The cause of a prepare retrieval refused, from its typed error (ADR 0081): which of git's limits ran out in any step
+ * of getting the code ready (the fetch, the worktree, the diff or the commit check), git
+ * missing, or a path too long; none for the others, git's network included (its words are never read for it).
+ */
+function retrievalCause(error: RetrievalError): FailureCause | null {
+  if (error.limit !== null) return error.limit.kind === "idle" ? "git_silent" : "git_time_limit";
+  if (error.problem === "git_not_found") return "git_missing";
+  return error.pathTooLong ? "path_too_long" : null;
+}
+
+/** The cause of a find pass that failed (ADR 0081): its time limit, or an answer it didn't give or that can't be read. */
+const REVIEW_CAUSE = {
+  timeout: "engine_time_limit",
+  crashed: "engine_answer",
+  invalid_output: "engine_answer",
+  missing_block: "engine_answer",
+  malformed_block: "engine_answer",
+  invalid_block: "engine_answer",
+  cancelled: null,
+  auth_required: null,
+  quota_exhausted: null,
+} as const satisfies Record<ReviewFailure, FailureCause | null>;
 
 /** The engine's state a session's failure shows: signed out, or at its limit; null for any other failure. */
 function engineShown(reason: ReviewFailure | ConfirmFailure): RanInto | null {
@@ -370,18 +425,25 @@ const secondFailure = (reason: ReviewFailure): ConfirmFailure => (unread(reason)
  * a job waits for an engine in that state; or it failed. A failed engine's own words (a refused prompt, an API
  * error) follow the reason; an unreadable answer's text does not, its problems say what was wrong.
  */
-function reviewFailed(engine: EngineId, reason: ReviewFailure, problems: string[], text: string): End {
+function reviewFailed(
+  engine: EngineId,
+  reason: ReviewFailure,
+  found: { problems: string[]; text: string },
+  timeoutMs: number,
+): End {
   const state = engineShown(reason);
   const deferral = state === null ? null : engineHold({ id: engine, state, unusable: null });
   if (deferral) return { kind: "deferred", deferral };
-  const words = unread(reason) || text.trim() === "" ? [] : [text.trim()];
-  return failed("review_failed", [reason, ...problems, ...words].join("\n"));
+  const words = unread(reason) || found.text.trim() === "" ? [] : [found.text.trim()];
+  const cause = REVIEW_CAUSE[reason];
+  const detail = [reason, ...found.problems, ...words].join("\n");
+  return failed("review_failed", detail, cause, cause === "engine_time_limit" ? timeoutMs : null);
 }
 
 /** Anything a step threw that it did not answer itself: the host, the store, a bug. */
 function threw(error: unknown, signal: AbortSignal): End {
   if (signal.aborted) return { kind: "stopped" };
-  if (error instanceof HostError) return failed("host_failed", error.failure);
+  if (error instanceof HostError) return failed("host_failed", error.failure, hostCause(error.failure));
   return failed("unexpected", said(error));
 }
 
@@ -396,9 +458,11 @@ const held = (ledger: Finding[], post: Finding[]): Finding[] => {
 
 /** Why posting stopped: the host's refusal, `publish_failed`; anything else (the store, a bug), `unexpected`. */
 function postFailure(error: unknown): FailureFacts {
-  if (error instanceof HostError)
-    return { kind: "publish_failed", detail: `${error.failure}: ${error.message}` };
-  return { kind: "unexpected", detail: said(error) };
+  if (error instanceof HostError) {
+    const detail = `${error.failure}: ${error.message}`;
+    return { kind: "publish_failed", detail, cause: hostCause(error.failure), limitMs: null };
+  }
+  return { kind: "unexpected", detail: said(error), cause: null, limitMs: null };
 }
 
 /** The longest an activity's text leaves the service (ADR 0055), cut once the secrets filter has seen it whole. */
@@ -515,7 +579,7 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
     } catch (error) {
       if (!(error instanceof HostError) || error.failure !== "not_found") throw error;
       if (c.signal.aborted) return { kind: "stopped" };
-      return failed("prepare_failed", `${error.failure}: ${error.message}`);
+      return failed("prepare_failed", `${error.failure}: ${error.message}`, "base_not_found");
     }
   }
 
@@ -537,7 +601,12 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
     } catch (error) {
       if (!(error instanceof RetrievalError)) throw error;
       if (c.signal.aborted) return { kind: "stopped" };
-      return failed("prepare_failed", `${error.problem}: ${error.detail}`);
+      return failed(
+        "prepare_failed",
+        `${error.problem}: ${error.detail}`,
+        retrievalCause(error),
+        error.limit?.ms ?? null,
+      );
     }
   }
 
@@ -577,7 +646,7 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
     if (c.signal.aborted) return { kind: "stopped" };
     if (found.kind === "failed") {
       ranInto(c.engine, found.reason, found);
-      return reviewFailed(c.engine, found.reason, found.problems, found.text);
+      return reviewFailed(c.engine, found.reason, found, d.reviewTimeoutMs);
     }
     const engine = c.secondFinder;
     if (engine === null) return { ...found, secondFind: null };
@@ -661,6 +730,7 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
         withheld: d.store.posts.withheld(c.changeId),
         threads: so.reading,
         full: c.full,
+        lastChecked: so.lastChecked,
       },
     );
   }
@@ -766,8 +836,10 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
           fork: host.fork,
           lookovers,
         });
+        const rounds = d.store.rounds.of(c.changeId);
         const so: SoFar = {
-          n: d.store.rounds.of(c.changeId).length + 1,
+          n: rounds.length + 1,
+          lastChecked: rounds.at(-1)?.sha ?? null,
           ledger,
           rules: promptRules(repoId, prepared.rules, off),
           switches,
@@ -920,6 +992,8 @@ export function createRun(d: RunDeps): { start: StartRun; resume: ResumeRun } {
     const failure: FailureFacts = {
       kind: "unexpected",
       detail: last instanceof Error ? last.message : String(last),
+      cause: null,
+      limitMs: null,
     };
     const job = d.store.jobs.runEnded(r.runId, { kind: "failed", failure, posted }, t);
     d.emit({ type: "job.changed", at: t, changeId: r.changeId, job });

@@ -2,15 +2,21 @@
 
 import {
   type ButtonHTMLAttributes,
+  Fragment,
   type InputHTMLAttributes,
   type MouseEvent,
   type ReactNode,
+  useEffect,
   useId,
+  useRef,
   useState,
 } from "react";
 import type { WithCommand } from "../view-model/format.ts";
+import type { LogRun } from "../view-model/logs.ts";
+import { IN_DISPLAY, saidParts } from "../view-model/said.ts";
 import type { SaveShown } from "../view-model/save.ts";
 import { ICON_TILE, LOADER, MARK } from "./eyes.generated.ts";
+import { CodePath } from "./path.tsx";
 
 const ICONS = {
   search: (
@@ -47,6 +53,27 @@ const ICONS = {
   next: <path d="M6 4l4 4-4 4" />,
   // Back to what applied before: the one way back on a setting that differs.
   revert: <path d="M3 6.5h6.5a3.5 3.5 0 0 1 0 7H6M3 6.5l3-3M3 6.5l3 3" />,
+  // What is not done yet, in a state square before (design-system.md "State square"): to install, to sign in.
+  install: <path d="M8 2.5v7.5M4.5 6.5L8 10l3.5-3.5M3 13.5h10" />,
+  "sign-in": (
+    <path d="M9.5 2.5H12a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H9.5M2.5 8h7.5M7 4.5L10.5 8 7 11.5" />
+  ),
+  // An account's state before its detail (the accounts list): not installed, a dashed ring where the App would be;
+  // ask its owners, two people; a cause holds it; another account to add.
+  absent: <circle cx="8" cy="8" r="6" strokeDasharray="2.71 2" />,
+  owners: (
+    <>
+      <circle cx="6" cy="5.5" r="2.5" />
+      <path d="M1.5 13.5a4.5 4.5 0 0 1 9 0M10.5 3.2a2.5 2.5 0 0 1 0 4.6M12 9.4a4.5 4.5 0 0 1 2.5 4.1" />
+    </>
+  ),
+  alert: (
+    <>
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M8 4.75v3.75M8 11.25v.01" />
+    </>
+  ),
+  add: <path d="M8 3v10M3 8h10" />,
 } as const;
 export type IconName = keyof typeof ICONS;
 
@@ -150,7 +177,7 @@ export function Kbd({ children }: { children: ReactNode }) {
 }
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "primary" | "secondary" | "ghost" | "danger";
+  variant?: "primary" | "secondary" | "quiet" | "ghost" | "danger";
   size?: "sm" | "md" | "lg";
   loading?: boolean;
   icon?: IconName;
@@ -174,6 +201,21 @@ export function Button({
       {children}
       {kbd ? <span className="kbd">{kbd}</span> : null}
     </button>
+  );
+}
+
+/**
+ * What a button's place says while what it would start is under way (design-system.md "Button"): not a button, a
+ * status line, the state's words in its colour (lavender running, amber waiting) with the reading eyes before them, at
+ * the start of the place, no fill and no edge, so it reads as Lookover at work, never as a dimmed control. Not a live region itself: inside `SameWidth`'s hidden
+ * slots it would never be announced, so its caller says its words in one visually hidden status line beside it.
+ */
+export function BusyStatus({ tone, children }: { tone: "run" | "wait"; children: ReactNode }) {
+  return (
+    <span className="busy-status" data-tone={tone}>
+      <Eyes />
+      {children}
+    </span>
   );
 }
 
@@ -206,6 +248,7 @@ export function LinkButton({
   className = "",
   onClick,
   kbd,
+  title,
   children,
 }: {
   href: string;
@@ -215,12 +258,15 @@ export function LinkButton({
   /** Runs as the tab opens: what the app records of it. It may stop the tab (`preventDefault`) to open it later. */
   onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
   kbd?: string;
+  /** Said on hover: a label that may be cut, said whole. */
+  title?: string;
   children: ReactNode;
 }) {
   const sizeClass = size === "sm" ? "btn-sm" : size === "lg" ? "btn-lg" : "";
   return (
     <a
       className={`btn btn-${variant} ${sizeClass} ${className}`}
+      title={title}
       href={href}
       target="_blank"
       rel="noopener noreferrer"
@@ -233,24 +279,31 @@ export function LinkButton({
   );
 }
 
-/** A value the owner copies into another program (design-system.md, Value to copy): the value, then a copy button. */
+/**
+ * A value the owner copies into another program (design-system.md, Value to copy): the value in a block of its own,
+ * the copy button level with its top.
+ */
 export function CopyLine({ value, onCopy }: { value: string; onCopy: () => void }) {
   return (
-    <span className="copyline">
+    <div className="copyline">
       <code>{value}</code>
       <IconButton icon="copy" label="Copy" onClick={onCopy} />
-    </span>
+    </div>
   );
 }
 
-/** What a chip says about a status, in colour (design-system.md, Chip). */
-export type Tone = "need" | "run" | "ok" | "warn" | "mute";
+/**
+ * What a chip says about a status, in colour (design-system.md, Chip): every tone one construction; `wait` is amber
+ * as `warn` is, told apart by its dot, a ring.
+ */
+export type Tone = "need" | "run" | "ok" | "warn" | "wait" | "mute";
 
 const CHIP_CLASS: Record<Tone, string> = {
   need: "c-need",
   run: "c-run",
   ok: "c-ok",
   warn: "c-warn",
+  wait: "c-wait",
   mute: "c-mute",
 };
 
@@ -295,11 +348,14 @@ export function Switch({
   onChange: (on: boolean) => void;
   children?: ReactNode;
   label?: string;
-  /** Held where it is: dims, and the caller's tooltip says why (design-system.md, Switch). */
+  /**
+   * Held where it is: drawn as any switch in its state, never dimmed, the not-allowed cursor; the caller says why in
+   * words beside it (design-system.md, Switch).
+   */
   disabled?: boolean;
 }) {
   return (
-    <label className="switch">
+    <label className={disabled ? "switch held" : "switch"}>
       <input
         type="checkbox"
         role="switch"
@@ -315,22 +371,42 @@ export function Switch({
   );
 }
 
+/**
+ * A checkbox. `mixed`, for one standing for several of which some are ticked, shows a bar and is announced as mixed;
+ * it is not `checked`, so a click on it ticks them all. `label` names it when its visible text says less.
+ */
 export function Check({
   checked,
   onChange,
   children,
   disabled,
+  mixed = false,
+  label,
+  describedBy,
 }: {
   checked: boolean;
   onChange: (on: boolean) => void;
   children: ReactNode;
   disabled?: boolean;
+  mixed?: boolean;
+  label?: string;
+  /** The id of what describes the box beyond its label: setup's account count, "29 of 30 to review". */
+  describedBy?: string;
 }) {
+  const ref = useRef<HTMLInputElement>(null);
+  // The browser clears `indeterminate` on a click; it is set again from `mixed` after every render.
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = mixed;
+  });
   return (
     <label className="check">
       <input
+        ref={ref}
         type="checkbox"
-        checked={checked}
+        checked={checked && !mixed}
+        aria-checked={mixed ? "mixed" : undefined}
+        aria-label={label}
+        aria-describedby={describedBy}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
       />
@@ -368,14 +444,15 @@ export function Segmented<T extends string | number>({
   disabled = false,
 }: {
   value: T;
-  /** An option disabled alone is dimmed in place, as the whole control is when disabled; used for an option with nothing behind it. */
+  /** An option disabled alone can't be pressed but is drawn as any option not pressed, never dimmed; used for an option with nothing behind it. */
   options: { value: T; label: string; disabled?: boolean }[];
   onChange: (value: T) => void;
   label: string;
+  /** The whole control disabled: every option dimmed, said on the group. */
   disabled?: boolean;
 }) {
   return (
-    <div className="seg" role="group" aria-label={label}>
+    <div className="seg" role="group" aria-label={label} aria-disabled={disabled ? true : undefined}>
       {options.map((o) => (
         <button
           type="button"
@@ -472,22 +549,30 @@ export function Row({
   );
 }
 
+/** A notice's tone: pink where the person is needed, amber while it waits, muted where it only informs. */
+export type NoticeTone = "need" | "warn" | "mute";
+
 /**
  * "Needs you": a surface card with a mono pink label and the still eyes. Buttons inside stay ordinary. A review
  * that waits says "Waiting" in amber, as the alert band does: pink is only for what needs you. What only informs (a
- * repository that left the installation) is `mute`: its label and eyes muted.
+ * repository that left the installation) is `mute`: its label and eyes muted. Every notice is one layout
+ * (design-system.md "Notice"): the eyes, the text column (the label over the sentence, flush), the action edge; what
+ * opens under it (`below`) sits on the text column, after the actions, so Tab goes as the eye does.
  */
 export function Notice({
   label = "Needs you",
   tone = "need",
   children,
   action,
+  below,
   busy,
 }: {
   label?: string;
-  tone?: "need" | "warn" | "mute";
+  tone?: NoticeTone;
   children: ReactNode;
   action?: ReactNode;
+  /** What opens under the notice, from the text column to the action edge: Left's list. */
+  below?: ReactNode;
   busy?: boolean;
 }) {
   return (
@@ -498,7 +583,63 @@ export function Notice({
         {children}
       </span>
       {action}
+      {below}
     </div>
+  );
+}
+
+/**
+ * A notice whose list opens under it (design-system.md "Notice"): at its action edge a quiet Show (Hide once open),
+ * as wide as either word (`SameWidth`) and named by what it opens, beside its ×, before what opens in Tab's order; what
+ * opens (`below`) slides open on the text column, out of Tab's way while closed. The caller gives only the words, the
+ * × and the list.
+ */
+export function NoticeDisclosure({
+  label,
+  tone,
+  toggle,
+  dismiss,
+  below,
+  children,
+}: {
+  label: string;
+  tone?: NoticeTone;
+  /** The toggle's words, and its accessible names, which say what it opens. */
+  toggle: { show: string; hide: string; showName: string; hideName: string };
+  /** The × beside the toggle: its name and tooltip, and what it does. */
+  dismiss: { label: string; onClick: () => void };
+  below: ReactNode;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <Notice
+      label={label}
+      {...(tone === undefined ? {} : { tone })}
+      action={
+        <span className="banner-acts">
+          <Button
+            variant="quiet"
+            size="sm"
+            aria-label={open ? toggle.hideName : toggle.showName}
+            aria-expanded={open}
+            aria-controls={id}
+            onClick={() => setOpen(!open)}
+          >
+            <SameWidth shown={open ? "hide" : "show"} labels={{ show: toggle.show, hide: toggle.hide }} />
+          </Button>
+          <IconButton icon="close" label={dismiss.label} onClick={dismiss.onClick} />
+        </span>
+      }
+      below={
+        <div className={open ? "banner-below open" : "banner-below"} id={id} inert={!open}>
+          <div>{below}</div>
+        </div>
+      }
+    >
+      {children}
+    </Notice>
   );
 }
 
@@ -542,6 +683,18 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
   );
 }
 
+/**
+ * A status line no one sees (design-system.md "Visually hidden"): always there, so a screen reader hears what comes
+ * into it, empty otherwise; one per place that announces (a refusal, a review starting).
+ */
+export function StatusLine({ children }: { children: ReactNode }) {
+  return (
+    <p className="visually-hidden" role="status">
+      {children}
+    </p>
+  );
+}
+
 export function PageLoading() {
   return (
     <div className="page-loading">
@@ -552,57 +705,67 @@ export function PageLoading() {
 
 /**
  * The session screen: shown alone once the service no longer knows the tab (design-system.md). The large still
- * eyes and one sentence, with the command to run as code inside it when there is one; a long path wraps inside its
- * code. Nothing to click: the next link is a new tab.
+ * eyes and one sentence, with the command to run as code inside it when there is one; a long command breaks only after
+ * its path's separators and at its spaces (`CodePath`). Nothing to click: the next link is a new tab.
  */
 export function Session({ words }: { words: string | WithCommand }) {
   return (
     <div className="session">
       <Eyes still large />
       <p>
-        <Said words={words} />
+        <Said words={words} max={IN_DISPLAY} />
       </p>
     </div>
   );
 }
 
 /**
- * A sentence, plain or with commands in it: each command shown as inline code (design-system.md "Inline code"), at
- * the size of the line it is in, a device code in its own face ("Device code"). Punctuation that follows a command
- * (`, but`, `.`) sits against it.
+ * A sentence, plain or with commands in it (design-system.md "Inline code"): a command short enough sits in it whole,
+ * a step under the line's size (`CodePath`); one too long goes on its own line under the sentence said without it
+ * (`saidParts`), a block broken only after its separators or at its spaces; a device code whole, in its own face
+ * ("Device code"). Punctuation that follows a command (`, but`, `.`) sits against it.
  */
-export function Said({ words }: { words: string | WithCommand }) {
+export function Said({ words, max }: { words: string | WithCommand; max?: number }) {
   if (typeof words === "string") return words;
-  const next = typeof words.after === "string" ? words.after : words.after.before;
-  const gap = /^[,.:;]/.test(next) ? "" : " ";
   return (
     <span className="said">
-      {words.before} <code className={words.kind}>{words.command}</code>
-      {gap}
-      <Said words={words.after} />
+      {saidParts(words, max).map((part, i) =>
+        "text" in part ? (
+          <Fragment key={i}>{part.text}</Fragment>
+        ) : part.kind === "device-code" ? (
+          <code key={i} className="device-code">
+            {part.code}
+          </code>
+        ) : (
+          <CodePath key={i} text={part.code} kind={part.kind} line={part.line} max={max} />
+        ),
+      )}
     </span>
   );
 }
 
 /**
- * Lines of code, numbered from `start`, the line `mark` marked; or one diff line, removed then added. Without `start`,
- * the lines have no numbers: a log's lines come and go, and a number would move with them.
+ * Lines of code, numbered from `start`, the line `mark` marked; or one diff line, removed then added. Code keeps its
+ * lines whole, scrolled sideways when one is too long; a `log`'s lines wrap under their text instead, clear of the
+ * numbers (design-system.md "Code").
  */
 export function Code({
   start,
   lines,
   mark,
   diff,
+  log = false,
 }: {
-  start?: number;
+  start: number;
   lines: string[];
   mark?: number;
   diff?: { del: string; add: string };
+  log?: boolean;
 }) {
   return (
-    <div className="code">
+    <div className={log ? "code log" : "code"}>
       <pre>
-        {diff && start !== undefined ? (
+        {diff ? (
           <>
             <span className="ln">{start}</span>
             <span className="del">- {diff.del.trimStart()}</span>
@@ -610,12 +773,11 @@ export function Code({
             <span className="ln">{start}</span>
             <span className="add">+ {diff.add.trimStart()}</span>
           </>
-        ) : start === undefined ? (
+        ) : log ? (
           lines.map((line, i) => (
-            // A line is its place: two may say the same.
-            <span key={i}>
+            <span key={start + i} className="line">
+              <span className="ln">{start + i}</span>
               {line}
-              {"\n"}
             </span>
           ))
         ) : (
@@ -633,12 +795,47 @@ export function Code({
 }
 
 /**
+ * The log file's lines (the Logs page, ADR 0055): no numbers, since they come and go and a number would move with
+ * them; each line's time in a column of its own, wider when it says the day, its words wrapping under its message
+ * (round 4). A pull request is named once (ADR 0083, round 6): its run opens on a head naming it, over its lines'
+ * words; a run about none has no head. The time's column is the run's: the day's wider one for the head and every
+ * line when any line says the day, so a run across midnight keeps its words on one x.
+ */
+export function LogFile({ runs }: { runs: LogRun[] }) {
+  return (
+    <div className="code log file">
+      <pre>
+        {runs.map((run, r) => (
+          // A run is its place: two may name the same pull request.
+          <span key={r} className={run.day ? "run day" : "run"}>
+            {run.pr === null ? null : <span className="head">{run.pr}</span>}
+            {run.lines.map((line, i) => (
+              // A line is its place: two may say the same.
+              <span key={i} className="line">
+                {line.time === null ? null : (
+                  // The space after the time is inside its column, which is wider: copied, the line keeps it.
+                  <span className="when">
+                    {line.day === null ? `${line.time} ` : `${line.day} ${line.time} `}
+                  </span>
+                )}
+                {line.words}
+              </span>
+            ))}
+          </span>
+        ))}
+      </pre>
+    </div>
+  );
+}
+
+/**
  * The live log (ADR 0055): what the AI does while a round runs, newest line last, in a Code block eight lines tall
- * scrolled to the newest. Each line as plain text; with none, `empty` in the same block, so it keeps its height.
+ * scrolled to the newest, its lines from the block's top. Each line as plain text, wrapping under its text, clear of
+ * the AI's name; with none, `empty` in the same block, so it keeps its height.
  */
 export function LiveLog({ lines, empty }: { lines: { who: string; text: string }[]; empty: string | null }) {
   return (
-    <div className="code live" role="log">
+    <div className="code log live" role="log">
       <pre>
         {lines.length === 0 ? (
           <span className="cm">{empty}</span>
@@ -665,9 +862,18 @@ export function SectionHead({ children, count }: { children: ReactNode; count?: 
   );
 }
 
-export function Group({ title, children }: { title: string; children: ReactNode }) {
+/** A titled group of a page. `landing`: a link to a place in it opens the group itself (Settings' `openPlace`). */
+export function Group({
+  title,
+  children,
+  landing = false,
+}: {
+  title: string;
+  children: ReactNode;
+  landing?: boolean;
+}) {
   return (
-    <section className="grp">
+    <section className="grp" data-landing={landing || undefined}>
       <h4>{title}</h4>
       {children}
     </section>

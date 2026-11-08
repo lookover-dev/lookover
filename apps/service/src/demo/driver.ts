@@ -29,6 +29,7 @@ import {
   type RepositoryRef,
   type State,
 } from "@lookover/contracts";
+import { RetrievalError } from "@lookover/retrieval";
 import { openStore, type Store } from "@lookover/store";
 import {
   DemoClock,
@@ -149,6 +150,12 @@ const DEMO_NPM_SKILL_COMMAND =
 const GITHUB_LIMIT_MS = 20 * 60_000;
 /** When Codex's limit resets, as its run says, when the drawer has it reach its limit: two days on, not today. */
 const CODEX_RESETS_IN_MS = 2 * 24 * 60 * 60_000;
+/**
+ * The limits a fetch runs out of when the drawer says so: retrieval's for a fetch (git silent that long, or running
+ * that long), as the real one reports them in its `RetrievalError` (ADR 0081).
+ */
+const FETCH_IDLE_MS = 2 * 60_000;
+const FETCH_WALL_MS = 10 * 60_000;
 /** How long GitHub is out of reach when the drawer says so: long enough to see, short enough to come back. */
 const CONNECTION_LOST_MS = 20_000;
 /** Who suspends the shared App on an organisation when the drawer says so, as GitHub names them: an owner of it. */
@@ -411,6 +418,10 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     const change = world.unopened(by);
     return change === null ? Promise.resolve("nothing_to_open") : played({ kind: "open", change });
   };
+  const refuseFetch = (error: RetrievalError) => {
+    world.retrieval.refuse(error);
+    return Promise.resolve("ok" as const);
+  };
   const faults = {
     "claude-signed-out": () => played({ kind: "sign-out", engine: "claude" }),
     "codex-signed-out": () => played({ kind: "sign-out", engine: "codex" }),
@@ -503,7 +514,8 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
       if (last === undefined) return Promise.resolve("nothing_to_remove" as const);
       return discovered(() => world.host.removeRepository(last));
     },
-    // The repository that left last, said departed (ADR 0059), added back on GitHub.
+    // The repository that left last, said departed (ADR 0059), added back on GitHub to its own account's installation:
+    // an organisation's the App left, the App installed there again on it alone.
     "repository-back": () => {
       const last = room.snapshot().departed.at(-1);
       if (last === undefined) return Promise.resolve("nothing_departed" as const);
@@ -523,6 +535,25 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
       return change === undefined
         ? Promise.resolve("nothing_to_close" as const)
         : played({ kind: "close", change });
+    },
+    // The next fetch of the code runs out of one of its limits, as the real one fails it: that review fails, the
+    // one after fetches again (ADR 0081). A failure is a fault, never a seed's: the seed refuses one.
+    "fetch-silent": () =>
+      refuseFetch(
+        new RetrievalError("fetch_failed", "git took too long (idle)", {
+          limit: { kind: "idle", ms: FETCH_IDLE_MS },
+        }),
+      ),
+    "fetch-too-long": () =>
+      refuseFetch(
+        new RetrievalError("fetch_failed", "git took too long (wall_clock)", {
+          limit: { kind: "wall_clock", ms: FETCH_WALL_MS },
+        }),
+      ),
+    // Codex's next run crashes: a review it finds fails on its answer; as a confirmer, its round goes unchecked.
+    "codex-no-review": () => {
+      world.engines.nextRunAnswers("codex", "crashed");
+      return Promise.resolve("ok" as const);
     },
     "codex-updated": () =>
       played({

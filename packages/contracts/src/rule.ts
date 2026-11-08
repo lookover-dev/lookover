@@ -37,6 +37,8 @@ export interface Rule {
    * own switch, which is kept for when that rule comes back on.
    */
   parentOff: boolean;
+  /** Sits in another rule: its row keeps the room of why it is held, so it never moves as that rule toggles. */
+  nestedIn: boolean;
   /** How many rules are nested in it: switching it off switches them off too (ADR 0049). */
   nested: number;
 }

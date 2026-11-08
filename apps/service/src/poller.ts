@@ -3,13 +3,16 @@
 // loop goes over every repository watched, one after the other (GitHub asks for serial requests), each at its own
 // cadence; a repository switched off is polled all the same (its `/lookover review` is recorded as a skip, ADR 0047).
 // - Each poll of a repository lists the open changes and compares them with the inbox (the last listing, kept in the
-//   store), never with the host's "unchanged" answer: the listing is shared with every other reader of the adapter. A change new
-//   to the inbox is `change.opened` and the queue's `opened` (`core.intake` with the "opened" trigger); a draft
-//   listed ready is `change.opened` again (the UI keeps its review) and `opened` too; a moved head is
+//   store), never with the host's "unchanged" answer: the listing is shared with every other reader of the adapter. A
+//   change new to the inbox is `change.opened` and the queue's `opened` (`core.intake` with the "opened" trigger); a
+//   draft listed ready is `change.opened` again (the UI keeps its review) and `opened` too; a moved head is
 //   `change.pushed` with the commits GitHub's compare counts between the two heads (0 when it can't: the timeline
-//   then says "pushed new commits"), and the queue's `pushed`; a change no longer listed is `change.closed`, its
-//   waiting job left to the next take, which cancels it. The first listing of a repository (a fresh data folder) only
-//   shows what is open: nothing was asked of what was there before Lookover watched it.
+//   then says "New commits"), by the agent only when it listed every one and an agent signed each
+//   (`core.agentPushed`), else by no one named (ADR 0081: GitHub's polled answers don't say who pushed), and the
+//   queue's `pushed`; a review request comment with the marker is the agent's, without it a person's (ADR 0081); a
+//   change no longer listed is `change.closed`, its waiting job left to the next take, which cancels it. The first
+//   listing of a repository (a fresh data folder) only shows what is open: nothing was asked of what was there before
+//   Lookover watched it.
 // - Who wrote each change (ADR 0044) is read from GitHub's compares: `core.writerOf` over the messages of the commits
 //   since the last read (their `Co-authored-by` trailers), the writer kept and the branch prefix. The inbox keeps it
 //   with the head commit it was read through: a change opened is read from its base, a push from where the last read
@@ -110,6 +113,7 @@ import {
   HostError,
   type HostIntake,
   type Listing,
+  type PushedBy,
   type Repository,
   type RepositoryId,
   type RepositoryRef,
@@ -117,7 +121,7 @@ import {
   readRequest,
   sameRepository,
 } from "@lookover/contracts";
-import { pollEvery, writerOf } from "@lookover/core";
+import { agentPushed, pollEvery, writerOf } from "@lookover/core";
 import type { CommentPlace, OpenChange, RequestComment, Store, WriterRead } from "@lookover/store";
 import { said } from "./said.ts";
 import { changeOf, repoIdOf } from "./snapshot.ts";
@@ -236,9 +240,24 @@ const accountCauseOf = (error: unknown): AccountCause | null => {
   return cause?.kind === "uninstalled" || cause?.kind === "sso" ? cause : null;
 };
 
+/** What a push's compare said: the commits it brought (0 when GitHub couldn't say), and whether an agent pushed them. */
+interface PushRead {
+  commits: number;
+  by: PushedBy;
+}
+
+/**
+ * What a push's compare said, null when it failed. Who pushed is not on GitHub's polled answers (ADR 0081): the agent,
+ * only when it signed every commit read (`core.agentPushed`).
+ */
+const pushReadOf = (pushed: CommitCount | null): PushRead => ({
+  commits: pushed?.commits ?? 0,
+  by: pushed !== null && agentPushed(pushed) ? "agent" : null,
+});
+
 /** What the compares of one poll said: the commits each push brought, and the writers read, by number. */
 interface Compared {
-  counts: Map<string, number>;
+  counts: Map<string, PushRead>;
   writers: Map<number, WriterRead>;
 }
 
@@ -409,7 +428,7 @@ export function createPoller(d: PollerDeps): Poller {
     const { pushedFrom, readFrom } = fromWhere(c, was);
     const pushed = pushedFrom === null ? null : await compare(repo, pushedFrom, to, at);
     still(at);
-    if (pushedFrom !== null) into.counts.set(pushKey(c.number, pushedFrom, to), pushed?.commits ?? 0);
+    if (pushedFrom !== null) into.counts.set(pushKey(c.number, pushedFrom, to), pushReadOf(pushed));
     if (readFrom === null) return;
     const read = readFrom === pushedFrom ? pushed : await compare(repo, readFrom, to, at);
     still(at);
@@ -507,15 +526,17 @@ export function createPoller(d: PollerDeps): Poller {
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id, "en", { numeric: true }));
     const requests = news.flatMap((c) => {
       const asks = requestOf(c, open);
-      return asks === null ? [] : [{ c, full: asks.full }];
+      return asks === null ? [] : [{ c, asks }];
     });
-    for (const { c, full } of requests) {
+    for (const { c, asks } of requests) {
       const request: RequestComment = {
         repo,
         comment: { id: c.id, createdAt: c.createdAt },
         nodeId: c.nodeId,
+        // The marker naming a commit is `lookover wait`'s: the agent asked (ADR 0081); the command alone, a person.
+        askedBy: asks.commit === null ? "person" : "agent",
       };
-      d.requested(changeIdOf(repo, c.change), request, full);
+      d.requested(changeIdOf(repo, c.change), request, asks.full);
     }
     const newest = items.reduce((at, c) => Math.max(at, c.updatedAt), place.newest);
     d.store.requests.seen(
@@ -592,9 +613,8 @@ export function createPoller(d: PollerDeps): Poller {
     for (const entry of delta.pushed) {
       const changeId = changeIdOf(repo, entry.change.number);
       const sha = entry.change.head.sha;
-      // Who pushed is not known yet: "you" until something tells an agent's push from the owner's.
-      const count = counts.get(pushKey(entry.change.number, entry.from, sha)) ?? 0;
-      d.emit({ type: "change.pushed", at, changeId, sha, commits: count, by: "you" });
+      const { commits, by } = counts.get(pushKey(entry.change.number, entry.from, sha)) ?? pushReadOf(null);
+      d.emit({ type: "change.pushed", at, changeId, sha, commits, by });
       d.pushed(changeId, sha);
     }
     // Another writer read (a push signed by another agent, a read that failed before), or another opened time

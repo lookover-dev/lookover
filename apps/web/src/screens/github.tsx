@@ -9,9 +9,10 @@ import { reviewPath, useAppState } from "../store.tsx";
 import { BrandIcon } from "../ui/basics.tsx";
 import { WORDMARK_BOX } from "../ui/eyes.generated.ts";
 import { InlineCode } from "../ui/inline-code.tsx";
+import { CodePath } from "../ui/path.tsx";
 import { severityLabel } from "../view-model/confirm.ts";
 import { placeText } from "../view-model/findings.ts";
-import { agoSentence, clock } from "../view-model/format.ts";
+import { agoSentence, logStamp, type Words } from "../view-model/format.ts";
 import {
   agentLine,
   type BlockItem,
@@ -23,7 +24,6 @@ import {
   statusBlock,
   threadOf,
   timelineOf,
-  type Words,
 } from "../view-model/github.ts";
 import { type ChangeReview, changeReviewAt } from "../view-model/select.ts";
 import { timelineText } from "../view-model/timeline.ts";
@@ -56,7 +56,8 @@ function Commit({ sha }: { sha: CommitSha }) {
   );
 }
 
-function Said({ words }: { words: Words }) {
+/** Words in a post: text with its code spans as GitHub shows them, each commit a link to it. */
+function PostWords({ words }: { words: Words }) {
   return (
     <>
       {words.map((w, i) =>
@@ -98,10 +99,10 @@ function Block({ block }: { block: StatusBlock }) {
   return (
     <>
       <h3 className="gh-block-head">
-        <Wordmark px={26} /> · <Said words={block.head} />
+        <Wordmark px={26} /> · <PostWords words={block.head} />
       </h3>
       <p>
-        <Said words={block.line} />
+        <PostWords words={block.line} />
       </p>
       {block.items.length > 0 ? (
         <ul>
@@ -115,7 +116,7 @@ function Block({ block }: { block: StatusBlock }) {
               ) : (
                 <InlineCode text={item.finding.title} />
               )}{" "}
-              · <code>{item.finding.file}</code> {item.place}
+              · <CodePath text={item.finding.file} kind="path" /> {item.place}
               {item.note ? (
                 <div>
                   <InlineCode text={item.note} />
@@ -149,7 +150,7 @@ function Inline({ change, finding, author }: { change: Change; finding: Finding;
   return (
     <details id={`thread-${finding.id}`} className="gh-box gh-thread" open={!thread.resolved}>
       <summary>
-        <code>{finding.file}</code>
+        <CodePath text={finding.file} kind="path" />
         <span className="gh-muted">{placeText(finding)}</span>
         {thread.label ? <span className="gh-label">{thread.label}</span> : null}
       </summary>
@@ -285,16 +286,16 @@ export function GitHubMock() {
             t.kind === "event" ? (
               <div className="gh-event" key={`${t.at}-${t.entry.kind}`}>
                 <span className="gh-dot" />
-                <span>{timelineText(change, t.entry)}</span>
+                <span>{timelineText(t.entry)}</span>
                 {t.entry.sha ? <code>{shortSha(t.entry.sha)}</code> : null}
-                <span className="gh-muted">{clock(t.at)}</span>
+                <span className="gh-muted">{logStamp(state.now, t.at)}</span>
               </div>
             ) : (
               <Fragment key={`round-${t.round.n}`}>
                 <div className="gh-event">
                   <span className="gh-dot" />
                   <b>{author}</b>
-                  <span className="gh-muted">reviewed · {clock(t.at)}</span>
+                  <span className="gh-muted">reviewed · {logStamp(state.now, t.at)}</span>
                 </div>
                 {t.findings.map((f) => (
                   <Inline key={f.id} change={change} finding={f} author={author} />

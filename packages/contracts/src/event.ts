@@ -9,7 +9,7 @@ import type { Connection } from "./connection.ts";
 import type { Engine, EngineId } from "./engine.ts";
 import type { Finding } from "./finding.ts";
 import type { ChangeId, CommitSha, FindingId, RepositoryId } from "./ids.ts";
-import type { ReviewJob } from "./job.ts";
+import type { PushedBy, ReviewJob } from "./job.ts";
 import type { LoopState } from "./loop.ts";
 import type { NoiseCounts, Repository } from "./repository.ts";
 import type { Round } from "./round.ts";
@@ -64,13 +64,17 @@ export type EventBody =
   | { type: "change.opened"; at: number; change: Change }
   /** The change is no longer open on the host (closed or merged): it leaves the list; its review is kept. */
   | { type: "change.closed"; at: number; changeId: ChangeId }
+  /**
+   * The change's head moved. `by`: `agent` when every new commit was read and an agent signed each (ADR 0081), else
+   * null: GitHub's polled answers don't say who pushed. An event stored before ADR 0081 may say "you": read as null.
+   */
   | {
       type: "change.pushed";
       at: number;
       changeId: ChangeId;
       sha: CommitSha;
       commits: number;
-      by: "you" | "agent";
+      by: PushedBy;
     }
   /** A job was asked for, or its state changed. A job that is not running has no run. */
   | { type: "job.changed"; at: number; changeId: ChangeId; job: ReviewJob }

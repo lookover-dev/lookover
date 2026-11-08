@@ -3,7 +3,7 @@ import { repositoryId } from "@lookover/contracts";
 import {
   CHOICES,
   pickOf,
-  ruleSourceText,
+  ruleSource,
   ruleSwitch,
   SETTING_KEYS,
   settingChange,
@@ -18,13 +18,19 @@ test("a rule's switch is its own, unless a rule it sits in is off: then off, hel
   expect(ruleSwitch({ enabled: false, parentOff: true })).toEqual(held);
 });
 
-test("a rule says where it is from, its line's number kept with its word; the owner's, you", () => {
+test("a rule says where it is from, its repository over its file and line, the line's number kept with its word; the owner's, you", () => {
   const billing = { id: repositoryId("sasensi/billing"), name: "billing" };
   const rule = { source: "REVIEW.md", repoId: billing.id, line: 3 } as const;
-  expect(ruleSourceText([billing], rule)).toBe("billing · REVIEW.md, line 3");
+  // Two lines in the From column, so it is as narrow as a repository's name and the rule's words get the room
+  // (round 6: on one line, "Amounts stay in integer cents…" wrapped beside a From column with room to spare). The
+  // line's number is kept with its word by a no-break space.
+  expect(ruleSource([billing], rule)).toEqual({ repo: "billing", where: "REVIEW.md, line 3" });
   // A repository no longer listed is never named "undefined": the file and line alone.
-  expect(ruleSourceText([], rule)).toBe("REVIEW.md, line 3");
-  expect(ruleSourceText([billing], { source: "yours", repoId: null, line: null })).toBe("you");
+  expect(ruleSource([], rule)).toEqual({ repo: null, where: "REVIEW.md, line 3" });
+  expect(ruleSource([billing], { source: "yours", repoId: null, line: null })).toEqual({
+    repo: null,
+    where: "you",
+  });
 });
 
 test("depth is a three-way choice, said by its label, listed right after strictness", () => {

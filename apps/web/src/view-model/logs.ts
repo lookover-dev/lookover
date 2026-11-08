@@ -86,17 +86,60 @@ export function followLogs(
 /** A line of the file: its stamp's day and time, and its words. */
 const LINE = /^\d{4}-(\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\.\d+\S* (.*)$/;
 
+/** The words of a line about a pull request: the pull request ("sasensi/ledger-api#151"), then the rest. */
+const ABOUT = /^([\w.-]+\/[\w.-]+#\d+) (.*)$/;
+
+/** A line as the page shows it: when the service wrote it, null for a line not of the file's shape, and its words. */
+interface LogLineShown {
+  /** The day, when it isn't the newest line's; else null. */
+  day: string | null;
+  /** Null for a line not of the file's shape. */
+  time: string | null;
+  /** Its words, past the pull request it is about: its run's head names that. */
+  words: string;
+}
+
+/** Consecutive lines about one pull request, under a head naming it; or about none (`pr` null), under no head. */
+export interface LogRun {
+  pr: string | null;
+  /**
+   * The run's time column is the day's wider one: some line of it says the day. The column is the run's, not each
+   * line's, so a run across midnight keeps its head and every line's words on one x.
+   */
+  day: boolean;
+  lines: LogLineShown[];
+}
+
 /**
- * The lines as the page shows them: the time the service wrote each, and its words; the day before the time when it
- * isn't the newest line's (the tail tops up from yesterday's file). A line not of that shape is shown as it is.
+ * The lines as the page shows them (ADR 0083, round 6): the time the service wrote each, apart from its words, so a
+ * long line wraps under its words, clear of the time (design-system.md "Code"); the day before the time when it isn't
+ * the newest line's (the tail tops up from yesterday's file). They scan by pull request, each named once: consecutive
+ * lines about one are a run under a head naming it, their words the rest, so a message gets the width the name took
+ * on every line (round 5: "sasensi/lookover-sandbox#135" on every line drowned the words). Consecutive lines about none
+ * are a run of their own, under no head. A line not of the file's shape is all words, and stays in the run before it
+ * (a stack's lines under the error). A run's time column is one width for all its lines, the day's when any says it.
  */
-export function logLinesShown(lines: string[]): string[] {
+export function logRunsShown(lines: string[]): LogRun[] {
   const parsed = lines.map((line) => LINE.exec(line));
   const today = parsed.findLast((match) => match !== null)?.[1];
-  return lines.map((line, i) => {
+  const runs: LogRun[] = [];
+  lines.forEach((line, i) => {
     const match = parsed[i];
-    if (!match) return line;
-    const [, day, time, words] = match;
-    return `${day === today ? "" : `${day} `}${time}  ${words}`;
+    const last = runs.at(-1);
+    if (!match) {
+      const shown = { day: null, time: null, words: line };
+      if (last) last.lines.push(shown);
+      else runs.push({ pr: null, day: false, lines: [shown] });
+      return;
+    }
+    const [, day = "", time = "", words = ""] = match;
+    const about = ABOUT.exec(words);
+    const pr = about?.[1] ?? null;
+    const shown = { day: day === today ? null : day, time, words: about?.[2] ?? words };
+    if (last && last.pr === pr) {
+      last.lines.push(shown);
+      last.day ||= shown.day !== null;
+    } else runs.push({ pr, day: shown.day !== null, lines: [shown] });
   });
+  return runs;
 }

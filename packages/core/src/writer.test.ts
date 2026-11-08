@@ -1,7 +1,7 @@
 // Who wrote a change (ADR 0044): read from what the host shows, the `Co-authored-by` trailers of its commits and its
 // branch prefix, the newest signal winning; none means unknown.
 import { expect, test } from "bun:test";
-import { writerOf } from "./index.ts";
+import { agentPushed, writerOf } from "./index.ts";
 
 const CLAUDE_CODE = "Fix the total\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>";
 const CODEX = "Rewrite the filter\n\nCo-authored-by: Codex <codex@openai.com>";
@@ -87,4 +87,16 @@ test("a commit naming both agents is read by its last trailer", () => {
   const both =
     "Work\n\nCo-authored-by: Codex <codex@openai.com>\nCo-Authored-By: Claude <noreply@anthropic.com>";
   expect(writerOf({ branch: "main", messages: [both], before: null })).toBe("claude");
+});
+
+test("a push is the agent's only when every one of its commits, all read, carries a coding agent's trailer", () => {
+  expect(agentPushed({ commits: 2, messages: [CLAUDE_CODE, CODEX] })).toBe(true);
+  expect(agentPushed({ commits: 1, messages: [CODEX] })).toBe(true);
+  // One commit by hand: someone else pushed some of it.
+  expect(agentPushed({ commits: 2, messages: [CLAUDE_CODE, BY_HAND] })).toBe(false);
+  // GitHub gave fewer messages than commits: the rest are not known.
+  expect(agentPushed({ commits: 3, messages: [CLAUDE_CODE, CODEX] })).toBe(false);
+  // Nothing read, or no count.
+  expect(agentPushed({ commits: 0, messages: [] })).toBe(false);
+  expect(agentPushed({ commits: 1, messages: [] })).toBe(false);
 });

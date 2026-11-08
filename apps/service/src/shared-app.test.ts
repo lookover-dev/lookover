@@ -6,7 +6,7 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { HostError, type SignIn, type State } from "@lookover/contracts";
+import { changeId, HostError, type SignIn, type State } from "@lookover/contracts";
 import { DemoClock, FakeGitHost } from "@lookover/testkit";
 import { type GitHubSide, type Keychain, memoryKeychain, type RunningService, signInStore } from "./index.ts";
 import {
@@ -26,6 +26,7 @@ import {
   SANDBOX,
   SHA1,
   SHARED_BOT,
+  setupOn,
   sinceStart,
   snapshot,
   start,
@@ -338,6 +339,43 @@ test("a folder holding an App of its own from an earlier version and no sign-in 
   expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
   // Read no more, and left where it was.
   expect(existsSync(join(dir, "github", "app.json"))).toBe(true);
+});
+
+test("a start with the sign-in gone sends setup back to the GitHub step, the furthest reached too: the repositories are chosen again before anything is asked (ADR 0079)", async () => {
+  const dir = home();
+  const time = new DemoClock({ at: T0 });
+  const host = sharedHost(time);
+  const SEVEN = changeId("sasensi/lookover-sandbox#7");
+  const { service } = await start({
+    home: dir,
+    host,
+    time,
+    github: onShared(host, dir, memoryKeychain()),
+    setup: setupOn("agent"),
+    engines: fakeEngines({ reviews: 1 }),
+  });
+  const cookie = await openApp(service);
+  expect((await stateOf(service, cookie)).setup).toEqual(AT_GITHUB);
+
+  // Whoever signs in next installs and is shown the Repositories step: a pull request opened meanwhile asks nothing.
+  expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
+  host.enterCode("D054-61DC");
+  await time.advance(5_000);
+  await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.setup.github === "done",
+  );
+  host.open({ ...pr1, number: 7, head: { ref: "branch-7", sha: SHA1 } });
+  // Listed within a few polls, seen open: asked nothing.
+  for (let polls = 0; polls < 5 && !(await stateOf(service, cookie)).changes[SEVEN]; polls++)
+    await time.advance(60_000);
+  // One poll more: a job asked on listing would have run and posted by now.
+  await time.advance(60_000);
+  const state = await stateOf(service, cookie);
+  expect(Object.keys(state.changes)).toContain(SEVEN);
+  expect(state.reviews[SEVEN]?.job ?? null).toBeNull();
+  expect(state.setup).toMatchObject({ done: false, reached: "repos" });
+  expect(host.posts).toEqual([]);
 });
 
 test("signed in with the shared App installed nowhere yet, the connection names the person at once", async () => {

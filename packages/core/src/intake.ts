@@ -5,13 +5,16 @@
 // so another author's change gets nothing on GitHub (ADR 0078). That rule comes first, so a teammate's fork, draft or
 // change in a repository switched off is not asked either. The owner's fork change (its head in another repository
 // than its base) is never reviewed unless asked by hand (ADR 0048): its code could try to steer the reviewer. It is
-// skipped, its check saying why.
+// skipped, its check saying why. Before every rule: until the person has chosen the repositories in setup
+// (`reposChosen`, ADR 0079), nothing asks by itself, so opening and a push are not asked, whatever the switches say
+// (the owner's fork's told skip included); what the person asks in person is answered as before.
 import type { Change, ReviewJob, SettingValues, SkipReason, Trigger } from "@lookover/contracts";
 
 /**
  * `job`: a review job is asked for. `skipped`: the job is recorded as skipped, with the reason on the check.
- * `not-asked`: a push with reviews after every push switched off, or another author's change on a trigger nobody
- * asked in person. Nobody asked, so there is no job and nothing on GitHub: the change waits for a review request.
+ * `not-asked`: a push with reviews after every push switched off, another author's change on a trigger nobody
+ * asked in person, or a trigger nobody asked in person before the repositories are chosen (ADR 0079). Nobody asked,
+ * so there is no job and nothing on GitHub: the change waits for a review request.
  */
 export type Intake = { kind: "job" } | { kind: "skipped"; reason: SkipReason } | { kind: "not-asked" };
 
@@ -35,8 +38,12 @@ export function intake(
   change: Pick<Change, "author" | "draft" | "fork">,
   repository: { enabled: boolean; settings: Pick<SettingValues, "onOpen" | "onPush"> },
   trigger: Trigger,
+  setup: { reposChosen: boolean },
 ): Intake {
   const skip = (reason: SkipReason): Intake => ({ kind: "skipped", reason });
+  // Before the person has chosen the repositories, nothing asks by itself: a repository they meant to leave out
+  // never sees Lookover (ADR 0079). First, so not even the owner's fork is told why.
+  if (automatic(trigger) && !setup.reposChosen) return { kind: "not-asked" };
   // A push with the switch off asks nothing, so there is nothing to skip, whoever's change it is (ADR 0043).
   if (trigger === "push" && !repository.settings.onPush) return { kind: "not-asked" };
   // Owner-only in v1: the owner's coding agents push as the owner, so "agent" is the owner too (ADR 0016); the

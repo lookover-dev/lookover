@@ -103,17 +103,40 @@ export type RetrievalProblem =
   | "rules_unread"
   | "cancelled";
 
-/** The one thing `prepare` and `dispose` throw. `detail` is git's own words, with any token hidden. */
+/** A time limit a git command ran out of, as it was set for that command. */
+export interface RetrievalLimit {
+  kind: "idle" | "wall_clock";
+  ms: number;
+}
+
+/**
+ * The one thing `prepare` and `dispose` throw. `detail` is git's own words, with any token hidden. `limit`: the time
+ * limit git ran out of, null when it didn't; `pathTooLong`: git refused a path too long.
+ */
 export class RetrievalError extends Error {
   readonly problem: RetrievalProblem;
   readonly detail: string;
-  constructor(problem: RetrievalProblem, detail: string) {
+  readonly limit: RetrievalLimit | null;
+  readonly pathTooLong: boolean;
+  constructor(
+    problem: RetrievalProblem,
+    detail: string,
+    why: { limit?: RetrievalLimit; pathTooLong?: boolean } = {},
+  ) {
     super(`${problem}: ${detail}`);
     this.name = "RetrievalError";
     this.problem = problem;
     this.detail = detail;
+    this.limit = why.limit ?? null;
+    this.pathTooLong = why.pathTooLong ?? false;
   }
 }
+
+/**
+ * Whether git refused a path too long for the disk: its words for `ENAMETOOLONG` in the C locale git runs in,
+ * "Filename too long" on Windows, "File name too long" from glibc and macOS. The one text of git's read for a cause.
+ */
+const refusedLongPath = (stderr: string) => /File ?name too long/.test(stderr);
 
 /** One entry of a tree, as `ls-tree` lists it. */
 interface TreeEntry {
@@ -154,12 +177,15 @@ const isGitVariable = (key: string) => key.toUpperCase().startsWith("GIT_");
 const pathOf = (env: Record<string, string>) =>
   Object.entries(env).find(([key]) => key.toUpperCase() === "PATH")?.[1];
 
-/** The environment git sees: the caller's without any `GIT_*` variable, and never a credential prompt. */
+/**
+ * The environment git sees: the caller's without any `GIT_*` variable, never a credential prompt, and git's words
+ * untranslated (`C_LOCALE`), whatever the person's locale.
+ */
 function gitEnv(env: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) if (!isGitVariable(key)) out[key] = value;
-  out.GIT_TERMINAL_PROMPT = "0";
-  return out;
+  for (const [key, value] of Object.entries(withoutKeys(env, Object.keys(C_LOCALE))))
+    if (!isGitVariable(key)) out[key] = value;
+  return { ...out, ...C_LOCALE, GIT_TERMINAL_PROMPT: "0" };
 }
 
 /** `env` without the variables `keys` name, in any case: a variable set over it then has one spelling only. */
@@ -168,7 +194,10 @@ function withoutKeys(env: Record<string, string>, keys: string[]): Record<string
   return Object.fromEntries(Object.entries(env).filter(([key]) => !names.has(key.toUpperCase())));
 }
 
-/** Git's words untranslated, whatever the person's locale: the fetch's error is read for one of them. */
+/**
+ * Git's words untranslated, for every git retrieval runs: its stderr is read for some of them (a fetch's missing
+ * branch, a path too long). `LC_ALL` overrides `LANG` and every `LC_*`; gettext reads `LANGUAGE` too.
+ */
 const C_LOCALE: Record<string, string> = { LC_ALL: "C", LANGUAGE: "C" };
 
 /**
@@ -206,9 +235,10 @@ type ConfigEntry = [key: string, value: string];
 /**
  * The options every git command runs with (ADR 0056, SR-06), above whatever the user's own configuration says,
  * so a hostile repository meeting it runs nothing: no hook (the hooks folder is an empty one of ours), no link
- * checked out as a link, no fsmonitor, no LFS filter, no submodule followed, no file protocol. The fetch alone
- * sets `protocol.file.allow=user` after these (the last value wins): git counts a local path as that protocol,
- * and the evals, demo mode and the tests fetch from local folders.
+ * checked out as a link, no fsmonitor, no LFS filter, no submodule followed, no file protocol; and a path past
+ * Windows' 260 characters checked out, diffed and removed like any other (on macOS and Linux git ignores it). The
+ * fetch alone sets `protocol.file.allow=user` after these (the last value wins): git counts a local path as that
+ * protocol, and the evals, demo mode and the tests fetch from local folders.
  */
 const safeConfig = (hooks: string): ConfigEntry[] => [
   ["core.hooksPath", hooks],
@@ -219,6 +249,7 @@ const safeConfig = (hooks: string): ConfigEntry[] => [
   ["filter.lfs.required", "false"],
   ["submodule.recurse", "false"],
   ["protocol.file.allow", "never"],
+  ["core.longpaths", "true"],
 ];
 
 /** Git config for one command, in its environment: never on its command line (`git config`, "GIT_CONFIG_COUNT"). */
@@ -276,8 +307,6 @@ interface Run {
   stdin?: string;
   /** Git config for this command only, after the safe options every git command gets: one list, one count. */
   config?: ConfigEntry[];
-  /** Environment variables for this command only, over the caller's. */
-  env?: Record<string, string>;
   /** Strings hidden from the log and from `detail`: the secret in every form it takes. */
   secrets?: string[];
 }
@@ -291,9 +320,8 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
   /** The hooks folder every git command is given: empty, made by the first prepare. */
   const hooks = join(options.root, "no-hooks");
   const safe = safeConfig(hooks);
-  const envWith = (config: ConfigEntry[] = [], own: Record<string, string> = {}) => ({
-    ...withoutKeys(env, Object.keys(own)),
-    ...own,
+  const envWith = (config: ConfigEntry[] = []) => ({
+    ...env,
     ...configEnv([...safe, ...config]),
   });
 
@@ -301,9 +329,10 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
     if (signal?.aborted) throw new RetrievalError("cancelled", "cancelled before git ran");
     if (git === null) throw new RetrievalError("git_not_found", "no git program on PATH");
     const secrets = r.secrets ?? [];
+    const limits = r.limits ?? QUICK_LIMITS;
     const started = options.runner.start(
-      { executable: git, args: r.args, cwd: r.cwd, env: envWith(r.config, r.env), stdin: r.stdin ?? "" },
-      r.limits ?? QUICK_LIMITS,
+      { executable: git, args: r.args, cwd: r.cwd, env: envWith(r.config), stdin: r.stdin ?? "" },
+      limits,
     );
     const kill = () => started.kill();
     signal?.addEventListener("abort", kill, { once: true });
@@ -315,14 +344,21 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
     switch (result.end) {
       case "exited":
         if (result.exitCode === 0) return result;
-        throw new RetrievalError(r.problem, stderr || `git exited ${result.exitCode}`);
+        throw new RetrievalError(r.problem, stderr || `git exited ${result.exitCode}`, {
+          pathTooLong: refusedLongPath(stderr),
+        });
       case "failed_to_start":
         throw new RetrievalError("git_not_found", stderr);
       case "killed":
         throw new RetrievalError("cancelled", "cancelled while git ran");
       case "wall_clock":
+        throw new RetrievalError(r.problem, "git took too long (wall_clock)", {
+          limit: { kind: "wall_clock", ms: limits.wallClockMs },
+        });
       case "idle":
-        throw new RetrievalError(r.problem, `git took too long (${result.end})`);
+        throw new RetrievalError(r.problem, "git took too long (idle)", {
+          limit: { kind: "idle", ms: limits.idleMs },
+        });
     }
   }
 
@@ -414,7 +450,6 @@ export function createRetrieval(options: RetrievalOptions): Retrieval {
           cwd: mirror,
           problem: "fetch_failed",
           limits: FETCH_LIMITS,
-          env: C_LOCALE,
           config: [
             ["http.extraheader", `AUTHORIZATION: basic ${basicOf(credentials)}`],
             // No credential helper: a refused token fails here instead of asking a helper (or a person).

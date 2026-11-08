@@ -138,6 +138,7 @@ test("each deferred job says which engine may step in; a reroute moves only the 
     trigger: "comment",
     ...onClaude,
     stepIn: null,
+    askedBy: "agent",
   });
   expect(before.seq).toBe(SEEDED_EVENTS);
 

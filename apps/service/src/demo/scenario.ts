@@ -154,7 +154,8 @@ type Refusal = Extract<HostFailure, "unavailable" | "rate_limited">;
 
 /**
  * A move on the fake world, naming its change by repository and number (two repositories of one name on two
- * accounts each have their own #1, ADR 0066). `open`: the host lists the change, at its first commit. `push`: its next commit
+ * accounts each have their own #1, ADR 0066). `open`: the host lists the change, at its first commit; `open-several`: each
+ * of `changes` so, then one listing, so a world with many pull requests opens them at the cost of one. `push`: its next commit
  * lands. `ask`: a `/lookover review` comment by the owner's agent (as the owner, naming the head commit, as
  * `lookover wait` writes it). `refuse`: the host refuses every call for `forMs` on the clock (as rate limited, with
  * that time as GitHub's reset), then answers again. `update`: the engine is a newer version, whose self-test passes
@@ -163,10 +164,16 @@ type Refusal = Extract<HostFailure, "unavailable" | "rate_limited">;
  * installed again at `version`, signed in, as the owner does in a terminal: nothing tells the service, which sees it
  * at its next health check ("Check again"). `reply`: `by` answers on the thread of `finding`, the bot's inline
  * comment on it, with `text` (ADR 0052): as the owner's agent does with the owner's login, the owner, the change's
- * author or anyone. Nothing is listed: a round reads the threads when it runs.
+ * author or anyone. Nothing is listed: a round reads the threads when it runs. `leave`: each of `repos` taken off its
+ * account's installation on GitHub, the owner's own or an organisation's; `uninstall`: the shared App uninstalled from
+ * `organisation`, one the sign-in reaches, so the account is no longer reached. Neither is listed: a `reconnect` after
+ * them (the drawer's "Reconnect", or the 5-minute discovery) lists the installations again, and what they no longer
+ * list departs. A repository departs only once listed (`apply` says departed only what it held): each of these
+ * throws on one the room doesn't watch yet.
  */
 export type Move =
   | { kind: "open"; change: ChangeRef }
+  | { kind: "open-several"; changes: ChangeRef[] }
   | { kind: "push"; change: ChangeRef }
   | { kind: "ask"; change: ChangeRef }
   | { kind: "reply"; change: ChangeRef; finding: FindingId; by: Account; text: string }
@@ -177,7 +184,10 @@ export type Move =
   | { kind: "too-old"; engine: EngineId; version: string }
   | { kind: "refuse"; failure: Refusal; forMs: number }
   | { kind: "update"; engine: EngineId; version: string; selfTest: "passes" | "fails" | "unfinished" }
-  | { kind: "command"; command: OwnerCommand };
+  | { kind: "command"; command: OwnerCommand }
+  | { kind: "leave"; repos: RepositoryRef[] }
+  | { kind: "uninstall"; organisation: Account }
+  | { kind: "reconnect" };
 
 export interface TimedMove {
   /** Milliseconds from the room's start. */

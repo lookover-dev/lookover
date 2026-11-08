@@ -14,6 +14,7 @@ import {
   githubLinks,
   repositoryId,
   SHARED_APP,
+  type State,
 } from "@lookover/contracts";
 import { scenarioOf } from "../index.ts";
 import { eventually, TEST_LIMIT_MS } from "../service.test-support.ts";
@@ -223,6 +224,51 @@ test("agent-opens-change: the agent's #149 opens, Codex finds and Claude confirm
   expect(await again.json()).toEqual({ error: "no pull request left to open in this scenario" });
 });
 
+test("fetch-too-long, then fetch-silent: the next review fails on its fetch's limit, the cause and the limit kept; the one after runs (ADR 0081)", async () => {
+  const door = await quiet();
+  const ask = () => send(door, { type: "review.request", changeId: id(149) });
+  const failureOf = (state: State) => state.reviews[id(149)]?.job?.failure;
+  const failedOn = (cause: string) =>
+    eventually(
+      () => snapshotOf(door),
+      (s) => failureOf(s)?.cause === cause,
+    );
+  // A seed whose review fails is refused (driver.ts), so a failure is a fault played after it.
+  expect(await inject(door, "fetch-too-long")).toBe(200);
+  expect(await inject(door, "agent-opens-change")).toBe(200);
+  expect(failureOf(await failedOn("git_time_limit"))).toMatchObject({
+    kind: "prepare_failed",
+    limitMs: 10 * MIN,
+  });
+  expect(await inject(door, "fetch-silent")).toBe(200);
+  expect((await ask()).status).toBe(200);
+  expect(failureOf(await failedOn("git_silent"))).toMatchObject({ kind: "prepare_failed", limitMs: 2 * MIN });
+  // Each fault fails one fetch: the next review finds and posts its round.
+  expect((await ask()).status).toBe(200);
+  await advance(door, 200_000);
+  const reviewed = (await snapshotOf(door)).reviews[id(149)];
+  expect(reviewed?.job?.state).toBe("done");
+  expect(reviewed?.rounds.map((r) => r.n)).toEqual([1]);
+});
+
+test("codex-no-review: Codex's next run gives no usable review, so the review fails on its answer; the one after runs (ADR 0081)", async () => {
+  const door = await quiet();
+  expect(await inject(door, "codex-no-review")).toBe(200);
+  expect(await inject(door, "agent-opens-change")).toBe(200);
+  await advance(door, 200_000);
+  const failed = (await snapshotOf(door)).reviews[id(149)];
+  expect(failed?.job).toMatchObject({
+    state: "failed",
+    failure: { kind: "review_failed", engine: "codex", cause: "engine_answer", limitMs: null },
+  });
+  expect(failed?.rounds).toEqual([]);
+  expect((await send(door, { type: "review.request", changeId: id(149) })).status).toBe(200);
+  await advance(door, 200_000);
+  expect((await snapshotOf(door)).reviews[id(149)]?.rounds.map((r) => [r.n, r.reviewer])).toEqual([
+    [1, "codex"],
+  ]);
+});
+
 test("other-opens-change: a colleague's #150 opens with nothing asked or posted; nothing left, the fault says so", async () => {
   const door = await quiet();
   expect(await inject(door, "other-opens-change")).toBe(200);
@@ -242,7 +288,7 @@ test("you-push: a commit lands on the reviewed #141, counted and not reviewed wi
     headSha: "c2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5",
   });
   expect(state.reviews[id(141)]?.job?.state).toBe("done");
-  expect(state.reviews[id(141)]?.timeline.at(-1)).toMatchObject({ kind: "pushed", by: "you", commits: 1 });
+  expect(state.reviews[id(141)]?.timeline.at(-1)).toMatchObject({ kind: "pushed", by: null, commits: 1 });
   const again = await send(door, { type: "demo.inject", fault: "you-push" });
   expect(again.status).toBe(409);
   expect(await again.json()).toEqual({

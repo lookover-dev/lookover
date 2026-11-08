@@ -47,7 +47,7 @@ export interface ConnectionAccount {
  * there (`kind` `user`, `owner` true), or an organisation their own `gh` names as one of their active memberships
  * (`kind` `organisation`, `owner` as `gh` gave their role; null when it couldn't say). `askedAt` is when the person
  * asked to install it there ("Ask to install on <org>", `connection.askToInstall`), ms since the epoch, null when
- * they didn't: while it holds, the app says "Waiting for an owner of <org>". GitHub never says whether an owner saw
+ * they didn't: while it holds, the app says "Waiting for an owner" on its row. GitHub never says whether an owner saw
  * the request: this is Lookover's own memory, forgotten once the account is reached or another person signs in.
  */
 export interface UnreachedAccount {

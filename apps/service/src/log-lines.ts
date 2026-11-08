@@ -6,6 +6,7 @@
 // as the file's stamps are: "11:00" on the event's own day, else with the date. The installation's and the sign-in's
 // lines, which no event carries the words of, are here too (`installationLines`, `signInLines`).
 import {
+  type AskedBy,
   type Change,
   cancelPhrase,
   confirmFailureText,
@@ -14,9 +15,10 @@ import {
   type EventBody,
   engineDeferral,
   engineName,
-  failureText,
+  failureWords,
   type JobFailure,
   postWaitText,
+  pushedText,
   type Review,
   type ReviewJob,
   type Round,
@@ -41,6 +43,24 @@ const TRIGGER: Record<Trigger, string> = {
   "first-review": "the setup's first review",
 };
 
+/** Who asked on GitHub (ADR 0081): the agent, through `lookover wait`, or the owner by hand. */
+const ASKED: Record<AskedBy, string> = {
+  agent: "asked by the agent on GitHub",
+  person: "asked on GitHub",
+};
+
+/** Who joined a job with a request (ADR 0081): "review asked for by the agent on GitHub". */
+const ASKED_FOR: Record<AskedBy, string> = {
+  agent: "asked for by the agent on GitHub",
+  person: "asked for on GitHub",
+};
+
+/** What asked for a new job: its trigger, and for a request comment, who wrote it (none named on an old job). */
+function askedText(job: ReviewJob): string {
+  const by = job.askedBy ?? null;
+  return job.trigger === "comment" && by !== null ? ASKED[by] : TRIGGER[job.trigger];
+}
+
 /** `until` in local time: "11:00" on the day of `at`, "2026-10-12 09:00" on another. */
 function timeOf(until: number, at: number): string {
   const date = new Date(until);
@@ -53,21 +73,32 @@ const plural = (n: number, one: string) => (n === 0 ? `no ${one}s` : n === 1 ? `
 
 /** Why a job failed, with what the module that failed said, for the record. */
 function failedText(failure: JobFailure | null): string {
-  const why = failureText(failure);
+  const why = failureWords(failure).phrase;
   return failure === null || failure.detail === "" ? why : `${why} (${failure.detail})`;
 }
 
 /**
- * A job now queued, given the same job as it was: new, back from a wait, run again after a restart (only a restart
- * puts a running job back in the queue), moved to a newer commit, or nothing new.
+ * A job now queued, given the same job as it was: new, back from a wait, run again after a restart (only a restart puts
+ * a running job back in the queue), moved to a newer commit, or nothing new. The first request that asked for a job
+ * (ADR 0081) says who asked, before what else it did: "review asked for on GitHub, moved to b2e8d1f".
  */
 function queuedLine(job: ReviewJob, same: ReviewJob | null): string | null {
-  if (same === null) return `review queued (${TRIGGER[job.trigger]}) for ${shortSha(job.sha)}`;
+  if (same === null) return `review queued (${askedText(job)}) for ${shortSha(job.sha)}`;
+  const moved = queuedMove(job, same);
+  if (job.askedBy && !same.askedBy) {
+    const asked = `review ${ASKED_FOR[job.askedBy]}`;
+    return moved === null ? asked : `${asked}, ${moved}`;
+  }
+  return moved === null ? null : `review ${moved}`;
+}
+
+/** What brought the same job back to the queue or moved it: null when nothing did. */
+function queuedMove(job: ReviewJob, same: ReviewJob): string | null {
   // Running to queued is only the restart's `interrupted` end (`queue.recover`): a new way back to the queue from a
   // running job needs its own line here.
-  if (same.state === "running") return "review runs again: the service stopped while it ran";
-  if (same.state === "deferred") return "review back in the queue";
-  return same.sha === job.sha ? null : `review moved to ${shortSha(job.sha)}`;
+  if (same.state === "running") return "runs again: the service stopped while it ran";
+  if (same.state === "deferred") return "back in the queue";
+  return same.sha === job.sha ? null : `moved to ${shortSha(job.sha)}`;
 }
 
 /** The change's line for its job's new state, given the job it had: null when nothing a reader looks for moved. */
@@ -202,7 +233,7 @@ export function logLineOf(event: EventBody, before: State): string | null {
     case "change.opened":
       return openedLine(event.change, before.changes[event.change.id]);
     case "change.pushed":
-      return `${event.changeId} pushed ${shortSha(event.sha)} by ${event.by === "agent" ? "the agent" : "you"}`;
+      return `${event.changeId} ${pushedText(event.by, event.commits)}, now at ${shortSha(event.sha)}`;
     case "change.closed":
       return `${event.changeId} closed`;
     case "job.changed": {

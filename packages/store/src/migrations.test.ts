@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
-import { copyFileSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { changeId } from "@lookover/contracts";
@@ -18,6 +18,26 @@ function folder(): string {
   return dir;
 }
 
+const ALL = join(import.meta.dir, "migrations");
+
+/**
+ * A data folder whose database holds every migration before `first`, applied and recorded as the store records them
+ * (`migrations`), and no handle opened on it: today's handles may refuse a schema that old (a column a later
+ * migration adds), as they would on a data folder of the time.
+ */
+function migratedBefore(first: string): string {
+  const home = folder();
+  const db = new Database(join(home, "lookover.sqlite"), { create: true, strict: true });
+  db.run("CREATE TABLE migrations (name TEXT PRIMARY KEY)");
+  for (const file of readdirSync(ALL).sort()) {
+    if (file >= first) break;
+    db.run(readFileSync(join(ALL, file), "utf8"));
+    db.run("INSERT INTO migrations (name) VALUES (?)", [file.replace(/\.sql$/, "")]);
+  }
+  db.close();
+  return home;
+}
+
 test("a fresh store has every migration of the folder applied: one added or renamed needs `bun run migrations`", () => {
   const store = openStore({ home: folder(), durable: false });
   expect(store.migrated).toEqual(
@@ -29,35 +49,20 @@ test("a fresh store has every migration of the folder applied: one added or rena
 });
 
 test("one way in (ADR 0073): a setup left waiting for an App is back at the GitHub step's start", () => {
-  const all = join(import.meta.dir, "migrations");
-  const before = folder();
-  for (const file of readdirSync(all).sort()) {
-    if (file >= "20261102090000-one-way-in.sql") break;
-    copyFileSync(join(all, file), join(before, file));
-  }
-  const home = folder();
-  const old = openStore({ home, migrations: before, durable: false });
-  old.close();
+  const home = migratedBefore("20261102090000-one-way-in.sql");
   const db = new Database(join(home, "lookover.sqlite"), { strict: true });
   db.run(
     "INSERT INTO setup (id, done, step, reached, github, github_refused, first_review_change) VALUES (1, 0, 'github', 'github', 'waiting-for-app', 'expired', NULL)",
   );
   db.close();
-  const store = openStore({ home, migrations: all, durable: false });
+  const store = openStore({ home, migrations: ALL, durable: false });
   expect(store.migrated[0]).toBe("20261102090000-one-way-in");
   expect(store.setup.read()).toMatchObject({ step: "github", reached: "github", github: "start" });
   store.close();
 });
 
 test("the status block (ADR 0074): a round's or a dismissal's summary post, owed or sent, is its status post", () => {
-  const all = join(import.meta.dir, "migrations");
-  const before = folder();
-  for (const file of readdirSync(all).sort()) {
-    if (file >= "20261103090000-status-posts.sql") break;
-    copyFileSync(join(all, file), join(before, file));
-  }
-  const home = folder();
-  openStore({ home, migrations: before, durable: false }).close();
+  const home = migratedBefore("20261103090000-status-posts.sql");
   const path = join(home, "lookover.sqlite");
   const db = new Database(path, { strict: true });
   db.run("INSERT INTO posts (run_id, seq, kind, host_id, tries) VALUES ('r1', 0, 'summary', '9001', 1)");
@@ -72,7 +77,7 @@ test("the status block (ADR 0074): a round's or a dismissal's summary post, owed
     "INSERT INTO dismissal_posts (dismissal_id, seq, kind, host_id, tries) VALUES ('d1', 1, 'summary', NULL, 0)",
   );
   db.close();
-  const store = openStore({ home, migrations: all, durable: false });
+  const store = openStore({ home, migrations: ALL, durable: false });
   expect(store.migrated[0]).toBe("20261103090000-status-posts");
   store.close();
   const after = new Database(path, { strict: true });
@@ -93,14 +98,7 @@ test("the status block (ADR 0074): a round's or a dismissal's summary post, owed
 });
 
 test("a finding's suggestion (ADR 0074): a finding stored before it reads back with none, one with it keeps it", () => {
-  const all = join(import.meta.dir, "migrations");
-  const before = folder();
-  for (const file of readdirSync(all).sort()) {
-    if (file >= "20261103100000-findings-suggestion.sql") break;
-    copyFileSync(join(all, file), join(before, file));
-  }
-  const home = folder();
-  openStore({ home, migrations: before, durable: false }).close();
+  const home = migratedBefore("20261103100000-findings-suggestion.sql");
   const path = join(home, "lookover.sqlite");
   const db = new Database(path, { strict: true });
   const old = { id: "F1", title: "Old" };
@@ -115,8 +113,8 @@ test("a finding's suggestion (ADR 0074): a finding stored before it reads back w
     ledger,
   ]);
   db.close();
-  const store = openStore({ home, migrations: all, durable: false });
-  expect(store.migrated).toEqual(["20261103100000-findings-suggestion"]);
+  const store = openStore({ home, migrations: ALL, durable: false });
+  expect(store.migrated[0]).toBe("20261103100000-findings-suggestion");
   const both = [
     { ...old, suggestion: null },
     { ...offered, suggestion: "return 1;" },

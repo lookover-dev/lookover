@@ -192,11 +192,13 @@ test("the session screen says the tab isn't signed in, and names the command the
       before: "This tab isn't signed in. Run",
       command: binary,
       after: "to open Lookover.",
+      alone: "This tab isn't signed in. To open Lookover, run:",
     });
   expect(sessionLost("program", "bun run lookover open")).toEqual({
     before: "This tab isn't signed in. Run",
     command: "bun run lookover open",
     after: "to open Lookover.",
+    alone: "This tab isn't signed in. To open Lookover, run:",
   });
 });
 

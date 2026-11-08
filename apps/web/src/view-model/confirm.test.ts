@@ -16,7 +16,16 @@ import {
   type Run,
   runId,
 } from "@lookover/contracts";
-import { checkedBy, confirmDetails, findersOf, foundByLine, severityLabel } from "./confirm.ts";
+import {
+  checkedBy,
+  confirmDetails,
+  confirmLabels,
+  findersOf,
+  foundByLine,
+  howItRan,
+  severityLabel,
+} from "./confirm.ts";
+import { SEPARATOR } from "./format.ts";
 
 function finding(extra: Partial<Finding> = {}): Finding {
   return {
@@ -97,6 +106,23 @@ const reviewWith = (rounds: Round[], findings: Finding[] = []): Review => ({
   findings,
 });
 
+/** A round running, found by Codex. */
+const RUNNING: Run = {
+  id: runId("run-2"),
+  reviewer: "codex",
+  secondFinder: null,
+  confirmer: null,
+  confirmFallback: null,
+  sha: commitSha("8e1f0aa"),
+  preview: false,
+  startedAt: 0,
+  step: "finding",
+  stepAt: 0,
+  steps: [],
+  activities: [],
+  posting: null,
+};
+
 test("a blocking finding lowered for want of a confirmation reads Should fix, unconfirmed", () => {
   expect(severityLabel(finding())).toBe("Blocking");
   expect(
@@ -122,7 +148,7 @@ test("a blocking finding lowered for want of a confirmation reads Should fix, un
   ).toBe("Should fix");
 });
 
-test("Checked by names the confirmer, its verdict, its reason and its evidence", () => {
+test("Checked by names the confirmer and its verdict, then the lines it cites in its sentence, then its reason", () => {
   const confirmed = finding({
     confirmation: {
       verdict: "confirmed",
@@ -133,8 +159,14 @@ test("Checked by names the confirmer, its verdict, its reason and its evidence",
   });
   expect(checkedBy(reviewWith([round()]), confirmed)).toEqual({
     head: "Checked by:",
-    text: "Codex, confirmed. Every apiKey reaches the log.",
-    evidence: ["src/invoices.ts:9", "src/invoices.ts:5"],
+    said: [
+      "Codex, confirmed at ",
+      { cite: "src/invoices.ts:9", tight: false },
+      " and ",
+      { cite: "src/invoices.ts:5", tight: true },
+      ". Every apiKey reaches the log.",
+    ],
+    under: [],
   });
   const unsure = finding({
     confirmation: {
@@ -147,53 +179,131 @@ test("Checked by names the confirmer, its verdict, its reason and its evidence",
   });
   expect(checkedBy(reviewWith([round()]), unsure)).toEqual({
     head: "Checked by:",
-    text: "Claude, unconfirmed. It depends on the callers.",
-    evidence: [],
+    said: ["Claude, unconfirmed. It depends on the callers."],
+    under: [],
+  });
+});
+
+test("Checked by's citations: a list, tight before punctuation; one too long for a sentence goes under it", () => {
+  const cites = ["src/a.ts:1", "src/b.ts:2", "src/c.ts:3"];
+  const three = finding({
+    confirmation: { verdict: "confirmed", by: "claude", reason: "All three log it.", evidence: cites },
+  });
+  expect(checkedBy(reviewWith([round()]), three).said).toEqual([
+    "Claude, confirmed at ",
+    { cite: "src/a.ts:1", tight: true },
+    ", ",
+    { cite: "src/b.ts:2", tight: false },
+    " and ",
+    { cite: "src/c.ts:3", tight: true },
+    ". All three log it.",
+  ]);
+  const long = "packages/service/src/webhooks/payments/verify.ts:120";
+  const mixed = finding({
+    confirmation: {
+      verdict: "confirmed",
+      by: "codex",
+      reason: "It is never read.",
+      evidence: [long, "src/a.ts:1"],
+    },
+  });
+  expect(checkedBy(reviewWith([round()]), mixed)).toEqual({
+    head: "Checked by:",
+    said: ["Codex, confirmed at ", { cite: "src/a.ts:1", tight: true }, ". It is never read."],
+    under: [long],
   });
 });
 
 test("a finding nobody checked says so, and why when its round's confirm gave no answer", () => {
   expect(checkedBy(reviewWith([round()]), finding())).toEqual({
     head: "Not double-checked.",
-    text: "",
-    evidence: [],
+    said: [],
+    under: [],
   });
   expect(checkedBy(reviewWith([round({ confirmFailure: "timeout" })]), finding())).toEqual({
     head: "Not double-checked.",
-    text: "Claude ran out of time, so it shows as found.",
-    evidence: [],
+    said: ["Claude ran out of time, so it shows as found."],
+    under: [],
   });
 });
 
-test("the details say who found, who double-checked and what was ruled out, from the last round", () => {
+test("the details say who found the last round and what it ruled out, and who double-checked", () => {
   const ruledOut = [
     { candidate: CANDIDATE, by: "claude" as const, reason: "Nothing less tested.", evidence: [] },
   ];
   expect(confirmDetails(reviewWith([round({ ruledOut })]))).toEqual({
     found: "Claude",
-    checked: "Claude, in a new session",
+    checked: ["Claude, in a new session"],
     ruledOut: [{ title: "No tests for unpaid()", reason: "Nothing less tested." }],
     count: "1 ruled out",
   });
   expect(confirmDetails(reviewWith([round({ confirmer: "codex" })]))).toMatchObject({
-    checked: "Codex",
+    checked: ["Codex"],
     ruledOut: [],
     count: null,
   });
   expect(confirmDetails(reviewWith([round({ confirmFailure: "crashed" })]))).toMatchObject({
-    checked: "Claude stopped before it answered",
+    checked: ["Claude stopped before it answered"],
     count: null,
   });
   expect(confirmDetails(reviewWith([round({ confirmer: null, raised: 0 })]))).toMatchObject({
-    checked: "Nobody: nothing new to double-check",
+    checked: ["Nobody: nothing new to double-check"],
     count: null,
   });
   // Quick, or only Consider findings after round 1: "not double-checked" on the pull request too.
   expect(confirmDetails(reviewWith([round({ confirmer: null, raised: 1 })]))).toMatchObject({
-    checked: "Nobody: its new findings are not double-checked",
+    checked: ["Nobody: its new findings are not double-checked"],
     count: null,
   });
   expect(confirmDetails(reviewWith([]))).toBeNull();
+});
+
+test("Double-checked by agrees with the rounds: each round's checker, said once for the rounds it stands for", () => {
+  // Round 1 found and Claude confirmed; rounds 2 and 3 raised nothing new. The Rounds table reads Codex → Claude,
+  // Codex, Codex, and the finding "Checked by: Claude": the details never say "Nobody" alone.
+  const rounds = [
+    round({ n: 1, reviewer: "codex", confirmer: "claude" }),
+    round({ n: 2, reviewer: "codex", confirmer: null, raised: 0 }),
+    round({ n: 3, reviewer: "codex", confirmer: null, raised: 0 }),
+  ];
+  // Each line led by its rounds, never a round tacked on after the reason (#644).
+  expect(confirmDetails(reviewWith(rounds))?.checked).toEqual([
+    "Round 1: Claude",
+    "Rounds 2 and 3: nobody, nothing new to double-check",
+  ]);
+  // Every round alike: said once, with no round named.
+  expect(confirmDetails(reviewWith([round({ n: 1 }), round({ n: 2 })]))?.checked).toEqual([
+    "Claude, in a new session",
+  ]);
+  // Rounds apart are listed: "in rounds 1 and 3".
+  expect(
+    confirmDetails(
+      reviewWith([
+        round({ n: 1, confirmer: "codex" }),
+        round({ n: 2, confirmFailure: "timeout" }),
+        round({ n: 3, confirmer: "codex" }),
+      ]),
+    )?.checked,
+  ).toEqual(["Rounds 1 and 3: Codex", "Round 2: Claude ran out of time"]);
+});
+
+test("Found by and Ruled out name their round once there are rounds before it; Double-checked by covers them all (#644)", () => {
+  const one = reviewWith([round({ n: 1 })]);
+  expect(confirmLabels(one)).toEqual({
+    found: "Found by",
+    checked: "Double-checked by",
+    ruledOut: "Ruled out",
+  });
+  const three = reviewWith([round({ n: 1 }), round({ n: 2 }), round({ n: 3 })]);
+  expect(confirmLabels(three)).toEqual({
+    found: "Found in round 3 by",
+    checked: "Double-checked by",
+    ruledOut: "Ruled out in round 3",
+  });
+  // A round running: Found by is its, Ruled out still the last one ended's.
+  const running = { ...reviewWith([round({ n: 1 })]), run: RUNNING };
+  expect(confirmLabels(running)).toMatchObject({ found: "Found in round 2 by", ruledOut: "Ruled out" });
+  expect(confirmLabels(reviewWith([]))).toMatchObject({ found: "Found by" });
 });
 
 test("a Deep round's details name both finders, or the one that answered and why the second didn't", () => {
@@ -231,21 +341,7 @@ test("How this review ran: one finder with its CLI and version; a Deep round's b
   expect(foundByLine(reviewWith([round({ reviewer: "codex" })]), engines)).toBe("Codex, codex");
   expect(foundByLine(deep, engines)).toBe("Claude and Codex");
   // A round running names its own finder, not the last round's.
-  const run: Run = {
-    id: runId("run-2"),
-    reviewer: "codex",
-    secondFinder: null,
-    confirmer: null,
-    confirmFallback: null,
-    sha: commitSha("8e1f0aa"),
-    preview: false,
-    startedAt: 0,
-    step: "finding",
-    stepAt: 0,
-    steps: [],
-    activities: [],
-    posting: null,
-  };
+  const run = RUNNING;
   const running = { ...deep, run };
   expect(foundByLine(running, engines)).toBe("Codex, codex");
   // A Deep round running names both its finders, as the round will once done.
@@ -254,6 +350,18 @@ test("How this review ran: one finder with its CLI and version; a Deep round's b
     "Codex in two sessions",
   );
   expect(foundByLine(reviewWith([]), engines)).toBe("");
+});
+
+test("How this review ran's line: the finders, what was ruled out, the rounds' time or running, dots held", () => {
+  const ruledOut = [
+    { candidate: CANDIDATE, by: "claude" as const, reason: "Nothing less tested.", evidence: [] },
+  ];
+  expect(howItRan(reviewWith([round({ endedAt: 72_000 })]))).toBe(`Claude${SEPARATOR}1 min 12 s`);
+  expect(howItRan(reviewWith([round({ ruledOut, endedAt: 3_000 })]))).toBe(
+    `Claude${SEPARATOR}1 ruled out${SEPARATOR}3 s`,
+  );
+  // No round ended yet: the first is running, and nobody is named before it says who finds.
+  expect(howItRan(reviewWith([]))).toBe("running");
 });
 
 test("the summary of How this review ran: the finders as Found by words them, without CLI or version", () => {
@@ -268,7 +376,7 @@ test("the summary of How this review ran: the finders as Found by words them, wi
 
 test("the finder double-checking in a new session says why the other engine didn't", () => {
   const checked = (confirmFallback: ConfirmFallback, reviewer: EngineId = "claude") =>
-    confirmDetails(reviewWith([round({ reviewer, confirmer: reviewer, confirmFallback })]))?.checked;
+    confirmDetails(reviewWith([round({ reviewer, confirmer: reviewer, confirmFallback })]))?.checked[0];
   expect([
     checked({ reason: "not-ready", engine: "codex", state: "signed-out" }),
     checked({ reason: "not-ready", engine: "codex", state: "missing" }),
@@ -298,5 +406,5 @@ test("the finder double-checking in a new session says why the other engine didn
         }),
       ]),
     )?.checked,
-  ).toBe("Claude ran out of time");
+  ).toEqual(["Claude ran out of time"]);
 });

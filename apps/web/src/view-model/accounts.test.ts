@@ -4,8 +4,11 @@
 // state only.
 import { expect, test } from "bun:test";
 import {
+  type Change,
   type Connection,
   type ConnectionAccount,
+  changeId,
+  commitSha,
   connectionId,
   DEMO_API,
   type DepartedRepository,
@@ -13,13 +16,23 @@ import {
   type EngineId,
   GITHUB_WEB,
   type Repository,
+  type RepositoryId,
   type ResolvedSettings,
   repositoryId,
   type State,
   type UnreachedAccount,
 } from "@lookover/contracts";
-import { ACCOUNT_FIX_LABELS, accountRows, repositoryGroups } from "./accounts.ts";
-import { addRepositoryLink, departedNotice } from "./onboarding.ts";
+import {
+  accountMark,
+  accountRows,
+  pullRequestsCell,
+  repositoryGroups,
+  repositoryStanding,
+  setupRepoGroups,
+  tickAccount,
+} from "./accounts.ts";
+import { SEPARATOR } from "./format.ts";
+import { addRepositoryLink, chosenRepos, departedNotice } from "./onboarding.ts";
 
 /** 2026-10-30 10:00 UTC; times are said in UTC here. */
 const NOW = Date.UTC(2026, 9, 30, 10, 0, 0);
@@ -176,8 +189,10 @@ test("Install on another account is always last, to GitHub's own page, even with
       detail: "GitHub's page lists every account you belong to.",
       details: ["GitHub's page lists every account you belong to."],
       fix: { label: "Install on another account", href: INSTALL },
+      labels: ["Install on another account"],
+      againLabels: [],
       again: null,
-      asks: false,
+      status: null,
     },
   ]);
 });
@@ -207,10 +222,63 @@ test("an account reached says how many of the repositories are its", () => {
     detail: "2 repositories.",
     details: ["2 repositories.", ...REACHED_HELD],
     fix: null,
+    labels: ["Choose repositories", "Sign in with SSO", "Unsuspend it on GitHub", "Install on sasensi"],
+    againLabels: [],
     again: null,
-    asks: false,
+    status: "Installed",
   });
   expect(row(state, "Ledger-Dev")?.detail).toBe("1 repository.");
+});
+
+test("an account installed and used says so where a fix would be; every row with a fix, or no account, says nothing there", () => {
+  const state = signedIn(
+    {
+      accounts: [
+        own,
+        org("ledger-dev", null, true),
+        org("ledger-ops", { kind: "sso", organisation: "ledger-ops", url: null }, false, 33),
+      ],
+      unreached: [unreached("ledger-labs", true), unreached("ledger-hq", false, NOW)],
+    },
+    [repo("sasensi", "ledger-api")],
+  );
+  expect(Object.fromEntries(rows(state).map((r) => [r.key, r.status]))).toEqual({
+    sasensi: "Installed",
+    // Installed with no repository: Choose repositories is its fix.
+    "ledger-dev": null,
+    "ledger-ops": null,
+    "ledger-labs": null,
+    "ledger-hq": null,
+    another: null,
+  });
+});
+
+test("each row's detail carries its state's mark: its repositories, not installed, ask its owners, waiting, a cause, another", () => {
+  const state = signedIn(
+    {
+      accounts: [
+        own,
+        org("ledger-dev", null, true),
+        org("ledger-ops", { kind: "sso", organisation: "ledger-ops", url: null }, false, 33),
+      ],
+      unreached: [
+        unreached("ledger-labs", true),
+        unreached("ledger-co", false),
+        unreached("ledger-hq", false, NOW),
+      ],
+    },
+    [repo("sasensi", "ledger-api")],
+  );
+  expect(Object.fromEntries(rows(state).map((r) => [r.key, accountMark(r)]))).toEqual({
+    sasensi: "repositories",
+    // Installed with no repository: still its repositories' line.
+    "ledger-dev": "repositories",
+    "ledger-ops": "needs-you",
+    "ledger-labs": "not-installed",
+    "ledger-co": "ask",
+    "ledger-hq": "waiting",
+    another: "another",
+  });
 });
 
 test("an account installed with no repository yet: Choose repositories, its installation's settings when the person owns it", () => {
@@ -225,8 +293,10 @@ test("an account installed with no repository yet: Choose repositories, its inst
     detail: "No repository yet.",
     details: REACHED_HELD,
     fix: { label: "Choose repositories", href: "https://github.com/settings/installations/11" },
+    labels: ["Choose repositories", "Sign in with SSO", "Unsuspend it on GitHub", "Install on sasensi"],
+    againLabels: [],
     again: null,
-    asks: false,
+    status: null,
   });
   expect(row(state, "ledger-dev")?.fix).toEqual({
     label: "Choose repositories",
@@ -248,8 +318,10 @@ test("an account asking for SSO: its SSO page, GitHub's own when the 403 gave on
     // Its own line first, then the others a reached row holds.
     details: ["Asks you to sign in with SSO.", "No repository yet.", "Suspended.", "No longer installed."],
     fix: { label: "Sign in with SSO", href: "https://github.com/orgs/ledger-dev/sso" },
+    labels: ["Choose repositories", "Sign in with SSO", "Ask an owner of ledger-dev"],
+    againLabels: [],
     again: null,
-    asks: false,
+    status: null,
   });
   expect(
     row(sso("https://github.com/orgs/ledger-dev/sso?authorization_request=x"), "ledger-dev")?.fix,
@@ -326,8 +398,10 @@ test("the person's own account not reached: Install on it", () => {
     detail: "Not installed.",
     details: ["Not installed."],
     fix: { label: "Install on sasensi", href: INSTALL },
+    labels: ["Install on sasensi"],
+    againLabels: [],
     again: null,
-    asks: false,
+    status: null,
   });
 });
 
@@ -350,15 +424,18 @@ test("an organisation the person owns: Install on it; one they're a member of, o
       detail: "Not installed. On GitHub, you ask its owners to install it.",
       details: [
         "Not installed. On GitHub, you ask its owners to install it.",
-        `Waiting for an owner of ${login}, asked at 10:00. If you sent the request, GitHub emailed its owners.`,
+        `Waiting for an owner, asked at 10:00. If you sent the request, GitHub emailed its owners.`,
+        `Waiting for an owner, asked on Fri 30 Oct at 10:00. If you sent the request, GitHub emailed its owners.`,
       ],
       fix: {
         label: `Ask to install on ${login}`,
         href: INSTALL,
         command: { type: "connection.askToInstall", account: login },
       },
+      labels: [`Ask to install on ${login}`, `Ask an owner of ${login}`],
+      againLabels: [`Ask an owner of ${login}`],
       again: null,
-      asks: true,
+      status: null,
     });
 });
 
@@ -369,48 +446,72 @@ test("asked: waiting for an owner, since when, hedged; ask an owner, and GitHub'
     account: "ledger-labs",
     name: "ledger-labs",
     state: "waiting",
-    detail:
-      "Waiting for an owner of ledger-labs, asked at 09:35. If you sent the request, GitHub emailed its owners.",
+    detail: "Waiting for an owner, asked at 09:35. If you sent the request, GitHub emailed its owners.",
     details: [
-      "Waiting for an owner of ledger-labs, asked at 09:35. If you sent the request, GitHub emailed its owners.",
+      "Waiting for an owner, asked at 09:35. If you sent the request, GitHub emailed its owners.",
+      "Waiting for an owner, asked on Fri 30 Oct at 09:35. If you sent the request, GitHub emailed its owners.",
       "Not installed. On GitHub, you ask its owners to install it.",
-      "Waiting for an owner of ledger-labs, asked at 10:00. If you sent the request, GitHub emailed its owners.",
+      "Waiting for an owner, asked at 10:00. If you sent the request, GitHub emailed its owners.",
+      "Waiting for an owner, asked on Fri 30 Oct at 10:00. If you sent the request, GitHub emailed its owners.",
     ],
     fix: {
       label: "Ask an owner of ledger-labs",
       href: "https://github.com/orgs/ledger-labs/people?query=role%3Aowner",
     },
+    labels: ["Ask to install on ledger-labs", "Ask an owner of ledger-labs"],
+    againLabels: ["Ask an owner of ledger-labs"],
     again: {
       label: "Ask again",
       href: INSTALL,
       command: { type: "connection.askToInstall", account: "ledger-labs" },
     },
-    asks: true,
+    status: null,
   });
   const yesterday = signedIn({ unreached: [unreached("ledger-labs", false, NOW - 20 * 60 * MIN)] });
   expect(row(yesterday, "ledger-labs")?.detail).toBe(
-    "Waiting for an owner of ledger-labs, asked on Thu 29 Oct at 14:00. If you sent the request, GitHub emailed its owners.",
+    "Waiting for an owner, asked on Thu 29 Oct at 14:00. If you sent the request, GitHub emailed its owners.",
   );
 });
 
 // ---- held ----
 
-test("the fix's place is as wide as one list of labels: an organisation arriving later moves no row above it", () => {
-  // Wide enough for every label that names no account, and for one naming a login of a usual length.
-  for (const label of [
-    "Unsuspend it on GitHub",
-    "Sign in with SSO",
-    "Choose repositories",
-    "Install on another account",
-  ])
-    expect(ACCOUNT_FIX_LABELS).toContain(label);
-  expect(
-    ACCOUNT_FIX_LABELS.some(
-      (l) => l.startsWith("Ask to install on ") && l.length >= "Ask to install on ".length + 16,
-    ),
-  ).toBe(true);
-  // Ask again keeps its own place.
-  expect(ACCOUNT_FIX_LABELS).not.toContain("Ask again");
+test("a row's fix place holds every label its own fix can show where it is in the list, and no other row's", () => {
+  const state = signedIn({
+    accounts: [own, org("ledger-dev", null, false)],
+    unreached: [unreached("ledger-labs", true), unreached("ledger-hq", false, NOW)],
+  });
+  expect(Object.fromEntries(rows(state).map((r) => [r.key, r.labels]))).toEqual({
+    // Reached and owned: no repository yet, SSO, suspended, gone.
+    sasensi: ["Choose repositories", "Sign in with SSO", "Unsuspend it on GitHub", "Install on sasensi"],
+    // Reached, a member's: an owner is asked for what an owner would do.
+    "ledger-dev": ["Choose repositories", "Sign in with SSO", "Ask an owner of ledger-dev"],
+    // Not reached, the person's own: it never waits.
+    "ledger-labs": ["Install on ledger-labs"],
+    // Not reached, a member's: asked, then waiting.
+    "ledger-hq": ["Ask to install on ledger-hq", "Ask an owner of ledger-hq"],
+    another: ["Install on another account"],
+  });
+  for (const r of rows(state)) if (r.fix !== null) expect(r.labels).toContain(r.fix.label);
+});
+
+test("only a member's row not reached holds Ask again's square beside a fix: the one it waits with", () => {
+  const state = signedIn({
+    accounts: [org("ledger-dev", null, false)],
+    unreached: [unreached("ledger-labs", true), unreached("ledger-hq", false)],
+  });
+  expect(Object.fromEntries(rows(state).map((r) => [r.key, r.againLabels]))).toEqual({
+    "ledger-dev": [],
+    "ledger-labs": [],
+    "ledger-hq": ["Ask an owner of ledger-hq"],
+    another: [],
+  });
+});
+
+test("a login longer than a usual one is held at 16 characters: its fix's label is cut, never the row's detail", () => {
+  const login = "ledger-holdings-europe-west";
+  const r = row(signedIn({ unreached: [unreached(login, true)] }), login);
+  expect(r?.fix?.label).toBe(`Install on ${login}`);
+  expect(r?.labels).toEqual(["Install on ledger-holdings-"]);
 });
 
 test("every detail a row can show, so a state changing in place moves nothing", () => {
@@ -419,11 +520,34 @@ test("every detail a row can show, so a state changing in place moves nothing", 
   });
   for (const r of list.rows) expect(r.details).toContain(r.detail);
   expect(list.rows.find((r) => r.key === "ledger-labs")?.details).toContain(
-    "Waiting for an owner of ledger-labs, asked at 10:00. If you sent the request, GitHub emailed its owners.",
+    "Waiting for an owner, asked at 10:00. If you sent the request, GitHub emailed its owners.",
   );
 });
 
-test("a row holds only what its own place in the list can say: reached rows aren't as tall as a waiting line", () => {
+test("a waiting row holds the line it says once the day it was asked has passed, so a day passing moves nothing", () => {
+  const asked = NOW - 25 * MIN;
+  const today = row(signedIn({ unreached: [unreached("ledger-labs", false, asked)] }), "ledger-labs");
+  const later = {
+    ...signedIn({ unreached: [unreached("ledger-labs", false, asked)] }),
+    now: NOW + 3 * 24 * 60 * MIN,
+  };
+  const then = row(later, "ledger-labs");
+  expect(then?.detail).toBe(
+    "Waiting for an owner, asked on Fri 30 Oct at 09:35. If you sent the request, GitHub emailed its owners.",
+  );
+  expect(today?.details).toContain(then?.detail);
+});
+
+test("a waiting row's longest line names no login, so it fits two lines in setup's column whatever the account", () => {
+  // The login heads the row. 103 characters: the older day's form, two lines beside the fix's place in setup.
+  const login = "x".repeat(39);
+  const longest = (r: ReturnType<typeof row>) => Math.max(...(r?.details ?? []).map((d) => d.length));
+  const waiting = row(signedIn({ unreached: [unreached(login, false, NOW - 20 * 60 * MIN)] }), login);
+  for (const line of waiting?.details ?? []) expect(line).not.toContain(login);
+  expect(longest(waiting)).toBeLessThanOrEqual(103);
+});
+
+test("a row holds only what its own place in the list can say: a reached row never holds a waiting line", () => {
   const list = accountRows(
     signedIn({ accounts: [own], unreached: [unreached("ledger-labs", false), unreached("ledger-hq", true)] }),
     { timeZone: UTC },
@@ -436,13 +560,14 @@ test("a row holds only what its own place in the list can say: reached rows aren
   // Not reached, a member's: asked or waiting; never a reached account's cause.
   expect(details("ledger-labs")).toEqual([
     "Not installed. On GitHub, you ask its owners to install it.",
-    "Waiting for an owner of ledger-labs, asked at 10:00. If you sent the request, GitHub emailed its owners.",
+    "Waiting for an owner, asked at 10:00. If you sent the request, GitHub emailed its owners.",
+    "Waiting for an owner, asked on Fri 30 Oct at 10:00. If you sent the request, GitHub emailed its owners.",
   ]);
   // Not reached, theirs: Install on it is all it offers, so it never waits for an owner.
   expect(details("ledger-hq")).toEqual(["Not installed."]);
 });
 
-test("only a member's account not reached keeps Ask again's place: no other row can wait for an owner", () => {
+test("only a row waiting for an owner has Ask again: every row keeps its place, the screen's (github-app.test.tsx)", () => {
   const list = accountRows(
     signedIn({
       accounts: [own],
@@ -454,12 +579,12 @@ test("only a member's account not reached keeps Ask again's place: no other row 
     }),
     { timeZone: UTC },
   );
-  expect(Object.fromEntries(list.rows.map((r) => [r.key, r.asks]))).toEqual({
-    sasensi: false,
-    "ledger-labs": true,
-    "ledger-ops": true,
-    "ledger-hq": false,
-    another: false,
+  expect(Object.fromEntries(list.rows.map((r) => [r.key, r.again?.label ?? null]))).toEqual({
+    sasensi: null,
+    "ledger-labs": null,
+    "ledger-ops": "Ask again",
+    "ledger-hq": null,
+    another: null,
   });
 });
 
@@ -499,11 +624,15 @@ test("a group head with no cause says nothing more, and keeps every cause line's
   );
   expect(head).toEqual({
     account: "sasensi",
+    toggleLabel: "sasensi's repositories",
     state: "fine",
     cause: "",
     held: ["", "Asks you to sign in with SSO.", "Suspended.", "No longer installed."],
     fix: null,
     labels: ["Sign in with SSO", "Unsuspend it on GitHub", "Install on sasensi", "Ask an owner of sasensi"],
+    count: "1 repository, reviewed",
+    counts: ["1 repository, not reviewed", "1 repository, reviewed"],
+    shows: null,
   });
 });
 
@@ -553,6 +682,219 @@ test("an account with no repository has no group; a repository on no account rea
   expect(groups(state).map((g) => [g.key, g.head.cause, g.head.fix, g.repos])).toEqual([
     ["ledger-dev", "", null, ["ledger-dev/billing"]],
     ["acme", "", null, ["acme/site"]],
+  ]);
+});
+
+// ---- The account's switch and count (ADR 0082) ----
+
+const off = (owner: string, name: string): Repository => ({ ...repo(owner, name), enabled: false });
+
+test("a group of two or more says how many of its repositories are reviewed, and has the account's switch", () => {
+  const state = signedIn({ accounts: [own, org("fernhill", null, false)] }, [
+    repo("fernhill", "api"),
+    off("fernhill", "web"),
+    repo("fernhill", "cli"),
+    repo("sasensi", "ledger-api"),
+    repo("sasensi", "dotfiles"),
+  ]);
+  const [mine, fernhill] = repositoryGroups(state);
+  expect(fernhill).toMatchObject({ reviewed: 2, total: 3, allOn: false });
+  expect(fernhill?.head.count).toBe("2 of 3 reviewed");
+  // A mixed account's switch is off (`allOn`); it names every repository of the account.
+  expect(fernhill?.control).toEqual({
+    label: "Review every repository in fernhill",
+    repoIds: [repositoryId("fernhill/api"), repositoryId("fernhill/web"), repositoryId("fernhill/cli")],
+    command: {
+      type: "repos.setEnabled",
+      repoIds: [repositoryId("fernhill/api"), repositoryId("fernhill/web"), repositoryId("fernhill/cli")],
+    },
+  });
+  expect(mine).toMatchObject({ reviewed: 2, total: 2, allOn: true });
+  expect(mine?.head.count).toBe("All 2 reviewed");
+});
+
+test("an account with none reviewed says so, and its switch is off", () => {
+  const state = signedIn({ accounts: [org("fernhill", null, false)] }, [
+    off("fernhill", "api"),
+    off("fernhill", "web"),
+  ]);
+  const [fernhill] = repositoryGroups(state);
+  expect(fernhill).toMatchObject({ reviewed: 0, total: 2, allOn: false });
+  expect(fernhill?.head.count).toBe("None of 2 reviewed");
+});
+
+test("a group's count holds the place of every count its total can say", () => {
+  const state = signedIn({ accounts: [org("fernhill", null, false)] }, [
+    repo("fernhill", "api"),
+    off("fernhill", "web"),
+    repo("fernhill", "cli"),
+  ]);
+  expect(repositoryGroups(state)[0]?.head.counts).toEqual([
+    "None of 3 reviewed",
+    "1 of 3 reviewed",
+    "2 of 3 reviewed",
+    "All 3 reviewed",
+  ]);
+});
+
+test("a group of one has its count and the account's switch on its head, as every group (ADR 0083, round 4)", () => {
+  const state = signedIn({ accounts: [own] }, [off("sasensi", "ledger-api")]);
+  const [mine] = repositoryGroups(state);
+  expect(mine).toMatchObject({ reviewed: 0, total: 1, allOn: false });
+  // The account's switch, as on every head: its row keeps its own.
+  expect(mine?.control).toEqual({
+    label: "Review every repository in sasensi",
+    repoIds: [repositoryId("sasensi/ledger-api")],
+    command: { type: "repos.setEnabled", repoIds: [repositoryId("sasensi/ledger-api")] },
+  });
+  expect(mine?.head.count).toBe("1 repository, not reviewed");
+  expect(mine?.head.counts).toEqual(["1 repository, not reviewed", "1 repository, reviewed"]);
+});
+
+test("the count and the switch are of the whole account, whatever the rows shown", () => {
+  const state = signedIn({ accounts: [own, org("fernhill", null, false)] }, [
+    repo("fernhill", "api"),
+    off("fernhill", "web"),
+    repo("fernhill", "cli"),
+    repo("sasensi", "ledger-api"),
+  ]);
+  const onlyOff = (r: Repository) => !r.enabled;
+  const shown = repositoryGroups(state, onlyOff);
+  // A group with no row left is dropped; the others keep only their rows shown.
+  expect(shown.map((g) => [g.key, g.repos.map((r) => r.name)])).toEqual([["fernhill", ["web"]]]);
+  const [fernhill] = shown;
+  expect(fernhill).toMatchObject({ reviewed: 2, total: 3, allOn: false });
+  expect(fernhill?.head.count).toBe("2 of 3 reviewed");
+  expect(fernhill?.control?.repoIds).toEqual([
+    repositoryId("fernhill/api"),
+    repositoryId("fernhill/web"),
+    repositoryId("fernhill/cli"),
+  ]);
+});
+
+// ---- Setup's Repositories step, grouped (ADR 0082) ----
+
+test("setup's step lists the same groups as Repositories, each repository ticked from the step's choices", () => {
+  const state = signedIn({ accounts: [own, org("fernhill", null, false)] }, [
+    repo("fernhill", "api"),
+    off("fernhill", "web"),
+    repo("sasensi", "ledger-api"),
+  ]);
+  const unticked = new Map([[repositoryId("fernhill/api"), false]]);
+  const steps = setupRepoGroups(state, unticked);
+  expect(steps.map((g) => g.key)).toEqual(repositoryGroups(state).map((g) => g.key));
+  expect(steps.map((g) => g.rows.map((r) => [r.repo.name, r.ticked]))).toEqual([
+    [["ledger-api", true]],
+    // Unticked here; off on the service and not ticked here.
+    [
+      ["api", false],
+      ["web", false],
+    ],
+  ]);
+});
+
+test("an account's checkbox is ticked when all are, unticked when none, mixed when some", () => {
+  const state = signedIn({ accounts: [org("fernhill", null, false)] }, [
+    repo("fernhill", "api"),
+    repo("fernhill", "web"),
+    repo("fernhill", "cli"),
+  ]);
+  const [api, web, cli] = [
+    repositoryId("fernhill/api"),
+    repositoryId("fernhill/web"),
+    repositoryId("fernhill/cli"),
+  ];
+  const ticked = (...unticked: RepositoryId[]) =>
+    setupRepoGroups(state, new Map(unticked.map((id) => [id, false])))[0]?.ticked;
+  expect(ticked()).toBe("all");
+  expect(ticked(web)).toBe("some");
+  expect(ticked(api, web, cli)).toBe("none");
+  expect(setupRepoGroups(state, new Map())[0]?.control).toEqual({
+    label: "Review every repository in fernhill",
+    repoIds: [api, web, cli],
+    command: { type: "repos.setEnabled", repoIds: [api, web, cli] },
+  });
+});
+
+test("setup's step says each account's size, each repository's open pull requests, and names each in full", () => {
+  const base = signedIn({ accounts: [own, org("fernhill", null, false)] }, [
+    repo("fernhill", "api"),
+    repo("fernhill", "web"),
+    repo("sasensi", "api"),
+  ]);
+  const opened = (n: number, repoId: RepositoryId): Change => ({
+    id: changeId(`${repoId}#${n}`),
+    repoId,
+    number: n,
+    title: `Change ${n}`,
+    openedBy: "sasensi",
+    author: "agent",
+    writtenBy: "claude",
+    headSha: commitSha("a1f9c2e"),
+    openedAt: NOW,
+    draft: false,
+    fork: false,
+    newCommits: 0,
+  });
+  const fernhillApi = repositoryId("fernhill/api");
+  const mineApi = repositoryId("sasensi/api");
+  const state: State = {
+    ...base,
+    changes: Object.fromEntries(
+      [opened(1, fernhillApi), opened(2, fernhillApi), opened(3, mineApi)].map((c) => [c.id, c]),
+    ),
+  };
+  const said = setupRepoGroups(state, new Map()).map((g) => [
+    g.size,
+    g.rows.map((r) => [r.open, r.zero, r.label]),
+  ]);
+  // Repositories' words, "2 open", zero said and told apart; the box's name says it in full.
+  expect(said).toEqual([
+    ["1 repository", [["1 open", false, "sasensi/api, 1 open pull request"]]],
+    [
+      "2 repositories",
+      [
+        ["2 open", false, "fernhill/api, 2 open pull requests"],
+        ["0 open", true, "fernhill/web, 0 open pull requests"],
+      ],
+    ],
+  ]);
+});
+
+test("a group of one has no account checkbox in setup", () => {
+  const [mine] = setupRepoGroups(signedIn({ accounts: [own] }, [repo("sasensi", "ledger-api")]), new Map());
+  expect(mine?.control).toBeNull();
+});
+
+test("ticking an account sets each of its repositories' choices, and leaves the others'", () => {
+  const state = signedIn({ accounts: [own, org("fernhill", null, false)] }, [
+    repo("fernhill", "api"),
+    repo("fernhill", "web"),
+    repo("sasensi", "ledger-api"),
+  ]);
+  const [api, web, mine] = [
+    repositoryId("fernhill/api"),
+    repositoryId("fernhill/web"),
+    repositoryId("sasensi/ledger-api"),
+  ];
+  const mixed = new Map([
+    [web, false],
+    [mine, false],
+  ]);
+  const fernhill = setupRepoGroups(state, mixed)[1];
+  const repoIds = fernhill?.control?.repoIds ?? [];
+  // A mixed account's checkbox ticks them all.
+  const all = tickAccount(mixed, repoIds, true);
+  expect(chosenRepos(state.repos, all)).toEqual([api, web]);
+  expect(setupRepoGroups(state, all)[1]?.ticked).toBe("all");
+  // Ticked, it unticks them all.
+  const none = tickAccount(all, repoIds, false);
+  expect(chosenRepos(state.repos, none)).toEqual([]);
+  expect(setupRepoGroups(state, none)[1]?.ticked).toBe("none");
+  // The choices given are not changed.
+  expect([...mixed]).toEqual([
+    [web, false],
+    [mine, false],
   ]);
 });
 
@@ -627,5 +969,45 @@ test("Add it back on the shared App: GitHub's install page when its account is n
   const two = signedIn({ accounts: [own, org("ledger-dev", null, true, 22)] }).connection;
   expect(departedNotice(two, departed("ledger-dev", "billing")).addBack).toBe(
     "https://github.com/organizations/ledger-dev/settings/installations/22",
+  );
+});
+
+const NOW_PR = Date.UTC(2026, 10, 7, 10, 0, 0);
+
+test("Repositories' Pull requests cell: the count, zero included and told apart, then the last review", () => {
+  expect(pullRequestsCell({ enabled: true, open: 2, lastAt: NOW_PR - 3 * MIN }, NOW_PR)).toEqual({
+    on: true,
+    open: "2 open",
+    zero: false,
+    last: "last review 3 min ago",
+  });
+  // Zero is data: said in the same place and words as two, muted by `zero`; a dash or a blank read as missing.
+  expect(pullRequestsCell({ enabled: true, open: 0, lastAt: NOW_PR - 3 * MIN }, NOW_PR)).toEqual({
+    on: true,
+    open: "0 open",
+    zero: true,
+    last: "last review 3 min ago",
+  });
+  expect(pullRequestsCell({ enabled: true, open: 0, lastAt: null }, NOW_PR)).toEqual({
+    on: true,
+    open: "0 open",
+    zero: true,
+    last: null,
+  });
+  expect(pullRequestsCell({ enabled: false, open: 4, lastAt: null }, NOW_PR)).toEqual({
+    on: false,
+    text: "not reviewed",
+  });
+});
+
+test("a repository's page says whether it is reviewed, its open pull requests and its last review, dots held", () => {
+  expect(repositoryStanding({ enabled: true, open: 1, lastAt: NOW_PR - 3 * MIN }, NOW_PR)).toBe(
+    ["Reviewing", "1 open pull request", "last review 3 min ago"].join(SEPARATOR),
+  );
+  expect(repositoryStanding({ enabled: true, open: 0, lastAt: null }, NOW_PR)).toBe(
+    ["Reviewing", "no open pull requests"].join(SEPARATOR),
+  );
+  expect(repositoryStanding({ enabled: false, open: 3, lastAt: null }, NOW_PR)).toBe(
+    ["Off", "pull requests here are not reviewed"].join(SEPARATOR),
   );
 });

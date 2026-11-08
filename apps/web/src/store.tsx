@@ -15,7 +15,11 @@ import { createContext, useContext, useState, useSyncExternalStore } from "react
 import { openOf, Refused } from "./api/http.ts";
 import type { WebMode } from "./dev/mode.ts";
 import { THEME_KEY } from "./theme-key.ts";
-import { type Refusal, refusalOf } from "./view-model/refusal.ts";
+import { CollapsedGroups } from "./view-model/collapsed.ts";
+import { LeftSummary } from "./view-model/departed.ts";
+import type { HeldValue } from "./view-model/held.ts";
+import { type Refusal, refusalOf, saysNothing } from "./view-model/refusal.ts";
+import { RepositoriesBar } from "./view-model/repositories.ts";
 import { ListScope, type ScopeChoice } from "./view-model/scope.ts";
 import { changeReviews } from "./view-model/select.ts";
 
@@ -43,6 +47,12 @@ export class Store {
   private listeners = new Set<() => void>();
   /** Mine or Everyone, one choice for Home and All reviews while the page is open (ADR 0078). */
   readonly scope = new ListScope();
+  /** Repositories' groups collapsed from their heads, while the page is open, never stored (ADR 0082). */
+  readonly collapsed = new CollapsedGroups();
+  /** Whether Repositories shows its search and filter: once more than ten are watched, then while the app is open. */
+  readonly repositoriesBar = new RepositoriesBar();
+  /** Whether Repositories says its quiet departed repositories as one summary: from two, then down to one (ADR 0082). */
+  readonly leftSummary = new LeftSummary();
 
   readonly api: LookoverApi;
 
@@ -71,14 +81,16 @@ export class Store {
 
   /**
    * Sends a command and says whether the service took it; a refusal becomes the notice, never an unhandled
-   * rejection.
+   * rejection, unless it is one said nowhere (`saysNothing`).
    */
   send = (command: Command): Promise<boolean> =>
     this.api.send(command).then(
       () => true,
       (error: unknown) => {
         console.error("Lookover refused a command", command, error instanceof Refused ? error.answer : error);
-        this.status = { ...this.status, refusal: refusalOf(error, command) };
+        const refusal = refusalOf(error, command);
+        if (saysNothing(refusal)) return false;
+        this.status = { ...this.status, refusal };
         this.changed();
         return false;
       },
@@ -98,7 +110,11 @@ export class Store {
   }
 
   private changed(): void {
-    if (this.state) this.scope.see(changeReviews(this.state));
+    if (this.state) {
+      this.scope.see(changeReviews(this.state));
+      this.repositoriesBar.see(this.state);
+      this.leftSummary.see(this.state);
+    }
     for (const l of this.listeners) l();
   }
 
@@ -183,8 +199,9 @@ export function useStoreState(store: Store): State | null {
   return useSyncExternalStore(store.subscribe, store.get);
 }
 
+/** The store's status; rendered to markup (the screens' tests), the same. */
 export function useStoreStatus(store: Store): StoreStatus {
-  return useSyncExternalStore(store.subscribe, store.getStatus);
+  return useSyncExternalStore(store.subscribe, store.getStatus, store.getStatus);
 }
 
 const StateContext = createContext<State | null>(null);
@@ -198,11 +215,39 @@ export function useAppState(): State {
 
 export const useSend = () => useApp().send;
 
+/** A value the app holds (`HeldValue`), rendered again each time it changes. */
+export function useHeld<T>(held: HeldValue<T>): T {
+  // Its own snapshot on the server too: a screen rendered to markup reads what the app holds.
+  return useSyncExternalStore(held.subscribe, held.get, held.get);
+}
+
 /** The list's Mine or Everyone, and the way to choose it: one for Home and All reviews (ADR 0078). */
 export function useListScope(): ScopeChoice & { choose: ListScope["choose"] } {
   const { scope } = useApp().store;
-  const choice = useSyncExternalStore(scope.subscribe, scope.get);
-  return { ...choice, choose: scope.choose };
+  return { ...useHeld(scope), choose: scope.choose };
+}
+
+/**
+ * Repositories' groups folded or opened by the person, or as each was first shown, the way to fold or open one and the
+ * way to hold a group's first fold: kept while the app is open (ADR 0082).
+ */
+export function useCollapsedGroups(): {
+  collapsed: ReadonlyMap<string, boolean>;
+  toggle: CollapsedGroups["toggle"];
+  remember: CollapsedGroups["remember"];
+} {
+  const { collapsed } = useApp().store;
+  return { collapsed: useHeld(collapsed), toggle: collapsed.toggle, remember: collapsed.remember };
+}
+
+/** Whether Repositories shows its search and filter: held while the app is open (ADR 0082). */
+export function useRepositoriesBar(): boolean {
+  return useHeld(useApp().store.repositoriesBar);
+}
+
+/** Whether Repositories says its quiet departed repositories as one summary: held while the app is open (ADR 0082). */
+export function useLeftSummary(): boolean {
+  return useHeld(useApp().store.leftSummary);
 }
 
 export type Theme = "dark" | "light" | "system";

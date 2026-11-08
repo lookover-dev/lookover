@@ -2,6 +2,7 @@
 // the prepare itself, the mirror, the fetch, the token and failures. The rules files' tests are in `rules.test.ts`,
 // a file of its own so the two run on separate workers.
 import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -14,7 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { CommitSha, FetchSpec, ProcessRunner } from "@lookover/contracts";
+import type { CommitSha, FetchSpec, ProcessLimits, ProcessRunner } from "@lookover/contracts";
 import { commitSha, HostError, jobId } from "@lookover/contracts";
 import { createRetrieval, RetrievalError } from "@lookover/retrieval";
 import {
@@ -394,6 +395,106 @@ test("dispose removes the worktree and leaves the mirror", async () => {
   expect(setupGit(r.env, mirror, "cat-file", "-t", r.b)).toBe("commit");
 });
 
+/**
+ * A path past Windows' 260 characters relative to the repository itself, so no short temporary folder lets it
+ * pass, each name in it under NTFS's own 255: four folders of 70 characters and a file.
+ */
+const LONG_PATH = `${Array.from({ length: 4 }, (_, i) => `${i}`.padEnd(70, "-folder")).join("/")}/a-file-at-the-end-of-a-long-path.txt`;
+
+/**
+ * A change, from `a`, whose tree holds a file at `LONG_PATH`: written by `fast-import`, never checked out, on its own
+ * branch of the host (`long-paths`). Made on first use, not in the shared fixture: only the tests here read it, and no
+ * test lists the host's refs.
+ */
+const longPathChange = (() => {
+  let made: CommitSha | undefined;
+  return (): CommitSha => {
+    if (made) return made;
+    const longest = Math.max(...LONG_PATH.split("/").map((name) => name.length));
+    if (LONG_PATH.length <= 260 || longest >= 255) {
+      throw new Error(`setup: the long path is ${LONG_PATH.length} characters, its longest name ${longest}`);
+    }
+    made = importCommits(r.env, r.origin, [
+      { ref: "refs/heads/long-paths", from: r.a, message: "long", files: { [LONG_PATH]: "deep down\n" } },
+    ])[0];
+    if (!made) throw new Error("setup: git fast-import wrote no commit");
+    return made;
+  };
+})();
+
+test.skipIf(process.platform !== "win32")(
+  "on Windows only: a change holding a path past 260 characters is checked out, diffed and removed",
+  async () => {
+    const head = longPathChange();
+    const { mirror, retrieval } = data();
+    const prepared = await retrieval().prepare(request("job-long", head));
+    const seen = {
+      text: readFileSync(join(prepared.cwd, LONG_PATH), "utf8"),
+      inDiff: prepared.diff.includes(`+++ b/${LONG_PATH}`),
+    };
+    await prepared.dispose();
+    // The control: the same checkout from the same mirror, in the environment retrieval is given, without
+    // Lookover's options, and git's messages in English. A machine whose system configuration sets
+    // `core.longpaths` fails here, loudly.
+    const plain = spawnSync(
+      GIT,
+      ["worktree", "add", "--quiet", "--detach", join(mirror, "..", "plain"), head],
+      {
+        cwd: mirror,
+        env: { ...r.env, LC_ALL: "C", LANGUAGE: "C" },
+        encoding: "utf8",
+      },
+    );
+
+    expect({ ...seen, left: existsSync(prepared.cwd) }).toEqual({
+      text: "deep down\n",
+      inDiff: true,
+      left: false,
+    });
+    expect(plain.status).not.toBe(0);
+    expect(plain.stderr).toContain("Filename too long");
+  },
+);
+
+test("every git of a prepare and its dispose runs with core.longpaths=true in its environment, never in the mirror's config", async () => {
+  const { mirror, prepared, invocations } = await shared(() => request("job-long-env", longPathChange()))();
+  await prepared.dispose();
+
+  const configs = invocations.map((i) => configOf(i.env));
+  expect(invocations.map((i) => i.args[0])).toEqual(
+    expect.arrayContaining(["init", "fetch", "worktree", "diff"]),
+  );
+  // Dispose's own git is recorded too: the runner is the prepare's.
+  expect(invocations.at(-1)?.args.slice(0, 2)).toEqual(["worktree", "remove"]);
+  expect(
+    configs.filter((config) => !config.some(([k, v]) => k === "core.longpaths" && v === "true")),
+  ).toEqual([]);
+  expect(readFileSync(join(mirror, "config"), "utf8").toLowerCase()).not.toContain("longpaths");
+});
+
+test("every git of a prepare and its dispose runs in the C locale, whatever the person's, so its words can be read", async () => {
+  const translated = { LC_ALL: "fr_FR.UTF-8", language: "fr", LANG: "fr_FR.UTF-8" };
+  const { prepared, invocations } = await shared(() => request("job-locale"), {
+    env: () => ({ ...r.env, ...translated }),
+  })();
+  await prepared.dispose();
+
+  const locales = invocations.map((i) => ({
+    command: i.args.slice(0, 2).join(" "),
+    locale: Object.entries(i.env)
+      .filter(([key]) => ["LC_ALL", "LANGUAGE"].includes(key.toUpperCase()))
+      .sort(([a], [b]) => a.localeCompare(b)),
+  }));
+  expect(locales.find((l) => l.command === "worktree add")).toEqual({
+    command: "worktree add",
+    locale: [
+      ["LANGUAGE", "C"],
+      ["LC_ALL", "C"],
+    ],
+  });
+  expect(locales.filter((l) => JSON.stringify(l.locale) !== '[["LANGUAGE","C"],["LC_ALL","C"]]')).toEqual([]);
+});
+
 test("after a prepare, no file in the mirror or the worktree, no logged line and no argument holds the token", async () => {
   const { root, log, invocations } = await firstPrepare();
 
@@ -485,6 +586,19 @@ const configOf = (env: Record<string, string>) =>
     env[`GIT_CONFIG_KEY_${i}`],
     env[`GIT_CONFIG_VALUE_${i}`],
   ]);
+
+test("the fetch alone allows the file protocol, after the safe options' never: the last value wins", async () => {
+  const { invocations } = await firstPrepare();
+
+  const allowed = invocations.map((i) => ({
+    verb: i.args[0],
+    values: configOf(i.env)
+      .filter(([k]) => k === "protocol.file.allow")
+      .map(([, v]) => v),
+  }));
+  expect(allowed.find((i) => i.verb === "fetch")?.values).toEqual(["never", "user"]);
+  expect(allowed.filter((i) => i.verb !== "fetch" && i.values.join() !== "never")).toEqual([]);
+});
 
 test("the fetch says it is alive: git's progress on, never quiet, and its maintenance kept in the foreground", async () => {
   const { invocations } = await firstPrepare();
@@ -785,3 +899,129 @@ function pushAnotherCommit(): CommitSha {
   if (!pushed) throw new Error("setup: git fast-import wrote no commit");
   return pushed;
 }
+
+/**
+ * A runner on which every git whose args start with `command`'s words (`fetch`, `worktree add`) ends as `end` says,
+ * with git's `stderr`, without running: a limit running out (`idle`, `wall_clock`) or git refusing (`exited`, code
+ * 128). Every other git runs for real. `limitsOf` gives the limits the last git started with each command was given.
+ */
+function ending(real: ProcessRunner, command: string, end: "idle" | "wall_clock" | "exited", stderr = "") {
+  const words = command.split(" ");
+  const given = new Map<string, ProcessLimits>();
+  const runner: ProcessRunner = {
+    start: (invocation, limits, onStdout) => {
+      const head = invocation.args.slice(0, words.length);
+      given.set(invocation.args.slice(0, 2).join(" "), limits);
+      if (head.join(" ") !== command) return real.start(invocation, limits, onStdout);
+      const exitCode = end === "exited" ? 128 : null;
+      const result = Promise.resolve({ end, exitCode, stdout: "", stderr, tookMs: 0 });
+      return { pid: 0, result, kill: () => {} };
+    },
+    sweepOrphans: () => real.sweepOrphans(),
+  };
+  const limitsOf = (started: string) => {
+    const limits = [...given].find(([key]) => key.startsWith(started))?.[1];
+    if (!limits) throw new Error(`no git ${started} started`);
+    return limits;
+  };
+  return { runner, limitsOf };
+}
+
+// These stop git by stubbing the runner's end, not with real git and fake timers: the runner's own idle and
+// wall-clock timers are tested in `packages/process`; here, only what retrieval makes of a limit running out.
+test("a fetch stopped for saying nothing names its idle limit and the ms it had", async () => {
+  const { runner, retrieval } = data({ seeded: true });
+  const stopped = ending(runner(), "fetch", "idle");
+
+  const error = await retrieval([], r.env, stopped.runner)
+    .prepare(request("job-limit-idle"))
+    .catch((e: unknown) => e);
+
+  expect(error).toMatchObject({
+    problem: "fetch_failed",
+    detail: "git took too long (idle)",
+    limit: { kind: "idle", ms: stopped.limitsOf("fetch").idleMs },
+    pathTooLong: false,
+  });
+});
+
+test("a git stopped at its wall clock names that limit, as configured for that command", async () => {
+  const { runner, retrieval } = data({ seeded: true });
+  const stopped = ending(runner(), "diff", "wall_clock");
+
+  const error = await retrieval([], r.env, stopped.runner)
+    .prepare(request("job-limit-wall"))
+    .catch((e: unknown) => e);
+
+  expect(error).toMatchObject({
+    problem: "diff_failed",
+    detail: "git took too long (wall_clock)",
+    limit: { kind: "wall_clock", ms: stopped.limitsOf("diff").wallClockMs },
+    pathTooLong: false,
+  });
+});
+
+test("a worktree add stopped at its wall clock names the fetch's limit, the one it was given", async () => {
+  const { runner, retrieval } = data({ seeded: true });
+  const stopped = ending(runner(), "worktree add", "wall_clock");
+
+  const error = await retrieval([], r.env, stopped.runner)
+    .prepare(request("job-limit-worktree"))
+    .catch((e: unknown) => e);
+
+  expect(stopped.limitsOf("worktree add")).toEqual(stopped.limitsOf("fetch"));
+  expect(stopped.limitsOf("worktree add")).not.toEqual(stopped.limitsOf("cat-file"));
+  expect(error).toMatchObject({
+    problem: "worktree_failed",
+    detail: "git took too long (wall_clock)",
+    limit: { kind: "wall_clock", ms: stopped.limitsOf("worktree add").wallClockMs },
+    pathTooLong: false,
+  });
+});
+
+test("a git that fails on its own names no limit and no path too long", async () => {
+  const { retrieval } = data({ seeded: true });
+  const missing = commitSha("0123456789abcdef0123456789abcdef01234567");
+
+  const error = await retrieval()
+    .prepare(request("job-limit-none", missing))
+    .catch((e: unknown) => e);
+
+  expect(error).toMatchObject({ problem: "fetch_failed", limit: null, pathTooLong: false });
+});
+
+for (const [system, stderr] of [
+  // Git for Windows' words for a path past 260 characters without core.longpaths, in the C locale.
+  [
+    "Windows",
+    "error: unable to create file deep/very/long/name.txt: Filename too long\n" +
+      "fatal: Could not reset index file to revision 'HEAD'.\n",
+  ],
+  // Git on Linux (glibc's strerror) and macOS for a name past 255 bytes, in the C locale.
+  [
+    "Linux",
+    "error: unable to create file deep/very/long/name.txt: File name too long\n" +
+      "fatal: Could not reset index file to revision 'HEAD'.\n",
+  ],
+] as const) {
+  test(`git refusing a path too long on ${system} says so, its words kept as the detail`, async () => {
+    const { runner, retrieval } = data({ seeded: true });
+
+    const error = await retrieval([], r.env, ending(runner(), "worktree add", "exited", stderr).runner)
+      .prepare(request(`job-path-long-${system}`))
+      .catch((e: unknown) => e);
+
+    expect(error).toMatchObject({
+      problem: "worktree_failed",
+      detail: stderr.trim(),
+      limit: null,
+      pathTooLong: true,
+    });
+  });
+}
+
+test("an error made outside git names no limit and no path too long", () => {
+  const error = new RetrievalError("fetch_failed", "fatal: could not read from remote repository");
+
+  expect(error).toMatchObject({ limit: null, pathTooLong: false });
+});

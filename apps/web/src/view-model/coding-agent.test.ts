@@ -1,5 +1,5 @@
 // What Your coding agent's rows and Try it say for a given snapshot (ADR 0058): each row's state and its one action,
-// Try it's choice of pull request, and a refused write said on the rows' refusal line. Snapshots are built by hand.
+// Try it's choice of pull request, a refused write said on its row, and each row's mark. Snapshots are built by hand.
 import { expect, test } from "bun:test";
 import {
   type Change,
@@ -29,11 +29,15 @@ import {
   rowAction,
   rowDetails,
   rowLabels,
+  rowLine,
+  rowView,
   SKILL_LABELS,
   skillRows,
   tryIt,
+  tryItLines,
 } from "./coding-agent.ts";
-import { refusalOf, refusalToast } from "./refusal.ts";
+import { type Refusal, refusalOf, refusalToast } from "./refusal.ts";
+import { codePlace } from "./said.ts";
 
 const NOW = Date.UTC(2026, 9, 12, 10, 0, 0);
 const MIN = 60_000;
@@ -62,13 +66,16 @@ const detailsOf = (a: CodingAgent, id: AgentRow["id"]) => rowDetails(a, "lookove
 test("Lookover's launcher running another copy: said with that copy, and Point it at this Lookover", () => {
   const old = "C:\\Users\\Your Name\\Downloads\\lookover.exe";
   expect(pathOf(agent({ path: { reach: "stale", folder: WINDOWS, other: old } }))).toMatchObject({
-    state: "idle",
+    state: "stale",
     action: { label: "Point it at this Lookover", command: { type: "agent.path", on: true } },
     undo: null,
     detail: {
       before: "Lookover's launcher runs",
       command: old,
+      kind: "path",
       after: "instead of this copy. Terminals already open need a restart.",
+      alone:
+        "Lookover's launcher runs another copy instead of this one. Terminals already open need a restart. That copy is at:",
     },
   });
   expect(PATH_LABELS.setup).toContain("Point it at this Lookover");
@@ -80,18 +87,21 @@ test("on another data folder, the done row names Lookover's command as a termina
     before: "A terminal's",
     command,
     after: "runs this Lookover.",
+    alone: "A terminal runs this Lookover as:",
   });
 });
 
 test("the binary off the PATH offers Add to my PATH, saying what it adds and that open terminals need a restart", () => {
   expect(pathOf(agent())).toEqual({
     id: "path",
-    state: "idle",
+    state: "todo",
     title: { before: "", command: "lookover", after: "in your terminal" },
     detail: {
       before: "Adds",
       command: WINDOWS,
+      kind: "path",
       after: "to your PATH. It holds only Lookover's launcher. Terminals already open need a restart.",
+      alone: "Adds to your PATH, for new terminals, the folder that holds only Lookover's launcher:",
     },
     action: { label: "Add to my PATH", command: { type: "agent.path", on: true } },
     undo: null,
@@ -100,7 +110,9 @@ test("the binary off the PATH offers Add to my PATH, saying what it adds and tha
   expect(pathOf(agent({ path: { reach: "no", folder: "/home/sam/.local/bin" } })).detail).toEqual({
     before: "Links lookover into",
     command: "/home/sam/.local/bin",
+    kind: "path",
     after: "for new terminals; open ones need a restart.",
+    alone: "Links Lookover's launcher into this folder, for new terminals (open ones need a restart):",
   });
 });
 
@@ -117,24 +129,31 @@ test("on the PATH, the row is done, with Remove from my PATH as its undo", () =>
 test("linked off the PATH, or another lookover first: said, with no Add", () => {
   const linked = pathOf(agent({ path: { reach: "linked", folder: "/home/sam/.local/bin" } }));
   expect(linked).toMatchObject({
-    state: "idle",
+    state: "stale",
     action: null,
     undo: { label: "Remove from my PATH" },
     detail: {
       before: "Lookover's link is in",
       command: "/home/sam/.local/bin",
+      kind: "path",
       after: ", but that folder isn't on your PATH. Add it there, then open a new terminal.",
+      alone: "Add this folder to your PATH, then open a new terminal. Lookover's link is in:",
     },
   });
   const other = "C:\\Users\\Your Name\\AppData\\Roaming\\npm\\lookover.cmd";
   expect(pathOf(agent({ path: { reach: "other", folder: WINDOWS, other } }))).toMatchObject({
-    state: "idle",
+    state: "stale",
     action: null,
     undo: null,
     detail: {
       before: "A terminal runs another",
       command: "lookover",
-      after: { before: "first:", command: other, after: ". Take it off your PATH to reach this one." },
+      after: {
+        before: "first:",
+        command: other,
+        kind: "path",
+        after: ". Take it off your PATH to reach this one.",
+      },
     },
   });
 });
@@ -149,6 +168,7 @@ test("an npm install has no PATH offer: npm put it there, unless another lookove
       before: "npm put it on your PATH: a terminal's",
       command: "lookover",
       after: "runs this Lookover.",
+      alone: "npm put it on your PATH, so a terminal runs this Lookover as:",
     },
     action: null,
     undo: null,
@@ -156,12 +176,14 @@ test("an npm install has no PATH offer: npm put it there, unless another lookove
   // npm's folder off the PATH (a Node installed without it): said with that folder, and nothing offered.
   expect(pathOf(agent({ offer: "npm", path: { reach: "no", folder: npm } }))).toEqual({
     id: "path",
-    state: "idle",
+    state: "stale",
     title: { before: "", command: "lookover", after: "in your terminal" },
     detail: {
       before: "npm put it in",
       command: npm,
+      kind: "path",
       after: ", but that folder isn't on your PATH. Add it there, then open a new terminal.",
+      alone: "Add this folder to your PATH, then open a new terminal. npm put it in:",
     },
     action: null,
     undo: null,
@@ -169,20 +191,20 @@ test("an npm install has no PATH offer: npm put it there, unless another lookove
   // Another lookover first (bun's, pnpm's), maybe the person's only other one: said with its path, not to remove it.
   const other = "C:\\Users\\Your Name\\.bun\\bin\\lookover.exe";
   expect(pathOf(agent({ offer: "npm", path: { reach: "other", folder: WINDOWS, other } }))).toMatchObject({
-    state: "idle",
+    state: "stale",
     action: null,
     undo: null,
     detail: {
       before: "A terminal runs another",
       command: "lookover",
-      after: { before: "first, at", command: other, after: "." },
+      after: { before: "first, at", command: other, kind: "path", after: "." },
     },
   });
 });
 
 test("a clone has no PATH offer: the skill needs none", () => {
   expect(pathOf(agent({ offer: "clone" }))).toMatchObject({
-    state: "idle",
+    state: "todo",
     detail: "Lookover runs from its clone here: the skill calls it there, so your agent needs no PATH.",
     action: null,
     undo: null,
@@ -208,19 +230,23 @@ test("each agent found has its row: Install the skill, Replace for another's or 
       detail: {
         before: "The review loop's skill is in",
         command: CLAUDE_SKILL,
+        kind: "path",
         after: "and calls this Lookover.",
+        alone: "The review loop's skill, which calls this Lookover, is in:",
       },
       action: null,
       undo: { label: "Remove the skill", command: { type: "agent.skill", agent: "claude", on: false } },
     },
     {
       id: "codex",
-      state: "idle",
+      state: "todo",
       title: "Codex",
       detail: {
         before: "Installs the review loop's skill in",
         command: CODEX_SKILL,
+        kind: "path",
         after: "so Codex knows the loop.",
+        alone: "Installs the review loop's skill, so Codex knows the loop, in:",
       },
       action: { label: "Install the skill", command: { type: "agent.skill", agent: "codex", on: true } },
       undo: null,
@@ -236,23 +262,27 @@ test("each agent found has its row: Install the skill, Replace for another's or 
   );
   expect(replaced.map((r) => [r.state, r.action?.label, r.undo, r.detail])).toEqual([
     [
-      "idle",
+      "stale",
       "Replace",
       null,
       {
         before: "Another Lookover's skill is in",
         command: CLAUDE_SKILL,
+        kind: "path",
         after: "Replace it to call this one.",
+        alone: "Replace another Lookover's skill to call this one. It is in:",
       },
     ],
     [
-      "idle",
+      "stale",
       "Replace",
       null,
       {
         before: "A skill Lookover didn't write is in",
         command: CODEX_SKILL,
+        kind: "path",
         after: "Replace it to call this Lookover.",
+        alone: "Replace a skill Lookover didn't write to call this Lookover. It is in:",
       },
     ],
   ]);
@@ -323,7 +353,12 @@ test("a row's action keeps the width of every label it can show there: Settings 
 });
 
 test("a row holds every detail a click there can bring, so its height holds when it is done or undone", () => {
-  const done = { before: "A terminal's", command: "lookover", after: "runs this Lookover." };
+  const done = {
+    before: "A terminal's",
+    command: "lookover",
+    after: "runs this Lookover.",
+    alone: "A terminal runs this Lookover as:",
+  };
   const adds = pathOf(agent()).detail;
   // Off the PATH or on it, the PATH row holds both details, the done one first.
   expect(detailsOf(agent(), "path")).toEqual([done, adds]);
@@ -346,7 +381,13 @@ test("a row holds every detail a click there can bring, so its height holds when
   const fresh = skillRows(agent()).map((r) => r.detail);
   expect(detailsOf(skills, "claude")).toEqual([...now.slice(0, 1), ...fresh.slice(0, 1)]);
   expect(detailsOf(skills, "codex")).toEqual([
-    { before: "The review loop's skill is in", command: CODEX_SKILL, after: "and calls this Lookover." },
+    {
+      before: "The review loop's skill is in",
+      command: CODEX_SKILL,
+      kind: "path",
+      after: "and calls this Lookover.",
+      alone: "The review loop's skill, which calls this Lookover, is in:",
+    },
     ...fresh.slice(1),
     ...now.slice(1),
   ]);
@@ -354,6 +395,78 @@ test("a row holds every detail a click there can bring, so its height holds when
 
 test("an agent not found has no row", () => {
   expect(skillRows(agent({ skills: [] }))).toEqual([]);
+});
+
+// ---- each row's mark, and a refused write said on its row ----
+
+const viewOf = (a: CodingAgent, id: AgentRow["id"], refusal: Refusal | null = null) => {
+  const row = id === "path" ? pathOf(a) : skillRows(a).find((r) => r.id === id);
+  if (row === undefined) throw new Error(`no ${id} row`);
+  return rowView(a, "lookover", row, refusal);
+};
+const markOf = (a: CodingAgent, id: AgentRow["id"], refusal: Refusal | null = null) =>
+  viewOf(a, id, refusal).mark;
+
+test("each row's mark: to install before, done once set up, stale when something else is there", () => {
+  expect(markOf(agent(), "path")).toBe("install");
+  expect(markOf(agent(), "claude")).toBe("install");
+  expect(markOf(agent({ path: { reach: "yes", folder: WINDOWS } }), "path")).toBe("done");
+  const old = "D:\\old\\lookover.exe";
+  for (const path of [
+    { reach: "stale", folder: WINDOWS, other: old },
+    { reach: "other", folder: WINDOWS, other: old },
+    { reach: "linked", folder: "/home/sam/.local/bin" },
+  ] as const)
+    expect(markOf(agent({ path }), "path")).toBe("stale");
+  // npm's folder off the PATH is something to fix by hand, not a step Lookover takes.
+  expect(markOf(agent({ offer: "npm", path: { reach: "no", folder: WINDOWS } }), "path")).toBe("stale");
+  const skills = (state: "ours" | "another" | "foreign") =>
+    markOf(agent({ skills: [{ agent: "claude", state, folder: CLAUDE_SKILL }] }), "claude");
+  expect(skills("ours")).toBe("done");
+  expect(skills("another")).toBe("stale");
+  expect(skills("foreign")).toBe("stale");
+});
+
+test("a refused write marks its own row refused and is said there, in place of the row's detail", () => {
+  const denied = refusalOf(new Refused(500, { error: "Access is denied." }), {
+    type: "agent.path",
+    on: true,
+  });
+  const path = viewOf(agent(), "path", denied);
+  expect(path.mark).toBe("refused");
+  expect(path.detail).toBe("This computer refused to change your PATH. Try again.");
+  expect(path.details).toContainEqual(path.detail);
+  // The other rows keep their own mark and detail.
+  expect(viewOf(agent(), "claude", denied)).toMatchObject({
+    mark: "install",
+    detail: skillRows(agent())[0]?.detail,
+  });
+
+  const notOurs = refusalOf(new Refused(409, { error: "not ours", agent: "not_ours" }), {
+    type: "agent.skill",
+    agent: "codex",
+    on: false,
+  });
+  expect(markOf(agent(), "codex", notOurs)).toBe("refused");
+  expect(markOf(agent(), "claude", notOurs)).toBe("install");
+  expect(markOf(agent(), "path", notOurs)).toBe("install");
+});
+
+test("a row holds every refusal it can be told, so one said or cleared moves nothing under it", () => {
+  const path = viewOf(agent(), "path").details;
+  expect(path).toContainEqual("This computer refused to change your PATH. Try again.");
+  // `not_offered` answers a PATH click only where the row offers none, so no row holds its room.
+  expect(path).not.toContainEqual("Lookover puts itself on the PATH only when it runs as its own program.");
+  const skill = viewOf(agent(), "codex").details;
+  expect(skill).toContainEqual("This computer refused to change the skill's folder. Try again.");
+  expect(skill).toContainEqual("Lookover doesn't find that agent on this computer any more.");
+  expect(skill).toContainEqual(
+    "Lookover didn't write this skill, so it leaves it there. Replace it, or remove it by hand.",
+  );
+  // A refusal with words of its own is held while it shows.
+  const odd = refusalOf(new Refused(0, { error: "unreachable" }), { type: "agent.path", on: true });
+  const shown = viewOf(agent(), "path", odd);
+  expect(shown.details).toContainEqual(shown.detail);
 });
 
 // ---- Try it ----
@@ -465,6 +578,7 @@ function world(
               state: job,
               deferral: null,
               stepIn: null,
+              askedBy: null,
               skip: null,
               cancel: null,
               failure: null,
@@ -526,6 +640,8 @@ const NEXT = {
   before: "Your agent fixes and pushes, then",
   command: "lookover wait",
   after: "asks Lookover for round 2. Each finding it fixed has its thread resolved.",
+  alone:
+    "Your agent fixes and pushes, then asks Lookover for round 2, which resolves each fixed finding's thread, with:",
 };
 
 test("Try it names the owner's pull request with a finding posted on GitHub, and what happens next", () => {
@@ -543,6 +659,40 @@ test("Try it's next line names Lookover's command, the one a terminal runs: off 
     ...NEXT,
     command: `${command} wait`,
   });
+});
+
+test("Try it holds the line Add to my PATH switches it to, so the card keeps its height when the command shortens", () => {
+  const state = world([{ n: 148, findings: [finding(true)] }]);
+  const command = "& 'C:\\Users\\Your Name\\Downloads\\lookover.exe'";
+  const binary = { ...state, service: { ...state.service, command } };
+  expect(tryItLines(binary)).toEqual([tryIt(binary).line, NEXT]);
+});
+
+/** Where each line Try it holds sets its command: in the sentence, or on a line of its own. */
+const placesOf = (state: State) =>
+  tryItLines(state).map((line) => (typeof line === "string" ? null : codePlace(line.command)));
+const commandsOf = (state: State) =>
+  tryItLines(state).map((line) => (typeof line === "string" ? null : line.command));
+
+test("on the PATH, Try it still holds the long line Remove from my PATH switches it to, its --home kept", () => {
+  const state = world([{ n: 148, findings: [finding(true)] }]);
+  expect(tryItLines(state)[0]).toEqual(NEXT);
+  expect(placesOf(state)).toEqual(["inline", "line"]);
+  const onHome = { ...state, service: { ...state.service, command: "lookover --home=/tmp/a" } };
+  expect(commandsOf(onHome).every((command) => command?.endsWith(" --home=/tmp/a wait"))).toBe(true);
+  expect(placesOf(onHome)).toEqual(["inline", "line"]);
+  // Off the PATH on another data folder, the form Add to my PATH brings back keeps that folder.
+  const off = "& 'C:\\Users\\Your Name\\Downloads\\lookover.exe' '--home=C:\\data'";
+  const offHome = { ...state, service: { ...state.service, command: off } };
+  expect(commandsOf(offHome)).toEqual([`${off} wait`, "lookover '--home=C:\\data' wait"]);
+});
+
+test("without Add to my PATH, Try it holds its one line", () => {
+  const state = world([{ n: 148, findings: [finding(true)] }]);
+  for (const offer of ["npm", "clone"] as const) {
+    const service = { ...state.service, agent: agent({ offer }) };
+    expect(tryItLines({ ...state, service })).toEqual([NEXT]);
+  }
 });
 
 test("Try it prefers the setup's first review, else the pull request reviewed last", () => {
@@ -588,6 +738,8 @@ const CLEAN = {
   before: "Lookover found nothing to fix there, so",
   command: "lookover wait",
   after: "reports a pass. After your agent's next push, it asks for round 2.",
+  alone:
+    "Lookover found nothing to fix there, so this reports a pass, and after your agent's next push asks for round 2:",
 };
 const cleanSentence = (n: number) =>
   `Get pull request #${n} of sasensi/ledger-api through Lookover's review.`;
@@ -677,9 +829,9 @@ test("nothing posted, or only on someone else's pull request: none, and post a r
   ).toEqual({ sentence: null, line: none });
 });
 
-// ---- a refused write, said under the rows ----
+// ---- a refused write, said on its row ----
 
-test("a refused write is said under the rows, never in the toast; another command's refusal isn't the rows'", () => {
+test("a refused write is said on its row, never in the toast; another command's refusal isn't the rows'", () => {
   const skill = { type: "agent.skill", agent: "codex", on: false } as const;
   const notOurs = refusalOf(
     new Refused(409, { error: "the skill isn't Lookover's", agent: "not_ours" }),
@@ -713,4 +865,66 @@ test("a refused write is said under the rows, never in the toast; another comman
   expect(agentRefusal(other)).toBeNull();
   expect(refusalToast(other)).toBe("Lookover couldn't do that.");
   expect(agentRefusal(null)).toBeNull();
+});
+
+// ---- a row's value on a line of its own, across the row (round 5: one layout for the three rows) ----
+
+const SKILL_LINE = { value: CLAUDE_SKILL, kind: "path" } as const;
+
+test("a skill row's folder goes on its own line under the row's sentence, in every detail that names it", () => {
+  const { shown, held } = rowLine(viewOf(agent(), "claude"));
+  expect(shown).toEqual({
+    sentence: "Installs the review loop's skill, so Claude Code knows the loop, in:",
+    line: SKILL_LINE,
+  });
+  expect(held).toContainEqual({
+    sentence: "The review loop's skill, which calls this Lookover, is in:",
+    line: SKILL_LINE,
+  });
+  // No sentence holds the folder: it is said on its line.
+  for (const d of held) expect(typeof d.sentence).toBe("string");
+});
+
+test("the PATH row's value goes on its own line too, the same way, whichever value its detail names", () => {
+  const { shown, held } = rowLine(viewOf(agent(), "path"));
+  expect(shown).toEqual({
+    sentence: "Adds to your PATH, for new terminals, the folder that holds only Lookover's launcher:",
+    line: { value: WINDOWS, kind: "path" },
+  });
+  // Done, a terminal's `lookover` is short: it sits in its sentence, no line.
+  expect(held).toContainEqual({ sentence: expect.objectContaining({ command: "lookover" }), line: null });
+  // A long command, Lookover's own off the PATH, goes on a line as a command.
+  const long = "& 'C:\\Users\\Your Name\\AppData\\Local\\Programs\\Lookover\\lookover.exe'";
+  const done = rowView(agent({ path: { reach: "yes", folder: WINDOWS } }), long, pathOf(agent()), null);
+  expect(rowLine(done).held).toContainEqual({
+    sentence: "A terminal runs this Lookover as:",
+    line: { value: long, kind: "command" },
+  });
+});
+
+test("a refused row says the refusal alone, no line; every other detail it can show is held, so nothing moves", () => {
+  const denied = refusalOf(new Refused(500, { error: "denied" }), {
+    type: "agent.skill",
+    agent: "claude",
+    on: true,
+  });
+  const { shown, held, mark } = rowLine(viewOf(agent(), "claude", denied));
+  expect(mark).toBe("refused");
+  expect(shown).toEqual({
+    sentence: "This computer refused to change the skill's folder. Try again.",
+    line: null,
+  });
+  expect(held).not.toContainEqual(shown);
+  expect(held).toContainEqual({
+    sentence: "Installs the review loop's skill, so Claude Code knows the loop, in:",
+    line: SKILL_LINE,
+  });
+});
+
+test("a short value stays in its sentence, and a sentence naming two values keeps them both there", () => {
+  const short = agent({ skills: [{ agent: "claude", state: "none", folder: "~/.claude" }] });
+  const view = viewOf(short, "claude");
+  expect(rowLine(view).shown).toEqual({ sentence: view.detail, line: null });
+  const two = viewOf(agent({ path: { reach: "other", folder: WINDOWS, other: WINDOWS } }), "path");
+  expect(rowLine(two).shown).toEqual({ sentence: two.detail, line: null });
 });

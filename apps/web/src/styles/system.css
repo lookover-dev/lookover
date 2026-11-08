@@ -40,6 +40,18 @@ kbd,
 pre {
   font-family: var(--mono);
 }
+/* read by a screen reader, never seen, and out of the flow, so it moves nothing (design-system.md "Visually hidden") */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* type styles */
 .t-display {
@@ -71,8 +83,13 @@ pre {
   font: 400 var(--t-13) / 1.45 var(--body);
   color: var(--muted);
 }
+/* small text that explains (a setting's help, a card's explanation, an account's detail): read, not glanced at, so
+   `--ink-2`; `--muted` stays for metadata (times, counts, labels) (design-system.md "Type") */
+.t-help {
+  color: var(--ink-2);
+}
 .t-label {
-  font: 600 11px / 1.2 var(--mono);
+  font: 600 var(--t-12) / 1.2 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -80,7 +97,7 @@ pre {
 .t-code {
   font: 400 var(--t-13) / 1.6 var(--mono);
 }
-/* a name kept on one line: a repository's is never broken at its hyphen */
+/* kept on one line: a repository's name, never broken at its hyphen; a meta line's dot with the running time after it */
 .nowrap {
   white-space: nowrap;
 }
@@ -142,6 +159,20 @@ pre {
   background: var(--raised);
   border-color: var(--faint);
 }
+/* quiet: an action that is there but never the point, said in words with its edge (design-system.md "Button"): no
+   fill, a `--line-2` outline, its words in `--ink-2` at 500; lit as a secondary on hover. Left's Show and each line's
+   Dismiss (round 6: a borderless ghost in `--muted` read as a label, not an action) */
+.btn-quiet {
+  background: transparent;
+  color: var(--ink-2);
+  border-color: var(--line-2);
+  font-weight: 500;
+}
+.btn-quiet:hover {
+  background: var(--raised);
+  border-color: var(--faint);
+  color: var(--ink);
+}
 .btn-ghost {
   background: transparent;
   color: var(--ink-2);
@@ -198,10 +229,10 @@ pre {
   min-width: 20px;
   justify-content: center;
 }
-/* icons: 16 px, 1.5 px stroke, round caps, drawn on a 16 grid */
+/* icons: 16 px (`--ic`), 1.5 px stroke, round caps, drawn on a 16 grid */
 .ic {
-  width: 16px;
-  height: 16px;
+  width: var(--ic);
+  height: var(--ic);
   fill: none;
   stroke: currentColor;
   stroke-width: 1.5;
@@ -220,7 +251,7 @@ pre {
   gap: 6px;
   justify-items: center;
   width: 64px;
-  font: 400 11px var(--mono);
+  font: 400 var(--t-12) var(--mono);
   color: var(--muted);
 }
 .icons .ic {
@@ -341,7 +372,7 @@ pre {
 }
 .field .help {
   font-size: var(--t-13);
-  color: var(--muted);
+  color: var(--ink-2);
 }
 .field .err {
   font-size: var(--t-13);
@@ -371,7 +402,7 @@ pre {
     box-shadow var(--d-1);
 }
 .input::placeholder {
-  color: var(--faint);
+  color: var(--muted);
 }
 .input:hover {
   border-color: var(--faint);
@@ -412,14 +443,8 @@ textarea.input {
   position: absolute;
   right: 8px;
 }
-select.input {
-  appearance: none;
-  padding-right: 32px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5l3.5 3.5 3.5-3.5' fill='none' stroke='%239A948A' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-}
-/* custom select: a button and a listbox, keyboard first */
+/* custom select: a button and a listbox, keyboard first; a select is never native (design-system.md "Select"), so
+   no rule draws a native one's chevron, whose data-URI could not follow the theme's --muted */
 .sel {
   position: relative;
   min-width: 0;
@@ -489,7 +514,7 @@ select.input {
 }
 .sel [role="option"] small {
   font-size: var(--t-12);
-  color: var(--muted);
+  color: var(--ink-2);
 }
 .sel [role="option"]:hover,
 .sel [role="option"]:focus-visible {
@@ -551,14 +576,17 @@ select.input {
 .switch input:focus-visible + i {
   box-shadow: var(--focus);
 }
-.switch:has(input:disabled) {
-  opacity: 0.45;
+/* Held: it can't move, something else decides (a rule off with the rule it sits in). The same drawing as any switch
+   in its state, never dimmed nor hollow, so one off reads as one control (2026-11-08: a hollow held one beside a
+   filled off one read as two controls); only the not-allowed cursor says it can't move, and why is said in words
+   beside it. */
+.switch.held {
   cursor: not-allowed;
 }
 .check {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--check-gap);
   cursor: pointer;
   font-size: var(--t-14);
   user-select: none;
@@ -566,8 +594,8 @@ select.input {
 .check input {
   appearance: none;
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: var(--check);
+  height: var(--check);
   border: 1.5px solid var(--line-2);
   border-radius: 5px;
   background: var(--bg);
@@ -604,6 +632,20 @@ select.input {
 }
 .check input[type="checkbox"]:checked::after {
   transform: rotate(-45deg) translate(1px, -1px) scale(1);
+  opacity: 1;
+}
+/* mixed: one box standing for several, some ticked; filled as ticked, a bar in place of the tick
+   (design-system.md "Switch / checkbox / radio / segmented") */
+.check input[type="checkbox"][aria-checked="mixed"] {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.check input[type="checkbox"][aria-checked="mixed"]::after {
+  height: 2px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  transform: rotate(0) translate(0, 0) scale(1);
   opacity: 1;
 }
 .check input[type="radio"] {
@@ -644,15 +686,24 @@ select.input {
 .check:has(> input[type="radio"][disabled]) > span {
   opacity: 0.6;
 }
-/* chips + status */
+/* chips + status: one construction for every state chip, both themes (design-system.md "Chip"; round 6: filled grey,
+   outlined and tinted read as three components): its tone's soft fill, an edge in its tone, its word in its tone. A
+   tone only names its three colours below; it never draws itself apart */
+/* the chip's padding over and under its word, named once: what sets a chip in a line's box reads it (`.first-row-chip`) */
+:root {
+  --chip-pad-y: 5px;
+}
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font: 600 var(--t-12) / 1 var(--body);
-  padding: 5px 9px;
+  padding: var(--chip-pad-y) 9px;
   border-radius: var(--r-pill);
   white-space: nowrap;
+  background: var(--tone-soft);
+  border: 1px solid color-mix(in srgb, var(--tone) 55%, var(--tone-soft));
+  color: var(--tone-text);
 }
 .chip::before {
   content: "";
@@ -662,33 +713,48 @@ select.input {
   background: currentColor;
   flex: none;
 }
-.chip {
-  border: 1px solid transparent;
+/* light: every chip's word is its -text darkened by 30 % of --ink, 6.5:1 and up on its soft fill, as legible as dark's
+   (the table under "Chip" in design-system.md, computed by tokens.test.ts) */
+:root[data-theme="light"] .chip {
+  color: color-mix(in srgb, var(--tone-text) 70%, var(--ink));
+}
+/* in a list (a row, the palette) every chip is one width, its dot and word from its start, so the titles after it
+   start at one x and the chip's edge never moves when its word changes (design-system.md "Chip") */
+.rowi.status > .chip,
+.cmdk-lead > .chip {
+  width: var(--w-chip);
 }
 .c-need {
-  background: color-mix(in srgb, var(--acc) 13%, transparent);
-  border-color: color-mix(in srgb, var(--acc) 30%, transparent);
-  color: var(--acc-text);
+  --tone: var(--acc);
+  --tone-soft: var(--acc-soft);
+  --tone-text: var(--acc-text);
 }
 .c-run {
-  background: color-mix(in srgb, var(--run) 13%, transparent);
-  border-color: color-mix(in srgb, var(--run) 30%, transparent);
-  color: var(--run-text);
+  --tone: var(--run);
+  --tone-soft: var(--run-soft);
+  --tone-text: var(--run-text);
 }
 .c-ok {
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
-  border-color: color-mix(in srgb, var(--ok) 30%, transparent);
-  color: var(--ok-text);
+  --tone: var(--ok);
+  --tone-soft: var(--ok-soft);
+  --tone-text: var(--ok-text);
 }
-.c-warn {
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
-  border-color: color-mix(in srgb, var(--warn) 32%, transparent);
-  color: var(--warn-text);
+/* to fix, and waiting: To fix's amber and construction; what has not happened yet is told by its dot, a ring */
+.c-warn,
+.c-wait {
+  --tone: var(--warn);
+  --tone-soft: var(--warn-soft);
+  --tone-text: var(--warn-text);
 }
-.c-mute {
+.c-wait::before {
   background: transparent;
-  border-color: var(--line-2);
-  color: var(--muted);
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+/* grey, nothing to do: the account band's grey as its soft fill, --muted its edge and word */
+.c-mute {
+  --tone: var(--muted);
+  --tone-soft: var(--band);
+  --tone-text: var(--muted);
 }
 .c-run::before {
   animation: pulse 2s var(--e-io) infinite;
@@ -701,6 +767,30 @@ select.input {
   50% {
     opacity: 0.35;
   }
+}
+/* a button's place while what it starts is under way: the state's words in `--ink-2`, the reading eyes before them
+   in the state's colour, at the end of the place the button keeps, right beside the button after it, no fill and no
+   edge: a status line, as a running step reads, nothing to press (design-system.md "Button"; round 3, 2026-11-08:
+   the chip still read as a button beside "Open on GitHub"; round 6: words in lavender read as a link, and at the
+   place's start, far from "Open on GitHub", as a stray). Not a chip: its own rule; the hairline's width each side
+   keeps the place it had as the chip it was */
+.busy-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font: 600 var(--t-13) / 1 var(--body);
+  color: var(--ink-2);
+  white-space: nowrap;
+  height: var(--h-sm);
+  padding: 0 var(--line-w);
+  align-self: center;
+  margin-inline: auto 0;
+}
+.busy-status[data-tone="run"] .eyes {
+  color: var(--run-text);
+}
+.busy-status[data-tone="wait"] .eyes {
+  color: var(--warn-text);
 }
 .tag {
   display: inline-flex;
@@ -743,7 +833,13 @@ select.input {
   color: var(--ink);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
 }
+/* an option alone with nothing behind it is drawn as any option not pressed, in --muted, never dimmed: it looks
+   available because it is a place to go; only the whole control disabled dims (design-system.md "Switch / checkbox /
+   radio / segmented") */
 .seg button:disabled {
+  cursor: default;
+}
+.seg[aria-disabled="true"] button {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -876,6 +972,91 @@ select.input {
   background: var(--acc);
   animation: pulse 2s var(--e-io) infinite;
 }
+/* alert band: what needs the person, above every page, never a row. Each line is tinted by its own tone, edge to
+   edge, so it reads as an alert, never as a second header bar (round 4: in light, `--raised` is the white of the top
+   bar and the cards), and a Waiting line beside one that needs you is never on pink. The tint is a border image
+   reaching past the line to the band's sides: it paints, never lays out or scrolls, so nothing shifts. */
+.alerts {
+  border-bottom: 1px solid var(--line-2);
+  overflow-x: clip;
+  animation: page-in var(--d-4) var(--e-out);
+}
+/* The band's padding is its first and last lines', so their tints reach its edges. */
+.alerts-in {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 var(--s-5);
+  display: grid;
+}
+.alert {
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  gap: var(--s-3);
+  align-items: center;
+  padding: var(--s-2) 0;
+  font-size: var(--t-14);
+  color: var(--ink-2);
+}
+.alert:first-child {
+  padding-top: calc(2 * var(--s-2));
+}
+.alert:last-child {
+  padding-bottom: calc(2 * var(--s-2));
+}
+.alert.need {
+  --tint: var(--acc-soft);
+}
+.alert.warn {
+  --tint: var(--warn-soft);
+}
+.alert.need,
+.alert.warn {
+  border-image: linear-gradient(var(--tint) 0 0) fill 0 / 0 / 0 100vmax;
+}
+/* A border image paints in the border's place: the hairline between two lines is its first pixel, edge to edge. */
+.alert + .alert {
+  border-top: 1px solid var(--line-2);
+  border-image-source: linear-gradient(var(--line-2) 0 1px, var(--tint) 1px);
+}
+.alert b {
+  color: var(--ink);
+}
+.alert-label {
+  font: 700 var(--t-12) var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--acc-text);
+}
+.alert.warn .alert-label {
+  color: var(--warn-text);
+}
+/* The button keeps its width while it waits, as wide as the widest fix: "Copy code and open GitHub" on one line. */
+.alert .btn {
+  width: var(--w-fix);
+  justify-content: center;
+}
+/* the Refused line: the × sits where the other lines keep their fix button */
+.alert.refused .anchor {
+  justify-self: end;
+}
+@media (max-width: 640px) {
+  .alerts-in {
+    padding-inline: var(--s-4);
+  }
+  .alert {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .alert .btn {
+    justify-self: start;
+  }
+  .alert.refused {
+    grid-template-columns: 1fr auto;
+  }
+  .alert.refused .alert-text {
+    grid-column: 1 / -1;
+  }
+}
 /* floating layers */
 .layer {
   position: absolute;
@@ -888,6 +1069,16 @@ select.input {
   padding: var(--s-1);
   transform-origin: top left;
   animation: layer-in var(--d-3) var(--e-out);
+}
+/* A layer that covers what it opens over (the status menu): the page under the top bar dims, as under a dialog, so
+   what shows at the menu's edge reads as behind it; a click on it closes the layer. Under the layer, over the page. */
+.scrim {
+  position: fixed;
+  inset: var(--h-top) 0 0;
+  z-index: 19;
+  background: var(--scrim);
+  backdrop-filter: blur(var(--scrim-blur));
+  animation: fade var(--d-3) var(--e-out);
 }
 .layer[hidden] {
   display: none;
@@ -932,8 +1123,26 @@ select.input {
   margin-left: auto;
 }
 .menu .r {
-  font-size: var(--t-12);
+  font-size: var(--t-13);
   color: var(--muted);
+}
+/* the palette's setting values (design-system.md "Command palette"): at the row's end, on the panel's edge as the key
+   cap is, in --ink-2, each on one line (round 5: from one x in a column of their own they floated mid-row, tied to
+   nothing; round 4 had them right-aligned in --muted) */
+.cmdk .menu button > .r {
+  flex: none;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+/* a menu's action (`MenuItem`'s `icon`): its icon first, in a place of its own as wide as the loader that stands there
+   while it works, so the words never move, and the words after it read as a command, never as a label (round 5) */
+.menu .act-ic {
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  width: 1.2em;
+  color: var(--ink-2);
 }
 .menu hr {
   border: 0;
@@ -941,10 +1150,10 @@ select.input {
   margin: 4px 0;
 }
 .menu .h {
-  font: 600 11px var(--mono);
+  font: 600 var(--t-12) var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--muted);
   padding: 8px 10px 4px;
 }
 .menu .st {
@@ -982,7 +1191,7 @@ select.input {
 }
 .pop p {
   font-size: var(--t-13);
-  color: var(--muted);
+  color: var(--ink-2);
   margin: 0 0 10px;
 }
 .anchor {
@@ -1017,17 +1226,6 @@ select.input {
   transform: translate(-50%, 0) scale(1);
   transition-delay: 400ms;
 }
-/* At the right edge of what holds it (a table's last column): it ends where its anchor ends. */
-.anchor.end .tip {
-  left: auto;
-  right: 0;
-  transform: translate(0, 3px) scale(0.98);
-  transform-origin: bottom right;
-}
-.anchor.end:hover .tip,
-.anchor.end:focus-within .tip {
-  transform: translate(0, 0) scale(1);
-}
 /* dialog + toast */
 dialog.dlg {
   background: var(--overlay);
@@ -1040,7 +1238,8 @@ dialog.dlg {
   animation: dlg-in var(--d-3) var(--e-out);
 }
 dialog.dlg::backdrop {
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
+  backdrop-filter: blur(var(--scrim-blur));
   animation: fade var(--d-3) var(--e-out);
 }
 @keyframes dlg-in {
@@ -1146,6 +1345,14 @@ dialog.dlg::backdrop {
   padding: var(--s-4);
   min-width: 0;
 }
+/* a card's title, one size wherever a step or a section titles its cards (round 6: Try it's and the background
+   card's a size above the installs' read as another level): a row's title's size, as setup's sub-steps and Settings'
+   rows are titled */
+.card-title {
+  margin: 0;
+  font: 700 var(--t-14) / 1.5 var(--body);
+  color: var(--ink);
+}
 .list {
   display: grid;
   gap: var(--s-2);
@@ -1176,8 +1383,13 @@ dialog.dlg::backdrop {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* a closed finding's severity on its title's line, just before it, so the two read as one; it ends on a space, the margin
+   what is left of `--s-2` (`.finding h5 .sev`) */
+.rowi .ti .sev-label {
+  margin-right: calc(var(--s-2) - 1ch - 0.06em);
+}
 .rowi .me {
-  font-size: var(--t-12);
+  font-size: var(--t-13);
   color: var(--muted);
   display: flex;
   gap: 8px;
@@ -1202,22 +1414,24 @@ dialog.dlg::backdrop {
     transform: none;
   }
 }
+/* `--cell-x`: every cell's padding at the sides, which a cell set in from it (Repositories' rows) starts from */
 .tbl {
+  --cell-x: 10px;
   width: 100%;
   border-collapse: collapse;
   font-size: var(--t-14);
 }
 .tbl th {
   text-align: left;
-  font: 600 11px var(--mono);
+  font: 600 var(--t-12) var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
-  padding: 8px 10px;
+  padding: 8px var(--cell-x);
   border-bottom: 1px solid var(--line);
 }
 .tbl td {
-  padding: 10px;
+  padding: 10px var(--cell-x);
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
@@ -1229,22 +1443,40 @@ dialog.dlg::backdrop {
   display: grid;
   gap: 8px;
 }
+/* the meta line and the file under the title, read as one block: `--s-1` between them, not the card's gap (round 6) */
+.finding-meta {
+  display: grid;
+  gap: var(--s-1);
+}
+/* read, not skimmed: `--ink-2` (round 6, 2026-11-08: in `--muted` Codex read it as faint) */
 .finding .t {
   display: flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
   font-size: var(--t-13);
-  color: var(--muted);
+  color: var(--ink-2);
+}
+/* a finding that needs the person among open ones that don't: its card's edge in the needs tone, never a chip; the
+   page's banner says "Needs you" once (ADR 0083, round 6; `edgeNeedsYou`) */
+.finding.need {
+  border-color: var(--acc);
 }
 .finding .sev {
-  font: 700 11px var(--mono);
+  font: 700 var(--t-12) var(--mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--acc-text);
 }
 .finding .sev.fix {
   color: var(--warn-text);
+}
+/* the severity opens the title's line, `--s-2` before the title, as on a done finding's row (round 4, 2026-11-08:
+   on a line of its own above the title, open and done findings placed it two ways). The label ends on a space, so
+   the heading reads "Blocking SQL injection…": in the mono face a space is `1ch` and the label's letter-spacing, so
+   the margin is what is left of `--s-2` (a closed finding's row the same). */
+.finding h5 .sev {
+  margin-right: calc(var(--s-2) - 1ch - 0.06em);
 }
 .finding h5 {
   margin: 0;
@@ -1282,7 +1514,7 @@ dialog.dlg::backdrop {
   padding: var(--s-3) var(--s-4);
 }
 .code .ln {
-  color: var(--faint);
+  color: var(--muted);
   display: inline-block;
   width: 3ch;
   text-align: right;
@@ -1304,32 +1536,82 @@ dialog.dlg::backdrop {
   color: var(--acc-text);
 }
 .code .cm {
-  color: var(--faint);
+  color: var(--muted);
 }
-/* live log (ADR 0055): eight lines tall whatever it holds, scrolled to the newest, long lines wrapped */
-.code.live {
-  display: flex;
-  flex-direction: column-reverse;
-  height: calc(8lh + 2 * var(--s-3) + 2 * var(--line-w));
-  overflow: hidden auto;
-  /* the AI's name column: wide enough for "Claude" and "Codex" and a space */
-  --who: 7ch;
+/* a log (the Logs page, a review's history, the live log): never cut at the block's edge. One line a block; a long one
+   wraps under its text, the column before it kept clear (a hanging indent as wide as the column, `--hang`). */
+.code.log {
+  overflow-x: hidden;
+  /* a review's history: the line number's column, as `.ln` draws it */
+  --hang: calc(3ch + 12px);
 }
-.code.live pre {
+.code.log pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* One activity a line; a long one wraps under its text, the name's column kept clear (a hanging indent). */
-.code.live .line {
+.code.log .line {
   display: block;
-  padding-left: var(--who);
-  text-indent: calc(-1 * var(--who));
+  padding-left: var(--hang);
+  text-indent: calc(-1 * var(--hang));
 }
-.code.live .who {
-  color: var(--faint);
-  display: inline-block;
-  width: var(--who);
+.code.log .line > :first-child {
   text-indent: 0;
+}
+/* the Logs page: the time's column (`--when`), "08:52:00" and two spaces; with the day before it, "11-05 08:52:00" and
+   two. A long line hangs 2ch past where its words start, so a wrapped line reads as the same entry, never as one more
+   (round 4: under the words' start, "double-checks" read as a line of its own). */
+.code.log.file {
+  --when: 10ch;
+}
+/* the column is the run's: the day's when any of its lines says it, so its head and every line's words share one x
+   (a run across midnight: the head took its first line's 16ch, its later lines 10ch) */
+.code.log.file .run.day {
+  --when: 16ch;
+}
+.code.log.file .line {
+  --hang: calc(var(--when) + 2ch);
+  color: var(--ink);
+}
+/* the time steps down to --muted, the same on every line, so the event's words read first (round 5: every line one
+   colour, the eye had nothing to land on) */
+.code.log.file .when {
+  color: var(--muted);
+}
+.code.log .when {
+  display: inline-block;
+  width: var(--when);
+}
+/* the Logs page scans by pull request, each named once (ADR 0083, round 6): consecutive lines about one are a run under
+   a head naming it, over the words' column so the times stay one column, in 600 and --ink-2, a head and not one more
+   line (round 5: the name on every line drowned the words); lines about none are a run with no head. Each run opens
+   apart from the one before it. */
+.code.log.file .run {
+  display: block;
+}
+.code.log.file .run + .run {
+  margin-top: var(--s-2);
+}
+.code.log.file .head {
+  display: block;
+  padding-left: var(--when);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+/* live log (ADR 0055): as tall as its lines, eight at most, then scrolled to the newest; it ends at its last line,
+   never an empty band under it (round 3, 2026-11-08). It is the page's last block, so its growth moves nothing */
+.code.live {
+  display: flex;
+  flex-direction: column-reverse;
+  max-height: calc(8lh + 2 * var(--s-3) + 2 * var(--line-w));
+  overflow: hidden auto;
+  /* the AI's name column: wide enough for "Claude" and "Codex" and a space */
+  --hang: 7ch;
+}
+/* Once it overflows, the reversed column keeps it scrolled to the newest line. */
+.code.live .who {
+  color: var(--muted);
+  display: inline-block;
+  width: var(--hang);
   user-select: none;
 }
 /* progress + empty + skeleton */
@@ -1446,16 +1728,33 @@ dialog.dlg::backdrop {
   letter-spacing: -0.01em;
   margin: 0;
 }
+/* a Settings section's intro (Your coding agent's), balanced as setup's leads are */
+.section-intro {
+  text-wrap: balance;
+}
 .sentence small {
   display: block;
   font: 400 var(--t-13) var(--body);
-  color: var(--muted);
+  color: var(--ink-2);
   letter-spacing: 0;
   margin-top: 4px;
+  /* its last word never alone on a line: balanced, its lines about as long as each other (round 6: `pretty` alone
+     still left "is optional." under a full line) */
+  text-wrap: balance;
 }
-.grp h4 {
-  margin: 0 0 8px;
-  font: 600 11px var(--mono);
+/* a group opened by link (Settings' #github, #agent) lands its label 20 px under the top bar, as a page's first line
+   sits: less than the 32 px to the group above, so nothing of its card shows under the bar */
+.page > .grp {
+  scroll-margin-top: calc(var(--h-top) + var(--s-5));
+}
+/* a group's label belongs to the list under it: 8 px over it, 32 px under the group above (the page's gap and this) */
+.page > .grp + .grp {
+  margin-top: var(--s-3);
+}
+/* the group's own label only: a card's title inside the group (Try it's) keeps its `card-title` */
+.grp > h4 {
+  margin: 0 0 var(--s-2);
+  font: 600 var(--t-12) / 1.2 var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -1495,9 +1794,12 @@ dialog.dlg::backdrop {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* A notice (design-system.md "Notice"), one layout for all: the eyes, the text column (the label over the sentence,
+   flush), the action edge, centred on the text's lines; what opens under it (`.banner-below`) on the text column out
+   to the action edge, so what it lists lines up with the sentence and its actions with the notice's own */
 .banner {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: var(--s-3);
   align-items: center;
   padding: 12px 14px;
@@ -1512,7 +1814,7 @@ dialog.dlg::backdrop {
 }
 .banner .lb {
   display: block;
-  font: 700 11px var(--mono);
+  font: 700 var(--t-12) var(--mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--acc-text);
@@ -1526,19 +1828,44 @@ dialog.dlg::backdrop {
 .banner.mute .lb {
   color: var(--muted);
 }
-/* A notice's button and its × side by side (Repositories' departed repository). */
+/* A notice's button and its × side by side (Repositories' departed repository; Left's Show and Dismiss all). */
 .banner-acts {
   display: flex;
   align-items: center;
   gap: var(--s-2);
 }
+/* What opens under a notice: from the text column to the action edge, sliding open as a Disclosure's body; closed, it
+   takes no row gap, so the notice is as tall as one with nothing under it. Its clipping box reaches past the edges by
+   a focus ring's width, so a control at the edge shows its ring whole. */
+.banner:has(> .banner-below) {
+  row-gap: 0;
+}
+.banner-below {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-rows: 0fr;
+  margin-inline: calc(-1 * var(--s-1));
+  transition: grid-template-rows var(--d-3) var(--e-out);
+}
+.banner-below.open {
+  grid-template-rows: 1fr;
+}
+.banner-below > div {
+  overflow: hidden;
+  min-height: 0;
+  padding-inline: var(--s-1);
+}
 /* On phone they go under the sentence, which keeps the width. */
 @media (max-width: 640px) {
   .banner:has(.banner-acts) {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
   }
   .banner .banner-acts {
     grid-column: 2;
+  }
+  /* the gap the notice's rows have elsewhere, kept with no row gap left for what opens */
+  .banner:has(> .banner-below) .banner-acts {
+    margin-top: var(--s-3);
   }
 }
 .sec-h {
@@ -1552,12 +1879,16 @@ dialog.dlg::backdrop {
   font: 600 var(--t-12) var(--mono);
   color: var(--muted);
 }
+/* a settings row's padding above and below, named once: a row that lines up with one (More settings') takes it */
+:root {
+  --setrow-y: 14px;
+}
 .setrow {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: var(--s-4);
   align-items: center;
-  padding: 14px 0;
+  padding: var(--setrow-y) 0;
   border-top: 1px solid var(--line);
 }
 .setrow:first-child {
@@ -1570,8 +1901,7 @@ dialog.dlg::backdrop {
 .setrow span {
   display: block;
   font-size: var(--t-13);
-  color: var(--muted);
-  max-width: 52ch;
+  color: var(--ink-2);
 }
 /* a row whose help changes length with its control: the control stays level with the title, under the pointer, at
    every width (under 640 px too, where other rows put their control under the help) */
@@ -1586,6 +1916,36 @@ dialog.dlg::backdrop {
 /* a settings row's one action under its help, for the state the help names (design-system.md "Settings row") */
 .setrow-act {
   margin-top: var(--s-2);
+}
+/* every control ends on the rows' one right edge: a segmented control as wide as a select (`Select`'s width, 240), its
+   options sharing it; a checkbox list as wide too, its words starting where a select starts, its boxes after them on
+   the edge, the list starting level with the row's title, so its first box reads as the title's control
+   (`--setrow-control`) */
+.setrow > .seg {
+  width: var(--setrow-control);
+}
+.setrow > .seg button {
+  flex: 1;
+}
+.setrow > .stack {
+  align-self: start;
+  width: var(--setrow-control);
+}
+.setrow > .stack > .check {
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  text-align: left;
+}
+/* under 640 px the control goes under the help, at its start: the boxes before their words again */
+@media (max-width: 640px) {
+  .setrow > .stack {
+    width: auto;
+    justify-items: start;
+  }
+  .setrow > .stack > .check {
+    flex-direction: row;
+    justify-content: start;
+  }
 }
 .steps {
   display: flex;
@@ -1604,46 +1964,64 @@ dialog.dlg::backdrop {
   background: var(--line-2);
 }
 .engine {
+  /* a card's padding, named once: a sub-step's bottom reads it too (`.substep`). 14 px, between `--s-3` and `--s-4`
+     on no step of the scale: the engine row's padding since the design system's page drew it (its `.engine`, as its
+     banner's sides and a settings row's height), kept so no card of rows moves */
+  --engine-pad: 14px;
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: var(--s-3);
   align-items: center;
-  padding: 14px;
+  padding: var(--engine-pad);
   border: 1px solid var(--line);
   border-radius: var(--r-3);
   background: var(--surface);
 }
+/* the state square (design-system.md "State square"): its 36 px room kept in every state, so nothing moves when it
+   changes, and no tile in any state (round 5: Claude's done on a green tile beside Codex's to do on none read as two
+   components); each state is its icon in its colour: before, the icon of what is not done yet (install, sign-in,
+   time, alert) in `--ink-2`, a state, never a control; waiting, the eyes in `--ink`; done, a check in green; stale,
+   the again arrow in amber; refused, a cross in pink */
 .engine .lg {
   width: 36px;
   height: 36px;
-  border-radius: var(--r-2);
-  background: var(--raised);
+  background: none;
   display: grid;
   place-items: center;
-  font: 700 var(--t-13) var(--mono);
-  color: var(--muted);
+}
+.engine .lg.busy,
+.engine .lg .eyes {
+  color: var(--ink);
+}
+.engine .lg.done {
+  color: var(--ok-text);
+}
+.engine .lg .ic {
+  color: var(--ok-text);
+}
+.engine .lg.todo .ic {
+  color: var(--ink-2);
+}
+.engine .lg.stale .ic {
+  color: var(--warn-text);
+}
+.engine .lg.refused .ic {
+  color: var(--acc-text);
+}
+/* a refused write said on its row, in place of its detail: pink, as a field's error */
+.substep.mark-refused > .substep-detail,
+.substep.mark-refused > .substep-detail span {
+  color: var(--acc-text);
 }
 .engine b {
   display: block;
 }
 .engine span {
   font-size: var(--t-13);
-  color: var(--muted);
+  color: var(--ink-2);
 }
 
 /* ---- added with demo mode on the service (design-system.md): the three states of the app on the service ---- */
-/* the Refused line of the alert band: the × sits where the other lines keep their fix button */
-.alert.refused .anchor {
-  justify-self: end;
-}
-@media (max-width: 640px) {
-  .alert.refused {
-    grid-template-columns: 1fr auto;
-  }
-  .alert.refused .alert-text {
-    grid-column: 1 / -1;
-  }
-}
 /* the session screen: shown alone once the service no longer knows the tab; the still eyes, one sentence.
    The eyes keep the place the page loader drew them (the middle of the page), so nothing jumps when the
    screen takes the loader's place; the sentence hangs under them. */
@@ -1668,38 +2046,62 @@ dialog.dlg::backdrop {
   font: 700 var(--t-21) / 1.25 var(--display);
   letter-spacing: -0.01em;
 }
-/* inline code: a value inside a sentence or a line, its size its line's (design-system.md "Inline code") */
+/* inline code: a value inside a sentence or a line, a step under its line's size, in the line's flow
+   (design-system.md "Inline code"). A path or a command (`CodePath`) breaks only between the pieces it keeps whole:
+   after a separator, at a command's space, never at "Your Name" nor at a hyphen; each fragment keeps its box, and a
+   piece longer than the line still wraps, never past the screen */
 .session code,
 .said code,
-.copyline code,
 .finding .why code,
 .finding h5 code,
 .finding > p code,
-.rowi .ti code {
+.verdict .disc-in code,
+.rowi .ti code,
+.agent-line code,
+code.sha {
   padding: 0 var(--s-1);
   border-radius: var(--r-1);
   background: var(--code-bg);
   color: var(--ink);
-}
-/* inline code read as one where it is typed elsewhere (a device code), in the band, the status menu, setup and
-   Settings: never broken at its hyphen */
-.code-whole code {
-  white-space: nowrap;
-}
-/* a long command in a line of copy (another install's, with its path, ADR 0068) wraps inside its code, never past
-   the screen */
-.said code {
+  font-size: 0.92em;
   overflow-wrap: anywhere;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
+/* a commit in a sentence (the verdict, the failed notice, a done finding's line) keeps a whole space either side, its
+   padding inside its chip: drawn into the spaces (round 3), "over a6e7f80" read as no space at all (round 4,
+   2026-11-08). A commit or a citation followed by punctuation keeps it tight: no room on its right, so "a7b8c9d."
+   never reads "a7b8c9d ." */
+code.sha.tight,
+code.path.tight {
+  padding-right: 0;
+}
+/* a piece is the code's own, whatever a row's spans are given (`.engine span`, `.setrow span`) */
+code.path > span.piece {
+  display: inline-block;
+  max-width: 100%;
+  font-size: inherit;
+  color: inherit;
+}
+/* a value too long to sit in a sentence (a folder, a long command): on its own line under it, a block of mono as
+   wide as the value, wrapping only after a separator or at a command's space when wider than its card (over
+   `.setrow .check span code`, which keeps a row's inline code inline) */
+code.path.line,
+.setrow .check span code.path.line {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+}
+/* the session screen's sentence is display size: its code a step under, at 500; a long one on its own line centred
+   under the sentence, as the sentence is */
 .session code {
   font-size: 0.85em;
   font-weight: 500;
-  /* a long path (a binary's, with its --home) wraps inside its code, never past the screen */
-  overflow-wrap: anywhere;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
+}
+.session code.path.line {
+  margin-inline: auto;
 }
 /* a check line without a verdict: the fact alone, judged by nobody, draws the muted dot */
 .menu .st i.mute {
@@ -1720,11 +2122,35 @@ a.btn {
   min-height: calc(2em * 1.45);
   margin: 0;
 }
-/* Your coding agent's Try it (design-system.md "Your coding agent", ADR 0058): a sub-step row with no state square,
-   its title, the sentence to give the agent as a value to copy, then one line of what happens next */
+/* Your coding agent's installs and Try it (design-system.md "Your coding agent", ADR 0058), one form in setup and
+   Settings: the installs one card of rows, like the accounts list (ADR 0083, round 6: three cards of one install each
+   read as three layouts and outweighed the step's last action), a refusal said on its own row; then, the page's gap
+   under them, Try it, a card titled at the cards' title size: the sentence to give the agent as a value to copy, then
+   one line of what happens next */
+.coding-agent {
+  display: grid;
+  gap: var(--s-5);
+}
+/* the installs' card: its rows share their columns (subgrid), the action column as wide as the widest row's, so every
+   row's text is as wide as the others', whichever action it holds; the card's own padding at the sides, so each
+   row's action ends on the edge the selects, GitHub's buttons and Try it's copy end on */
 .agent-rows {
   display: grid;
-  gap: var(--s-2);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: var(--s-3);
+  padding-block: var(--s-1);
+}
+/* a row of the card, not a card of its own: no edge, no fill, a hairline between rows, inset to the card's padding */
+.agent-rows > .engine {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  padding: var(--s-3) 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.agent-rows > .engine ~ .engine {
+  border-top: 1px solid var(--line);
 }
 /* each row's detail as tall as the tallest it can show (`HeldDetail`): every one in the same cell, only the row's
    seen, so a row done or undone keeps its height at any width and the rows under it don't move */
@@ -1740,40 +2166,153 @@ a.btn {
 .held-detail > span[aria-hidden="true"] {
   visibility: hidden;
 }
-.engine.try-it {
-  grid-template-columns: 1fr;
+/* a detail given as sentences: each a block of its own, in the copy shown and every one held */
+.held-sentence {
+  display: block;
 }
-.engine.try-it > div {
+.try-it {
   display: grid;
-  gap: var(--s-1);
+  gap: var(--s-2);
 }
-/* what happens next, kept two lines tall: a binary's path wraps it, `lookover` doesn't, and the card holds its height */
+.try-it > * {
+  margin: 0;
+}
+/* what happens next, at least two lines tall, holding every line Add to my PATH can switch it to (`tryItLines`): a
+   binary's long command on a line of its own, `lookover` in the sentence, and the card holds its height; its last
+   line never one word alone ("with:" under a full line) */
 .try-it .try-next {
   min-height: 2lh;
+  text-wrap: pretty;
 }
-/* what a sub-step holds below (setup's accounts list): under its title and detail, as wide as them and the action,
-   so the action going moves nothing */
+/* a setup sub-step, the GitHub step's two cards and the installs' rows alike (design-system.md "State square", round
+   6): the state square, the title and the action on one line, the square as tall as a small button, each centred on
+   that line; the detail under the title across the text and action columns, so a sentence keeps to one line beside
+   no button's room; what the sub-step holds below (setup's accounts list) on the title's text column, so its rows
+   start where "Your accounts" does. The card's padding even: the line as tall as its button puts the title a few px
+   under the card's padding (`--engine-pad`), so the bottom takes `--s-2` more, measured on the shots to even the
+   glyphs: the last line's sits as far over the card's edge as the title's under the other (round 6: 17 px under the
+   sign-in card's last line, 26 over its title, screen 07) */
+.substep {
+  row-gap: 0;
+  align-items: start;
+  padding-bottom: calc(var(--engine-pad) + var(--s-2));
+}
+.substep > .lg {
+  grid-area: 1 / 1;
+  height: var(--h-sm);
+  align-self: center;
+}
+.substep > b {
+  grid-area: 1 / 2;
+  align-self: center;
+}
+.substep > .substep-act {
+  grid-area: 1 / 3;
+  align-self: center;
+}
+.substep > .substep-detail {
+  grid-column: 2 / -1;
+  grid-row: 2;
+}
 .substep-below {
   grid-column: 2 / -1;
+  grid-row: 3;
+  margin-top: var(--s-3);
 }
-/* on a phone a sub-step's action goes under its title and detail, its place still kept: the text keeps the width;
-   what is below takes the whole width, from under the square */
+/* setup's accounts card ends as it starts: the last row's band (its `--s-2` padding) is room the list already keeps
+   under its last line, so it takes back that and `--s-1` of the `--s-2` the card adds under its padding (`.substep`),
+   which leaves the last line as far over the card's edge as the title sits under the other */
+.substep-below > .accounts-list {
+  margin-bottom: calc(-1 * (var(--s-2) + var(--s-1)));
+}
+/* Your coding agent's rows, one layout (`rowLine`, round 5): the sub-step's line, then the row's value (a long folder
+   or command) on its line right under the sentence, across the text and action columns, so it keeps to one line
+   whatever the action column takes, the same gap above it in every row (the line's own `--s-1`). The row's held
+   copies (every detail it can show, each with its line, hidden) are no boxes of their own: their title, sentence and
+   line sit in the shown ones' tracks, so the sentence's track is as tall as the tallest sentence held and the line's
+   a line tall whenever any detail has one. The square and the button, on the title's line, stay put whichever detail
+   shows (#642) */
+.agent-rows > .agent-row {
+  grid-template-rows: auto auto auto;
+  row-gap: 0;
+}
+.agent-row > b,
+.agent-held-one > b {
+  grid-area: 1 / 2;
+}
+.agent-row > .substep-detail,
+.agent-held-one > .substep-detail {
+  grid-column: 2 / -1;
+  grid-row: 2;
+}
+/* the action as wide as the column, the widest row's: every row's button ends and starts on the same edges */
+.agent-row > .agent-act {
+  grid-area: 1 / 3;
+  align-self: center;
+  display: grid;
+}
+.agent-row > .agent-line,
+.agent-held-one > .agent-line {
+  grid-column: 2 / -1;
+  grid-row: 3;
+}
+.agent-line {
+  display: block;
+  min-width: 0;
+}
+.agent-held {
+  display: contents;
+  visibility: hidden;
+}
+.agent-held-one {
+  display: contents;
+}
+/* on a phone a sub-step's action goes under its title and detail, its place still kept: the text keeps the width.
+   An agent row's goes under its line, in a fourth track, the tracks above holding every detail's room */
 @media (max-width: 640px) {
-  .substep {
+  .substep,
+  .agent-rows {
     grid-template-columns: auto minmax(0, 1fr);
   }
-  .substep-below {
-    grid-column: 1 / -1;
-  }
-  .substep > :nth-child(3):not(.substep-below) {
-    grid-column: 2;
+  .substep > .substep-act {
+    grid-area: 3 / 2;
     justify-self: start;
     max-width: 100%;
+    margin-top: var(--s-2);
+  }
+  /* done, the sub-step has no action left: its held place, a row of its own here, would leave a blank band under the
+     card's last line (round 6, the sign-in card signed in). The one place held here that is not held in every state:
+     a sub-step done or undone (signed in, signed out) brings or takes away the accounts list under it, which moves
+     what is below anyway (design-system.md "Setup's Continue") */
+  .substep.done > .substep-act {
+    display: none;
+  }
+  /* the list from under the square: on a phone the text column's room is worth more than its edge (T7: a waiting
+     line took three lines indented) */
+  .substep-below {
+    grid-area: 4 / 1 / auto / -1;
+  }
+  .agent-rows > .agent-row {
+    grid-template-rows: auto auto auto auto;
+  }
+  .agent-row > .agent-act {
+    grid-column: 2;
+    grid-row: 4;
+    justify-self: start;
+    max-width: 100%;
+    margin-top: var(--s-2);
+  }
+  .agent-row > .agent-line,
+  .agent-held-one > .agent-line {
+    grid-column: 2;
   }
 }
 /* a device code (design-system.md "Device code", #476): inline code in the face drawn to tell 0 from D and O, 1 from
-   I, at its line's size, a little apart, wherever it shows (setup, Settings, the band, the status menu) */
+   I, at its line's size, a little apart, wherever it shows (setup, Settings, the band, the status menu); typed
+   elsewhere, so never broken at its hyphen */
 code.device-code {
+  font-size: 1em;
+  white-space: nowrap;
   font-family: var(--mono-code);
   font-weight: 600;
   font-variant-numeric: slashed-zero;
@@ -1787,37 +2326,98 @@ code.device-code {
   gap: var(--s-2);
 }
 /* The accounts list (design-system.md "Accounts list", ADR 0067): one row per account, its login over its detail,
-   then its actions: the fix's place, as wide as every label it can show across the rows, and under it Ask again's on
-   the rows that can wait for an owner, so a row asked, reached or suspended moves nothing; a row's detail held at the
-   tallest it can show (`HeldDetail`) */
+   the detail led by its state's mark, then the fix's one place, as wide as every label its own row can show and no
+   wider, centred on the login and its detail; in it the button as wide as its own label, on the place's right edge,
+   where Installed, every other button and Sign in again end (Ask again beside the fix in it on a row waiting for an
+   owner); a row's detail held at the tallest it can show (`HeldDetail`), two lines at least, on every row, so every
+   row is as tall and as padded, and a row asked, reached or suspended moves nothing. Each row is its own grid, so a
+   row appended moves only what is under it; a hairline between rows, tinted on hover from edge to edge, so a button
+   reads as its account's */
 .accounts-list {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  column-gap: var(--s-2);
-  row-gap: var(--s-3);
-  align-items: start;
 }
+/* the row's band reaches a step past the list's edges, its hairline doesn't: lines meet the card's other rules */
 .account-row {
-  display: contents;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--s-4);
+  align-items: center;
+  margin-inline: calc(-1 * var(--s-2));
+  padding: var(--s-2);
+  border-radius: var(--r-1);
+  transition: background var(--d-1);
+}
+.account-row + .account-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 var(--s-2) auto;
+  border-top: 1px solid var(--line);
+}
+.account-row:hover {
+  background: var(--raised);
+}
+:root[data-theme="light"] .account-row:hover {
+  background: var(--bg);
 }
 .account-name {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
+/* the detail led by its state's mark, an icon on its first line, the words hanging beside it */
+.account-detail {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--s-1);
+}
+.account-mark {
+  display: flex;
+  align-items: center;
+  height: 1lh;
+  color: var(--ink-2);
+}
+.account-mark .ic {
+  width: 14px;
+  height: 14px;
+}
+.account-name .held-detail {
+  min-height: 2lh;
+}
+/* the list's last row, Another account, can show nothing else: no blank second line held under it, so a card ends
+   under the list as it starts over it (round 6: the held line left a band about twice the card's top, screens 03, 07) */
+.accounts-list > .account-row[data-state="another"] .held-detail {
+  min-height: 0;
+}
 .account-name b {
   color: var(--ink);
   overflow-wrap: anywhere;
 }
-.account-row[data-state="needs-you"] .account-name .t-small {
+.account-row[data-state="needs-you"] .account-detail {
   color: var(--acc-text);
+}
+.account-row[data-state="needs-you"] .account-mark {
+  color: inherit;
 }
 .account-actions {
   display: grid;
   justify-items: end;
-  row-gap: var(--s-1);
 }
-/* an action's place: as wide as the hidden floor labels in the same cell and no wider, whatever the rows; the link
+/* an account installed and used: Installed, quiet, in the fix's place, on its right edge, where every button ends,
+   its check in --ok-text, as tall as a button, so the right column is one width and ends on one line */
+.account-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-1);
+  height: var(--h-sm);
+  font-size: var(--t-13);
+  color: var(--muted);
+}
+.account-status .ic {
+  color: var(--ok-text);
+}
+/* an action's place: as wide as its own row's hidden floor labels (`AccountRow.labels`) and no wider; the link
    shown adds no width of its own (inline-size containment), so a label naming a long login is cut, never pushing */
 .account-action {
   display: inline-grid;
@@ -1829,9 +2429,16 @@ code.device-code {
 }
 .account-action-floor {
   visibility: hidden;
+  gap: var(--s-1);
+}
+/* a waiting row's fix floor holds Ask again's square beside it, so that fix on a usual login is never cut for it */
+.account-again-floor {
+  flex: none;
+  width: var(--h-sm);
 }
 .account-action-link {
   contain: inline-size;
+  gap: var(--s-1);
 }
 .account-action > * > .btn {
   flex: 1;
@@ -1843,22 +2450,35 @@ code.device-code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* on a phone a row stacks: the login over its detail across the width, then its actions beneath, the fix's place on
-   the left, held on every row so nothing shifts, and Ask again's beside it on the rows that can wait for an owner; the
-   fix's place narrows to the width left when its widest floor would not fit, its label cut */
+/* in a row, the button is as wide as its own label, on the place's right edge; past the place (a login longer than a
+   usual one) it is cut with an ellipsis. Repositories' group heads keep theirs filling the place */
+.account-actions .account-action > * {
+  justify-content: flex-end;
+}
+.account-actions .account-action > * > .btn {
+  flex: 0 1 auto;
+}
+/* Ask again, beside the fix in its place: a square ghost icon button, said on hover and named by its words */
+.account-action-link > .account-again {
+  display: flex;
+  flex: none;
+}
+.account-again > .btn {
+  width: var(--h-sm);
+  padding: 0;
+  justify-content: center;
+}
+/* on a phone a row stacks: the login over its detail across the width, then the fix's place beneath, on the left,
+   held on every row so nothing shifts, narrowed to the width left when its widest floor would not fit, its label cut */
 @media (max-width: 640px) {
-  .accounts-list {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .account-row {
-    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     row-gap: var(--s-2);
   }
   .account-actions {
-    grid-template-columns: minmax(0, max-content) auto;
+    grid-template-columns: minmax(0, max-content);
     justify-content: start;
     justify-items: stretch;
-    column-gap: var(--s-2);
   }
   .account-actions > .account-action {
     min-width: 0;
@@ -1866,20 +2486,177 @@ code.device-code {
   .account-row .account-action-floor {
     overflow: hidden;
   }
+  /* stacked, a row's height is its own: no second line held, Installed and the button at the start of the place */
+  .account-name .held-detail {
+    min-height: 0;
+  }
+  .account-status,
+  .account-actions .account-action > * {
+    justify-content: start;
+  }
 }
-/* Repositories' group heads (design-system.md, ADR 0067): the account in the table's header style, the group's header
-   cell and nothing else in it, then its cause's line held at every line a cause can say, then its fix's place, as wide
-   as every fix the account can have, so a cause coming or going moves nothing */
-.repos-group th {
-  padding-top: var(--s-5);
-  overflow-wrap: anywhere;
+/* An account's head band (design-system.md "Repositories' group heads"): its own opaque tint, the account's name in the body
+   face, 16, heavy, in ink, a size above the rows' names so the head reads as a heading, its count beside it (under it
+   on a phone), small in `--ink-2`, in tabular figures. Repositories' group heads wear it, and any list grouped by account may: `.group-band`
+   on the head, `.group-band-name` and `.group-band-count` inside. A hairline in `--line-2` over it marks where a group
+   starts. */
+.group-band,
+.group-band > :is(th, td) {
+  background:
+    linear-gradient(var(--line-2), var(--line-2)) top / 100% var(--line-w) no-repeat,
+    var(--band);
 }
-.tbl.repos .repos-group td {
+.group-band-name {
+  font: 700 var(--t-16) / 1.3 var(--body);
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: var(--ink);
+}
+.group-band-count {
+  font: 400 var(--t-13) / 1.45 var(--body);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+/* A group's collapse control (design-system.md "Sticky, collapsible group heads"): the Disclosure's chevron, turning a
+   quarter as the group opens. Repositories' heads and setup's grouped checklist wear it; each lays it out its own way */
+.group-toggle {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  border-radius: var(--r-1);
+  transition: color var(--d-1);
+}
+.group-toggle:hover {
+  color: var(--ink);
+}
+.group-toggle:focus-visible {
+  box-shadow: var(--focus);
+}
+.group-toggle .ic {
+  transition: transform var(--d-2) var(--e-out);
+}
+.group-toggle[aria-expanded="true"] .ic {
+  transform: rotate(90deg);
+}
+/* Repositories' group heads (design-system.md, ADR 0067, 0082): one row in the table's columns on the account's head
+   band, the account with its count beside it (under it on a phone), held at every count it can say in tabular figures,
+   then its cause's line held at every line a cause can say and its fix's place, as wide as every fix the account can
+   have, in the Pull requests column, then the account's switch in the Reviewing column, so a cause or a count changing
+   moves nothing. The header cell starts with the collapse control's chevron, the account beside it in the same
+   control, the count beside the account, centred on its line (`.repos-group-title` is a grid, the control its first
+   two columns on a subgrid), under it on a phone. A hairline in `--line-2` over each head marks where a group starts. */
+.tbl.repos .repos-group > :is(th, td) {
   height: auto;
-  padding-top: var(--s-5);
+  padding-block: var(--s-3);
 }
-.tbl .repos-group:hover td {
-  background: none;
+/* the chevron's box (`--chevron`) and its gap, past which a head's account starts, and each row's repository under it */
+.tbl.repos {
+  --chevron: var(--ic);
+  --chevron-gap: var(--s-2);
+}
+.repos-group-title {
+  display: grid;
+  grid-template-columns: var(--chevron) minmax(0, max-content) auto;
+  column-gap: var(--chevron-gap);
+  align-items: center;
+}
+/* the collapse control (`.group-toggle`), the account beside its chevron; a login too long for the cell is cut with an
+   ellipsis, said whole on hover and in the control's name, so every head is one line of account */
+.repos-group-toggle {
+  grid-column: 1 / 3;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-width: 0;
+}
+.repos-group-account {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* the count wraps between its words rather than take the account's width: just past a phone's width the first column is
+   narrow, and a count held at its longest copy, kept on one line, left the account none. A folded group under the
+   filter says how many of it the filter shows on a line of its own, under the count (`.repos-group-shows`); an open
+   one holds that line empty, so every head under the filter is as tall and a later one stuck covers an earlier one
+   whole (a table cell sticks for the whole table) */
+.repos-group-count {
+  grid-column: 3;
+  margin-left: var(--s-1);
+  display: grid;
+}
+.repos-group-shows[aria-hidden="true"] {
+  visibility: hidden;
+}
+/* a group's rows sit indented under its head, each repository's name a step (`--s-4`) past the account's edge (past
+   the chevron's box and its gap), so the head plainly owns them (round 6: on the account's edge, they read as its
+   peers); a cell's own padding first, as every table cell's */
+.tbl.repos tr:not(.repos-group) > td:first-child {
+  padding-left: calc(var(--cell-x) + var(--chevron) + var(--chevron-gap) + var(--s-4));
+}
+/* The search and the filter, once shown, then the column heads, stick under the top bar with the group heads (ADR
+   0083, round 4), opaque on the page's ground, over the heads: `--repos-stuck` is where the column heads stick, the top
+   bar's bottom, past the bar when it shows. The bar's padding is taken back from the page's gap around it, so it
+   moves nothing in place. On a phone the bar, two lines tall there, scrolls away: only the column heads and the group
+   heads stick. */
+.tbl.repos {
+  --repos-stuck: var(--h-top);
+}
+.repos-bar {
+  position: sticky;
+  top: var(--h-top);
+  z-index: 11;
+  background: var(--bg);
+  padding-block: var(--s-3);
+  margin-block: calc(-1 * var(--s-3));
+}
+.repos-bar + .tbl.repos {
+  --repos-stuck: calc(var(--h-top) + var(--h-repos-bar));
+}
+.tbl.repos thead th {
+  height: var(--h-thead);
+  position: sticky;
+  top: var(--repos-stuck);
+  z-index: 11;
+  background: var(--bg);
+  border-bottom: 0;
+  box-shadow: inset 0 calc(-1 * var(--line-w)) 0 var(--line);
+}
+@media (max-width: 640px) {
+  .repos-bar {
+    position: static;
+  }
+  .repos-bar + .tbl.repos {
+    --repos-stuck: var(--h-top);
+  }
+}
+/* Each head sticks under the column heads while its group scrolls past, opaque, its hairline under it, below the top
+   bar, menus and tooltips: its cells stick, each over the rows, the next group's head over it as it arrives. On the
+   page's own scroll: the table has no sideways scroll wrapper. A collapsed border stays where the table drew it, so the
+   hairline is the cells' own. A table cell sticks for the whole table, so a group scrolled past keeps its head stuck
+   under the later ones: a control of it taking focus scrolls the page back to its group (`uncoverBy`). */
+.tbl.repos .repos-group > * {
+  background: var(--band);
+  border-bottom: 0;
+  box-shadow: inset 0 calc(-1 * var(--line-w)) 0 var(--line);
+}
+/* a line higher than the column heads' bottom: the line a collapsed border keeps above the cell, where nothing of it
+   is painted, goes under the column heads' own line, so no row shows through it */
+.tbl.repos .repos-group:not(.repos-group-narrow) > * {
+  /* the hairline over the head, in `--line-2`, where its group starts; stuck, it goes under the column heads' own */
+  background:
+    linear-gradient(var(--line-2), var(--line-2)) top / 100% var(--line-w) no-repeat,
+    var(--band);
+  position: sticky;
+  top: calc(var(--repos-stuck) + var(--h-thead) - var(--line-w));
+  z-index: 10;
+  container-type: scroll-state;
+}
+/* a row reached by Tab, a phone's fix row too, is never under a stuck head: what sticks over it, a head's height and a
+   little room */
+.tbl.repos tr:not(.repos-group:not(.repos-group-narrow)) :is(a, button, input) {
+  scroll-margin-top: calc(var(--repos-stuck) + var(--h-thead) + var(--h-group-head) + var(--s-2));
 }
 .repos-group-fix {
   display: grid;
@@ -1893,27 +2670,58 @@ code.device-code {
 .repos-group-narrow {
   display: none;
 }
-/* on a phone the cause and the fix's place go in a row of their own under the account, the fix under the cause, kept
-   there whether a cause holds or not */
+/* on a phone the Pull requests column has no width (app.css): the account, its count and its switch stay in the head's
+   first row, and the cause and the fix's place go in a row of their own under it, the fix under the cause, kept there
+   whether a cause holds or not. Only the first row sticks; its hairline is drawn while it is stuck, and between the
+   two rows only while no cause holds. */
 @media (max-width: 640px) {
-  .repos-group-wide {
-    display: none;
-  }
   .repos-group-narrow {
     display: table-row;
   }
-  .repos-group:has(+ .repos-group-narrow) th {
-    border-bottom: 0;
+  .tbl.repos .repos-group:has(+ .repos-group-narrow) > * {
+    box-shadow: none;
   }
   .tbl.repos .repos-group-narrow td {
     padding-top: 0;
+  }
+  /* no cause: the second row holds the fix's place on the page's own ground, the first row keeps its hairline, so
+     no empty tinted line is left under the head; a cause arriving paints both and moves nothing */
+  .tbl.repos .repos-group-narrow:has(.repos-group-fix[data-state="fine"]) > td {
+    background: var(--bg);
+  }
+  .tbl.repos .repos-group:has(+ .repos-group-narrow .repos-group-fix[data-state="fine"]) > * {
+    box-shadow: inset 0 calc(-1 * var(--line-w)) 0 var(--line);
   }
   .repos-group-fix {
     grid-template-columns: minmax(0, 1fr);
     row-gap: var(--s-2);
   }
+  /* the count goes under the account, so a login has the cell's width before it is cut */
+  .repos-group-title {
+    grid-template-columns: var(--chevron) minmax(0, 1fr);
+    row-gap: 2px;
+  }
+  .repos-group-toggle {
+    grid-column: 1 / -1;
+  }
+  .repos-group-count {
+    grid-column: 2;
+    margin-left: 0;
+  }
   .repos-group-fix .account-action {
     justify-self: start;
+  }
+  :is(.repos-group-title, .repos-group-switch)::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0;
+    border-bottom: var(--line-w) solid var(--line);
+    visibility: hidden;
+  }
+  @container scroll-state(stuck: top) {
+    :is(.repos-group-title, .repos-group-switch)::after {
+      visibility: visible;
+    }
   }
 }
 /* Settings › GitHub's sign-in row, a settings row's shape: who is signed in, or the code, held at the tallest it can
@@ -1948,18 +2756,34 @@ code.device-code {
     justify-content: flex-start;
   }
 }
+/* the card ends as it starts: the list's last row, Another account, holds no blank second line (the accounts list's
+   own rule, setup's too), and under it the row's own band and this make a settings row's padding (round 6: the held
+   blank line left a band there about twice the card's top) */
 .setcard-accounts {
-  padding: var(--s-3) 0;
+  padding: var(--s-3) 0 calc(var(--setrow-y) - var(--s-2));
   border-top: 1px solid var(--line);
 }
-/* a value to copy: the value in code, then the copy icon button */
+/* a value to copy: a code block of its own row, even padding all round, the copy icon button inside it, in its top
+   right corner, level with the value's first line, so it plainly belongs to the block (2026-11-08: outside its edge it
+   floated) */
 .copyline {
-  display: inline-flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: var(--s-2);
-  min-width: 0;
+  padding: var(--s-3);
+  padding-right: var(--s-2);
+  border-radius: var(--r-2);
+  background: var(--code-bg);
 }
 .copyline code {
+  display: block;
+  color: var(--ink);
   font-size: var(--t-13);
+  line-height: 1.5;
   overflow-wrap: anywhere;
+}
+/* the button's 24 px centred on the value's first line */
+.copyline > .anchor {
+  margin-top: calc((var(--t-13) * 1.5 - 24px) / 2);
 }

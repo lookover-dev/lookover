@@ -35,6 +35,8 @@ test("a shot lands on the screen its path routes to, or the one it names", () =>
     '[data-screen="repository"]',
   );
   expect(screenOf({ name: "a", scenario: "S10", path: "/settings" })).toBe('[data-screen="settings"]');
+  // A place on the page (a section opened by link) routes as its page does.
+  expect(screenOf({ name: "a", scenario: "S16", path: "/settings#github" })).toBe('[data-screen="settings"]');
   expect(screenOf({ name: "a", scenario: "S10", path: "/settings/rules" })).toBe(
     '[data-screen="settings-section"]',
   );

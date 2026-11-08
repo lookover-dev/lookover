@@ -3,13 +3,15 @@
 // opened in either is reviewed; a repository switched off is still listed, and its `/lookover review` is recorded as
 // a skip (ADR 0047); a rate limit met on one stops the listing of both until it ends, one refused alone (not found,
 // or 5xx) never stops the other's, at start neither; "Review now" lists its change's repository only; the settings,
-// the rules, the switch, the setup's choice and its first review work for either, and each round counts its own.
+// the rules, the switch, the setup's choice and its first review work for either, and each round counts its own;
+// many switches set by one command (`repos.setEnabled`, ADR 0082), one event for each that moved.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   changeId,
   commitSha,
+  type Event,
   type HostChange,
   HostError,
   type Listing,
@@ -420,5 +422,43 @@ test("a rule of the second repository switched off is written to its file alone;
     [SANDBOX_ID, 1],
     [SANDBOX_ID, 2],
     [LEDGER_ID, 1],
+  ]);
+});
+
+test("many switches set at once: one event for each repository whose switch moved, one not watched passed over, none watched refused, kept across a restart", async () => {
+  const WEB: RepositoryRef = { owner: SANDBOX.owner, name: "ledger-web" };
+  const WEB_ID = repositoryId(`${WEB.owner}/${WEB.name}`);
+  const dir = home();
+  const repos = [SANDBOX, LEDGER, WEB];
+  const { service, time } = await start({ home: dir, repos });
+  const cookie = await openApp(service);
+  const switchAll = (enabled: boolean, ...repoIds: string[]) =>
+    post(service, cookie, { type: "repos.setEnabled", repoIds, enabled });
+  const ledgerOff = { type: "repo.setEnabled", repoId: LEDGER_ID, enabled: false };
+  expect((await post(service, cookie, ledgerOff)).status).toBe(200);
+
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  expect(
+    (await switchAll(false, SANDBOX_ID, LEDGER_ID, "sasensi/elsewhere", WEB_ID, SANDBOX_ID)).status,
+  ).toBe(200);
+  // A command whose one event closes what the switches sent.
+  expect((await post(service, cookie, { type: "setup.goto", step: "repos" })).status).toBe(200);
+  const sent = (await until(stream, "setup.changed")).filter((e: Event) => e.type === "repo.changed");
+  expect(sent.map((e) => (e.type === "repo.changed" ? [e.repoId, e.patch] : null))).toEqual([
+    [SANDBOX_ID, { enabled: false }],
+    [WEB_ID, { enabled: false }],
+  ]);
+
+  expect((await switchAll(true, "sasensi/elsewhere", "acme/web")).status).toBe(404);
+  expect((await switchAll(true)).status).toBe(400);
+  expect((await switchAll(true, WEB_ID)).status).toBe(200);
+  await service.stop();
+
+  const again = await start({ home: dir, repos, time, idsFrom: 100 });
+  const kept = (await snapshot(again.service, await openApp(again.service))).repos;
+  expect(kept.map((r: Repository) => [r.id, r.enabled])).toEqual([
+    [SANDBOX_ID, false],
+    [LEDGER_ID, false],
+    [WEB_ID, true],
   ]);
 });

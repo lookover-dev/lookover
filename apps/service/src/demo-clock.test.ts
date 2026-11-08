@@ -44,6 +44,7 @@ const pausedJob: ReviewJob = {
   failure: null,
   turn: null,
   stepIn: null,
+  askedBy: null,
 };
 const named = (e: Event) => {
   if (e.type === "change.opened") return `${e.type} ${e.change.id}`;

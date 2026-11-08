@@ -2,10 +2,10 @@
 // The app's view model words the screens, `publish` words the pull request and the service's log file
 // (`apps/service/src/log-lines.ts`) words what the service did; where two of them say the same thing (an engine's name,
 // why a review waits or was skipped, why it failed, why it was cancelled, why its confirm pass or Deep's second find
-// gave no answer, who found a round and who double-checked it, why a post waits and when it is tried again, how many
-// findings stay in the app, the status block in the description, the kind of each reply on a thread), they take it
-// from here, so they never drift; so do the few ways of writing a thing they share (a phrase as a sentence, a short
-// commit, a day, a clock's two digits).
+// gave no answer, who found a round and who double-checked it, who pushed new commits, why a post waits and when it
+// is tried again, how many findings stay in the app, the status block in the description, the kind of each reply on a
+// thread), they take it from here, so they never drift; so do the few ways of writing a thing they share (a phrase as
+// a sentence, a short commit, a day, a clock's two digits).
 // Here, not in a package of its own: the web imports only `contracts`. Phrases start lower case and carry no full stop,
 // so the caller places them in its sentence (`asSentence` makes one a sentence of its own); titles and sentences start
 // upper case. Each map is a `Record` over its union: a new value fails the typecheck.
@@ -15,7 +15,15 @@ import type { EngineId } from "./engine.ts";
 import type { EngineHealth, EngineUnusable } from "./engines-port.ts";
 import type { Finding } from "./finding.ts";
 import type { TransientHostFailure } from "./host.ts";
-import type { CancelReason, Deferral, JobFailure, JobFailureKind, SkipReason } from "./job.ts";
+import type {
+  CancelReason,
+  Deferral,
+  FailureCause,
+  JobFailure,
+  JobFailureKind,
+  PushedBy,
+  SkipReason,
+} from "./job.ts";
 import type { ReplyKind } from "./reconciled.ts";
 import type { Round } from "./round.ts";
 import type { CitedRule } from "./rule.ts";
@@ -187,7 +195,7 @@ const FAILED: Record<JobFailureKind, (engine: EngineId | null) => string> = {
   prepare_failed: () => "the code could not be fetched",
   review_failed: (engine) => `${engine === null ? "the reviewer" : ENGINE[engine]} gave no review`,
   publish_failed: () => "GitHub refused a post",
-  host_failed: () => "GitHub did not answer",
+  host_failed: () => "GitHub didn't answer",
   unexpected: () => "the review could not run",
 };
 
@@ -195,14 +203,14 @@ const FAILED: Record<JobFailureKind, (engine: EngineId | null) => string> = {
  * Why a review did not run, as a phrase for the middle of a line, naming the engine that was reviewing when the
  * engine gave none. Null: a job that failed before anyone said why.
  */
-export function failureText(failure: Pick<JobFailure, "kind" | "engine"> | null): string {
+function failureText(failure: Pick<JobFailure, "kind" | "engine"> | null): string {
   return failure === null ? FAILED.unexpected(null) : FAILED[failure.kind](failure.engine);
 }
 
 /** What GitHub did to a post that waits to be sent again (ADR 0055). */
 const POST_WAIT: Record<TransientHostFailure, string> = {
   rate_limited: "GitHub asked to wait",
-  unavailable: "GitHub did not answer",
+  unavailable: "GitHub didn't answer",
 };
 
 /**
@@ -337,6 +345,16 @@ const STOPPED: Record<JobFailureKind, (engine: EngineId | null) => string> = {
 };
 
 /**
+ * New commits on a change, as a phrase: "the agent pushed 2 commits" when it signed every one (ADR 0081), else "2 new
+ * commits", no one named; "new commits" when GitHub didn't count them (`commits: 0`).
+ */
+export function pushedText(by: PushedBy, commits: number): string {
+  const counted = (one: string) => (commits === 1 ? `1 ${one}` : `${commits} ${one}s`);
+  if (by === "agent") return `the agent pushed ${commits > 0 ? counted("commit") : "new commits"}`;
+  return commits > 0 ? counted("new commit") : "new commits";
+}
+
+/**
  * Why a job failed, as the status block's sentence by its kind, naming the engine that was reviewing: "Codex stopped
  * before it finished."; "The reviewer" when no run had started.
  */
@@ -346,6 +364,146 @@ export function stoppedText(kind: JobFailureKind, engine: EngineId | null): stri
 
 /** What the status block of a failed job asks, after why it failed. */
 export const TRY_AGAIN = "Push again, or comment `/lookover review`, to try again.";
+
+const UNITS = [
+  { ms: 3_600_000, one: "hour" },
+  { ms: 60_000, one: "minute" },
+  { ms: 1_000, one: "second" },
+] as const;
+
+/**
+ * A time limit in words, in the largest unit it is a whole number of (seconds at the least, rounded): "2 minutes",
+ * or before a noun "2-minute".
+ */
+function limitWords(ms: number, beforeNoun: boolean): string {
+  const unit = UNITS.find((u) => ms % u.ms === 0) ?? UNITS[2];
+  const n = Math.max(1, Math.round(ms / unit.ms));
+  if (beforeNoun) return `${n}-${unit.one}`;
+  return `${n} ${unit.one}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * The words of one cause, given who was reviewing and the limit that ran out. `remedy`: what would change it, for a
+ * cause another try can't; null, another try can help.
+ */
+interface CauseWords {
+  phrase: string;
+  sentence: string;
+  remedy: string | null;
+}
+
+const CAUSED: Record<FailureCause, (reviewer: string, limitMs: number | null) => CauseWords> = {
+  // Any git step of getting the code ready, not the fetch alone: the worktree, the diff and the commit check have
+  // limits too. Since the fetch reports progress (ADR 0068), git silent that long is a stall: worth another try.
+  git_silent: (_, ms) => {
+    const time = `for ${ms === null ? "too long" : limitWords(ms, false)}`;
+    return {
+      phrase: `git sent nothing ${time} while Lookover got the code ready`,
+      sentence: `Git sent nothing ${time} while Lookover got the code ready.`,
+      remedy: null,
+    };
+  },
+  git_time_limit: (_, ms) => {
+    const limit = ms === null ? "time limit" : `${limitWords(ms, true)} limit`;
+    return {
+      phrase: `getting the code ready ran past its ${limit}`,
+      sentence: `Getting the code ready ran past its ${limit}.`,
+      remedy: "The repository or the change is too large to get ready in that time.",
+    };
+  },
+  engine_time_limit: (reviewer, ms) => {
+    const limit = ms === null ? "time limit" : `${limitWords(ms, true)} limit`;
+    return {
+      phrase: `${reviewer} ran past its ${limit}`,
+      sentence: `${upperFirst(reviewer)} ran past its ${limit}.`,
+      remedy: "A smaller pull request fits in the time.",
+    };
+  },
+  // No history in common, or a commit GitHub no longer has (force-pushed away): true of both.
+  base_not_found: () => ({
+    phrase: "where the commit branches off its base branch couldn't be found",
+    sentence: "Lookover couldn't find where the commit branches off its base branch.",
+    remedy: "Rebase onto the base branch, then push.",
+  }),
+  path_too_long: () => ({
+    phrase: "a file path is too long for this machine",
+    sentence: "A file path is too long for the machine Lookover runs on.",
+    remedy: "Turning on long paths in Windows, or shorter paths, would fix it.",
+  }),
+  git_missing: () => ({
+    phrase: "git isn't installed where Lookover runs",
+    sentence: "Git isn't installed where Lookover runs.",
+    remedy: "Install git, then push again.",
+  }),
+  network: () => ({ phrase: FAILED.host_failed(null), sentence: STOPPED.host_failed(null), remedy: null }),
+  engine_answer: (reviewer) => ({
+    phrase: `${reviewer} gave no usable review`,
+    sentence: `${upperFirst(reviewer)} gave no usable review.`,
+    remedy: null,
+  }),
+};
+
+/**
+ * A failed review in words (ADR 0081). `phrase`: lower case, no stop, after "The review failed: ", on Home and in
+ * `wait`. `sentence`: the status block's and the app's. `retry`: another try can help, and `next` is `TRY_AGAIN`;
+ * else `next` says what would change it. None of them names a path, an account or an engine's output: they are safe
+ * on a public pull request.
+ */
+export interface FailureWords {
+  phrase: string;
+  sentence: string;
+  retry: boolean;
+  next: string;
+}
+
+/**
+ * A failure's words by its cause, naming the engine that was reviewing and the limit that ran out (a limit of zero or
+ * less is not known); with no cause (none known, or an event stored before causes were, which has no `cause` or
+ * `limitMs` at all), by its kind, as `failureText` and `stoppedText` say it. Null: a job that failed before anyone said
+ * why.
+ */
+export function failureWords(
+  failure: Pick<JobFailure, "kind" | "engine" | "cause" | "limitMs"> | null,
+): FailureWords {
+  const cause = failure?.cause ?? null;
+  if (failure === null || cause === null) {
+    return {
+      phrase: failureText(failure),
+      sentence: stoppedText(failure?.kind ?? "unexpected", failure?.engine ?? null),
+      retry: true,
+      next: TRY_AGAIN,
+    };
+  }
+  const reviewer = failure.engine === null ? "the reviewer" : ENGINE[failure.engine];
+  const limitMs = failure.limitMs ?? null;
+  const words = CAUSED[cause](reviewer, limitMs !== null && limitMs > 0 ? limitMs : null);
+  return {
+    phrase: words.phrase,
+    sentence: words.sentence,
+    retry: words.remedy === null,
+    next: words.remedy ?? TRY_AGAIN,
+  };
+}
+
+/** What a failure's words take: a job's failure, with the engine that was reviewing. */
+type Failed = Parameters<typeof failureWords>[0];
+
+/**
+ * A failed review's check title on GitHub, which `lookover wait` repeats: "The review failed: Claude ran past its
+ * 20-minute limit".
+ */
+export function failedTitle(failure: Failed): string {
+  return `The review failed: ${failureWords(failure).phrase}`;
+}
+
+/**
+ * A failed review's line in the status block (ADR 0074 as 0081 amends it): its sentence, then how to try again where
+ * another try can help, else what would change it.
+ */
+export function failedLine(failure: Failed): string {
+  const words = failureWords(failure);
+  return `${words.sentence} ${words.next}`;
+}
 
 /**
  * When a deferred review starts, after "starts", for anyone on the pull request: "once GitHub is back"; an engine's
@@ -467,6 +625,12 @@ export const KEPT_TWICE_WONT_FIX =
   'Kept twice against "won\'t fix". Fix it, or resolve this thread to keep the code as it is.';
 
 /**
+ * The kind of a reply on the thread of a finding a round found still there after a push (ADR 0081): `lookover wait`
+ * prints it before that round's reason, as the reply says it.
+ */
+export const STILL_PRESENT = "Still present";
+
+/**
  * A reply on a finding's thread, after the wordmark: its kind; its fixed words in place of the finder's why, if any;
  * and what it says last, if anything.
  */
@@ -505,5 +669,8 @@ export function replyKind(
       return words("Answer");
     case "dismissed":
       return words("Dismissed by the owner", null, `It ${NOT_RAISED_AGAIN}.`);
+    case "still_present":
+      // Nothing is counted: no closing line, as for an answer.
+      return words(STILL_PRESENT);
   }
 }

@@ -7,31 +7,34 @@ import {
   type DeviceCode,
   type Engine,
   isCounted,
-  type RepositoryId,
   type Review,
   SETUP_ORDER,
   type SetupStep,
 } from "@lookover/contracts";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useApp, useAppState, useSend, useStoreStatus } from "../store.tsx";
+import { useApp, useAppState, useHeld, useRepositoriesBar, useSend, useStoreStatus } from "../store.tsx";
 import {
   Button,
   Card,
   Check,
   Chip,
   Disclosure,
+  Empty,
   Icon,
   Mark,
   Notice,
   Radio,
   Said,
   SameWidth,
+  Search,
 } from "../ui/basics.tsx";
-import { signedIn } from "../view-model/accounts.ts";
+import { SetupTicks, signedIn } from "../view-model/accounts.ts";
 import { AGENT_INTRO } from "../view-model/coding-agent.ts";
+import { CollapsedGroups } from "../view-model/collapsed.ts";
 import {
   type FirstReviewRow,
+  firstReviewMeta,
   firstReviewPick,
   firstReviewPrimary,
   firstReviewRows,
@@ -40,28 +43,22 @@ import {
   reviewedLine,
   reviewedLines,
 } from "../view-model/first-review.ts";
-import { agoSentence, plural } from "../view-model/format.ts";
+import { plural } from "../view-model/format.ts";
 import {
   aiStepActs,
   aiStepLabels,
-  chosenRepos,
   ENGINE_SETUP_LABELS,
   engineSetupAction,
   engineSetupNext,
   engineSetupText,
 } from "../view-model/onboarding.ts";
-import {
-  authorLabel,
-  type ChangeReview,
-  changeLabel,
-  changeReviews,
-  openChangeCount,
-  problems,
-} from "../view-model/select.ts";
+import { REPOSITORIES_BAR, RepositoriesChoice, setupRepoList } from "../view-model/repositories.ts";
+import { type ChangeReview, changeLabel, changeReviews, problems } from "../view-model/select.ts";
 import { SETUP_REVIEWERS_TEXT } from "../view-model/settings.ts";
 import { SIGN_IN_TEXT, signInEnd, signInStep } from "../view-model/sign-in.ts";
 import { BACKGROUND_TEXT, backgroundLine, backgroundLines } from "../view-model/start-at-login.ts";
-import { AgentRows } from "./coding-agent.tsx";
+import { engineMark } from "../view-model/state-square.ts";
+import { CodingAgent } from "./coding-agent.tsx";
 import { HeldDetail, roundDuration, Sentence, StateSquare, StepList, SubStep } from "./common.tsx";
 import { AccountsList, CodeActions, FixButton, GitHubButton } from "./github-app.tsx";
 
@@ -144,12 +141,11 @@ function StepsItem({
 }
 
 function EngineRow({ engine, now }: { engine: Engine; now: number }) {
-  const ready = engine.state === "ready";
   // A missing AI's next step after the install, the sign-in, on its own line under the service's (#431).
   const next = engineSetupNext(engine);
   return (
     <div className="engine">
-      <StateSquare state={ready ? "done" : engine.signingIn ? "busy" : "idle"} />
+      <StateSquare state={engineMark(engine)} />
       <div>
         <b>{engine.name}</b>
         <span>
@@ -212,9 +208,9 @@ function StepAi() {
       {engines.map((e) => (
         <EngineRow key={e.id} engine={e} now={state.now} />
       ))}
-      <p className="t-small">{SETUP_REVIEWERS_TEXT}</p>
+      <p className="t-small t-help">{SETUP_REVIEWERS_TEXT}</p>
+      {/* Continue alone: the cards say which AI is ready, and its label which it goes on with. */}
       <div className="setup-acts">
-        <span className="t-small">{acts.said}</span>
         <SameWidth shown={acts.label} labels={labels} />
       </div>
     </>
@@ -259,26 +255,26 @@ function StepGitHub() {
       <Sentence title={T.title} small={T.lead} />
       <SubStep
         state={step.signIn.state}
+        todo="sign-in"
         title={T.signIn}
         action={<CodeActions code={step.signIn.code} onCancel={cancel} />}
       >
-        <span className="code-whole">
-          <HeldDetail shown={step.signIn.text} details={step.signIn.held} />
-        </span>
+        <HeldDetail shown={step.signIn.text} details={step.signIn.held} />
       </SubStep>
       <SubStep
         state={step.accounts.state}
+        todo="install"
         title={T.accounts}
         below={step.accounts.list.rows.length > 0 ? <AccountsList list={step.accounts.list} /> : null}
       >
         <HeldDetail shown={step.accounts.text} details={step.accounts.held} />
       </SubStep>
-      {/* Always there, empty until a refusal: nothing under it moves when one is said or cleared. */}
-      <p className="refused-line" role="status">
-        {step.refused}
-      </p>
       <div className="setup-acts">
-        <span className="t-small">{step.done ? T.done : ""}</span>
+        {/* Against the primary it is about: a refusal of a sign-in it started, else the step satisfied. Always there,
+            two lines tall, so nothing moves when one is said or cleared. */}
+        <p className={`setup-said held ${step.refused === null ? "t-small" : "refused-line"}`} role="status">
+          {step.refused ?? (step.done ? T.done : "")}
+        </p>
         <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "ai" })}>
           Back
         </Button>
@@ -313,33 +309,147 @@ function StepGitHub() {
   );
 }
 
+/**
+ * One visit of setup's Repositories step: what the owner ticked or unticked there (the rest follows the installation,
+ * which GitHub may change meanwhile) and, past ten repositories (ADR 0082, 0083), Repositories' search and the groups
+ * folded or opened from their head, each first as Repositories' rule starts it (a group of more than ten folded; round
+ * 6), kept so while the step is shown.
+ */
+export interface SetupReposVisit {
+  ticks: SetupTicks;
+  choice: RepositoriesChoice;
+  folded: CollapsedGroups;
+}
+
+export const setupReposVisit = (): SetupReposVisit => ({
+  ticks: new SetupTicks(),
+  choice: new RepositoriesChoice(),
+  folded: new CollapsedGroups(),
+});
+
 function StepRepos() {
+  const [visit] = useState(setupReposVisit);
+  return <StepReposOn visit={visit} />;
+}
+
+/** Setup's Repositories step on one `visit` of it (design-system.md "Setup's grouped checklist"). */
+export function StepReposOn({ visit }: { visit: SetupReposVisit }) {
+  const { ticks, choice, folded } = visit;
   const state = useAppState();
   const send = useSend();
-  // What the owner ticked or unticked here; the rest follows the installation, which GitHub may change meanwhile.
-  const [choices, setChoices] = useState<ReadonlyMap<RepositoryId, boolean>>(() => new Map());
-  const enabled = new Set(chosenRepos(state.repos, choices));
-  const toggle = (id: RepositoryId, on: boolean) => setChoices(new Map(choices).set(id, on));
+  const groupId = useId();
+  const chosen = useHeld(choice);
+  const list = setupRepoList(state, useHeld(ticks), {
+    shown: useRepositoriesBar(),
+    choice: chosen,
+    collapsed: useHeld(folded),
+  });
+  // Each group's first fold, held the first time it shows: one growing past ten while shown never folds by itself.
+  useEffect(() => folded.remember(list.firstFolds), [folded, list.firstFolds]);
+  const large = list.searchable;
   return (
     <>
       <Sentence
         title="Pick the repositories to review."
-        small="These are the repositories you installed the App on. Untick any it should not review. To add more later, open the App's settings on GitHub, from Repositories."
+        small="These are the repositories you installed the App on. Untick an account, or any repository, it should not review. To add more later, open the App's settings on GitHub, from Repositories."
       />
-      <Card className="checklist">
-        {state.repos.map((r) => {
-          const n = openChangeCount(state, r.id);
-          return (
-            <Check key={r.id} checked={enabled.has(r.id)} onChange={(on) => toggle(r.id, on)}>
-              <b>{r.id}</b>
-              <span className="t-small">
-                {n === 0 ? "no open pull requests" : plural(n, "open pull request")}
-              </span>
-            </Check>
-          );
-        })}
-      </Card>
-      <p className="t-small">
+      {large ? (
+        <Search
+          placeholder={REPOSITORIES_BAR.search}
+          aria-label={REPOSITORIES_BAR.search}
+          value={chosen.query}
+          onChange={(e) => choice.search(state, e.target.value)}
+        />
+      ) : null}
+      {list.empty ? (
+        <Empty title={list.empty.title}>{list.empty.text}</Empty>
+      ) : (
+        <Card className={large ? "checklist checklist-large" : "checklist"}>
+          {list.groups.map(({ group: g, collapsed }) => {
+            const login = `${groupId}-${g.key}`;
+            // Past ten, on the account's head band: its name and how many of it are ticked, on one line.
+            const head = large ? (
+              <>
+                <b id={login} className="group-band-name">
+                  {g.key}
+                </b>
+                <span id={`${login}-count`} className="group-band-count">
+                  <HeldDetail shown={g.count} details={g.counts} />
+                </span>
+              </>
+            ) : (
+              <>
+                <b id={login}>{g.key}</b>
+                <span id={`${login}-count`} className="t-small">
+                  {g.size}
+                </span>
+              </>
+            );
+            const { control } = g;
+            const box =
+              control === null ? (
+                <div className="checklist-head">
+                  <span>{head}</span>
+                </div>
+              ) : (
+                <Check
+                  checked={g.ticked === "all"}
+                  mixed={g.ticked === "some"}
+                  label={control.label}
+                  // Its count read after its name: "29 of 30 to review" past ten, its size before.
+                  describedBy={`${login}-count`}
+                  onChange={(on) => ticks.tick(control.repoIds, on)}
+                >
+                  {head}
+                </Check>
+              );
+            return (
+              // A group named by its account, not a landmark: S19 has four of them.
+              <div key={g.key} className="checklist-group" role="group" aria-labelledby={login}>
+                {large ? (
+                  // The account's head band: the chevron that collapses the group, then the account's box.
+                  <div className="checklist-band group-band">
+                    <button
+                      type="button"
+                      className="group-toggle"
+                      aria-label={g.toggleLabel}
+                      aria-expanded={!collapsed}
+                      onClick={() =>
+                        list.searching ? choice.collapseInSearch(g.key) : folded.toggle(g.key, collapsed)
+                      }
+                    >
+                      <Icon name="next" />
+                    </button>
+                    {box}
+                  </div>
+                ) : (
+                  box
+                )}
+                {collapsed
+                  ? null
+                  : g.rows.map(({ repo: r, ticked, open, zero, label }) => (
+                      // Shown by its name alone under its account's head; its label names it in full, open pull
+                      // requests included. Its count in Repositories' words, zero said too, muted: zero is data.
+                      <Check
+                        key={r.id}
+                        checked={ticked}
+                        label={label}
+                        onChange={(on) => ticks.tick([r.id], on)}
+                      >
+                        <b>{r.name}</b>
+                        <span
+                          className={zero ? "t-small checklist-open open-zero" : "t-small checklist-open"}
+                        >
+                          {open}
+                        </span>
+                      </Check>
+                    ))}
+              </div>
+            );
+          })}
+        </Card>
+      )}
+      <p className="t-small t-help">
         <b>Whose pull requests?</b> Yours and your coding agents'. Pull requests from other people are
         skipped, to stay within the Claude and ChatGPT terms.
       </p>
@@ -347,16 +457,20 @@ function StepRepos() {
         Your Claude and ChatGPT subscriptions are personal. Using them to review other people's code is
         outside their terms, so Lookover skips those pull requests on purpose.
       </Disclosure>
-      <p className="t-small">Recommended settings are used. Everything can be changed later in Settings.</p>
-      <div className="setup-acts">
+      <p className="t-small t-help">
+        Recommended settings are used. Everything can be changed later in Settings.
+      </p>
+      {/* Past ten, a footer that stays in reach while the list scrolls, saying how many Continue sends. */}
+      <div className={large ? "setup-acts setup-acts-footer" : "setup-acts"}>
+        {large ? <span className="t-small">{list.count}</span> : null}
         <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "github" })}>
           Back
         </Button>
         <Button
           variant="primary"
           size="lg"
-          disabled={enabled.size === 0}
-          onClick={() => send({ type: "setup.chooseRepos", enabled: [...enabled] })}
+          disabled={list.enabled.length === 0}
+          onClick={() => send({ type: "setup.chooseRepos", enabled: list.enabled })}
         >
           Continue
         </Button>
@@ -413,7 +527,7 @@ function FirstReviewDone({ item }: { item: ChangeReview }) {
 
 /**
  * The setup's end (ADR 0058): what lets the owner's coding agent run the loop, which they may skip, then reviews
- * going on in the background, start at login, and "Go to my reviews".
+ * going on in the background, and the step's footer, as every step's: Back, start at login, and "Go to my reviews".
  */
 function StepAgent() {
   return (
@@ -422,63 +536,86 @@ function StepAgent() {
         title="Let your coding agent run the loop."
         small={`${AGENT_INTRO} All of this is optional.`}
       />
-      <AgentRows place="setup" />
+      <CodingAgent place="setup" />
       <BackgroundCard />
+      <AgentActs />
     </>
   );
 }
 
 /**
- * Reviews keep running in the background: start at login, and the end of setup, which works whatever was done; Back
- * to the first review, as every step has.
+ * "Reviews keep running in the background", its line the start at login's. The footer under it holds still when the
+ * line changes: every line it can say is a card laid in one place, only its own seen, so the room the tallest takes
+ * is under the card, never inside it, and the card ends at the padding its siblings do.
  */
-function BackgroundCard() {
+export function BackgroundCard() {
   const state = useAppState();
   const { mode } = useApp();
+  const seen = JSON.stringify(backgroundLine(state.service, mode));
+  return (
+    <div className="background-hold">
+      {backgroundLines(state.service, mode).map((line) => {
+        const key = JSON.stringify(line);
+        const shown = key === seen;
+        return (
+          <div
+            key={key}
+            className={shown ? "card background-note" : "card background-note held-room"}
+            aria-hidden={shown ? undefined : true}
+          >
+            <h4 className="card-title">Reviews keep running in the background</h4>
+            <p>{BACKGROUND_TEXT}</p>
+            <p className="t-small t-help">
+              <Said words={line} />
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The setup's last footer: Back to the first review, as every step has; start at login off or on again; and the end
+ * of setup, which works whatever was done.
+ */
+export function AgentActs() {
+  const state = useAppState();
   const send = useSend();
   const navigate = useNavigate();
   return (
-    <Card className="background-note">
-      <h4 className="t-h4">Reviews keep running in the background</h4>
-      <p>{BACKGROUND_TEXT}</p>
-      <p className="t-small">
-        <HeldDetail
-          shown={backgroundLine(state.service, mode)}
-          details={backgroundLines(state.service, mode)}
-        />
-      </p>
-      <div className="setup-acts">
-        <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "first-review" })}>
-          Back
-        </Button>
-        {/* One width for both labels, so the row keeps its places when it is pressed (#279). */}
-        <SameWidth
-          shown={state.service.startAtLogin ? "on" : "off"}
-          labels={{
-            on: (
-              <Button variant="ghost" onClick={() => send({ type: "service.startAtLogin", on: false })}>
-                Don't start at login
-              </Button>
-            ),
-            off: (
-              <Button variant="ghost" onClick={() => send({ type: "service.startAtLogin", on: true })}>
-                Start at login after all
-              </Button>
-            ),
-          }}
-        />
-        <Button
-          variant="primary"
-          size="lg"
-          onClick={() => {
-            send({ type: "setup.finish" });
-            void navigate("/");
-          }}
-        >
-          Go to my reviews
-        </Button>
-      </div>
-    </Card>
+    <div className="setup-acts">
+      <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "first-review" })}>
+        Back
+      </Button>
+      {/* One width for both labels, so the row keeps its places when it is pressed (#279). A secondary, outlined: a
+          choice, never a link beside Back (round 5). */}
+      <SameWidth
+        shown={state.service.startAtLogin ? "on" : "off"}
+        labels={{
+          on: (
+            <Button onClick={() => send({ type: "service.startAtLogin", on: false })}>
+              Don't start at login
+            </Button>
+          ),
+          off: (
+            <Button onClick={() => send({ type: "service.startAtLogin", on: true })}>
+              Start at login after all
+            </Button>
+          ),
+        }}
+      />
+      <Button
+        variant="primary"
+        size="lg"
+        onClick={() => {
+          send({ type: "setup.finish" });
+          void navigate("/");
+        }}
+      >
+        Go to my reviews
+      </Button>
+    </div>
   );
 }
 
@@ -498,7 +635,7 @@ function FirstReviewRunning({ item }: { item: ChangeReview }) {
   );
 }
 
-function StepFirstReview() {
+export function StepFirstReview() {
   const state = useAppState();
   const send = useSend();
   // The rows keep the places they were shown in: a review ending moves none (#425).
@@ -517,7 +654,11 @@ function StepFirstReview() {
   const firstReview = (preview: boolean) => {
     if (picked) send({ type: "setup.firstReview", changeId: picked, preview });
   };
-  /** The one "Review this pull request": the secondary beside Continue, else the step's primary. */
+  /**
+   * The one "Review this pull request": a secondary beside Continue, as the preview it replaces, so the bar has one
+   * primary and every other choice a button (round 5: as a ghost it read as a link between Back and Continue), else
+   * the step's primary.
+   */
   const reviewThis = (primary: boolean) => (
     <Button
       variant={primary ? "primary" : "secondary"}
@@ -560,7 +701,7 @@ function StepFirstReview() {
       {/* Held as tall as every line it can show under a list, so a row getting reviewed moves nothing under it. */}
       {rows.length > 0 ? (
         <p className="t-small first-reviewed-line">
-          <HeldDetail shown={reviewedLine(rows)} details={reviewedLines(rows)} />
+          <HeldDetail shown={reviewedLine(rows, picked)} details={reviewedLines(rows, picked)} />
         </p>
       ) : null}
       <div className="setup-acts first-review-acts">
@@ -573,7 +714,7 @@ function StepFirstReview() {
           shown={firstReviewSecondary(rows, picked)}
           labels={{
             preview: (
-              <Button variant="ghost" disabled={picked === null} onClick={() => firstReview(true)}>
+              <Button disabled={picked === null} onClick={() => firstReview(true)}>
                 Preview here only, post nothing
               </Button>
             ),
@@ -598,8 +739,9 @@ function StepFirstReview() {
 }
 
 /**
- * One pull request First review offers (design-system.md "First review's list"): its radio, and on its right, held
- * on every row, the state chip and "Open on GitHub" of one Lookover already reviewed on its head, whose radio is off.
+ * One pull request First review offers (design-system.md "First review's list"): its radio, and, held on every row,
+ * the state chip at the end of its title and "Open on GitHub" alone at its right, centred on both lines, of one
+ * Lookover already reviewed on its head, whose radio is off.
  */
 function FirstReviewChoice({
   row,
@@ -619,13 +761,15 @@ function FirstReviewChoice({
   return (
     <div className={`first-row${reviewed ? " reviewed" : ""}`}>
       <Radio name="first" checked={picked} disabled={reviewed} onChange={onPick}>
-        <b>{change.title}</b>
-        <span className="t-small">
-          {change.repoId} #{change.number} · {authorLabel(change)} · {agoSentence(now, change.openedAt)}
-        </span>
+        <b>
+          {change.title}
+          <span className="first-row-chip" aria-hidden={reviewed ? undefined : true}>
+            <SameWidth shown={reviewed && chip.label in chips ? chip.label : ""} labels={chips} />
+          </span>
+        </b>
+        <span className="t-small">{firstReviewMeta(change, now)}</span>
       </Radio>
       <span className="first-row-reviewed" aria-hidden={reviewed ? undefined : true}>
-        <SameWidth shown={reviewed && chip.label in chips ? chip.label : ""} labels={chips} />
         <GitHubButton change={change} variant="ghost" size="sm">
           Open on GitHub
         </GitHubButton>

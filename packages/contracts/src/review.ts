@@ -3,7 +3,7 @@
 // author stands). The screens derive one display status from the three.
 import type { Finding } from "./finding.ts";
 import type { ChangeId, CommitSha, FindingId } from "./ids.ts";
-import type { Deferral, ReviewJob, Trigger } from "./job.ts";
+import type { AskedBy, Deferral, JobFailure, PushedBy, ReviewJob, Trigger } from "./job.ts";
 import type { LoopState } from "./loop.ts";
 import type { Round } from "./round.ts";
 import type { Run } from "./run.ts";
@@ -16,17 +16,22 @@ export type TimelineEntry = {
   at: number;
   /** The commit it concerns, when there is one. */
   sha: CommitSha | null;
-} & (
+} /** Opened by `by`: when the host says it was, the first time Lookover lists it; when seen again, reopened. */ & (
   | { kind: "opened"; by: string }
-  | { kind: "pushed"; by: "you" | "agent"; commits: number }
-  /** A new job, and what asked for it. */
-  | { kind: "queued"; trigger: Trigger }
+  /** New commits: `agent` when an agent signed every one (ADR 0081), else null, no one named. */
+  | { kind: "pushed"; by: PushedBy; commits: number }
+  /** A new job, what asked for it, and who wrote the request when a request comment did. */
+  | { kind: "queued"; trigger: Trigger; by: AskedBy | null }
+  /** A request comment joined the waiting job, which no request had asked for (ADR 0081). */
+  | { kind: "asked"; by: AskedBy }
   | { kind: "deferred"; deferral: Deferral }
   /** The job was skipped; why is on the job. */
   | { kind: "skipped" }
   | { kind: "started"; round: number }
   /** A round finished: its number, and the findings still open on the pull request (`Round.open`). */
   | { kind: "posted"; round: number; open: number }
+  /** The job ended failed, on its commit (ADR 0081): its failure, as the job has it. */
+  | { kind: "failed"; failure: JobFailure | null }
   /** The owner dismissed findings as wrong ("Too noisy?", ADR 0052): which ones. */
   | { kind: "dismissed"; findingIds: FindingId[] }
 );

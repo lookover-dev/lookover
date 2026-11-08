@@ -65,8 +65,10 @@ test("every scenario's ids are one of a kind: the scenarios', the changes' (repo
     const shas = scenario.changes.flatMap((c) => c.commits.map((k) => k.sha));
     expect(new Set(shas).size).toBe(shas.length);
     // The script's moves name the scenario's own changes, by repository and number.
-    for (const { move } of scenario.script)
-      if ("change" in move) expect(changes).toContain(nameOf(move.change.repo, move.change.number));
+    for (const { move } of scenario.script) {
+      const named = "change" in move ? [move.change] : "changes" in move ? move.changes : [];
+      for (const ref of named) expect(changes).toContain(nameOf(ref.repo, ref.number));
+    }
   }
 });
 

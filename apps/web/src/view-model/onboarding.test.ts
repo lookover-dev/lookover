@@ -190,18 +190,15 @@ test("Open on GitHub opens the real pull request in live mode, and the simulated
   });
 });
 
-test("the AI step waits for Continue (ADR 0058): both ready says so and offers Continue; one of two ready says which and offers it only; none, nothing", () => {
+test("the AI step waits for Continue (ADR 0058): both ready offers Continue; one of two ready offers it only; none, a disabled one", () => {
   const claude = engine("claude", "Claude");
   const codex = engine("codex", "Codex");
   const signedOut = { ...codex, state: "signed-out" } as const;
-  expect(aiStepActs([claude, codex])).toEqual({ said: "Both are ready.", label: "Continue", enabled: true });
-  expect(aiStepActs([claude, signedOut])).toEqual({
-    said: "Claude is ready.",
-    label: "Continue with Claude only",
-    enabled: true,
-  });
+  // Nothing said beside Continue: each AI's card says it is ready, and the label names the one it goes on with
+  // (round 5: "Claude is ready." beside it said the card's word again).
+  expect(aiStepActs([claude, codex])).toEqual({ label: "Continue", enabled: true });
+  expect(aiStepActs([claude, signedOut])).toEqual({ label: "Continue with Claude only", enabled: true });
   expect(aiStepActs([{ ...claude, state: "signed-out" }, signedOut])).toEqual({
-    said: "",
     label: "Sign in to continue",
     enabled: false,
   });
@@ -212,11 +209,6 @@ test("the AI step waits for Continue (ADR 0058): both ready says so and offers C
     "Continue with Codex only",
     "Sign in to continue",
   ]);
-  // No copy says the step moves on by itself.
-  for (const acts of [aiStepActs([claude, codex]), aiStepActs([claude, signedOut])]) {
-    expect(acts.said).not.toContain("by itself");
-    expect(acts.said).not.toContain("Moving on");
-  }
 });
 
 test("each AI's line in the setup says its state; one that can't be used says why, the command included", () => {
@@ -298,7 +290,7 @@ test("each AI's row offers the one action its state needs: a sign-in only to one
   const claude = { ...engine("claude", "Claude"), version: "2.4.1" };
   const check = { type: "engine.check" } as const;
   expect(engineSetupAction({ ...claude, state: "signed-out" })).toEqual({
-    label: "Sign in in a terminal",
+    label: "Sign in from a terminal",
     command: { type: "engine.signIn", id: "claude" },
     enabled: true,
   });
@@ -371,10 +363,9 @@ test("an AI at its limit in setup says when it resets, and Check again finds it 
   // Both at their limit: no job waits during setup, so each row offers Check again, which reads the engines again.
   const check = { label: "Check again", command: { type: "engine.check" }, enabled: true } as const;
   expect([claude, codex].map(engineSetupAction)).toEqual([check, check]);
-  expect(aiStepActs([claude, codex])).toEqual({ said: "", label: "Continue", enabled: false });
+  expect(aiStepActs([claude, codex])).toEqual({ label: "Continue", enabled: false });
   // Once the check finds Claude ready after its reset, Continue goes on with it.
   expect(aiStepActs([{ ...claude, state: "ready", limitUntil: null }, codex])).toEqual({
-    said: "Claude is ready.",
     label: "Continue with Claude only",
     enabled: true,
   });
@@ -385,25 +376,22 @@ test("with no AI ready, Continue asks for a sign-in only when one is signed out;
   const codex = engine("codex", "Codex");
   const unfinished = { ...codex, state: "self-test-unfinished" } as const;
   const atLimit = { ...claude, state: "limit" } as const;
-  expect(aiStepActs([atLimit, unfinished])).toEqual({ said: "", label: "Continue", enabled: false });
+  expect(aiStepActs([atLimit, unfinished])).toEqual({ label: "Continue", enabled: false });
   expect(
     aiStepActs([
       { ...claude, state: "failed-self-test" },
       { ...codex, state: "missing" },
     ]),
   ).toEqual({
-    said: "",
     label: "Continue",
     enabled: false,
   });
   expect(aiStepActs([atLimit, { ...codex, state: "signed-out" }])).toEqual({
-    said: "",
     label: "Sign in to continue",
     enabled: false,
   });
   // One ready: Continue with it only, whatever the other's state.
   expect(aiStepActs([claude, unfinished])).toEqual({
-    said: "Claude is ready.",
     label: "Continue with Claude only",
     enabled: true,
   });

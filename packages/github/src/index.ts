@@ -6,32 +6,33 @@
 // it enters; the rate-limit headers of every answer are read; and, built with a list of repositories (`live.json`'s:
 // the sandboxes and Lookover's own), any other is refused before a request leaves and cut from what an installation
 // lists. Built with none, nothing is refused: the product uses what the shared App is installed on.
-// Interface: `createGitHub({ keeper | session, repositories?, api?, web?, clock?, fetch?, sleep?, secret? })`, signed
-// in as the person whose sign-in `keeper` keeps, or by the `session` given, gives the two host ports of contracts,
-// `intake` and `writer`, plus `rateLimit()` (the last headers read), `view(change, commit?)` (contracts' `HostView`,
-// what GitHub shows for a change now: the checks of that commit or of the head, the reviews with their inline
-// comments, the conversation's comments with their 👀 and 🚀 counts; the live run reads it back) and `identity(repo)`
-// (the repository's owner and who posts, for the live snapshot). `api` is GitHub's API address
+// Interface: `createGitHub({ keeper | session, repositories?, api?, web?, clock?, fetch?, sleep?, deadline?,
+// secret? })`, signed in as the person whose sign-in `keeper` keeps, or by the `session` given, gives the two host
+// ports of contracts, `intake` and `writer`, plus `rateLimit()` (the last headers read), `view(change, commit?)`
+// (contracts' `HostView`, what GitHub shows for a change now: the checks of that commit or of the head, the reviews
+// with their inline comments, the conversation's comments with their 👀 and 🚀 counts; the live run reads it back) and
+// `identity(repo)` (the repository's owner and who posts, for the live snapshot). `api` is GitHub's API address
 // (`https://api.github.com` when not given); `web` its web address, read only for the sign-in's OAuth endpoints
 // (`GITHUB_WEB` when not given; the links the app shows are the service's, contracts' `githubLinks`).
 // `secret`, on each, is given every secret the adapter comes to hold (a device code, each person's token and refresh
 // token) before any request carries it, so the service's log removes it (ADR 0054); the adapter itself logs nothing.
-// Signing in (ADR 0066): `createHostSignIn({ api?, web?, clock?, fetch?, secret? })` is contracts' `HostSignIn` for
-// the shared App (`SHARED_APP.clientId`, no secret): `startSignIn` (GitHub's device code: the code, its page, its
-// expiry and interval), `pollSignIn` (once: `pending`, `slow-down` with the interval GitHub gives, `expired`,
-// `denied`, or the tokens issued, the code spent), `person` (whose a token is, `GET /user`, asked apart so the tokens
-// survive it failing) and `refreshSignIn` (both tokens renewed, the refresh token rotated, the person kept). On
-// `keeper`, the session reads the sign-in from the keeper on first use, gives the same token for every repository,
-// posts as the person under the shared App's id, and renews it five minutes before it expires, one refresh at a time,
-// reading the keeper again first (another process may have renewed it) and writing the renewed sign-in back before
-// its token is used.
+// `sleep` and `deadline`, on each, are the waits of a request tried again (ADR 0080), real timers when not given.
+// Signing in (ADR 0066): `createHostSignIn({ api?, web?, clock?, fetch?, sleep?, deadline?, secret? })` is contracts'
+// `HostSignIn` for the shared App (`SHARED_APP.clientId`, no secret): `startSignIn` (GitHub's device code: the code,
+// its page, its expiry and interval), `pollSignIn` (once: `pending`, `slow-down` with the interval GitHub gives,
+// `expired`, `denied`, or the tokens issued, the code spent), `person` (whose a token is, `GET /user`, asked apart so
+// the tokens survive it failing) and `refreshSignIn` (both tokens renewed, the refresh token rotated, the person
+// kept). On `keeper`, the session reads the sign-in from the keeper on first use, gives the same token for every
+// repository, posts as the person under the shared App's id, and renews it five minutes before it expires, one refresh
+// at a time, reading the keeper again first (another process may have renewed it) and writing the renewed sign-in back
+// before its token is used.
 // What the person reaches through the shared App (ADR 0066): `createHostAccounts({ keeper, repositories?, api?, web?,
-// clock?, fetch?, secret? })` is contracts' `HostAccounts`, on the person's session over the sign-in `keeper` keeps:
-// `person()` (`GET /user`) and `accounts()` (`GET /user/installations`, every page, the shared App's only, then each
-// one's `GET /user/installations/{id}/repositories`, every page, archived ones and any off the list left out, owner and
-// name as GitHub gives them). A suspended installation is its account's cause (`uninstalled`, suspended), its
-// repositories not asked for; an organisation asking for SAML SSO is its account's `sso`; one gone between the reads
-// is left out; any other refusal is the call's.
+// clock?, fetch?, sleep?, deadline?, secret? })` is contracts' `HostAccounts`, on the person's session over the
+// sign-in `keeper` keeps: `person()` (`GET /user`) and `accounts()` (`GET /user/installations`, every page, the shared
+// App's only, then each one's `GET /user/installations/{id}/repositories`, every page, archived ones and any off the
+// list left out, owner and name as GitHub gives them). A suspended installation is its account's cause (`uninstalled`,
+// suspended), its repositories not asked for; an organisation asking for SAML SSO is its account's `sso`; one gone
+// between the reads is left out; any other refusal is the call's.
 // A pull request is a fork's when its head repository's id isn't its base's, or GitHub gives none (a deleted fork;
 // ADR 0048); `fetchSpec` reads the default branch at each call, with the person's token, so a rename is followed.
 // Invariants: a check is created `queued` or `in_progress`, patched with its status and output while it is not
@@ -71,17 +72,22 @@
 // reason to skip its items.
 // Error modes: everything it throws is a `HostError`. `not_found` for a repository or change GitHub has not, for one
 // off the list (before any request), for a commit compare doesn't know or two with no common history, and for a
-// comment a reaction can't find; `unauthorized` for a token or permission GitHub rejects, never for a secondary
-// limit; `rate_limited` when GitHub asks to wait (a 429, `retry-after`, `x-ratelimit-remaining: 0`, or a 403 whose
-// words name a secondary limit), its `retryAt` when GitHub said (`retry-after` from now, else the
-// `x-ratelimit-reset` time); `unplaceable_comment` for an inline comment GitHub can't put on the diff ("could not be
-// resolved", "must be part of the diff", "… of the same hunk"; nothing of the review is posted); `too_large` for a
-// check output over `CHECK_OUTPUT_MAX_BYTES` or a review body, comment or reply over `COMMENT_MAX_BYTES` (nothing is
-// sent), and for GitHub's own 422 "Body is too long"; `unavailable` for a network failure, a server error, GitHub's
-// 422 "An internal error occurred, please try again" (seen to save the review all the same) or a payload of a shape it
-// doesn't know; `invalid` for any other `422`. Nothing here retries but a token GitHub no longer
-// takes: `publish` does. `view` shows an inline comment as GitHub does after a push: `line` (and a range's `endLine`)
-// null once outdated, `originalLine` where it was posted.
+// comment a reaction can't find; `unauthorized` for a token or permission GitHub rejects, never for a secondary limit;
+// `rate_limited` when GitHub asks to wait (a 429, `retry-after`, `x-ratelimit-remaining: 0`, or a 403 whose words name
+// a secondary limit), its `retryAt` when GitHub said (`retry-after` from now, else the `x-ratelimit-reset` time);
+// `unplaceable_comment` for an inline comment GitHub can't put on the diff ("could not be resolved", "must be part of
+// the diff", "… of the same hunk"; nothing of the review is posted); `too_large` for a check output over
+// `CHECK_OUTPUT_MAX_BYTES` or a review body, comment or reply over `COMMENT_MAX_BYTES` (nothing is sent), and for
+// GitHub's own 422 "Body is too long"; `unavailable` for a network failure, a server error, GitHub's 422 "An internal
+// error occurred, please try again" (seen to save the review all the same) or a payload of a shape it doesn't know;
+// `invalid` for any other `422`. A brief network failure is tried again (ADR 0080): every try has a time limit, 30 s
+// for a read, 60 s for a write, the body read included ("no answer within 30 s"); a read (a GET, or a GraphQL query
+// its caller marks `read`) is tried 3 times in all, 1 s then 3 s apart, after any failure of the connection or a 502,
+// 503 or 504; a write is tried again only after a failure that means it never reached GitHub (no address, the
+// connection refused, the certificate refused: an exact list of codes). What still fails is `unavailable`, with the
+// last failure's words and the tries it took; a limit or any other refusal is never tried again. Nothing else here
+// retries but a token GitHub no longer takes: `publish` does. `view` shows an inline comment as GitHub does after a
+// push: `line` (and a range's `endLine`) null once outdated, `originalLine` where it was posted.
 // Signing in's errors: GitHub's OAuth endpoints answer their refusals with status 200 and an `error` field; the device
 // flow's own are polls' outcomes, a refresh's `bad_refresh_token` (or `incorrect_client_credentials`, a refresh token
 // GitHub doesn't know) is `unauthorized` with the cause `signed-out`, any other is `invalid`; a network failure or a

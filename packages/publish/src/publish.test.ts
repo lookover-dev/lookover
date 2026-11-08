@@ -1473,7 +1473,10 @@ test("a kept reply cut to fit still ends by saying the owner decides if it is ke
   ).toBe(true);
 });
 
-test("an answer with no words is never sent: no empty reply on the thread", async () => {
+test.each([
+  ["an answer with no words", "answered", " \n "],
+  ["a still-present reason of hidden characters and spaces alone", "still_present", "​⁠ \n﻿‮ "],
+] as const)("%s is never sent: no empty reply on the thread", async (_, kind, why) => {
   const github = host();
   const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
   await publisher.publish(round1);
@@ -1483,7 +1486,7 @@ test("an answer with no words is never sent: no empty reply on the thread", asyn
       ...answering,
       reconciled: {
         ...answering.reconciled,
-        replies: [{ findingId: F1.id, kind: "answered", why: " \n " }],
+        replies: [{ findingId: F1.id, kind, why }],
       },
     }),
   );
@@ -2269,7 +2272,10 @@ test("an hour of refusals gives up with the last refusal; the job's check comple
     run: { id: round1.run.id, engine: "claude", startedAt: round1.run.startedAt },
     rounds: 0,
     loop: "open",
-    standing: { kind: "ended", ended: { kind: "failed", failure: "publish_failed" } },
+    standing: {
+      kind: "ended",
+      ended: { kind: "failed", failure: { kind: "publish_failed", cause: null, limitMs: null } },
+    },
     onlyCodex: false,
     at: time.now(),
     checkId: created,

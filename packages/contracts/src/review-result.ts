@@ -77,8 +77,11 @@ const conclusion = enumOf<CheckConclusion | "failure" | "skipped" | "cancelled">
  */
 const nextAction = enumOf<NextAction | "reply" | "wait">()(["fix", "reply", "wait", "stop", "ask_human"]);
 const claimKind = enumOf<ClaimKind>()(["claimed_fixed", "wont_fix", "disputed", "deferred", "question"]);
-/** Why a finding was settled (its status but `open`), or `kept`: the reviewer kept it open after a claim. */
-const resolutionKind = enumOf<Exclude<FindingStatus, "open"> | "kept">()([
+/**
+ * Why a finding was settled (its status but `open`), or `kept`: the reviewer kept it open after a claim, or
+ * `still_present`: a push left it there, nobody claiming anything, and the finder said why (ADR 0081).
+ */
+const resolutionKind = enumOf<Exclude<FindingStatus, "open"> | "kept" | "still_present">()([
   "verified_fixed",
   "withdrawn",
   "acknowledged",
@@ -86,6 +89,7 @@ const resolutionKind = enumOf<Exclude<FindingStatus, "open"> | "kept">()([
   "escalated",
   "obsolete",
   "dismissed",
+  "still_present",
 ]);
 const placement = z.enum(["inline", "status", "check_only"]);
 const engine = enumOf<EngineId>()(["claude", "codex"]);

@@ -168,11 +168,11 @@ test("the posting step says how many posts are sent of the round's, and while Gi
     "Posted 2 of 4. GitHub asked to wait, trying again at 14:05.",
   );
   expect(postingText({ sent: 1, owed: 5, wait: { until: at, refusal: "unavailable" } }, now)).toBe(
-    "Posted 1 of 5. GitHub did not answer, trying again at 14:05.",
+    "Posted 1 of 5. GitHub didn't answer, trying again at 14:05.",
   );
   // A wait past midnight says its day, as every time the app shows against the service's clock does.
   const late = new Date(2026, 9, 6, 23, 59).getTime();
   expect(
     postingText({ sent: 1, owed: 5, wait: { until: at + 86_400_000, refusal: "unavailable" } }, late),
-  ).toBe("Posted 1 of 5. GitHub did not answer, trying again tomorrow at 14:05.");
+  ).toBe("Posted 1 of 5. GitHub didn't answer, trying again tomorrow at 14:05.");
 });

@@ -112,7 +112,12 @@ export function createView(api: GitHubApi, session: Session, allowed: Allowed) {
       for (let at = 0; at < ids.length; at += NODES_MAX) {
         const variables = { ids: ids.slice(at, at + NODES_MAX) };
         // A comment deleted since the REST read comes back NOT_FOUND beside partial data: the view fails, on purpose.
-        const read = await graphql(api, token, { query: NODES, variables, what: "nodes" }, minimizedNodes);
+        const read = await graphql(
+          api,
+          token,
+          { query: NODES, variables, what: "nodes", read: true },
+          minimizedNodes,
+        );
         for (const node of read.nodes) if (node) hidden.set(node.id, minimizedOf(node));
       }
 

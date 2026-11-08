@@ -172,6 +172,8 @@ function round(
   const { strictness = "recommended", ...input } = over;
   return reconcile(prior, found, {
     round: prior.length === 0 ? 1 : 2,
+    // Round 1 checked SHA_1: a round on it is asked again on the same commit, one on SHA_2 follows a push.
+    lastChecked: prior.length === 0 ? null : SHA_1,
     settings: { strictness },
     rules: [
       { id: "secrets", enabled: true, text: "Never log a secret." },
@@ -770,6 +772,132 @@ test("a raised finding carries no claim and was never kept; a round replies on n
   expect(r.replies).toEqual([]);
 });
 
+// Still present after a push (ADR 0081): a finding on its thread, nobody claiming anything, says the finder's reason.
+
+/** A finding round 1 posted with its own thread (an inline comment), open, on line `n`. */
+const threaded = (n: number, meaning: string, extra: Partial<Finding> = {}) =>
+  earlier(n, meaning, "open", "should_fix", { commented: true, ...extra });
+
+test("a finding still present after a push, with no claim, gets the finder's reason on its thread; nothing is counted", () => {
+  let ledger = [threaded(1, "a"), threaded(2, "b")];
+  // Three pushes, each a new commit, the finder each time saying why F1 still holds; F2 gone at the first.
+  const commits = [SHA_1, SHA_2, commitSha("c3d4e5f"), commitSha("d4e5f60")];
+  for (const n of [2, 3, 4]) {
+    const r = round(
+      ledger,
+      outcome({
+        sha: commits[n - 1] ?? SHA_1,
+        earlier: [
+          {
+            id: findingId("F1"),
+            verdict: "present",
+            why: ` The cap is 50 now, still above 20 (round ${n}). `,
+          },
+          ...(n === 2 ? [{ id: findingId("F2"), verdict: "gone" as const, why: "Fixed." }] : []),
+        ],
+      }),
+      { round: n, lastChecked: commits[n - 2] ?? null },
+    );
+    expect(r.replies).toEqual([
+      {
+        findingId: findingId("F1"),
+        kind: "still_present",
+        why: `The cap is 50 now, still above 20 (round ${n}).`,
+      },
+    ]);
+    expect(r.loop).toBe("open");
+    ledger = r.findings;
+  }
+  // The finding is as round 1 wrote it: no keep, no claim, its words unchanged.
+  expect(ledger[0]).toEqual(threaded(1, "a"));
+});
+
+test("no still-present reply on the same commit, an escalated finding, an empty reason, or a finding with no thread", () => {
+  const prior = [
+    threaded(1, "a"),
+    threaded(2, "b", { status: "escalated", kept: 2 }),
+    threaded(3, "c"),
+    // Posted in the status block only: no thread to reply on.
+    earlier(4, "d", "open", "should_fix", { commented: false }),
+    // Not posted: strictness kept it off the pull request.
+    earlier(5, "e", "open", "consider", { posted: false }),
+    // Present, but only as the finder listed it again: no reason of its own.
+    threaded(6, "f"),
+    threaded(7, "g"),
+  ];
+  const found = outcome({
+    sha: SHA_2,
+    candidates: [candidate("f", "should_fix", { line: 6 })],
+    earlier: [
+      said(1, "present"),
+      said(2, "present"),
+      { id: findingId("F3"), verdict: "present", why: "   " },
+      said(4, "present"),
+      said(5, "present"),
+      said(7, "unknown"),
+    ],
+  });
+  const pushed = round(prior, found, { lastChecked: SHA_1 });
+  expect(pushed.replies).toEqual([{ findingId: findingId("F1"), kind: "still_present", why: "Why of F1." }]);
+  // Asked again on the commit the last round checked (a reply elsewhere): the thread doesn't repeat itself.
+  expect(round(prior, found, { lastChecked: SHA_2 }).replies).toEqual([]);
+});
+
+test("a finding listed again but said gone gets no still-present reply: the gone verdict's reason says it is fixed", () => {
+  const r = round(
+    [threaded(1, "a")],
+    outcome({
+      sha: SHA_2,
+      candidates: [candidate("a", "should_fix", { line: 1 })],
+      earlier: [{ id: findingId("F1"), verdict: "gone", why: "The null check is now present." }],
+    }),
+    { lastChecked: SHA_1 },
+  );
+  // Listed again, it stays open: never verified fixed while the reviewer still sees it.
+  expect(r.findings.map((f) => [String(f.id), f.status])).toEqual([["F1", "open"]]);
+  expect(r.replies).toEqual([]);
+});
+
+test("a force-push back to an earlier commit is a push: the finding still present says so again", () => {
+  const r = round([threaded(1, "a")], outcome({ sha: SHA_1, earlier: [said(1, "present")] }), {
+    lastChecked: SHA_2,
+  });
+  expect(r.replies).toEqual([{ findingId: findingId("F1"), kind: "still_present", why: "Why of F1." }]);
+});
+
+test("a claim's answer wins over a still-present reply: the claim is answered, and kept counts", () => {
+  const prior = [threaded(1, "a"), threaded(2, "b")];
+  const r = round(prior, outcome({ sha: SHA_2, earlier: [said(1, "present"), said(2, "present")] }), {
+    lastChecked: SHA_1,
+    threads: { claims: [claim(1, "claimed_fixed"), claim(2, "question")] },
+  });
+  expect(r.replies).toEqual([
+    { findingId: findingId("F1"), kind: "kept", why: "Why of F1." },
+    { findingId: findingId("F2"), kind: "answered", why: "Why of F2." },
+  ]);
+  expect(r.findings.map((f) => f.kept)).toEqual([1, 0]);
+});
+
+test("today's identity rule (#63): an earlier finding listed again on its edited line is a new finding, on a thread of its own", () => {
+  // Round 1 found the cap too high on line 3; the push edited that very line, and the finder listed it again under
+  // `findings` instead of answering it in `earlier`.
+  const before = raised(3, "cap_too_high", "should_fix", true, 1, { line: 3, text: "const CAP = 100;" });
+  const r = round(
+    [{ ...before, commented: true }],
+    outcome({
+      sha: SHA_2,
+      candidates: [candidate("cap_too_high", "should_fix", { line: 3, text: "const CAP = 50;" })],
+      earlier: [said(3, "present")],
+    }),
+    { lastChecked: SHA_1 },
+  );
+  expect(ledgerAs(r.findings)).toEqual([
+    ["F3", "open", true],
+    ["F4", "open", true],
+  ]);
+  expect(ids(r.post)).toEqual(["F4"]);
+});
+
 // A finding's identity (ADR 0044, #63): the same when the meanings match and the locations match, or when either
 // has no line text; in one round, also the same category on the same line.
 
@@ -865,6 +993,7 @@ test("a finding raised without its line's text, given it in round 2, stays the s
     round: 2,
     settings: { strictness: "recommended" },
     rules: [],
+    lastChecked: SHA_1,
   });
   // Its location fingerprint follows the text it took.
   expect(second.findings[0]?.fingerprints).toEqual(quoted(5).fingerprints);
@@ -872,6 +1001,7 @@ test("a finding raised without its line's text, given it in round 2, stays the s
     round: 3,
     settings: { strictness: "recommended" },
     rules: [],
+    lastChecked: SHA_2,
   });
   expect(third.findings.map((f) => [String(f.id), f.status, f.line])).toEqual([["F1", "open", 7]]);
   expect(third.raised).toEqual([]);

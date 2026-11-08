@@ -7,6 +7,7 @@ import {
   type ClaimKind,
   newestThread,
   type ReviewResultFinding,
+  STILL_PRESENT,
 } from "@lookover/contracts";
 import { lookoverReply } from "./threads.ts";
 import { EXIT, forTheAgent, type Outcome } from "./wait.ts";
@@ -35,10 +36,32 @@ function documentOf(outcome: Outcome, findings: unknown[]) {
   };
 }
 
-/** A finding as text: its line, then its body indented, then `more` lines, then a blank line. */
-function printed(f: ReviewResultFinding, w: Pick<World, "out">, more: string[] = []): void {
+/**
+ * The body's lines as `wait` prints them: after round `round`'s reason when that round found the finding still present
+ * after a push (ADR 0081), today's words first and round 1's after them; else the body alone.
+ */
+function bodyOf(f: ReviewResultFinding, round: number | null): string[] {
+  const { resolution } = f;
+  const lines = f.body.split("\n");
+  if (resolution?.kind !== "still_present" || resolution.round !== round || !resolution.explanation)
+    return lines;
+  const [first = "", ...rest] = lines;
+  const [said = "", ...more] = resolution.explanation.split("\n");
+  return [`${STILL_PRESENT}: ${said}`, ...more, `Round ${f.raised.round} said: ${first}`, ...rest];
+}
+
+/**
+ * A finding as text: its line, then its body indented (this round's reason first when `round` is given, `bodyOf`),
+ * then `more` lines, then a blank line.
+ */
+function printed(
+  f: ReviewResultFinding,
+  w: Pick<World, "out">,
+  more: string[] = [],
+  round: number | null = null,
+): void {
   w.out(`${f.id} ${f.severity} ${where(f)}: ${f.title}`);
-  for (const line of f.body.split("\n")) w.out(`  ${line}`);
+  for (const line of bodyOf(f, round)) w.out(`  ${line}`);
   for (const line of more) w.out(`  ${line}`);
   w.out("");
 }
@@ -47,7 +70,7 @@ export function report(outcome: Outcome, json: boolean, w: Pick<World, "out" | "
   const findings = forTheAgent(outcome.result);
   w.err(outcome.message);
   if (json) w.out(JSON.stringify(documentOf(outcome, findings), null, 2));
-  else for (const f of findings) printed(f, w);
+  else for (const f of findings) printed(f, w, [], outcome.result?.loop.round ?? null);
   return EXIT[outcome.meaning];
 }
 

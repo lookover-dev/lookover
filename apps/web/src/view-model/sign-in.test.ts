@@ -322,7 +322,11 @@ test("signed in and installed: who you are, then the list, each account reached 
   } as const;
   const view = step(at("done", connection, repos));
   expect(view.signIn).toMatchObject({ state: "done", text: "Signed in as sasensi." });
-  expect(view.accounts).toMatchObject({ state: "done", text: "Install it on more accounts any time." });
+  // ledger-dev still asks for SSO: the step is done, and says the rest can wait, not that every account is.
+  expect(view.accounts).toMatchObject({
+    state: "done",
+    text: "Enough to go on. Set up the other accounts below now, or later in Settings.",
+  });
   expect(view.accounts.list.rows.map((r) => [r.account, r.detail])).toEqual([
     ["sasensi", "2 repositories."],
     ["ledger-co", "1 repository."],
@@ -333,6 +337,30 @@ test("signed in and installed: who you are, then the list, each account reached 
   expect(view.primary).toEqual({ label: "Continue", enabled: true, starts: false });
   expect(view.done).toBe(true);
   expect(SIGN_IN_TEXT.done).toBe("GitHub is connected.");
+});
+
+test("done with every account installed and used: more accounts any time; one still without it: the rest can wait", () => {
+  const person = { person: SASENSI, id: connectionId("github:sasensi") };
+  const own = { account: { ...SASENSI, type: "User" as const }, installationId: 1, cause: null, owner: true };
+  const used = [repo("sasensi", "ledger-api")];
+  const all = step(at("done", { ...person, accounts: [own] }, used));
+  expect(all.accounts.text).toBe("Install it on more accounts any time.");
+  const unreached = [
+    {
+      account: { id: 4242, login: "ledger-labs" },
+      kind: "organisation" as const,
+      owner: true,
+      askedAt: null,
+    },
+  ];
+  const some = step(at("done", { ...person, accounts: [own], unreached }, used));
+  expect(some.accounts).toMatchObject({
+    state: "done",
+    text: "Enough to go on. Set up the other accounts below now, or later in Settings.",
+  });
+  // Every line the row can say is held, so an account installed later moves nothing under it.
+  expect(some.accounts.held).toContain(all.accounts.text);
+  expect(all.accounts.held).toContain(some.accounts.text);
 });
 
 test("installed with no repository: said, GitHub's page in the list", () => {

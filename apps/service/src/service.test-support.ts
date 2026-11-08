@@ -28,6 +28,7 @@ import {
   repositoryId,
   type SettingValues,
   type Setup,
+  type SetupStep,
   SSE,
   type State,
   statusOf,
@@ -115,6 +116,15 @@ export const pr2: FakeChange = {
   base: { ref: "main", sha: BASE },
   diff: [],
 };
+
+/** Setup on `step`, the App installed with its repositories, nothing else done. */
+export const setupOn = (step: SetupStep): Setup => ({
+  done: false,
+  step,
+  reached: step,
+  github: "done",
+  firstReviewChange: null,
+});
 
 const homes: string[] = [];
 /** The services and rooms a test started, stopped after it. */

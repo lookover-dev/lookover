@@ -20,7 +20,10 @@ import {
   HostError,
   newestThread,
   type RepositoryRef,
+  repositoryId,
+  repositoryName,
   reviewRequest,
+  sameLogin,
 } from "@lookover/contracts";
 import { writerOf } from "@lookover/core";
 import { indexDiff } from "@lookover/diff";
@@ -189,27 +192,43 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
     }
   };
 
+  /** Throws unless the room watches each of `repos`: one never listed can't depart (`apply` holds it nowhere). */
+  const watched = (room: Room, repos: RepositoryRef[]) => {
+    const ids = new Set(room.snapshot().repos.map((r) => r.id));
+    const unlisted = repos.find((repo) => !ids.has(repositoryId(repositoryName(repo))));
+    if (unlisted) throw new Error(`${repositoryName(unlisted)} was never listed: it can't depart`);
+  };
+
+  /** The host lists the change, at its first commit; nothing is listed yet. */
+  const opens = (ref: ChangeRef) => {
+    const change = changeOf(ref);
+    const repo = repoOf(scenario, change);
+    const [first] = change.commits;
+    const listing: FakeChange = {
+      repo,
+      number: change.number,
+      title: change.title,
+      url: `https://github.com/${repo.owner}/${repo.name}/pull/${change.number}`,
+      author: change.author,
+      draft: change.draft ?? false,
+      fork: change.fork ?? false,
+      ...(change.openedAgo === undefined ? {} : { openedAt: clock.now() - change.openedAgo }),
+      head: { ref: change.branch, sha: first.sha },
+      base: { ...world.main },
+      diff: commentableOf(first.diff),
+      messages: [first.message],
+    };
+    host.open(listing);
+    opened.set(changeName(ref), { change, next: 1, closed: false });
+  };
+
   const moves: Moves = {
     open: async (move, room) => {
-      const change = changeOf(move.change);
-      const repo = repoOf(scenario, change);
-      const [first] = change.commits;
-      const shown: FakeChange = {
-        repo,
-        number: change.number,
-        title: change.title,
-        url: `https://github.com/${repo.owner}/${repo.name}/pull/${change.number}`,
-        author: change.author,
-        draft: change.draft ?? false,
-        fork: change.fork ?? false,
-        ...(change.openedAgo === undefined ? {} : { openedAt: clock.now() - change.openedAgo }),
-        head: { ref: change.branch, sha: first.sha },
-        base: { ...world.main },
-        diff: commentableOf(first.diff),
-        messages: [first.message],
-      };
-      host.open(shown);
-      opened.set(changeName(move.change), { change, next: 1, closed: false });
+      opens(move.change);
+      await listed(room);
+    },
+    "open-several": async (move, room) => {
+      for (const ref of move.changes) opens(ref);
       await listed(room);
     },
     push: async (move, room) => {
@@ -274,6 +293,23 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
       engines.setHealth(move.engine, { installed: true, version: move.version, signedIn: true });
       return room.checkEngines();
     },
+    leave: (move, room) => {
+      watched(room, move.repos);
+      for (const repo of move.repos) host.removeRepository(repo);
+      return Promise.resolve();
+    },
+    uninstall: (move, room) => {
+      const { login } = move.organisation;
+      const reached = host.onGitHub().reached.find((r) => sameLogin(r.account.login, login));
+      if (reached === undefined) throw new Error(`The sign-in reaches no ${login}`);
+      watched(room, reached.repositories);
+      host.uninstall(login);
+      return Promise.resolve();
+    },
+    reconnect: (_move, room) =>
+      room.reconnect().catch((error: unknown) => {
+        if (!(error instanceof HostError)) throw error;
+      }),
     command: async (move, room) => {
       const { command } = move;
       if (command.type === "review.request") await room.review(command.changeId);

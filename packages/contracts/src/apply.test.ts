@@ -8,10 +8,13 @@ import {
   changeId,
   commitSha,
   connectionId,
+  type Event,
   emptyReview,
   type Finding,
+  failedTitle,
   findingId,
   GITHUB_WEB,
+  type JobFailure,
   jobId,
   type Repository,
   type ResolvedSettings,
@@ -170,6 +173,7 @@ function job(state: ReviewJob["state"], extra: Partial<ReviewJob> = {}): ReviewJ
     cancel: null,
     failure: null,
     turn: null,
+    askedBy: null,
     ...extra,
   };
 }
@@ -230,10 +234,87 @@ function reviewOf(state: State): Review {
   return review;
 }
 
-test("a new job is recorded, and the timeline keeps what asked for it", () => {
-  const after = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: job("queued") });
-  expect(reviewOf(after).job).toEqual(job("queued"));
-  expect(reviewOf(after).timeline).toEqual([{ at: NOW, sha: null, kind: "queued", trigger: "comment" }]);
+test("a new job is recorded, and the timeline keeps what asked for it, and who", () => {
+  const asked = job("queued", { askedBy: "agent" });
+  const after = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: asked });
+  expect(reviewOf(after).job).toEqual(asked);
+  expect(reviewOf(after).timeline).toEqual([
+    { at: NOW, sha: null, kind: "queued", trigger: "comment", by: "agent" },
+  ]);
+  const opened = job("queued", { trigger: "opened" });
+  const onOpening = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: opened });
+  expect(reviewOf(onOpening).timeline).toEqual([
+    { at: NOW, sha: null, kind: "queued", trigger: "opened", by: null },
+  ]);
+});
+
+test("a request joining a waiting job says who asked, once; another request on it adds nothing (ADR 0081)", () => {
+  const pushed = job("queued", { trigger: "push" });
+  let after = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: pushed });
+  const joined = { ...pushed, askedBy: "person" as const };
+  after = apply(after, { type: "job.changed", at: NOW + 1_000, seq: 2, changeId: ID, job: joined });
+  after = apply(after, {
+    type: "job.changed",
+    at: NOW + 2_000,
+    seq: 3,
+    changeId: ID,
+    job: { ...joined, sha: commitSha("b2c3d4e") },
+  });
+  expect(reviewOf(after).job?.askedBy).toBe("person");
+  expect(reviewOf(after).timeline).toEqual([
+    { at: NOW, sha: null, kind: "queued", trigger: "push", by: null },
+    { at: NOW + 1_000, sha: null, kind: "asked", by: "person" },
+  ]);
+});
+
+test("events stored before ADR 0081 replay: a job with no askedBy and a push by you name no one; a failure, its kind", () => {
+  const { askedBy: _, ...old } = job("queued");
+  // A failure with no `cause` or `limitMs` at all.
+  const oldFailure: JobFailure = JSON.parse(
+    JSON.stringify({ kind: "prepare_failed", engine: null, detail: "fatal: early EOF" }),
+  );
+  const base = snapshot().changes[ID];
+  if (!base) throw new Error("No change");
+  // As the store keeps them, JSON written before the fields were, read back.
+  const stored: Event[] = JSON.parse(
+    JSON.stringify([
+      { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: old },
+      {
+        type: "job.changed",
+        at: NOW + 500,
+        seq: 2,
+        changeId: ID,
+        job: { ...old, sha: commitSha("c3d4e5f") },
+      },
+      {
+        type: "change.pushed",
+        at: NOW + 1_000,
+        seq: 3,
+        changeId: ID,
+        sha: commitSha("b2c3d4e"),
+        commits: 1,
+        by: "you",
+      },
+      {
+        type: "job.changed",
+        at: NOW + 2_000,
+        seq: 4,
+        changeId: ID,
+        job: { ...old, sha: commitSha("b2c3d4e"), state: "failed", failure: oldFailure },
+      },
+    ]),
+  );
+  const after = stored.reduce(apply, snapshot());
+  expect(reviewOf(after).timeline).toEqual([
+    { at: NOW, sha: null, kind: "queued", trigger: "comment", by: null },
+    { at: NOW + 1_000, sha: commitSha("b2c3d4e"), kind: "pushed", by: null, commits: 1 },
+    { at: NOW + 2_000, sha: commitSha("b2c3d4e"), kind: "failed", failure: oldFailure },
+  ]);
+  // Worded by its kind, as before causes were.
+  const failed = reviewOf(after).timeline.at(-1);
+  expect(failed?.kind === "failed" ? failedTitle(failed.failure) : null).toBe(
+    "The review failed: the code could not be fetched",
+  );
 });
 
 test("a job deferred while it ran loses its run, and the timeline says why once", () => {
@@ -262,6 +343,52 @@ test("a skipped job and why are kept in the timeline", () => {
   const after = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: skipped });
   expect(reviewOf(after).job).toEqual(skipped);
   expect(reviewOf(after).timeline).toEqual([{ at: NOW, sha: null, kind: "skipped" }]);
+});
+
+test("a job that ends failed adds a failed entry with its failure, once (ADR 0081)", () => {
+  const failure = {
+    kind: "prepare_failed",
+    detail: "fetch_failed: git took too long (idle)",
+    engine: "claude",
+    cause: "git_silent",
+    limitMs: 120_000,
+  } as const;
+  const failed = job("failed", { failure });
+  let after = apply(snapshot({ job: job("running") }), {
+    type: "job.changed",
+    at: NOW,
+    seq: 1,
+    changeId: ID,
+    job: failed,
+  });
+  expect(reviewOf(after).timeline).toEqual([{ at: NOW, sha: SHA, kind: "failed", failure }]);
+  // The same failed job sent again adds nothing.
+  after = apply(after, { type: "job.changed", at: NOW + 1, seq: 2, changeId: ID, job: failed });
+  expect(reviewOf(after).timeline).toHaveLength(1);
+});
+
+test("a round kept whose posts were given up: the round's entry, then its job's failure (ADR 0081)", () => {
+  const failure = {
+    kind: "publish_failed",
+    detail: "",
+    engine: "codex",
+    cause: null,
+    limitMs: null,
+  } as const;
+  const after = apply(snapshot({ job: job("running") }), {
+    type: "round.finished",
+    at: NOW,
+    seq: 1,
+    changeId: ID,
+    round: ROUND_1,
+    job: job("failed", { failure }),
+    newCommits: 0,
+    findings: [],
+    loop: "open",
+    preview: false,
+  });
+  expect(reviewOf(after).timeline.map((t) => t.kind)).toEqual(["posted", "failed"]);
+  expect(reviewOf(after).timeline[1]).toEqual({ at: NOW, sha: SHA, kind: "failed", failure });
 });
 
 test("a run that starts records its run and the job the event carries", () => {
@@ -605,12 +732,19 @@ test("a settings change records what now applies, for the owner and for each rep
   ]);
 });
 
-test("an opened change and the commits pushed to it are kept in its timeline, with who did it", () => {
+test("an opened change, dated when the host says it opened, and the commits pushed to it are kept in its timeline", () => {
   const other = changeId("sam/app#2");
   const base = snapshot().changes[ID];
   if (!base) throw new Error("No change");
   const pushed = commitSha("b2c3d4e");
-  let after = apply(snapshot(), { type: "change.opened", at: NOW, seq: 1, change: { ...base, id: other } });
+  // Opened on GitHub two days before Lookover first listed it (ADR 0081).
+  const opened = NOW - 2 * 24 * 3_600_000;
+  let after = apply(snapshot(), {
+    type: "change.opened",
+    at: NOW,
+    seq: 1,
+    change: { ...base, id: other, openedAt: opened },
+  });
   after = apply(after, {
     type: "change.pushed",
     at: NOW + 1_000,
@@ -620,10 +754,21 @@ test("an opened change and the commits pushed to it are kept in its timeline, wi
     commits: 2,
     by: "agent",
   });
+  after = apply(after, {
+    type: "change.pushed",
+    at: NOW + 2_000,
+    seq: 3,
+    changeId: other,
+    sha: SHA,
+    commits: 1,
+    by: null,
+  });
   expect(after.reviews[other]?.timeline).toEqual([
-    { at: NOW, sha: SHA, kind: "opened", by: "sam" },
+    { at: opened, sha: SHA, kind: "opened", by: "sam" },
     { at: NOW + 1_000, sha: pushed, kind: "pushed", by: "agent", commits: 2 },
+    { at: NOW + 2_000, sha: SHA, kind: "pushed", by: null, commits: 1 },
   ]);
+  expect(after.reviews[other]?.updatedAt).toBe(NOW + 2_000);
 });
 
 test("a draft opened again, marked ready, is a draft no more and keeps its review", () => {
@@ -741,13 +886,14 @@ test("a change reopened comes back with the review it had: its next round follow
   const base = before.changes[ID];
   if (!base) throw new Error("No change");
   const closed = apply(before, { type: "change.closed", at: NOW, seq: 1, changeId: ID });
+  // Reopened: the entry is when Lookover saw it again, not when it was first opened.
   const reopened = apply(closed, {
     type: "change.opened",
     at: NOW + 1_000,
     seq: 2,
-    change: { ...base, openedAt: NOW + 1_000 },
+    change: { ...base, openedAt: NOW - 120_000 },
   });
-  expect(reopened.changes[ID]).toEqual({ ...base, openedAt: NOW + 1_000 });
+  expect(reopened.changes[ID]).toEqual({ ...base, openedAt: NOW - 120_000 });
   expect(reviewOf(reopened)).toMatchObject({ rounds: [round], job: job("done"), loop: "settled" });
   expect(reviewOf(reopened).timeline).toEqual([
     { at: NOW - 60_000, sha: SHA, kind: "opened", by: "sam" },
@@ -777,6 +923,7 @@ function rule(id: string, repo: string | null, raised = 0): Rule {
     acted: 0,
     enabled: true,
     parentOff: false,
+    nestedIn: false,
     nested: 0,
   };
 }

@@ -15,6 +15,8 @@ Then tell your agent:
 Get pull request #12 through Lookover's review: fix what it found and push.
 ```
 
+"Look over this pull request" or "lookover #12" starts it too. Handed a pull request with nothing to push, the agent checks it out first, then waits on it.
+
 Installed from npm, `lookover` is on your PATH too. If npm's global folder isn't, the step names that folder (`npm prefix -g` names it too; on macOS and Linux, add its `bin`). The skill doesn't need it.
 
 ## The loop
@@ -40,7 +42,7 @@ Then `wait` resolves the threads of the findings it verified fixed or withdrew. 
 | 4 | A person is needed | Stops and tells you, with the findings. |
 | 5 | Timed out | Runs `wait` again, or tells you. |
 | 6 | Skipped | Stops and says why. A pull request from a fork is reviewed only when you ask: the agent never asks for it. |
-| 7 | The review failed | Runs `wait` once more after a push; if it fails again, tells you. |
+| 7 | The review failed | Stops and tells you what `wait` printed; it doesn't ask again. |
 | 9 | No review appeared | Lookover is probably not running: `lookover status` says. |
 | 10 | A newer commit was pushed | Runs `wait` again, on the new head. |
 | 1, 2 | An error, or a wrong call | Reads the message, fixes the call or tells you. |

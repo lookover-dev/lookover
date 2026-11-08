@@ -45,6 +45,7 @@ const job = (state: JobState, trigger: Trigger, skip: SkipReason | null = null):
   state,
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip,
   cancel: null,
   failure: null,

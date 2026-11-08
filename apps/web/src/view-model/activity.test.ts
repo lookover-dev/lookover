@@ -1,7 +1,7 @@
 // What the engine does while a round runs, in words (ADR 0055): one line per activity in Details › Log, plain text.
 import { expect, test } from "bun:test";
 import type { RunActivity } from "@lookover/contracts";
-import { activityText, liveLog } from "./activity.ts";
+import { activityText, liveLog, logSummary } from "./activity.ts";
 
 test("each activity says what the engine did, its path, pattern or command as it came", () => {
   expect(activityText({ kind: "read", path: "src/invoices.ts" })).toBe("Read src/invoices.ts");
@@ -52,4 +52,11 @@ test("before the engine did anything, and once no round runs, the block says wha
     lines: [],
     empty: "While a round runs, what the AI reads, searches and runs shows here.",
   });
+});
+
+test("the Log's summary counts what it shows: the history's lines, and the live block's while it has any", () => {
+  const read = found("claude", { kind: "read", path: "src/invoices.ts" });
+  expect(logSummary(3, null)).toBe("3 lines · secrets removed");
+  expect(logSummary(1, { activities: [] })).toBe("1 line · secrets removed");
+  expect(logSummary(3, { activities: Array(7).fill(read) })).toBe("3 lines, 7 live · secrets removed");
 });

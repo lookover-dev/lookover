@@ -1,18 +1,17 @@
 // Pieces shared by several screens.
 import type { Command, Review, RunStep, State } from "@lookover/contracts";
-import { type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { reviewPath, useAppState, useListScope, useSend } from "../store.tsx";
 import { useTickingNow } from "../ticking.tsx";
 import { Button, Chip, Eyes, Icon, Row, Said, Tabs } from "../ui/basics.tsx";
 import { Tip } from "../ui/layers.tsx";
-import { duration, LONGEST_RUNNING_TIMES, type WithCommand } from "../view-model/format.ts";
+import { duration, LONGEST_RUNNING_TIMES, SEPARATOR, type WithCommand } from "../view-model/format.ts";
 import {
   confirmerOf,
   confirmSkipped,
   postingText,
   type RunLineParts,
-  runLineParts,
   runSteps,
   stepListText,
   stepSkippedText,
@@ -21,17 +20,19 @@ import {
 import { SAVE_IDLE, SAVE_TEXT, type SaveShown, type SaveStep, saveStep } from "../view-model/save.ts";
 import { scopeTabs } from "../view-model/scope.ts";
 import {
-  authorLabel,
   type ChangeReview,
-  changeLabel,
   chip,
   reviewAgainNote,
   reviewerOf,
   rowAction,
-  rowAge,
-  status,
-  statusLine,
+  rowMeta,
 } from "../view-model/select.ts";
+import {
+  type SquareState,
+  type SubStepState,
+  subStepMark,
+  type TodoMark,
+} from "../view-model/state-square.ts";
 
 /**
  * A page's save stamp, and how a change is sent through it: "Saving…" once sent, "Saved" once the service took
@@ -72,7 +73,6 @@ export function ReviewRow({ item, fresh }: { item: ChangeReview; fresh?: boolean
   const c = chip(item);
   const action = rowAction(item);
   const note = action ? reviewAgainNote(state) : null;
-  const finished = ["settled", "skipped", "cancelled"].includes(status(item).kind);
   const open = () => navigate(reviewPath(item.change));
   const button = action ? (
     <Button size="sm" onClick={() => send(action.command)}>
@@ -86,18 +86,21 @@ export function ReviewRow({ item, fresh }: { item: ChangeReview; fresh?: boolean
       lead={<Chip tone={c.tone}>{c.label}</Chip>}
       title={item.change.title}
       meta={
-        <>
-          <code>{changeLabel(item.change)}</code>
-          <span>{authorLabel(item.change)}</span>
-          <span>
-            {status(item).kind === "running" ? (
-              <RunLine parts={runLineParts(now, item.review)} />
-            ) : (
-              statusLine(state, item, now)
-            )}
-          </span>
-          {finished ? <span>{rowAge(state, item)}</span> : null}
-        </>
+        // One line of text, one separator between its parts all along (`rowMeta`).
+        <span>
+          {rowMeta(state, item, now).map((part, i) => (
+            <Fragment key={part.kind === "change" ? "change" : i}>
+              {i > 0 ? SEPARATOR : null}
+              {part.kind === "change" ? (
+                <code>{part.text}</code>
+              ) : part.kind === "running" ? (
+                <RunLine parts={part} />
+              ) : (
+                part.text
+              )}
+            </Fragment>
+          ))}
+        </span>
       }
       onOpen={open}
       action={note ? <Tip text={note}>{button}</Tip> : button}
@@ -109,7 +112,12 @@ export function ReviewRow({ item, fresh }: { item: ChangeReview; fresh?: boolean
 export function RunLine({ parts }: { parts: RunLineParts }) {
   return (
     <>
-      {parts.doing} · <RunningTime time={parts.time} />
+      {parts.doing}
+      {/* The time's box is one inline grid: the no-break space alone may not hold the dot to it. */}
+      <span className="nowrap">
+        {SEPARATOR}
+        <RunningTime time={parts.time} />
+      </span>
     </>
   );
 }
@@ -256,25 +264,53 @@ export function Sentence({
   );
 }
 
-/** The state of a step or an AI, in a square: an empty ring before, the eyes while waiting, green when done. */
-export function StateSquare({ state }: { state: "done" | "busy" | "idle" }) {
-  return (
-    <span className={`lg ${state}`}>
-      {state === "done" ? <Icon name="check" /> : state === "busy" ? <Eyes /> : <span className="dot" />}
-    </span>
-  );
+/**
+ * Each state's mark: before, the icon of what is not done yet; the eyes while waiting, a check when done, again when
+ * stale, a cross when refused.
+ */
+const MARKS: Record<SquareState, ReactNode> = {
+  install: <Icon name="install" />,
+  "sign-in": <Icon name="sign-in" />,
+  wait: <Icon name="time" />,
+  fix: <Icon name="alert" />,
+  busy: <Eyes />,
+  done: <Icon name="check" />,
+  stale: <Icon name="again" />,
+  refused: <Icon name="close" />,
+};
+
+/** Its class: every mark before anything is done is `todo`, one look whatever is not done yet. */
+const CLASSES: Record<SquareState, string> = {
+  install: "todo",
+  "sign-in": "todo",
+  wait: "todo",
+  fix: "todo",
+  busy: "busy",
+  done: "done",
+  stale: "stale",
+  refused: "refused",
+};
+
+/** The state of a step or an AI, in a square holding its mark, in its state's colour. */
+export function StateSquare({ state }: { state: SquareState }) {
+  return <span className={`lg ${CLASSES[state]}`}>{MARKS[state]}</span>;
 }
+
+/** A detail given as its sentences, not as words with a command in them. */
+const isSentences = (detail: string | WithCommand | readonly string[]): detail is readonly string[] =>
+  Array.isArray(detail);
 
 /**
  * A sub-step's detail, held at the height of the tallest it can show: every one in the same cell, only `shown` seen
- * (as `SameWidth` does for widths), so a sub-step done or undone moves nothing under it, at any width.
+ * (as `SameWidth` does for widths), so a sub-step done or undone moves nothing under it, at any width. A detail given
+ * as sentences (first review's line) draws each as a block of its own (`.held-sentence`), in every copy held.
  */
 export function HeldDetail({
   shown,
   details,
 }: {
-  shown: string | WithCommand;
-  details: readonly (string | WithCommand)[];
+  shown: string | WithCommand | readonly string[];
+  details: readonly (string | WithCommand | readonly string[])[];
 }) {
   const seen = JSON.stringify(shown);
   return (
@@ -283,7 +319,15 @@ export function HeldDetail({
         const key = JSON.stringify(detail);
         return (
           <span key={key} aria-hidden={key === seen ? undefined : true}>
-            <Said words={detail} />
+            {isSentences(detail) ? (
+              detail.map((sentence) => (
+                <span key={sentence} className="held-sentence">
+                  {sentence}
+                </span>
+              ))
+            ) : (
+              <Said words={detail} />
+            )}
           </span>
         );
       })}
@@ -292,31 +336,33 @@ export function HeldDetail({
 }
 
 /**
- * A setup sub-step (design-system.md "State square"): its state, a title, its detail (`.substep-detail`), its one
- * action; and what it asks before its action, under its title and detail as wide as both and the action
- * (`below`: "Where the App lives"), so the action going moves nothing in it.
+ * A setup sub-step (design-system.md "State square"): its state, a title and its one action on one line, its detail
+ * (`.substep-detail`) under the title; and what it holds below (`below`: setup's accounts list) on the title's text
+ * column (`.substep-below`), so the action going moves nothing in it. `todo`, what its square shows before it
+ * is done (a sign-in, an install). Your coding agent's rows have a layout of their own (`coding-agent.tsx`).
  */
 export function SubStep({
   state,
+  todo,
   title,
   children,
   action,
   below,
 }: {
-  state: "done" | "busy" | "current" | "later";
+  state: SubStepState;
+  todo: TodoMark;
   title: ReactNode;
   children: ReactNode;
   action?: ReactNode;
   below?: ReactNode;
 }) {
+  const square = subStepMark(state, todo);
   return (
-    <div className={`engine substep ${state}`}>
-      <StateSquare state={state === "done" ? "done" : state === "busy" ? "busy" : "idle"} />
-      <div>
-        <b>{title}</b>
-        <span className="substep-detail">{children}</span>
-      </div>
-      {action}
+    <div className={`engine substep ${state} mark-${square}`}>
+      <StateSquare state={square} />
+      <b>{title}</b>
+      <span className="substep-detail">{children}</span>
+      {action === undefined ? null : <div className="substep-act">{action}</div>}
       {below ? <div className="substep-below">{below}</div> : null}
     </div>
   );

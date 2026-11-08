@@ -163,7 +163,12 @@ export function createIntake(api: GitHubApi, session: Session, allowed: Allowed)
     const outdated = new Set<string>();
     for (let at = 0; at < ids.length; at += NODES_MAX) {
       const variables = { ids: ids.slice(at, at + NODES_MAX) };
-      const read = await graphql(api, token, { query: OUTDATED, variables, what: "nodes" }, outdatedNodes);
+      const read = await graphql(
+        api,
+        token,
+        { query: OUTDATED, variables, what: "nodes", read: true },
+        outdatedNodes,
+      );
       for (const node of read.nodes) if (node?.outdated) outdated.add(node.id);
     }
     return outdated;

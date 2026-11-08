@@ -54,7 +54,14 @@ import {
   type RunId,
 } from "@lookover/contracts";
 import { endUnsent, loopState } from "@lookover/core";
-import type { Ended, JobCheck, Publisher, Standing, Status } from "@lookover/publish";
+import {
+  type Ended,
+  type JobCheck,
+  type Publisher,
+  type Standing,
+  type Status,
+  shownFailure,
+} from "@lookover/publish";
 import type { JobCheckRef, Store, StoredJob, StoredJobCheck } from "@lookover/store";
 import { said } from "./said.ts";
 
@@ -132,7 +139,7 @@ function endOf(job: ReviewJob): Ended {
       if (job.skip === null) throw new Error(`job ${job.id} is skipped without a reason`);
       return { kind: "skipped", why: job.skip };
     default:
-      return { kind: "failed", failure: job.failure?.kind ?? "unexpected" };
+      return { kind: "failed", failure: shownFailure(job.failure) };
   }
 }
 

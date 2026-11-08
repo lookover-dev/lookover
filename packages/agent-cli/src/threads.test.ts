@@ -98,6 +98,27 @@ describe("lookover feedback", () => {
     });
   });
 
+  test("a finding still present after a push: Lookover's last reply is the finder's reason as of now (ADR 0081)", async () => {
+    const w = world();
+    const [root = 0] = await w.review("F1");
+    w.appReply(root, `${wordmark(18)} · Still present\n\nThe cap is 50 now,\nstill above 20.`);
+    const still = finding("F1", {
+      resolution: { kind: "still_present", round: 2, explanation: "The cap is 50 now,\nstill above 20." },
+    });
+    await w.check("round", "in_progress");
+    await w.complete("round", "neutral", round([still]));
+    expect(await w.lookover("feedback")).toBe(3);
+    expect(w.out).toEqual([
+      GUARD,
+      "",
+      "F1 blocking src/invoice.ts:12: Finding F1",
+      "  What F1 is about.",
+      `  Thread: ${URL}${root}`,
+      "  Lookover: Still present: The cap is 50 now, still above 20.",
+      "",
+    ]);
+  });
+
   test("nothing waiting on the agent: 0, and nothing on stdout, not even the guard sentence", async () => {
     const w = world();
     await w.check("round", "in_progress");

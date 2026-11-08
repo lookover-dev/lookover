@@ -105,6 +105,8 @@ const ACCOUNTS_TEXT = {
   looking: "Looking for your accounts with Lookover's App.",
   nothing: "Installed, with no repository. On GitHub, pick the ones it may see.",
   done: "Install it on more accounts any time.",
+  /** Done, with an account still to set up: one is enough to go on (Repositories, First review and the agent come next), the rest can wait. */
+  rest: "Enough to go on. Set up the other accounts below now, or later in Settings.",
 } as const;
 
 const ENDED: Record<SignInEnd, string> = {
@@ -177,7 +179,11 @@ function accountsRow(state: State, timeZone: string | undefined): AccountsRowVie
   if (!signedIn(state.connection)) return row("later", ACCOUNTS_TEXT.later);
   switch (state.setup.github) {
     case "done":
-      return row("done", ACCOUNTS_TEXT.done);
+      // An account with a fix still needs the person (installing, SSO, an owner): the rest can wait, said so.
+      return row(
+        "done",
+        list.rows.some((r) => r.account !== null && r.fix !== null) ? ACCOUNTS_TEXT.rest : ACCOUNTS_TEXT.done,
+      );
     case "nothing-granted":
       return row("current", ACCOUNTS_TEXT.nothing);
     default:

@@ -362,6 +362,70 @@ test("a failed review completes its check neutral with the reason, never failure
   });
 });
 
+/** A host that answers every read but, once a run read the change, can't relate its commits: no merge base. */
+/**
+ * GitHub with no common history between `pr1`'s base and its head: only the run's merge-base compare (from the base
+ * to the job's commit) is refused, so a poller's compare of two heads still answers.
+ */
+class NoMergeBase extends FakeGitHost {
+  override countCommits(
+    ...args: Parameters<FakeGitHost["countCommits"]>
+  ): ReturnType<FakeGitHost["countCommits"]> {
+    const [, from, to] = args;
+    if (from !== pr1.base.sha || to !== pr1.head.sha) return super.countCommits(...args);
+    return Promise.reject(new HostError("not_found", "No common ancestor between main and planted-bugs"));
+  }
+}
+
+/** One "Review now" that fails on these fakes: its check's title and summary, its block's line, its result's reason. */
+async function failedCheck(options: Parameters<typeof start>[0]) {
+  const { service, host, time } = await start(options);
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  expect((await review(service, cookie)).status).toBe(200);
+  await until(stream, "job.changed");
+  for (let i = 0; i < 20 && host.view(PR).checks[0]?.status !== "completed"; i++) await time.advance(0);
+  const check = host.view(PR).checks[0];
+  const block = statusOf(host.view(PR).description) ?? "";
+  return {
+    title: check?.output.title,
+    summary: check?.output.summary,
+    line: block.split("\n\n")[1],
+    reason: readResult(check?.output.text ?? "")?.run.state_reason,
+  };
+}
+
+test("a failed review's check and status block say its cause, and to try again only where it helps (ADR 0081)", async () => {
+  const AGAIN = "Push again, or comment `/lookover review`, to try again.";
+  const idle = new ScriptedRetrieval();
+  idle.refuse(
+    new RetrievalError("fetch_failed", "git took too long (idle)", { limit: { kind: "idle", ms: 120_000 } }),
+  );
+  expect(await failedCheck({ engines: fakeEngines({ reviews: 1 }), retrieval: idle })).toEqual({
+    title: "The review failed: git sent nothing for 2 minutes while Lookover got the code ready",
+    summary: `Lookover did not look over a1b2c3d. ${AGAIN}`,
+    line: `Git sent nothing for 2 minutes while Lookover got the code ready. ${AGAIN}`,
+    reason: "prepare_failed",
+  });
+
+  const late = fakeEngines();
+  late.answer({ outcome: "timeout", text: "" });
+  expect(await failedCheck({ engines: late })).toEqual({
+    title: "The review failed: Claude ran past its 20-minute limit",
+    summary: "Lookover did not look over a1b2c3d. A smaller pull request fits in the time.",
+    line: "Claude ran past its 20-minute limit. A smaller pull request fits in the time.",
+    reason: "review_failed",
+  });
+
+  const host = new NoMergeBase({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
+  expect(await failedCheck({ host })).toEqual({
+    title: "The review failed: where the commit branches off its base branch couldn't be found",
+    summary: "Lookover did not look over a1b2c3d. Rebase onto the base branch, then push.",
+    line: "Lookover couldn't find where the commit branches off its base branch. Rebase onto the base branch, then push.",
+    reason: "prepare_failed",
+  });
+});
+
 test("a check write the host refuses doesn't fail the review, and is sent again at the job's next change", async () => {
   const engines = fakeEngines({ signedIn: false, reviews: 1 });
   const { service, host, time } = await start({ engines });

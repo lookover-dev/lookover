@@ -6,8 +6,11 @@ import {
   commitSha,
   type Deferral,
   emptyReview,
+  type FailureCause,
   type Finding,
   findingId,
+  type JobFailure,
+  type JobFailureKind,
   type JobState,
   jobId,
   type LoopState,
@@ -15,7 +18,15 @@ import {
   type RunStep,
   runId,
 } from "@lookover/contracts";
-import { cancelSentence, type DisplayStatus, displayStatus, failureSentence, failureText } from "./status.ts";
+import {
+  cancelSentence,
+  type DisplayStatus,
+  detailsShown,
+  displayStatus,
+  failedWords,
+  outcomeEyes,
+  retryNote,
+} from "./status.ts";
 
 const ID = changeId("sam/app#1");
 const SHA = commitSha("a1f9c2e");
@@ -63,9 +74,13 @@ function review(
       state: job,
       deferral,
       stepIn: null,
+      askedBy: null,
       skip: job === "skipped" ? "not-yours" : null,
       cancel: job === "cancelled" ? "closed" : null,
-      failure: job === "failed" ? { kind: "service_stopped", detail: "", engine: null } : null,
+      failure:
+        job === "failed"
+          ? { kind: "service_stopped", detail: "", engine: null, cause: null, limitMs: null }
+          : null,
       turn: null,
     },
     run:
@@ -172,38 +187,55 @@ test("a change shows one status from its job, run and loop", () => {
     [
       "failed before any round: why, as the service said",
       review("failed"),
-      { kind: "failed", failure: { kind: "service_stopped", detail: "", engine: null } },
+      {
+        kind: "failed",
+        failure: { kind: "service_stopped", detail: "", engine: null, cause: null, limitMs: null },
+      },
+    ],
+    // The pill keeps following the loop (ADR 0029); the review screen says the failure above the round.
+    [
+      "failed after a round: the loop says",
+      review("failed", { loop: "open", rounds: 1 }),
+      { kind: "to-fix" },
     ],
   ];
   for (const [name, r, status] of cases) expect([name, displayStatus(r)]).toEqual([name, status]);
 });
 
-test("why a review did not run is said once, as a phrase and as a sentence", () => {
-  expect(failureSentence({ kind: "service_stopped", detail: "", engine: null })).toBe(
-    "The service stopped before the review finished.",
-  );
-  expect(failureText({ kind: "service_stopped", engine: null })).toBe(
-    "the service stopped before the review finished",
-  );
-  expect(failureSentence({ kind: "prepare_failed", detail: "fetch_failed", engine: null })).toBe(
-    "The code could not be fetched.",
-  );
-  // The engine that gave no review is named, as the check on GitHub names it.
-  expect(failureSentence({ kind: "review_failed", detail: "crashed", engine: "codex" })).toBe(
-    "Codex gave no review.",
-  );
-  expect(failureSentence({ kind: "review_failed", detail: "crashed", engine: "claude" })).toBe(
-    "Claude gave no review.",
-  );
-  expect(failureSentence({ kind: "publish_failed", detail: "too_large", engine: null })).toBe(
-    "GitHub refused a post.",
-  );
-  expect(failureSentence({ kind: "host_failed", detail: "unavailable", engine: null })).toBe(
-    "GitHub did not answer.",
-  );
-  expect(failureSentence({ kind: "unexpected", detail: "", engine: null })).toBe("The review could not run.");
+test("a failed review says its cause, and what would change it where another try can't help (ADR 0081)", () => {
+  const failure = (
+    kind: JobFailure["kind"],
+    cause: FailureCause | null,
+    more: Partial<JobFailure> = {},
+  ): JobFailure => ({ kind, detail: "", engine: null, cause, limitMs: null, ...more });
+
+  // A stall, worth another try: the cause alone, the page's one primary button saying "Try again".
+  expect(failedWords(failure("prepare_failed", "git_silent", { limitMs: 120_000 }))).toEqual({
+    sentence: "Git sent nothing for 2 minutes while Lookover got the code ready.",
+    next: null,
+  });
+  expect(failedWords(failure("review_failed", "engine_answer", { engine: "codex" }))).toEqual({
+    sentence: "Codex gave no usable review.",
+    next: null,
+  });
+  // A time limit fails the same way again: what would change it.
+  expect(failedWords(failure("prepare_failed", "git_time_limit", { limitMs: 600_000 }))).toEqual({
+    sentence: "Getting the code ready ran past its 10-minute limit.",
+    next: "The repository or the change is too large to get ready in that time.",
+  });
+  expect(
+    failedWords(failure("review_failed", "engine_time_limit", { engine: "claude", limitMs: 1_200_000 })),
+  ).toEqual({
+    sentence: "Claude ran past its 20-minute limit.",
+    next: "A smaller pull request fits in the time.",
+  });
+  // No cause known: the status block's sentence by the kind, and another try.
+  expect(failedWords(failure("service_stopped", null))).toEqual({
+    sentence: "Lookover stopped before it finished.",
+    next: null,
+  });
   // A job that failed before the service said why (an older record).
-  expect(failureSentence(null)).toBe("The review could not run.");
+  expect(failedWords(null)).toEqual({ sentence: "Something went wrong in Lookover.", next: null });
 });
 
 test("why a review was cancelled is said as its check says it", () => {
@@ -233,4 +265,78 @@ test("a preview with findings open is the owner's to read; its other states read
     ],
   ];
   for (const [name, r, status] of cases) expect([name, displayStatus(r)]).toEqual([name, status]);
+});
+
+test("a review's Details show once a round ran or runs, and before any only when the review failed", () => {
+  const logged = (r: Review): Review => ({
+    ...r,
+    timeline: [{ at: 0, sha: SHA, kind: "queued", trigger: "opened", by: null }],
+  });
+  const cases: [string, Review, boolean][] = [
+    ["failed before any round, its log kept", logged(review("failed")), true],
+    ["failed before any round, nothing logged", review("failed"), false],
+    ["skipped", logged(review("skipped")), false],
+    ["waiting", logged(review("queued")), false],
+    ["deferred", logged(review("deferred", { deferral: SIGNED_OUT })), false],
+    ["cancelled before any round", logged(review("cancelled")), false],
+    ["running its first round", logged(review("running")), true],
+    ["settled after a round", logged(review("done", { loop: "settled", rounds: 1 })), true],
+    ["cancelled after a round", logged(review("cancelled", { loop: "open", rounds: 1 })), true],
+  ];
+  for (const [name, r, shown] of cases) expect([name, detailsShown(r)]).toEqual([name, shown]);
+});
+
+test("every outcome's card opens with the eyes, in its tone: looked over, open, cancelled alike", () => {
+  const cases: [DisplayStatus, ReturnType<typeof outcomeEyes>][] = [
+    [{ kind: "settled", clean: true }, "ok"],
+    [{ kind: "settled", clean: false }, "ok"],
+    [{ kind: "to-fix" }, "fix"],
+    [{ kind: "preview" }, "fix"],
+    // Ended without an outcome of its own: the eyes still, quiet.
+    [{ kind: "cancelled", reason: null }, "quiet"],
+    [{ kind: "skipped", reason: "not-yours" }, "quiet"],
+    [{ kind: "not-asked" }, "quiet"],
+    // Not an outcome: the running round and a wait have blocks of their own.
+    [{ kind: "running", round: 1, step: "preparing" }, null],
+    [{ kind: "waiting", deferral: null, turn: null }, null],
+    // Where the person is needed, the escalated banner and the failed notice carry their own eyes: no verdict card.
+    [{ kind: "needs-you" }, null],
+    [{ kind: "failed", failure: null }, null],
+  ];
+  for (const [s, tone] of cases) expect([s.kind, outcomeEyes(s)]).toEqual([s.kind, tone]);
+});
+
+test("a failed review says how likely another try works only for a cause it is known for, else nothing", () => {
+  const failure = (kind: JobFailureKind, cause: FailureCause | null) => ({
+    kind,
+    detail: "",
+    engine: "codex" as const,
+    cause,
+    limitMs: null,
+  });
+  const cases: [string, ReturnType<typeof failure> | null, string | null][] = [
+    // A stall, GitHub out of reach, an answer that couldn't be read: another try is known to help.
+    ["git silent", failure("prepare_failed", "git_silent"), "Another try usually gets through."],
+    ["network", failure("host_failed", "network"), "Another try usually gets through."],
+    [
+      "engine answer",
+      failure("review_failed", "engine_answer"),
+      "It stopped, or sent an answer Lookover couldn't read. Another try usually works.",
+    ],
+    // With no cause known, nothing promised: "Try again" above is the way, the log says the rest.
+    ["no failure said", null, null],
+    ["unexpected", failure("unexpected", null), null],
+    ["publish failed", failure("publish_failed", null), null],
+    ["service stopped", failure("service_stopped", null), null],
+    ["host failed, rate-limited", failure("host_failed", null), null],
+    ["review failed, cancelled or signed out", failure("review_failed", null), null],
+    ["prepare failed", failure("prepare_failed", null), null],
+    // A cause another try can't cure has its remedy instead (`failedWords`), never a try's odds.
+    ["git time limit", failure("prepare_failed", "git_time_limit"), null],
+    ["engine time limit", failure("review_failed", "engine_time_limit"), null],
+    ["base not found", failure("prepare_failed", "base_not_found"), null],
+    ["path too long", failure("prepare_failed", "path_too_long"), null],
+    ["git missing", failure("prepare_failed", "git_missing"), null],
+  ];
+  for (const [name, f, note] of cases) expect([name, retryNote(f)]).toEqual([name, note]);
 });

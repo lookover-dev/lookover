@@ -23,6 +23,7 @@ import {
   runId,
   shortSha,
 } from "@lookover/contracts";
+import type { Words } from "./format.ts";
 import {
   type Around,
   agentLine,
@@ -33,7 +34,6 @@ import {
   statusBlock,
   threadOf,
   timelineOf,
-  type Words,
 } from "./github.ts";
 import type { ChangeReview } from "./select.ts";
 
@@ -129,6 +129,7 @@ function item(findings: Finding[], change: Partial<Change> = {}, review: Partial
         state: "done",
         deferral: null,
         stepIn: null,
+        askedBy: null,
         skip: null,
         cancel: null,
         failure: null,
@@ -196,6 +197,7 @@ test("a preview that failed made no check either: keyed on the preview, whatever
     state: "failed",
     deferral: null,
     stepIn: null,
+    askedBy: null,
     skip: null,
     cancel: null,
     failure: null,
@@ -215,6 +217,7 @@ test("a review asked after a preview has its check while it waits: the preview w
     state: "queued",
     deferral: null,
     stepIn: null,
+    askedBy: null,
     skip: null,
     cancel: null,
     failure: null,
@@ -304,6 +307,7 @@ const job = (state: ReviewJob["state"], more: Partial<ReviewJob> = {}): ReviewJo
   state,
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip: null,
   cancel: null,
   failure: null,
@@ -470,18 +474,61 @@ test("a waiting review says why and when it starts, in the machine's time; past 
 });
 
 test("a failed review says what stopped and how to try again", () => {
-  const failure = { kind: "review_failed", detail: "", engine: "claude" } as const;
+  const failure = {
+    kind: "review_failed",
+    detail: "",
+    engine: "claude",
+    cause: null,
+    limitMs: null,
+  } as const;
   const failed = item([], {}, { rounds: [], loop: null, job: job("failed", { failure }) });
   expect(block(failed)).toEqual({
     head: "Couldn't look over `2f6d9e3`",
     line: "Claude stopped before it finished. Push again, or comment `/lookover review`, to try again.",
     items: [],
   });
-  const host = { kind: "host_failed", detail: "", engine: null } as const;
+  const host = { kind: "host_failed", detail: "", engine: null, cause: null, limitMs: null } as const;
   const later = item([], {}, { job: job("failed", { failure: host }) });
   expect(block(later)?.line).toBe(
     "Round 2 · GitHub didn't answer. Push again, or comment `/lookover review`, to try again.",
   );
+});
+
+test("a failed review's cause is said as GitHub says it, and to try again only where it helps (ADR 0081)", () => {
+  const AGAIN = "Push again, or comment `/lookover review`, to try again.";
+  const idle = {
+    kind: "prepare_failed",
+    detail: "fetch_failed: git took too long (idle)",
+    engine: "claude",
+    cause: "git_silent",
+    limitMs: 120_000,
+  } as const;
+  const stalled = item([], {}, { rounds: [], loop: null, job: job("failed", { failure: idle }) });
+  expect(checkOf(stalled)).toEqual({
+    tone: "neutral",
+    title: "Failed",
+    text: "Git sent nothing for 2 minutes while Lookover got the code ready",
+  });
+  expect(block(stalled)?.line).toBe(
+    `Git sent nothing for 2 minutes while Lookover got the code ready. ${AGAIN}`,
+  );
+  expect(agentLine(stalled)).toBe(
+    "The review failed: git sent nothing for 2 minutes while Lookover got the code ready.",
+  );
+
+  const late = {
+    ...idle,
+    kind: "review_failed",
+    detail: "timeout",
+    cause: "engine_time_limit",
+    limitMs: 1_200_000,
+  } as const;
+  const timedOut = item([], {}, { rounds: [], loop: null, job: job("failed", { failure: late }) });
+  expect(checkOf(timedOut)?.text).toBe("Claude ran past its 20-minute limit");
+  expect(block(timedOut)?.line).toBe(
+    "Claude ran past its 20-minute limit. A smaller pull request fits in the time.",
+  );
+  expect(agentLine(timedOut)).toBe("The review failed: Claude ran past its 20-minute limit.");
 });
 
 test("no block where Lookover writes none: before any job, on a skipped pull request, after a preview", () => {
@@ -671,6 +718,7 @@ test("an agent waiting on paused reviews is not told the review starts by itself
         state: "deferred",
         deferral: { reason: "paused" },
         stepIn: null,
+        askedBy: null,
         skip: null,
         cancel: null,
         failure: null,
@@ -695,6 +743,7 @@ test("an agent waiting on a signed-out AI is told the review starts by itself", 
         state: "deferred",
         deferral: { reason: "engine-signed-out", engine: "codex" },
         stepIn: null,
+        askedBy: null,
         skip: null,
         cancel: null,
         failure: null,

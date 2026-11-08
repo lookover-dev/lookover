@@ -13,7 +13,7 @@ import {
   type SignIn,
   type SignInKeeper,
 } from "@lookover/contracts";
-import { AT, type Call, type Route, stubGitHub } from "./github.test-support.ts";
+import { AT, type Call, fakeWaits, type Route, stubGitHub } from "./github.test-support.ts";
 import { createHostAccounts } from "./index.ts";
 
 const API = "https://api.github.com";
@@ -80,13 +80,16 @@ const reposOf = (id: number, ...pages: unknown[][]) =>
 
 function accountsOver(options: { repositories?: RepositoryRef[]; kept?: SignIn | null }, ...routes: Route[]) {
   const api = stubGitHub(...routes);
+  const waits = fakeWaits();
   const accounts = createHostAccounts({
     keeper: keeper(options.kept === undefined ? KEPT : options.kept),
     fetch: api.fetch,
     clock: { now: () => AT },
+    sleep: waits.sleep,
+    deadline: waits.deadline,
     ...(options.repositories === undefined ? {} : { repositories: options.repositories }),
   });
-  return { accounts, calls: api.calls };
+  return { accounts, calls: api.calls, waits };
 }
 
 async function refusal(call: Promise<unknown>): Promise<HostError> {
@@ -234,8 +237,11 @@ describe("what the person reaches", () => {
   });
 
   test("GitHub out of reach is unreachable", async () => {
-    const { accounts } = accountsOver({}, () => ({ status: 503 }));
+    const { accounts, calls, waits } = accountsOver({}, () => ({ status: 503 }));
     expect(connectionCauseOf(await refusal(accounts.person()))).toEqual({ kind: "unreachable" });
+    // A read: tried 3 times in all, 1 s then 3 s apart (ADR 0080).
+    expect(calls).toHaveLength(3);
+    expect(waits.sleeps).toEqual([1000, 3000]);
     expect(connectionCauseOf(await refusal(accounts.accounts()))).toEqual({ kind: "unreachable" });
   });
 });

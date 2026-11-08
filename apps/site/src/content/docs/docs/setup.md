@@ -24,7 +24,7 @@ No App to create, no key to keep: Lookover Dev has no private key ([where your c
 - **Installed:** Lookover Dev is on the account, with the repositories it may see. On GitHub, you pick which. With none yet, **Choose repositories** opens where you pick them.
 - **Install on &lt;account&gt;:** your own account, or an organisation you own, where it isn't installed yet. GitHub's page installs it and asks which repositories it may see.
 - **Ask to install on &lt;organisation&gt;:** an organisation where you are a member, not an owner. On GitHub's page, Install becomes Request, and GitHub emails the organisation's owners.
-- **Waiting for an owner of &lt;organisation&gt;:** once you asked. GitHub tells only the App whether a request was sent, so Lookover remembers that you asked, and when. If you sent the request, GitHub emailed its owners. **Ask an owner of &lt;organisation&gt;** opens the organisation's owners on GitHub, to ask one, and **Ask again** opens GitHub's page again. Once an owner installs it, the row turns into an installed account by itself.
+- **Waiting for an owner:** once you asked. GitHub tells only the App whether a request was sent, so Lookover remembers that you asked, and when. If you sent the request, GitHub emailed its owners. **Ask an owner of &lt;organisation&gt;** opens the organisation's owners on GitHub, to ask one, and **Ask again** opens GitHub's page again. Once an owner installs it, the row turns into an installed account by itself.
 - **Install on another account:** always last. GitHub's own page lists every account you belong to.
 
 Lookover names your organisations from your `gh`, when it is signed in as you. Without it, Install on another account still reaches them.

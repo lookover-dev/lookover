@@ -236,7 +236,7 @@ describe("the status block, as the prototype words each state", () => {
         kind: "failed",
         sha: SHA_1,
         round: 1,
-        failure: "review_failed",
+        failure: { kind: "review_failed", cause: null, limitMs: null },
         engine: "claude",
         posted: null,
       }),
@@ -307,11 +307,35 @@ describe("why a review waits, in the machine's time", () => {
 });
 
 describe("why a review failed", () => {
-  const failed = (failure: Failed["failure"], engine: "claude" | null = null) =>
-    block({ kind: "failed", sha: SHA_1, round: 1, failure, engine, posted: null })?.split("\n\n")[1];
+  const failed = (
+    kind: Failed["failure"]["kind"],
+    engine: "claude" | null = null,
+    cause: Failed["failure"]["cause"] = null,
+    limitMs: number | null = null,
+  ) =>
+    block({
+      kind: "failed",
+      sha: SHA_1,
+      round: 1,
+      failure: { kind, cause, limitMs },
+      engine,
+      posted: null,
+    })?.split("\n\n")[1];
   const AGAIN = " Push again, or comment `/lookover review`, to try again.";
 
-  test("one sentence per kind of failure, then how to try again", () => {
+  test("its cause's sentence, then how to try again only where another try can help (ADR 0081)", () => {
+    expect(failed("prepare_failed", null, "git_silent", 120_000)).toBe(
+      `Git sent nothing for 2 minutes while Lookover got the code ready.${AGAIN}`,
+    );
+    expect(failed("review_failed", "claude", "engine_time_limit", 1_200_000)).toBe(
+      "Claude ran past its 20-minute limit. A smaller pull request fits in the time.",
+    );
+    expect(failed("prepare_failed", null, "base_not_found")).toBe(
+      "Lookover couldn't find where the commit branches off its base branch. Rebase onto the base branch, then push.",
+    );
+  });
+
+  test("with no cause known, one sentence per kind of failure, then how to try again", () => {
     expect(failed("review_failed", "claude")).toBe(`Claude stopped before it finished.${AGAIN}`);
     expect(failed("review_failed")).toBe(`The reviewer stopped before it finished.${AGAIN}`);
     expect(failed("service_stopped")).toBe(`Lookover stopped before it finished.${AGAIN}`);
@@ -336,7 +360,14 @@ describe("waiting or failed after round 1", () => {
       ].join("\n\n"),
     );
     expect(
-      block({ kind: "failed", sha: SHA_2, round: 2, failure: "host_failed", engine: null, posted }),
+      block({
+        kind: "failed",
+        sha: SHA_2,
+        round: 2,
+        failure: { kind: "host_failed", cause: null, limitMs: null },
+        engine: null,
+        posted,
+      }),
     ).toBe(
       [
         `### ${mark(26)} · Couldn't look over ${at(SHA_2)}`,

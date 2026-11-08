@@ -1,41 +1,47 @@
 // Review detail: the verdict first, then the open findings. Everything else is one click down.
-import { type Finding, type State, shortSha } from "@lookover/contracts";
+import { asSentence, type CommitSha, type Finding, type State } from "@lookover/contracts";
 import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { usePageKeys } from "../shell.tsx";
 import { useAppState, useSend } from "../store.tsx";
 import { useTickingNow } from "../ticking.tsx";
 import {
+  BusyStatus,
   Button,
   Card,
-  Chip,
   Code,
   Disclosure,
   Empty,
   Eyes,
+  Group,
   LiveLog,
   Notice,
   Ring,
   SameWidth,
   SectionHead,
+  StatusLine,
   Tabs,
   Tag,
 } from "../ui/basics.tsx";
 import { InlineCode } from "../ui/inline-code.tsx";
 import { Layer, MenuItem, Tip, useToast } from "../ui/layers.tsx";
-import { liveLog } from "../view-model/activity.ts";
+import { CodePath } from "../ui/path.tsx";
+import { Sha, ShaWords } from "../ui/sha.tsx";
+import { liveLog, logSummary } from "../view-model/activity.ts";
 import {
-  CONFIRM_LABELS,
   checkedBy,
   confirmDetails,
-  findersOf,
+  confirmLabels,
   foundByLine,
+  howItRan,
   severityLabel,
 } from "../view-model/confirm.ts";
 import {
   doneLine,
+  edgeNeedsYou,
   type FindingTab,
   findingGroups,
+  findingMeta,
   findingTabs,
   type NoiseOption,
   needsYou,
@@ -46,32 +52,36 @@ import {
   roundOnHead,
   whyRaised,
 } from "../view-model/findings.ts";
-import { agoSentence, duration, plural } from "../view-model/format.ts";
+import { agoSentence, duration, plural, SEPARATOR } from "../view-model/format.ts";
 import { postedAs } from "../view-model/github.ts";
 import { roundRow } from "../view-model/rounds.ts";
 import { runLineParts, runSteps } from "../view-model/run.ts";
 import {
+  CHIPS,
   type ChangeReview,
   canReviewAgain,
   changeLabel,
   changeReviewAt,
   differences,
+  failedNotice,
+  gitHubPrimary,
   lookedOver,
   nextStep,
   notReviewed,
   openVerdict,
   REVIEW_BUTTON,
+  type ReviewButton,
   reviewAgainNote,
   reviewButton,
+  reviewButtonPrimary,
   reviewerOf,
-  reviewLabel,
+  reviewMeta,
   settledVerdict,
   status,
   unsettledFindings,
   waitNotice,
-  writerName,
 } from "../view-model/select.ts";
-import { cancelSentence, failureSentence } from "../view-model/status.ts";
+import { cancelSentence, type DisplayStatus, detailsShown, outcomeEyes } from "../view-model/status.ts";
 import { logLine, startedBy } from "../view-model/timeline.ts";
 import { Page, RunLine, StepList } from "./common.tsx";
 import { GitHubButton, useOpenOnGitHub } from "./github-app.tsx";
@@ -194,24 +204,31 @@ function FindingCard({ it, finding }: { it: ChangeReview; finding: Finding }) {
   const checked = checkedBy(it.review, finding);
   const why = whyRaised(finding);
   const reply = replyLine(it.change, finding);
+  const edge = edgeNeedsYou(it.review, finding);
   return (
-    <Card className="finding">
-      <div className="t">
-        <span className={`sev ${finding.severity === "blocking" ? "" : "fix"}`}>
-          {severityLabel(finding)}
-        </span>
-        {needsYou(finding) ? <Chip tone="need">Needs you</Chip> : null}
-        <span>
-          {finding.category} · open since round {finding.raisedIn}
-          {finding.posted ? "" : " · not posted on GitHub"}
-        </span>
-      </div>
+    // "Needs you" is the banner's, said once (ADR 0083, round 6); where the banner can't say which, or isn't there,
+    // the edge marks the card, and its heading says it to a screen reader: colour alone is no answer.
+    <Card className={edge ? "finding need" : "finding"}>
+      {/* The severity opens the title's line, as on a closed finding's row (design-system.md "Finding card"). */}
       <h5>
+        {edge ? <span className="visually-hidden">{asSentence(CHIPS["needs-you"].label)} </span> : null}
+        <span className={`sev ${finding.severity === "blocking" ? "" : "fix"}`}>
+          {/* A space, read as one ("Blocking SQL injection…"); its width is part of the gap the margin makes. */}
+          {severityLabel(finding)}{" "}
+        </span>
         <InlineCode text={finding.title} />
       </h5>
-      <div className="t">
-        <Tag>{finding.file}</Tag>
-        <span>{placeText(finding)}</span>
+      {/* The meta line and the file read as one block under the title (`.finding-meta`). */}
+      <div className="finding-meta">
+        <div className="t">
+          <span>{findingMeta(finding)}</span>
+        </div>
+        <div className="t">
+          <Tag>
+            <CodePath text={finding.file} kind="path" />
+          </Tag>
+          <span>{placeText(finding)}</span>
+        </div>
       </div>
       <p>
         <InlineCode text={finding.body} />
@@ -228,12 +245,16 @@ function FindingCard({ it, finding }: { it: ChangeReview; finding: Finding }) {
         ) : null}
         <span>
           <b>{checked.head}</b>
-          {checked.text ? ` ${checked.text}` : null}
-          {checked.evidence.map((line, i) => (
-            <Fragment key={`${i}-${line}`}>
-              {" "}
-              <code>{line}</code>
-            </Fragment>
+          {checked.said.length > 0 ? " " : null}
+          {checked.said.map((part, i) =>
+            typeof part === "string" ? (
+              <Fragment key={i}>{part}</Fragment>
+            ) : (
+              <CodePath key={i} text={part.cite} kind="path" tight={part.tight} />
+            ),
+          )}
+          {checked.under.map((line, i) => (
+            <CodePath key={`${i}-${line}`} text={line} kind="path" line />
           ))}
         </span>
         {reply ? (
@@ -273,21 +294,19 @@ function FindingCard({ it, finding }: { it: ChangeReview; finding: Finding }) {
 function ClosedRow({ finding }: { finding: Finding }) {
   const line = doneLine(finding);
   return (
-    <div className="rowi static">
-      <span className={`sev-label ${finding.severity === "blocking" ? "" : "fix"}`}>
-        {severityLabel(finding)}
-      </span>
+    <div className="rowi static nolead">
       <div className="rowi-main">
         <div className="ti">
+          <span className={`sev-label ${finding.severity === "blocking" ? "" : "fix"}`}>
+            {severityLabel(finding)}{" "}
+          </span>
           <InlineCode text={finding.title} />
         </div>
         <div className="me">
           {line.kind === "verified" ? (
-            <>
-              <span>verified fixed in</span>
-              <code>{line.sha}</code>
-              {line.round === null ? null : <span>round {line.round}</span>}
-            </>
+            <span>
+              <ShaWords words={line.words} />
+            </span>
           ) : (
             <span className="wrap">{line.text}</span>
           )}
@@ -298,12 +317,19 @@ function ClosedRow({ finding }: { finding: Finding }) {
   );
 }
 
+/** A verdict card's class: `verdict`, then its eyes' tone where the outcome has one (`outcomeEyes`). */
+function verdictClass(s: DisplayStatus): string {
+  const tone = outcomeEyes(s);
+  return tone === null ? "verdict" : `verdict ${tone}`;
+}
+
 function NotReviewed({ it }: { it: ChangeReview }) {
   const card = notReviewed(it);
   if (!card) return null;
   const { why } = card;
   return (
-    <Card className="verdict">
+    <Card className={verdictClass(status(it))}>
+      <Eyes still />
       <b>Not reviewed: {card.title}.</b>
       <Disclosure summary="Why wasn't it reviewed?">
         <p>
@@ -311,7 +337,7 @@ function NotReviewed({ it }: { it: ChangeReview }) {
           {why.ask ? (
             <>
               {" "}
-              {why.ask.lead} <code>{why.ask.command}</code> {why.ask.tail}
+              {why.ask.lead} <CodePath text={why.ask.command} /> {why.ask.tail}
             </>
           ) : null}
         </p>
@@ -346,6 +372,27 @@ function Running({ it, state, round }: { it: ChangeReview; state: State; round: 
   );
 }
 
+/**
+ * The newest review failed (ADR 0081): on which commit and why; under them, when, then what would change it where
+ * another try can't help, or what another try may do where that is known, the page's one primary above saying "Try
+ * again" (round 6, 2026-11-08: the commit ran into its time, the cause read as left to the log). Above the round when
+ * there was one, which the verdict still shows. No action of its own: Details › Log, below, is the way to the log
+ * (round 4, 2026-11-08: a "Show the log" here was a second way to it).
+ */
+function FailedNotice({ it, state }: { it: ChangeReview; state: State }) {
+  const failed = failedNotice(it, state.now);
+  if (!failed) return null;
+  const more = [failed.when, failed.next].filter((part) => part !== null);
+  return (
+    <Notice label="Failed">
+      <ShaWords words={[...failed.head, ". "]} />
+      {failed.sentence}
+      {/* Under the cause, apart from the commit: when, then what would change it or what another try may do. */}
+      {more.length === 0 ? null : <span className="failed-more">{more.join(SEPARATOR)}</span>}
+    </Notice>
+  );
+}
+
 function Verdict({ it, state }: { it: ChangeReview; state: State }) {
   const send = useSend();
   const { change, review } = it;
@@ -363,15 +410,15 @@ function Verdict({ it, state }: { it: ChangeReview; state: State }) {
       );
     }
     case "failed":
-      return (
-        <Card className="verdict">
-          <b>{failureSentence(s.failure)}</b> {reviewLabel(it)} to try once more.
-        </Card>
-      );
+      // Before any round, the failure is all there is to say, and `FailedNotice` says it, as after a round.
+      return null;
     case "cancelled":
       return (
-        <Card className="verdict">
-          <b>This review was cancelled.</b> {cancelSentence(s.reason)}
+        <Card className={verdictClass(s)}>
+          <Eyes still />
+          <span>
+            <b>This review was cancelled.</b> {cancelSentence(s.reason)}
+          </span>
         </Card>
       );
     case "running":
@@ -403,39 +450,50 @@ function Verdict({ it, state }: { it: ChangeReview; state: State }) {
   }
 }
 
-/** A settled review's verdict: the commit it looked over, then nothing to fix, or what it closed and what stays here. */
+/**
+ * A settled review's verdict: the commit it looked over, then nothing to fix, or what it closed and what stays here.
+ */
 function SettledVerdict({ it, state, clean }: { it: ChangeReview; state: State; clean: boolean }) {
   const { review } = it;
   // Only posted findings count (I-152): one kept off the pull request stays here, open, once the loop settles.
   const verdict = settledVerdict(review);
+  const className = verdictClass(status(it));
   return clean ? (
-    <Card className="verdict">
+    <Card className={className}>
       <Eyes still />
       <span>
-        <b>Looked over {lookedOver(it)}. Nothing to fix.</b>
+        <b>
+          Looked over <Sha sha={lookedOver(it)} tight />. Nothing to fix.
+        </b>
         <span className="t-small"> {agoSentence(state.now, review.updatedAt)}</span>
       </span>
     </Card>
   ) : (
-    <Card className="verdict">
+    <Card className={className}>
       <Eyes still />
       <span>
         <b>
-          Looked over {lookedOver(it)}. {verdict.closed}
+          Looked over <Sha sha={lookedOver(it)} tight />. {verdict.closed}
         </b>
-        <span className="t-small"> {verdict.rest}</span>
+        <span className="t-small t-help"> {verdict.rest}</span>
       </span>
     </Card>
   );
 }
 
-/** Findings left open: to fix once posted, found after a preview (ADR 0072). */
+/**
+ * Findings left open: to fix once posted, found after a preview (ADR 0072). It opens with the eyes as every outcome
+ * does, amber while there is something to fix (`outcomeEyes`).
+ */
 function OpenVerdict({ it }: { it: ChangeReview }) {
   return (
-    <Card className="verdict">
+    <Card className={verdictClass(status(it))}>
+      <Eyes still />
       <span>
-        <b>{openVerdict(it)}</b>
-        <span className="t-small"> {nextStep(it)}</span>
+        <b>
+          <ShaWords words={openVerdict(it)} />
+        </b>
+        <span className="t-small t-help"> {nextStep(it)}</span>
       </span>
     </Card>
   );
@@ -443,127 +501,19 @@ function OpenVerdict({ it }: { it: ChangeReview }) {
 
 function Details({ it, state }: { it: ChangeReview; state: State }) {
   const { review, repo } = it;
-  const last = review.rounds.at(-1);
-  const checks = confirmDetails(review);
-  // Every listed round has ended: their time shows, 0 s included (a frozen clock's); none yet, the first is running.
-  const total = review.rounds.reduce((ms, r) => ms + (r.endedAt - r.startedAt), 0);
   const { run } = review;
   const diffs = differences(repo);
   const strictness = repo.settings.strictness.value;
-  const log = review.timeline.map((t) => logLine(it.change, t));
+  const log = review.timeline.map((t) => logLine(t, state.now));
   // The running round counts here, as a row of the table still running.
-  const sha = run?.sha ?? last?.sha;
-  if (!sha) return null;
+  const sha = run?.sha ?? review.rounds.at(-1)?.sha;
+  // Before any round, only a failed review has Details: its settings and its log, without how it ran.
+  if (!detailsShown(review)) return null;
   return (
     <>
       <SectionHead>Details</SectionHead>
       <div className="list">
-        <Disclosure
-          row
-          summary="How this review ran"
-          value={
-            <>
-              {findersOf(review)}
-              {checks?.count ? ` · ${checks.count}` : ""} · {last ? duration(total) : "running"}
-            </>
-          }
-        >
-          <dl>
-            <dt>Started by</dt>
-            <dd>{startedBy(review.timeline)}</dd>
-            <dt>{CONFIRM_LABELS.found}</dt>
-            <dd>{foundByLine(review, state.engines)}</dd>
-            {checks ? (
-              <>
-                <dt>{CONFIRM_LABELS.checked}</dt>
-                <dd>{checks.checked}</dd>
-              </>
-            ) : null}
-            {checks && checks.ruledOut.length > 0 ? (
-              <>
-                <dt>{CONFIRM_LABELS.ruledOut}</dt>
-                <dd>
-                  {checks.ruledOut.map((r, i) => (
-                    <div key={`${i}-${r.title}`}>
-                      {r.title}: {r.reason}
-                    </div>
-                  ))}
-                </dd>
-              </>
-            ) : null}
-            <dt>Posted</dt>
-            <dd>
-              {review.preview ? (
-                "Nothing: this was a preview"
-              ) : (
-                // The person's login is never broken at a hyphen: the line wraps before it.
-                <>
-                  As <span className="nowrap">{postedAs(state.connection)}</span>, with a check on{" "}
-                  {shortSha(sha)}
-                </>
-              )}
-            </dd>
-          </dl>
-        </Disclosure>
-        <Disclosure
-          row
-          summary="Rounds"
-          value={
-            <>
-              {review.rounds.length + (run ? 1 : 0)} · last commit <code>{shortSha(sha)}</code>
-            </>
-          }
-        >
-          <div className="tbl-wrap">
-            <table className="tbl nowrap">
-              <thead>
-                <tr>
-                  <th>Round</th>
-                  <th>Commit</th>
-                  <th>New</th>
-                  <th>Verified fixed</th>
-                  <th>Still open</th>
-                  <th>By</th>
-                  <th>Tokens</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {review.rounds.map((r) => {
-                  const row = roundRow(r);
-                  return (
-                    <tr key={r.n}>
-                      <td>{r.n}</td>
-                      <td>
-                        <code>{row.commit}</code>
-                      </td>
-                      <td>{r.raised}</td>
-                      <td>{r.verifiedFixed}</td>
-                      <td>{r.open}</td>
-                      <td>{row.by}</td>
-                      <td className="num">{row.tokens}</td>
-                      <td>{duration(r.endedAt - r.startedAt)}</td>
-                    </tr>
-                  );
-                })}
-                {run ? (
-                  <tr>
-                    <td>{review.rounds.length + 1}</td>
-                    <td>
-                      <code>{shortSha(run.sha)}</code>
-                    </td>
-                    <td>…</td>
-                    <td>…</td>
-                    <td>…</td>
-                    <td>…</td>
-                    <td>…</td>
-                    <td>running</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </Disclosure>
+        {sha ? <HowItRan it={it} state={state} sha={sha} /> : null}
         <Disclosure
           row
           summary="Settings used"
@@ -584,18 +534,136 @@ function Details({ it, state }: { it: ChangeReview; state: State }) {
             </>
           }
         >
-          <p className="t-small">
+          <p className="t-small t-help">
             {diffs.length > 0 ? `${repo.name} differs from your defaults. ` : "Your defaults were used. "}
             <Link to={`/repositories/${repo.owner}/${repo.name}`}>See what applies to {repo.name}</Link>
           </p>
         </Disclosure>
-        <Disclosure row summary="Log" value={<>{plural(log.length, "line")} · secrets removed</>}>
+        <Disclosure row summary="Log" value={logSummary(log.length, run)}>
           <div className="stack">
-            <Code start={1} lines={log} />
-            <LiveLog {...liveLog(run)} />
+            <Group title="History">
+              <Code start={1} lines={log} log />
+            </Group>
+            <Group title="Live">
+              <LiveLog {...liveLog(run)} />
+            </Group>
           </div>
         </Disclosure>
       </div>
+    </>
+  );
+}
+
+/** Details' first rows, once a round ran or runs: how the review ran, and its rounds, `sha` the newest's commit. */
+function HowItRan({ it, state, sha }: { it: ChangeReview; state: State; sha: CommitSha }) {
+  const { review } = it;
+  const { run } = review;
+  const checks = confirmDetails(review);
+  const labels = confirmLabels(review);
+  return (
+    <>
+      <Disclosure row summary="How this review ran" value={howItRan(review)}>
+        <dl>
+          <dt>Started by</dt>
+          <dd>{startedBy(review.timeline)}</dd>
+          <dt>{labels.found}</dt>
+          <dd>{foundByLine(review, state.engines)}</dd>
+          {checks ? (
+            <>
+              <dt>{labels.checked}</dt>
+              <dd>
+                {checks.checked.map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
+              </dd>
+            </>
+          ) : null}
+          {checks && checks.ruledOut.length > 0 ? (
+            <>
+              <dt>{labels.ruledOut}</dt>
+              <dd>
+                {checks.ruledOut.map((r, i) => (
+                  <div key={`${i}-${r.title}`}>
+                    {r.title}: {r.reason}
+                  </div>
+                ))}
+              </dd>
+            </>
+          ) : null}
+          <dt>Posted</dt>
+          <dd>
+            {review.preview ? (
+              "Nothing: this was a preview"
+            ) : (
+              // The person's login is never broken at a hyphen: the line wraps before it.
+              <>
+                As <span className="nowrap">{postedAs(state.connection)}</span>, with a check on{" "}
+                <Sha sha={sha} />
+              </>
+            )}
+          </dd>
+        </dl>
+      </Disclosure>
+      <Disclosure
+        row
+        summary="Rounds"
+        value={
+          <>
+            {review.rounds.length + (run ? 1 : 0)}
+            {SEPARATOR}last commit <Sha sha={sha} />
+          </>
+        }
+      >
+        <div className="tbl-wrap">
+          <table className="tbl nowrap">
+            <thead>
+              <tr>
+                <th>Round</th>
+                <th>Commit</th>
+                <th>New</th>
+                <th>Verified fixed</th>
+                <th>Still open</th>
+                <th>By</th>
+                <th>Tokens</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {review.rounds.map((r) => {
+                const row = roundRow(r);
+                return (
+                  <tr key={r.n}>
+                    <td>{r.n}</td>
+                    <td>
+                      <Sha sha={row.commit} />
+                    </td>
+                    <td>{r.raised}</td>
+                    <td>{r.verifiedFixed}</td>
+                    <td>{r.open}</td>
+                    <td>{row.by}</td>
+                    <td className="num">{row.tokens}</td>
+                    <td>{duration(r.endedAt - r.startedAt)}</td>
+                  </tr>
+                );
+              })}
+              {run ? (
+                <tr>
+                  <td>{review.rounds.length + 1}</td>
+                  <td>
+                    <Sha sha={run.sha} />
+                  </td>
+                  <td>…</td>
+                  <td>…</td>
+                  <td>…</td>
+                  <td>…</td>
+                  <td>…</td>
+                  <td>running</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </Disclosure>
     </>
   );
 }
@@ -638,12 +706,7 @@ function ReviewHead({ it, state }: { it: ChangeReview; state: State }) {
         <Tag>
           {change.repoId} #{change.number}
         </Tag>
-        <span>
-          {change.writtenBy
-            ? `opened by ${change.openedBy}, written by ${writerName(change)}`
-            : `opened by ${change.openedBy}`}
-        </span>
-        {reviewerName ? <span>reviewed by {reviewerName}</span> : null}
+        <span>{reviewMeta(change, reviewerName)}</span>
         {review.preview ? (
           <Tip text="Nothing was posted on GitHub for this round.">
             <Tag origin>preview only</Tag>
@@ -660,47 +723,71 @@ interface ReviewActionsProps {
   copy: (() => unknown) | undefined;
 }
 
+/**
+ * The review button's place: one width through its labels, so the buttons after it never move (#279). The filled
+ * primary only when pressing it is what the person is needed for (`reviewButtonPrimary`), else a secondary. While a
+ * review runs or waits, a status stands there, never a dimmed button; its words are announced by one visually
+ * hidden status line beside it, as the hidden slots that keep the width can't be.
+ */
+export function ReviewButtonPlace({
+  shown,
+  primary,
+  again,
+}: {
+  shown: ReviewButton;
+  primary: boolean;
+  again: (() => void) | undefined;
+}) {
+  const busy = shown === "running" || shown === "waiting";
+  const variant = primary ? "primary" : "secondary";
+  return (
+    <>
+      <SameWidth
+        shown={shown}
+        labels={{
+          now: (
+            <Button variant={variant} kbd="R" onClick={again}>
+              {REVIEW_BUTTON.now}
+            </Button>
+          ),
+          again: (
+            <Button variant={variant} kbd="R" onClick={again}>
+              {REVIEW_BUTTON.again}
+            </Button>
+          ),
+          retry: (
+            <Button variant={variant} kbd="R" onClick={again}>
+              {REVIEW_BUTTON.retry}
+            </Button>
+          ),
+          running: <BusyStatus tone="run">{REVIEW_BUTTON.running}</BusyStatus>,
+          waiting: <BusyStatus tone="wait">{REVIEW_BUTTON.waiting}</BusyStatus>,
+        }}
+      />
+      <StatusLine>{busy ? REVIEW_BUTTON[shown] : ""}</StatusLine>
+    </>
+  );
+}
+
 function ReviewActions({ it, again, copy }: ReviewActionsProps) {
   const state = useAppState();
   const shown = reviewButton(it);
   const busy = shown === "running" || shown === "waiting";
   const note = again ? reviewAgainNote(state) : null;
-  // The button keeps one width through its labels, so the buttons after it never move (#279).
   return (
     <div className="rv-acts">
-      {busy || again ? (
-        <SameWidth
-          shown={shown}
-          labels={{
-            now: (
-              <Button variant="primary" kbd="R" onClick={again}>
-                {REVIEW_BUTTON.now}
-              </Button>
-            ),
-            again: (
-              <Button variant="primary" kbd="R" onClick={again}>
-                {REVIEW_BUTTON.again}
-              </Button>
-            ),
-            running: (
-              <Button loading disabled>
-                {REVIEW_BUTTON.running}
-              </Button>
-            ),
-            waiting: (
-              <Button loading disabled>
-                {REVIEW_BUTTON.waiting}
-              </Button>
-            ),
-          }}
-        />
-      ) : null}
       {copy ? (
         <Button kbd="C" onClick={copy}>
           Copy a fix prompt for my agent
         </Button>
       ) : null}
-      <GitHubButton change={it.change} kbd="G">
+      {/* Just before Open on GitHub in every round, so "Reviewing…", at its place's end, stands beside it, never
+          beside Copy with the room it holds read as an indent (round 6, 2026-11-08); held, so nothing moves. */}
+      {busy || again ? (
+        <ReviewButtonPlace shown={shown} primary={reviewButtonPrimary(it)} again={again} />
+      ) : null}
+      {/* A review that needs the person: Open on GitHub is the primary, where they settle the thread. */}
+      <GitHubButton change={it.change} kbd="G" variant={gitHubPrimary(it) ? "primary" : "secondary"}>
         Open on GitHub
       </GitHubButton>
       {/* Last, so the buttons keep their places when it comes and goes. */}
@@ -747,6 +834,7 @@ export function Review() {
       </div>
       <ReviewHead it={it} state={state} />
       <ReviewActions it={it} again={again} copy={copy} />
+      <FailedNotice it={it} state={state} />
       <Verdict it={it} state={state} />
       <Findings it={it} />
       <Details it={it} state={state} />

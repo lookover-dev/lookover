@@ -23,7 +23,7 @@ import { devCommand } from "./start-at-login.ts";
  * A command the service refused: the status it answered (0: the request never reached it), its own words, and the
  * data a settings save was refused with (ADR 0049): the file that doesn't read, the file that couldn't be written, or
  * the code of a refusal no file is at fault for; or why Your coding agent's command did nothing (`agent`, ADR 0058). With the command refused, when the app sent one: Your coding
- * agent's are said on the refusal line under its rows (`agentRefusal`), not in the toast.
+ * agent's are said on the row they were for (`agentRefusal`, `rowView`), not in the toast.
  */
 export interface Refusal {
   status: number;
@@ -226,6 +226,14 @@ function reason({ status, error }: Refusal): string {
   }
 }
 
+/**
+ * A refusal said nowhere, neither band nor toast: a command on many repositories (ADR 0082) answered 404 named only
+ * ones gone already, as a departure or a dismissal in another tab, and the list follows the events that said so.
+ */
+export function saysNothing({ status, command }: Refusal): boolean {
+  return status === 404 && (command?.type === "repos.setEnabled" || command?.type === "repos.dismiss");
+}
+
 /** The toast's one line. */
 export function refusalLine(refusal: Refusal): string {
   const { title, detail } = refusalText(refusal);
@@ -252,7 +260,13 @@ const NOT_SIGNED_IN = "This tab isn't signed in.";
  * and when the program's 401 named nothing (a body that didn't parse), the sentence without a command.
  */
 export function sessionLost(mode: WebMode, open: string | null): string | WithCommand {
-  if (open !== null) return { before: `${NOT_SIGNED_IN} Run`, command: open, after: "to open Lookover." };
+  if (open !== null)
+    return {
+      before: `${NOT_SIGNED_IN} Run`,
+      command: open,
+      after: "to open Lookover.",
+      alone: `${NOT_SIGNED_IN} To open Lookover, run:`,
+    };
   if (mode === "program") return `${NOT_SIGNED_IN} Open Lookover again from your terminal.`;
   return {
     before: `${NOT_SIGNED_IN} Open the link`,

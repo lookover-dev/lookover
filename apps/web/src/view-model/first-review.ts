@@ -1,8 +1,20 @@
 // Setup's First review list (#425, ADR 0070): the pull requests it offers, which of them Lookover already reviewed
 // on their head by itself, what is picked, and what the step says when nothing is left to pick.
-import type { ChangeId, State } from "@lookover/contracts";
+import type { Change, ChangeId, State } from "@lookover/contracts";
 import { roundOnHead } from "./findings.ts";
-import { CHIPS, type ChangeReview, changeReviews, chip, type StateChip } from "./select.ts";
+import { agoSentence, metaLine } from "./format.ts";
+import { authorLabel, CHIPS, type ChangeReview, changeReviews, chip, type StateChip } from "./select.ts";
+
+/**
+ * A row's small line, under its title: "owner/repo #n · by sasensi · written by Claude · 6 min ago", as a meta line.
+ */
+export function firstReviewMeta(change: Change, now: number): string {
+  return metaLine([
+    `${change.repoId} #${change.number}`,
+    authorLabel(change),
+    agoSentence(now, change.openedAt),
+  ]);
+}
 
 /**
  * The pull requests setup's first review offers: the owner's, in a repository that is on. Never another author's,
@@ -37,9 +49,17 @@ export const REVIEWED_CHIPS: readonly StateChip[] = [
   CHIPS["needs-you"],
 ];
 
+/**
+ * The line under the list, in its sentences: the screen draws each as a block of its own, so neither breaks
+ * mid-phrase nor leaves "#148 too." alone (round 6: `pretty` left it, `balance` across both split "by / itself").
+ */
+export type Sentences = readonly string[];
+
 /** What the step says when every pull request listed was reviewed already. */
-export const NONE_LEFT =
-  "Lookover already reviewed these by itself. Open one on GitHub to see its review, or go on.";
+export const NONE_LEFT: Sentences = [
+  "Lookover already reviewed these by itself.",
+  "Open one on GitHub to see its review, or go on.",
+];
 
 /** Whether the step says `NONE_LEFT`: pull requests are listed, and every one was reviewed already. */
 export function noneLeft(rows: readonly FirstReviewRow[]): boolean {
@@ -90,21 +110,38 @@ export function firstReviewPrimary(
   return picked === null || rows.some((row) => row.reviewed) ? "go-on" : "review";
 }
 
-const namedLine = (row: FirstReviewRow, word: string): string =>
-  `Lookover already reviewed ${row.change.repoId} #${row.change.number} by itself: ${word}.`;
+/** A pull request as the line names it: "sasensi/ledger-api #152". */
+const named = (row: FirstReviewRow): string => `${row.change.repoId} #${row.change.number}`;
 
-const countedLine = (n: number): string => `Lookover already reviewed ${n} of your pull requests by itself.`;
+/**
+ * What follows a line naming the reviewed while one is still picked: the pick it leaves the person, by name, so the
+ * radio on one pull request and the words on another agree (round 4: they read as a mismatch, then as vague).
+ */
+const picks = (pick: FirstReviewRow): string => `Go on, or review ${named(pick)} too.`;
+
+const namedLine = (row: FirstReviewRow, word: string, pick: FirstReviewRow): Sentences => [
+  `Lookover already reviewed ${named(row)} by itself: ${word}.`,
+  picks(pick),
+];
+
+const countedLine = (n: number, pick: FirstReviewRow): Sentences => [
+  `Lookover already reviewed ${n} of your pull requests by itself.`,
+  picks(pick),
+];
 
 /**
  * The line above the bar once a row is reviewed (ADR 0072): the one reviewed, named with its chip's word; a count
- * when several are; `NONE_LEFT` when every one is; "" while none is.
+ * when several are; either with the pick still left (`picked`, else the one `firstReviewPick` hands it to) by name;
+ * `NONE_LEFT` when every one is; no sentence while none is.
  */
-export function reviewedLine(rows: readonly FirstReviewRow[]): string {
+export function reviewedLine(rows: readonly FirstReviewRow[], picked: ChangeId | null): Sentences {
   const reviewed = rows.filter((row) => row.reviewed);
   const [only] = reviewed;
-  if (only === undefined) return "";
-  if (noneLeft(rows)) return NONE_LEFT;
-  return reviewed.length === 1 ? namedLine(only, only.chip.label) : countedLine(reviewed.length);
+  if (only === undefined) return [];
+  const pickId = firstReviewPick(rows, picked);
+  const pick = rows.find((row) => row.change.id === pickId);
+  if (noneLeft(rows) || pick === undefined) return NONE_LEFT;
+  return reviewed.length === 1 ? namedLine(only, only.chip.label, pick) : countedLine(reviewed.length, pick);
 }
 
 /**
@@ -119,17 +156,28 @@ export function firstReviewSecondary(
   return picked !== null && firstReviewPrimary(rows, picked) === "go-on" ? "review" : "preview";
 }
 
+/** How many of the longest-named rows the held lines name: a few, so a long list holds a handful of lines, not n². */
+const HELD_NAMES = 3;
+
 /**
- * The lines laid in one place (`HeldDetail`) so the line never grows when a review lands: the one shown, and every
- * one the step could show for these rows (each row named with each chip word a reviewed row can show, the count as
- * large as it can be, `NONE_LEFT`).
+ * The lines laid in one place (`HeldDetail`) so the line never grows when a review lands or the pick changes: the one
+ * shown, and the longest the step could show for these rows: the few rows with the longest names, each named with
+ * each chip word a reviewed row can show and each other of them picked, the count as large as it can be with each of
+ * them picked, and `NONE_LEFT`. Only the longest names are crossed (Lookover's round 4 F1: every pair of 300 rows
+ * was 359,102 hidden lines).
  */
-export function reviewedLines(rows: readonly FirstReviewRow[]): string[] {
+export function reviewedLines(rows: readonly FirstReviewRow[], picked: ChangeId | null): Sentences[] {
+  const longest = [...rows].sort((a, b) => named(b).length - named(a).length).slice(0, HELD_NAMES);
   const lines = [
-    reviewedLine(rows),
-    ...rows.flatMap((row) => REVIEWED_CHIPS.map((c) => namedLine(row, c.label))),
-    countedLine(Math.max(2, rows.length)),
+    reviewedLine(rows, picked),
+    ...longest.flatMap((row) =>
+      longest
+        .filter((pick) => pick !== row)
+        .flatMap((pick) => REVIEWED_CHIPS.map((c) => namedLine(row, c.label, pick))),
+    ),
+    ...longest.map((pick) => countedLine(Math.max(2, rows.length), pick)),
     NONE_LEFT,
   ];
-  return [...new Set(lines)];
+  // One copy of each line, its sentences compared, not the arrays.
+  return [...new Map(lines.map((line) => [JSON.stringify(line), line])).values()];
 }

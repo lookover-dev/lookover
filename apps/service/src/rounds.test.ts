@@ -127,6 +127,7 @@ test("round 1 posts in order with a valid result", () => {
     state: "queued",
     deferral: null,
     stepIn: null,
+    askedBy: null,
     skip: null,
     cancel: null,
     failure: null,
@@ -308,8 +309,8 @@ test("the fix pushed, round 2 verifies it and posts what is new", async () => {
   // Round 2 on the fix commit, with round 1's open findings in the prompt (the `review-round-2` recording:
   // the logged key is gone, the cap is still missing, the new eval is blocking, confirmed by `confirm-round-2`).
   // The fixed finding is verified fixed on the fix commit; the one reported again keeps its identity; the new
-  // blocking one is posted, numbered after the ledger's last (the ruled-out candidate never had a number); the
-  // summary is edited, not posted again.
+  // blocking one is posted, numbered after the ledger's last (the ruled-out candidate never had a number); the one
+  // still present after the push says why on its thread (ADR 0081); the summary is edited, not posted again.
   expect((await review(service, cookie)).status).toBe(200);
   const second = await until(stream, "round.finished");
   expect(second.map((e) => e.type)).toEqual([
@@ -319,6 +320,7 @@ test("the fix pushed, round 2 verifies it and posts what is new", async () => {
     "run.activity",
     "run.step",
     "run.step",
+    "run.posting",
     "run.posting",
     "run.posting",
     "run.posting",
@@ -349,7 +351,7 @@ test("the fix pushed, round 2 verifies it and posts what is new", async () => {
   expect(round2.findings[2]?.confirmation).toMatchObject({ by: "codex", verdict: "confirmed" });
 
   // Two reviews, the status block rewritten as each round runs and posts, two checks; the second check names the fix
-  // commit.
+  // commit. Round 2 replies on F2's thread, after its review: still present, in the finder's words of today.
   expect(host.posts.map((p) => p.kind)).toEqual([
     "check.created",
     "check.updated",
@@ -361,11 +363,19 @@ test("the fix pushed, round 2 verifies it and posts what is new", async () => {
     "check.updated",
     "status.written",
     "review",
+    "reply",
     "status.written",
     "check.completed",
   ]);
+  const still =
+    "listInvoices still returns all.slice(0, limit) with no Math.min cap and no check on limit, so large limits return everything and negative ones count from the end.";
+  const reply = host.posts[10];
+  if (reply?.kind !== "reply") throw new Error("no reply on F2's thread");
+  expect(reply.body).toContain(`Still present\n\n${still}`);
   const shown = host.view({ repo: SANDBOX, number: 1 });
-  expect(shown.reviews.map((r) => r.sha)).toEqual([HEAD, FIXED]);
+  // The reply on F2's thread is filed as GitHub files one: a review of its own, on the fix commit.
+  expect(shown.reviews.map((r) => r.sha)).toEqual([HEAD, FIXED, FIXED]);
+  expect(shown.reviews[2]?.comments.map((c) => c.body)).toEqual([reply.body]);
   expect(shown.comments).toEqual([]);
   expect(blockOn(host, { repo: SANDBOX, number: 1 })).toContain(" · 2 things to fix");
   // One check per commit: the view shows the head's, or the commit's named.
@@ -373,7 +383,7 @@ test("the fix pushed, round 2 verifies it and posts what is new", async () => {
     host.view({ repo: SANDBOX, number: 1 }, sha).checks.map((c) => `${c.sha} ${c.status} ${c.conclusion}`);
   expect(checks(HEAD)).toEqual([`${HEAD} completed neutral`]);
   expect(checks()).toEqual([`${FIXED} completed neutral`]);
-  const completed2 = host.posts[11];
+  const completed2 = host.posts[12];
   if (completed2?.kind !== "check.completed") throw new Error("no second completed check");
   expect(completed2.output.title).toBe("Looked over 4700cff: 2 things to fix");
   const result2 = readResult(completed2.output.text);
@@ -392,6 +402,7 @@ test("the fix pushed, round 2 verifies it and posts what is new", async () => {
     "F2 agent",
     "F1 none",
   ]);
+  expect(result2?.findings[1]?.resolution).toEqual({ kind: "still_present", round: 2, explanation: still });
   expect(result2?.counts).toEqual({
     open: { blocking: 1, should_fix: 1, consider: 0 },
     escalated: 0,
@@ -403,9 +414,9 @@ test("the fix pushed, round 2 verifies it and posts what is new", async () => {
     kept_in_app: 0,
   });
   // A finding never appears twice on the change: each review's comments carry their own findings, once.
-  const commented = shown.reviews.map((r) =>
-    r.comments.map((c) => /lookover:finding \{[^}]*"id":"(F\d+)"/.exec(c.body)?.[1]),
-  );
+  const commented = shown.reviews
+    .slice(0, 2)
+    .map((r) => r.comments.map((c) => /lookover:finding \{[^}]*"id":"(F\d+)"/.exec(c.body)?.[1]));
   expect(commented).toEqual([["F1", "F2"], ["F3"]]);
   // F3 is on line 17, the `eval` line whose text the recording quotes.
   expect(shown.reviews[1]?.comments.map((c) => [c.side, c.line, c.endLine])).toEqual([["head", 17, null]]);

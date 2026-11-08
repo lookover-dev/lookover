@@ -113,7 +113,7 @@ export interface CandidateFinding {
 export interface EarlierVerdict {
   id: FindingId;
   verdict: "present" | "gone" | "wrong" | "unknown";
-  /** The engine's one sentence on why; empty when unknown. */
+  /** The engine's reason, written to the author about the code now; empty when unknown. */
   why: string;
 }
 

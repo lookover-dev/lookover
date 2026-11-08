@@ -166,7 +166,8 @@ function repliesOf(round: PlacedRound): { reply: ThreadReply; root: ThreadRoot }
     const root = roots.find((r) => r.findingId === reply.findingId);
     // An answer is its reason alone: with none, there is nothing to say (`core` always gives one). Hidden characters
     // say nothing either: the filter removes them, so the posts owed and the posts sent agree.
-    const silent = reply.kind === "answered" && hiddenRemoved(reply.why).trim() === "";
+    const silent =
+      (reply.kind === "answered" || reply.kind === "still_present") && hiddenRemoved(reply.why).trim() === "";
     return root && !silent ? [{ reply, root }] : [];
   });
 }

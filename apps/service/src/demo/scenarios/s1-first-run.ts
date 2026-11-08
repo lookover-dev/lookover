@@ -5,7 +5,8 @@
 // ledger-api on and asks for a first review of #148, opened by their agent before Lookover watched it, with "Preview
 // here only": the round runs as any other (Codex finds, Claude double-checks) and nothing reaches GitHub. #148 is S2's.
 // Beside it, #131, open on GitHub for 19 days, which First review says so of (ADR 0068), and #152, the agent's, which
-// the drawer opens while setup shows its lists.
+// the drawer opens while setup shows its lists: opened on Repositories, it is asked nothing until the repositories
+// are chosen (ADR 0079), and First review can ask it; opened on First review, it is reviewed by itself.
 import { commitSha } from "@lookover/contracts";
 import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { added, BY_CLAUDE, LEDGER_API, MIN, OWNER, SHORT_FIND_MS } from "./ledger-api.ts";
@@ -84,7 +85,7 @@ export const S1: Scenario = {
   steps: [
     "Sign in to Codex: it is ready a few seconds later.",
     `Go on to GitHub and sign in with GitHub: copy the code and open GitHub's page, then enter it there with Authorize (or "You enter the sign-in code on GitHub" in the drawer); a few seconds later you are signed in, your three repositories reached. Cancel on GitHub's page (or "You cancel the sign-in on GitHub"), or wait 15 minutes, and the step says why.`,
-    "Keep ledger-api on and go on.",
+    `On Repositories, "Your agent opens a pull request" in the drawer opens #152: it shows at once and is asked nothing; First review can ask it. Keep ledger-api on and go on.`,
     "Pick #148 for the first review, with Preview here only, and watch it run. Nothing is posted on GitHub.",
   ],
   later: "",

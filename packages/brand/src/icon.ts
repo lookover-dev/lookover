@@ -41,6 +41,14 @@ export const MARK_SHAPES = {
     ring: circle(c, ecy, R) + circle(c, ecy, R - MARK.ring),
     pupil: circle(c, ecy + PUPIL_REST.ring, MARK.ringPupil),
     box: { x: r2(c - R), y: r2(ecy - R), width: 2 * R, height: 2 * R },
+    /**
+     * The solid eye's numbers its paths hold, for a picture drawn pixel by pixel: its disc's centre height (the
+     * disc is at `centre` across, `MARK.eye` round), its hole's centre height and radii.
+     */
+    solid: {
+      cy: r2(ecy),
+      hole: { cy: r2(ecy + PUPIL_REST.solid), rx: MARK.solidPupilRx, ry: MARK.solidPupilRy },
+    },
   })),
   lines: [
     { x: r2(x0), y: r2(y1), width: r2(PAIR), height: MARK.lineH },

@@ -20,6 +20,7 @@ const job: ReviewJob = {
   state: "running",
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip: null,
   cancel: null,
   failure: null,

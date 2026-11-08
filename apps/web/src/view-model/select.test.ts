@@ -28,6 +28,7 @@ import {
   type State,
   type Turn,
 } from "@lookover/contracts";
+import { repositoryLabel, SEPARATOR } from "./format.ts";
 import {
   authorLabel,
   bandOn,
@@ -38,7 +39,8 @@ import {
   changeReviews,
   chip,
   differences,
-  githubStatus,
+  failedNotice,
+  gitHubPrimary,
   homeGroups,
   lookedOver,
   nextStep,
@@ -49,17 +51,22 @@ import {
   pill,
   problems,
   REVIEW_BUTTON,
-  repositoryLabel,
+  REVIEW_KEY,
   reviewAgainNote,
   reviewButton,
+  reviewButtonPrimary,
   reviewLabel,
+  reviewMeta,
   rowAction,
+  rowMeta,
   sendElsewhere,
   sentence,
   settledVerdict,
   skipWhy,
   status,
   statusLine,
+  statusMenuGroups,
+  statusMenuLines,
   waitNotice,
 } from "./select.ts";
 
@@ -169,6 +176,7 @@ function levels(status: Status, at: number): Partial<Review> {
     state,
     deferral: null,
     stepIn: null,
+    askedBy: null,
     skip: null,
     cancel: null,
     failure: null,
@@ -684,44 +692,144 @@ test("two accounts with a problem: the pill counts them, the status menu lists b
     },
   };
   expect(pill(both)).toEqual({ tone: "need", label: "2 things need attention" });
-  const status = githubStatus(both);
-  expect(status.ok).toBe(false);
-  expect(status.text).toBe("connected as sam");
-  expect(status.problems.map((p) => [p.id, p.short, p.fix?.label])).toEqual([
-    ["account:sam", "App suspended on sam", "Unsuspend it on GitHub"],
-    ["account:ledger-dev", "ledger-dev needs SSO", "Sign in with SSO"],
+  // Each its own line, leading, in GitHub's order, each with its fix; GitHub's connection itself is fine, with them.
+  expect(
+    statusMenuLines(both).map((l) => [l.id, l.text, l.dot, l.problem?.fix?.label ?? null, l.leads]),
+  ).toEqual([
+    ["account:sam", "Lookover's App is suspended on sam", "need", "Unsuspend it on GitHub", true],
+    ["account:ledger-dev", "ledger-dev asks you to sign in with SSO", "need", "Sign in with SSO", true],
+    ["claude", "Claude: ready", "ok", null, false],
+    ["codex", "Codex: ready", "ok", null, false],
+    ["github", "GitHub: connected as sam", "ok", null, false],
+    ["service", "Service: running, starts at login", "ok", null, false],
   ]);
 });
 
-test("the status menu's GitHub line: connected and nothing held, its dot on; a wait GitHub asked for listed, no fault; disconnected, its cause", () => {
-  expect(githubStatus(onAccounts(null))).toEqual({
-    ok: true,
-    text: "connected as sam",
-    tone: null,
-    problems: [],
+/** The status menu in short: each line's words and dot. */
+const menuOf = (state: State) => statusMenuLines(state).map((l) => [l.text, l.dot]);
+
+test("the status menu: every line fine, each its green dot, in the menu's order", () => {
+  expect(menuOf(calm())).toEqual([
+    ["Claude: ready", "ok"],
+    ["Codex: ready", "ok"],
+    ["GitHub: connected as sam", "ok"],
+    ["Service: running, starts at login", "ok"],
+  ]);
+});
+
+test("the status menu: the lines with a problem lead, an account's problem a line of its own, the fine lines keep the green dot", () => {
+  // S16: Codex signed out, the App suspended on ledger-dev: in the band's order, the account's first, at the same level
+  // as Codex's (2026-11-08: nested in GitHub's, the two problems read as unequal); GitHub's connection is fine.
+  const st = signedOut(onAccounts({ kind: "uninstalled", suspended: true }), "codex");
+  expect(menuOf(st)).toEqual([
+    ["Lookover's App is suspended on ledger-dev", "need"],
+    ["Codex: signed out", "need"],
+    ["Claude: ready", "ok"],
+    ["GitHub: connected as sam", "ok"],
+    ["Service: running, starts at login", "ok"],
+  ]);
+  const codex = statusMenuLines(st).find((l) => l.id === "codex");
+  expect(codex?.problem?.fix?.label).toBe("Sign in");
+  const suspended = statusMenuLines(st).find((l) => l.id === "account:ledger-dev");
+  expect(suspended?.problem?.fix?.label).toBe("Ask an owner of ledger-dev");
+});
+
+test("the status menu: the lines that lead are marked, so the menu sets them apart from the fine ones", () => {
+  const st = signedOut(onAccounts({ kind: "uninstalled", suspended: true }), "codex");
+  expect(statusMenuLines(st).map((l) => [l.id, l.leads])).toEqual([
+    ["account:ledger-dev", true],
+    ["codex", true],
+    ["claude", false],
+    ["github", false],
+    ["service", false],
+  ]);
+  expect(statusMenuLines(calm()).some((l) => l.leads)).toBe(false);
+});
+
+test("the status menu: the fine lines get a heading, Fine, only under a problem; alone, Status already says it", () => {
+  const troubled = statusMenuGroups(statusMenuLines(signedOut(calm(), "codex")));
+  expect(troubled.leads.map((l) => l.id)).toEqual(["codex"]);
+  expect(troubled.fine.map((l) => l.id)).toEqual(["claude", "github", "service"]);
+  expect(troubled.fineHeading).toBe("Fine");
+  const fine = statusMenuGroups(statusMenuLines(calm()));
+  expect(fine.leads).toEqual([]);
+  expect(fine.fine.length).toBeGreaterThan(0);
+  expect(fine.fineHeading).toBeNull();
+  // every line in trouble: no fine well, so no heading over nothing
+  expect(statusMenuGroups(troubled.leads).fineHeading).toBeNull();
+});
+
+test("the status menu: an AI failing its safety check, start at login refused and an account's problem lead in the band's order", () => {
+  const st = withEngine(onAccounts({ kind: "sso", organisation: "ledger-dev", url: null }), "claude", {
+    state: "failed-self-test",
   });
-  const limited = { ...calm(), connection: { ...calm().connection, limitUntil: NOW + 5 * MIN } };
-  expect(githubStatus(limited)).toMatchObject({ ok: true, problems: [{ id: "connection", tone: "warn" }] });
-  const st = down({ kind: "signed-out" });
-  const out = githubStatus(st);
-  expect(out.ok).toBe(false);
-  expect(out.text).toBe("signed out");
-  expect(out.problems.map((p) => p.fix?.label)).toEqual(["Sign in again"]);
-  // The AIs and the service are the menu's other lines.
-  expect(githubStatus(signedOut(onAccounts(null), "claude")).problems).toEqual([]);
+  const refused: State = { ...st, service: { ...st.service, startAtLogin: true, atLogin: "none" } };
+  expect(menuOf(refused)).toEqual([
+    ["ledger-dev asks you to sign in with SSO", "need"],
+    ["Claude: didn't pass Lookover's safety check", "need"],
+    ["Service: running, doesn't start at login", "need"],
+    ["Codex: ready", "ok"],
+    ["GitHub: connected as sam", "ok"],
+  ]);
 });
 
-test("the status menu's GitHub line takes the band's colour: amber when it only waits, pink when any problem under it needs the person (ADR 0070)", () => {
-  const unreachable = githubStatus(down({ kind: "unreachable" }));
-  expect(unreachable).toMatchObject({ ok: false, tone: "warn" });
-  // The connection waits on GitHub's limit while ledger-dev asks for SSO: the line's dot is pink.
-  const st = onAccounts({ kind: "sso", organisation: "ledger-dev", url: null });
-  const both = githubStatus({ ...st, connection: { ...st.connection, limitUntil: NOW + 5 * MIN } });
-  expect(both.problems.map((p) => [p.id, p.tone])).toEqual([
-    ["connection", "warn"],
-    ["account:ledger-dev", "need"],
+test("the status menu: an AI at its limit waits, amber, first", () => {
+  expect(menuOf(withEngine(calm(), "codex", { state: "limit" }))).toEqual([
+    ["Codex: at its limit", "warn"],
+    ["Claude: ready", "ok"],
+    ["GitHub: connected as sam", "ok"],
+    ["Service: running, starts at login", "ok"],
   ]);
-  expect(both).toMatchObject({ ok: false, tone: "need" });
+});
+
+test("the status menu: another Lookover holding the start at login is fine, its line in its place", () => {
+  const st = calm();
+  const other = { other: String.raw`"C:\Program Files\Lookover\lookover.exe" start --no-open` };
+  expect(menuOf({ ...st, service: { ...st.service, atLogin: other } })).toEqual([
+    ["Claude: ready", "ok"],
+    ["Codex: ready", "ok"],
+    ["GitHub: connected as sam", "ok"],
+    ["Service: running, another Lookover starts at login", "ok"],
+  ]);
+});
+
+test("the status menu: an AI that doesn't review is grey, in its place, while the pill says all good", () => {
+  const st = signedOut(calm(), "codex");
+  const reviewers = {
+    value: "claude",
+    origin: "owner-default",
+    overrode: { value: "both", origin: "lookover-default" },
+  } as const;
+  const claudeOnly = { ...st, settings: { ...st.settings, reviewers } };
+  expect(pill(claudeOnly)).toEqual({ tone: "ok", label: "All good" });
+  expect(menuOf(claudeOnly)).toEqual([
+    ["Claude: ready", "ok"],
+    ["Codex: signed out", "mute"],
+    ["GitHub: connected as sam", "ok"],
+    ["Service: running, starts at login", "ok"],
+  ]);
+});
+
+test("the status menu's GitHub line: a wait GitHub asked for is amber, a cause takes its tone, with the connection's fix on the line", () => {
+  const limited = { ...calm(), connection: { ...calm().connection, limitUntil: NOW + 5 * MIN } };
+  const wait = statusMenuLines(limited).find((l) => l.id === "github");
+  expect(wait).toMatchObject({
+    text: "GitHub: connected as sam",
+    dot: "warn",
+    problem: { id: "connection" },
+  });
+  expect(statusMenuLines(limited)[0]?.id).toBe("github");
+  const out = statusMenuLines(down({ kind: "signed-out" })).find((l) => l.id === "github");
+  expect(out).toMatchObject({ text: "GitHub: signed out", dot: "need" });
+  expect(out?.problem?.fix?.label).toBe("Sign in again");
+  expect(statusMenuLines(down({ kind: "unreachable" })).find((l) => l.id === "github")?.dot).toBe("warn");
+  // The connection waits on GitHub's limit while ledger-dev asks for SSO: each says its own.
+  const st = onAccounts({ kind: "sso", organisation: "ledger-dev", url: null });
+  const both = statusMenuLines({ ...st, connection: { ...st.connection, limitUntil: NOW + 5 * MIN } });
+  expect(both.filter((l) => l.leads).map((l) => [l.id, l.dot, l.problem?.id])).toEqual([
+    ["github", "warn", "connection"],
+    ["account:ledger-dev", "need", "account:ledger-dev"],
+  ]);
 });
 
 test("an organisation asking for SSO with no page from GitHub opens the organisation's SSO page", () => {
@@ -907,7 +1015,7 @@ test("start at login not as chosen needs you, with Settings' row as its one fix,
     },
   ]);
   expect(pill(refused)).toEqual({ tone: "need", label: "Start at login refused" });
-  expect(sentence(refused).title).toBe("1 thing needs you.");
+  expect(sentence(refused).title).toBe("Nothing else needs you.");
   expect(problems(atLogin(false, true))).toEqual([
     {
       id: "login",
@@ -1007,6 +1115,29 @@ test("a running row's time counts from the ticking now the screen gives, else th
   expect(statusLine(st, first, st.now + 5_000)).toBe("reading the code · 3 min 5 s");
 });
 
+test("a row's meta line is its parts, in order, each its own: the screen puts one separator between them", () => {
+  const running = withChange(calm(), 1, "running", 0);
+  // A separator inside a part holds its dot to what follows, as the screen's between parts (`SEPARATOR`), so a
+  // wrapped line never ends on "written by Claude ·".
+  expect(rowMeta(running, firstOf(running), running.now + 5_000)).toEqual([
+    { kind: "change", text: "sam/app #1" },
+    { kind: "text", text: `by sam${SEPARATOR}written by Claude` },
+    { kind: "running", doing: "reading the code", time: "3 min 5 s" },
+  ]);
+  // A finished one says how long ago, after where it stands.
+  const settled = withChange(calm(), 2, "settled");
+  expect(rowMeta(settled, firstOf(settled))).toEqual([
+    { kind: "change", text: "sam/app #2" },
+    { kind: "text", text: `by sam${SEPARATOR}written by Claude` },
+    { kind: "text", text: "1 finding, all closed in 1 round" },
+    { kind: "text", text: "10 min" },
+  ]);
+  const toFix = withChange(calm(), 3, "to-fix");
+  const parts = rowMeta(toFix, firstOf(toFix));
+  expect(parts.map((part) => part.kind)).toEqual(["change", "text", "text"]);
+  for (const part of parts) expect("text" in part ? part.text : "").not.toContain(" · ");
+});
+
 test("running and waiting reviews are counted, not called out", () => {
   const st = withChange(withChange(calm(), 1, "running"), 2, "queued");
   expect(sentence(st)).toEqual({ title: "Nothing needs you.", small: "1 reviewing now · 1 waiting" });
@@ -1015,7 +1146,7 @@ test("running and waiting reviews are counted, not called out", () => {
 test("a pause still says so under a problem: what needs you comes first, the pause stays in sight", () => {
   const st = withChange(paused(signedOut(calm(), "claude")), 1, "deferred", 5 * MIN);
   expect(sentence(st)).toEqual({
-    title: "1 thing needs you.",
+    title: "Nothing else needs you.",
     small: "paused until you resume · 1 waiting · Codex ready",
   });
   const own = withChange(paused(calm()), 1, "needs-you");
@@ -1029,22 +1160,37 @@ test("pull requests with an escalated finding need you, and are counted", () => 
   );
 });
 
-test("a review waiting for a signed-out AI is not one more thing: the AI is", () => {
+test("a review waiting for a signed-out AI is not one more thing: the AI is, in the band", () => {
   const st = withChange(signedOut(calm(), "claude"), 1, "deferred", 5 * MIN);
-  expect(sentence(st).title).toBe("1 thing needs you.");
+  expect(sentence(st).title).toBe("Nothing else needs you.");
   expect(homeGroups(st, "mine").waiting.map((i) => String(i.change.id))).toEqual(["sam/app#1"]);
 });
 
-test("problems count with pull requests", () => {
-  // The design system's Home: a finding escalated, and a review waiting because Claude signed out.
-  let st = withChange(signedOut(calm(), "claude"), 1, "needs-you");
-  st = withChange(st, 2, "deferred", 5 * MIN);
-  expect(sentence(st).title).toBe("2 things need you.");
-  // A service problem on its own.
-  st = calm();
-  expect(sentence({ ...st, connection: { ...st.connection, state: "disconnected" } }).title).toBe(
-    "1 thing needs you.",
+test("the headline speaks of the reviews, never of the band's problems, which the band says once (round 5)", () => {
+  // The design system's Home: Claude signed out, a review waiting on it, nothing of the person's own to do.
+  const waiting = withChange(signedOut(calm(), "claude"), 1, "deferred", 5 * MIN);
+  expect(sentence(waiting).title).toBe("Nothing else needs you.");
+  // A finding escalated beside it: the pull request, as without the problem.
+  const own = withChange(waiting, 2, "needs-you");
+  expect(sentence(own).title).toBe("1 pull request needs you.");
+  // No name of a problem in any headline: GitHub, both AIs, start at login, an account's.
+  const disconnected = { ...calm().connection, state: "disconnected" as const };
+  const both = signedOut(signedOut(calm(), "claude"), "codex");
+  const refused: State = {
+    ...signedOut(calm(), "claude"),
+    service: { ...calm().service, startAtLogin: true, atLogin: "none", loginItem: "os" },
+  };
+  const sso = onAccounts({ kind: "sso", organisation: "ledger-dev", url: null });
+  for (const st of [{ ...calm(), connection: disconnected }, both, refused, sso]) {
+    expect(problems(st).some((p) => p.tone === "need")).toBe(true);
+    expect(sentence(st).title).toBe("Nothing else needs you.");
+  }
+  expect(sentence(withChange(withChange(both, 1, "needs-you"), 2, "needs-you")).title).toBe(
+    "2 pull requests need you.",
   );
+  // Previews alone are read, whatever the band holds.
+  const open = [finding("a", "blocking", "open")];
+  expect(sentence(withPreview(both, 1, open)).title).toBe("1 preview to read.");
 });
 
 test("an AI at its limit does not need you", () => {
@@ -1265,7 +1411,9 @@ test("a preview is counted with the rest of what needs you", () => {
   expect(sentence(withChange(withPreview(calm(), 1, open), 2, "needs-you")).title).toBe(
     "2 pull requests need you.",
   );
-  expect(sentence(withPreview(signedOut(calm(), "claude"), 1, open)).title).toBe("2 things need you.");
+  expect(sentence(withChange(withPreview(signedOut(calm(), "claude"), 1, open), 2, "needs-you")).title).toBe(
+    "2 pull requests need you.",
+  );
 });
 
 test("the same round posted stays To fix, the author's, under “Nothing needs you.”", () => {
@@ -1280,14 +1428,34 @@ test("the same round posted stays To fix, the author's, under “Nothing needs y
 
 test("the review page's verdict says a preview's findings were found, a posted round's are to fix", () => {
   const open = [finding("a", "blocking", "open")];
-  expect(openVerdict(firstOf(withPreview(calm(), 1, open)))).toBe(
-    "Looked over a1f9c2e. One thing found, 1 blocking.",
-  );
-  expect(openVerdict(firstOf(withChange(calm(), 1, "to-fix", MIN, { findings: open })))).toBe(
-    "Looked over a1f9c2e. One thing to fix, 1 blocking.",
-  );
+  const commit = { commit: commitSha("a1f9c2e") };
+  expect(openVerdict(firstOf(withPreview(calm(), 1, open)))).toEqual([
+    "Looked over ",
+    commit,
+    ". One thing found, one blocking.",
+  ]);
+  expect(openVerdict(firstOf(withChange(calm(), 1, "to-fix", MIN, { findings: open })))).toEqual([
+    "Looked over ",
+    commit,
+    ". One thing to fix, one blocking.",
+  ]);
+  // The counts one way: words for one, digits for more, never "One thing to fix, 1 blocking".
+  const three = [
+    finding("a", "blocking", "open"),
+    finding("b", "blocking", "open"),
+    finding("c", "should_fix", "open"),
+  ];
+  expect(openVerdict(firstOf(withChange(calm(), 1, "to-fix", MIN, { findings: three })))).toEqual([
+    "Looked over ",
+    commit,
+    ". 3 things to fix, 2 blocking.",
+  ]);
   const two = [finding("a", "should_fix", "open"), finding("b", "consider", "open")];
-  expect(openVerdict(firstOf(withPreview(calm(), 1, two)))).toBe("Looked over a1f9c2e. 2 things found.");
+  expect(openVerdict(firstOf(withPreview(calm(), 1, two)))).toEqual([
+    "Looked over ",
+    commit,
+    ". 2 things found.",
+  ]);
 });
 
 test("a preview with new commits says so and keeps Review again, as To fix does", () => {
@@ -1316,6 +1484,7 @@ test("a waiting review says what it waits for, in plain words", () => {
       state: "deferred",
       deferral: { reason: "paused" },
       stepIn: null,
+      askedBy: null,
       skip: null,
       cancel: null,
       failure: null,
@@ -1323,6 +1492,108 @@ test("a waiting review says what it waits for, in plain words", () => {
     },
   });
   expect(lineOf(paused)).toBe("reviews are paused");
+});
+
+test("a failed review's row says its cause; after a round, the loop's state, and the page says the failure above it (ADR 0081)", () => {
+  const failed = (failure: ReviewJob["failure"]): ReviewJob => ({
+    id: jobId("job-f"),
+    sha: commitSha("b2e8d1f"),
+    trigger: "push",
+    state: "failed",
+    deferral: null,
+    stepIn: null,
+    askedBy: null,
+    skip: null,
+    cancel: null,
+    failure,
+    turn: null,
+  });
+  const late = failed({
+    kind: "prepare_failed",
+    detail: "fetch_failed",
+    engine: "claude",
+    cause: "git_time_limit",
+    limitMs: 600_000,
+  });
+  const stall = failed({
+    kind: "prepare_failed",
+    detail: "fetch_failed",
+    engine: "claude",
+    cause: "git_silent",
+    limitMs: 120_000,
+  });
+
+  // Before any round: the row says the phrase, the chip "Failed", the page's notice says it, on which commit and
+  // when, from the review's history.
+  const timeline = [
+    { at: NOW - 3 * MIN, sha: commitSha("b2e8d1f"), kind: "failed" as const, failure: late.failure },
+  ];
+  const first = withChange(calm(), 1, "none", MIN, { job: late, timeline });
+  expect(lineOf(first)).toBe("getting the code ready ran past its 10-minute limit");
+  expect(chip(firstOf(first))).toEqual({ tone: "need", label: "Failed" });
+  // The commit and the time apart: the head ends on the commit, the time opens the line under it (round 6).
+  expect(failedNotice(firstOf(first), NOW)).toEqual({
+    head: ["Couldn't look over ", { commit: commitSha("b2e8d1f") }],
+    sentence: "Getting the code ready ran past its 10-minute limit.",
+    when: "3 min ago",
+    next: "The repository or the change is too large to get ready in that time.",
+  });
+
+  // After a round: the row and the chip follow the loop (ADR 0029); the page says the failure above the round.
+  const findings = [finding("a", "blocking", "open")];
+  // When is read from the failed entry on the job's own commit, never from a newer one on another commit.
+  const history = [
+    { at: NOW - 4 * MIN, sha: commitSha("b2e8d1f"), kind: "failed" as const, failure: stall.failure },
+    { at: NOW - MIN, sha: commitSha("0a1b2c3"), kind: "failed" as const, failure: late.failure },
+  ];
+  const after = withChange(calm(), 1, "to-fix", MIN, { job: stall, findings, timeline: history });
+  expect(lineOf(after)).toBe("1 blocking finding open");
+  expect(chip(firstOf(after))).toEqual({ tone: "warn", label: "To fix" });
+  // Where another try can help, the notice says so under the cause; "Try again" above is the way.
+  expect(failedNotice(firstOf(after), NOW)).toEqual({
+    head: ["Couldn't look over ", { commit: commitSha("b2e8d1f") }],
+    sentence: "Git sent nothing for 2 minutes while Lookover got the code ready.",
+    when: "4 min ago",
+    next: "Another try usually gets through.",
+  });
+  // A failure another try can't cure says what would change it.
+  expect(failedNotice(firstOf(withChange(calm(), 1, "to-fix", MIN, { job: late, findings })), NOW)).toEqual({
+    head: ["Couldn't look over ", { commit: commitSha("b2e8d1f") }],
+    sentence: "Getting the code ready ran past its 10-minute limit.",
+    when: null,
+    next: "The repository or the change is too large to get ready in that time.",
+  });
+  // An engine with no usable review: what that means, said in the notice, not left to the log.
+  const crashed = failed({
+    kind: "review_failed",
+    detail: "crashed",
+    engine: "codex",
+    cause: "engine_answer",
+    limitMs: null,
+  });
+  expect(failedNotice(firstOf(withChange(calm(), 1, "none", MIN, { job: crashed })), NOW)).toEqual({
+    head: ["Couldn't look over ", { commit: commitSha("b2e8d1f") }],
+    sentence: "Codex gave no usable review.",
+    when: null,
+    next: "It stopped, or sent an answer Lookover couldn't read. Another try usually works.",
+  });
+  // No cause known: the notice promises nothing of another try, "Try again" above is the way.
+  const unknown = failed({ kind: "unexpected", detail: "boom", engine: null, cause: null, limitMs: null });
+  expect(failedNotice(firstOf(withChange(calm(), 1, "none", MIN, { job: unknown })), NOW)).toEqual({
+    head: ["Couldn't look over ", { commit: commitSha("b2e8d1f") }],
+    sentence: "Something went wrong in Lookover.",
+    when: null,
+    next: null,
+  });
+  // A round that ended well, or a job not failed: nothing above it.
+  expect(failedNotice(firstOf(withChange(calm(), 1, "to-fix", MIN, { findings })), NOW)).toBeNull();
+
+  // The page's one primary answers the failure: "Try again" where another try can help, before a round or after;
+  // where it can't, the button asks for a review as ever, the notice saying what would change it.
+  expect(reviewButton(firstOf(withChange(calm(), 1, "none", MIN, { job: stall })))).toBe("retry");
+  expect(reviewButton(firstOf(after))).toBe("retry");
+  expect(reviewButton(firstOf(first))).toBe("now");
+  expect(reviewButton(firstOf(withChange(calm(), 1, "to-fix", MIN, { job: late, findings })))).toBe("again");
 });
 
 test("a review waiting its turn says what it waits behind, on its row and its page (ADR 0055)", () => {
@@ -1404,6 +1675,7 @@ test("reviews waiting for an AI can be sent to the other one when the service sa
         state: "deferred",
         deferral: { reason: "engine-signed-out", engine: "claude" },
         stepIn,
+        askedBy: null,
         skip: null,
         cancel: null,
         failure: null,
@@ -1429,7 +1701,7 @@ test("the chip says where a review stands; round counts have no limit", () => {
     return chip(first);
   };
   expect(chipOf("needs-you")).toEqual({ tone: "need", label: "Needs you" });
-  expect(chipOf("deferred")).toEqual({ tone: "warn", label: "Waiting" });
+  expect(chipOf("deferred")).toEqual({ tone: "wait", label: "Waiting" });
   expect(chipOf("to-fix")).toEqual({ tone: "warn", label: "To fix" });
   expect(chipOf("clean")).toEqual({ tone: "ok", label: "Clean" });
   expect(chipOf("settled")).toEqual({ tone: "ok", label: "Settled" });
@@ -1516,9 +1788,90 @@ test("the review button says what it does in each state: asks now or again, or s
   expect(REVIEW_BUTTON).toEqual({
     now: "Review now",
     again: "Review again",
+    retry: "Try again",
     running: "Reviewing…",
     waiting: "Waiting…",
   });
+});
+
+test("the line under a review's title: who opened, wrote and reviewed it, one separator between every two", () => {
+  const it = firstOf(withChange(calm(), 1, "to-fix"));
+  expect(reviewMeta(it.change, "Codex")).toBe(
+    `by sam${SEPARATOR}written by Claude${SEPARATOR}reviewed by Codex`,
+  );
+  expect(reviewMeta({ ...it.change, writtenBy: null }, null)).toBe("by sam");
+  // The author said as every row says it (`authorLabel`), never "opened by" here and "by" there.
+  expect(reviewMeta(it.change, null).replaceAll(SEPARATOR, " · ")).toBe(authorLabel(it.change));
+});
+
+test("the review button is the page's primary only when it answers what needs the person", () => {
+  const primary = (st: State) => reviewButtonPrimary(firstOf(st));
+  const findings = [finding("a", "blocking", "open")];
+  const withNew = (st: State, newCommits: number): State => {
+    const id = changeId("sam/app#1");
+    const change = st.changes[id];
+    if (!change) throw new Error("No change");
+    return { ...st, changes: { ...st.changes, [id]: { ...change, newCommits } } };
+  };
+  // Nothing needs the person: the agent works on the findings, the review settled, a finding only they can settle
+  // (the button doesn't settle it), a review running or waiting.
+  expect(primary(withChange(calm(), 1, "to-fix", MIN, { findings }))).toBe(false);
+  expect(primary(withChange(calm(), 1, "settled"))).toBe(false);
+  expect(primary(withChange(calm(), 1, "clean"))).toBe(false);
+  expect(primary(withChange(calm(), 1, "needs-you"))).toBe(false);
+  expect(primary(withChange(calm(), 1, "running"))).toBe(false);
+  expect(primary(withChange(calm(), 1, "queued"))).toBe(false);
+  // What needs them: new commits nobody looked at, a preview to post, a first review to ask for, a failure another
+  // try can help.
+  expect(primary(withNew(withChange(calm(), 1, "to-fix", MIN, { findings }), 2))).toBe(true);
+  expect(primary(withNew(withChange(calm(), 1, "settled"), 1))).toBe(true);
+  expect(primary(withPreview(calm(), 1, findings))).toBe(true);
+  expect(primary(withChange(calm(), 1, "none"))).toBe(true);
+  const failed = (cause: "git_silent" | "git_time_limit"): ReviewJob => ({
+    id: jobId("job-f"),
+    sha: commitSha("b2e8d1f"),
+    trigger: "push",
+    state: "failed",
+    deferral: null,
+    stepIn: null,
+    askedBy: null,
+    skip: null,
+    cancel: null,
+    failure: { kind: "prepare_failed", detail: "fetch_failed", engine: "claude", cause, limitMs: 120_000 },
+    turn: null,
+  });
+  expect(primary(withChange(calm(), 1, "to-fix", MIN, { job: failed("git_silent"), findings }))).toBe(true);
+  // A failure another try can't cure: the notice says what would change it, the button asks as ever.
+  expect(primary(withChange(calm(), 1, "to-fix", MIN, { job: failed("git_time_limit"), findings }))).toBe(
+    false,
+  );
+  // Before round 1 too: Review now is no answer to a failure another try can't cure (#644).
+  expect(primary(withChange(calm(), 1, "none", MIN, { job: failed("git_time_limit") }))).toBe(false);
+  // New commits after such a failure are what needs the person: nobody looked at them (#644).
+  expect(
+    primary(withNew(withChange(calm(), 1, "to-fix", MIN, { job: failed("git_time_limit"), findings }), 2)),
+  ).toBe(true);
+});
+
+test("a review that needs the person has one filled primary: Open on GitHub, where they settle the thread (#644)", () => {
+  const github = (st: State) => gitHubPrimary(firstOf(st));
+  expect(github(withChange(calm(), 1, "needs-you"))).toBe(true);
+  // Every other state, Open on GitHub stays a secondary.
+  for (const kind of ["to-fix", "settled", "clean", "running", "queued", "none"] as const)
+    expect(github(withChange(calm(), 1, kind))).toBe(false);
+  // New commits on it: Review again is the primary, and the only one.
+  const st = withChange(calm(), 1, "needs-you");
+  const id = changeId("sam/app#1");
+  const change = st.changes[id];
+  if (!change) throw new Error("No change");
+  const newer = firstOf({ ...st, changes: { ...st.changes, [id]: { ...change, newCommits: 1 } } });
+  expect([reviewButtonPrimary(newer), gitHubPrimary(newer)]).toEqual([true, false]);
+});
+
+test("the shortcut list says every label R can press: Review now, Review again and Try again", () => {
+  expect(REVIEW_KEY).toBe("Review now, Review again or Try again");
+  for (const label of [REVIEW_BUTTON.now, REVIEW_BUTTON.again, REVIEW_BUTTON.retry])
+    expect(REVIEW_KEY).toContain(label);
 });
 
 test("a change never asked for, opened with reviews on open off, says so, not that someone else opened it", () => {
@@ -1774,16 +2127,16 @@ test("the row follows the page: no Review now where only Codex reviews another's
   expect(canReviewAgain(ownOff)).toBe(false);
 });
 
-test("a row names who opened it, then who wrote it", () => {
+test('a row names who opened it the same way on every row, "by sam", then who wrote it (round 5)', () => {
   const { change } = firstOf(withChange(calm(), 1, "none"));
   const label = (author: "you" | "agent" | "other", openedBy: string, writtenBy: EngineId | null) =>
     authorLabel({ ...change, author, openedBy, writtenBy });
   expect(label("you", "sam", null)).toBe("by sam");
-  expect(label("you", "sam", "claude")).toBe("sam · written by Claude");
-  expect(label("agent", "sam", "claude")).toBe("sam · written by Claude");
-  expect(label("agent", "sam", "codex")).toBe("sam · written by Codex");
-  expect(label("other", "ana", null)).toBe("ana");
-  expect(label("other", "ana", "claude")).toBe("ana · written by Claude");
+  expect(label("you", "sam", "claude")).toBe("by sam · written by Claude");
+  expect(label("agent", "sam", "claude")).toBe("by sam · written by Claude");
+  expect(label("agent", "sam", "codex")).toBe("by sam · written by Codex");
+  expect(label("other", "ana", null)).toBe("by ana");
+  expect(label("other", "ana", "claude")).toBe("by ana · written by Claude");
 });
 
 test("a skipped job that never said why shows as not reviewed, never as another author's", () => {

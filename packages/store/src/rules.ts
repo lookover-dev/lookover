@@ -18,7 +18,7 @@ export type ReadRule = CitedRule & { text: string; parentIds: string[] };
  * A repository's rule as kept, with its counts and the rules it is nested in; whether it is on is the settings', not
  * the store's.
  */
-export type KeptRule = Omit<Rule, "enabled" | "parentOff" | "nested"> & { parentIds: string[] };
+export type KeptRule = Omit<Rule, "enabled" | "parentOff" | "nested" | "nestedIn"> & { parentIds: string[] };
 
 export interface Rules {
   /**

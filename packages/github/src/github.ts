@@ -14,7 +14,7 @@ import {
 } from "@lookover/contracts";
 import { createAccounts } from "./accounts.ts";
 import { allowedOnly } from "./allowed.ts";
-import { type Fetch, GitHubApi, type RateLimit } from "./api.ts";
+import { type Deadline, type Fetch, GitHubApi, type RateLimit, realWaits, type Waits } from "./api.ts";
 import { createIntake } from "./intake.ts";
 import { parse, repository } from "./schemas.ts";
 import type { Session } from "./session.ts";
@@ -54,10 +54,16 @@ export interface HostOptions {
   /** The HTTP client, for tests. `globalThis.fetch` when not given. */
   fetch?: Fetch;
   /**
-   * A pause of `ms`, for tests: the status block's write waits a second between two reads while GitHub's read lags
-   * (ADR 0069), measured on `clock`. A real timer when not given.
+   * A pause of `ms`, for tests: between two tries of a request that failed on the way (1 s, then 3 s, ADR 0080), and
+   * the status block's write's second between two reads while GitHub's read lags (ADR 0069), measured on `clock`. A
+   * real timer when not given.
    */
   sleep?(ms: number): Promise<void>;
+  /**
+   * A try's time limit of `ms`, for tests: a signal that aborts when it runs out, and how to clear it once the try is
+   * over (ADR 0080). A real timer, cleared at the try's end, when not given.
+   */
+  deadline?(ms: number): Deadline;
   /**
    * Given each secret the adapter holds, as it comes to hold it and before any request carries it: a device code, each
    * token and refresh token of the person's. The service's log removes them (ADR 0054). Nobody is told when not given.
@@ -86,10 +92,16 @@ export interface GitHub {
   identity(repo: RepositoryRef): Promise<Identity>;
 }
 
-function apiOf(options: HostOptions): { api: GitHubApi; clock: Clock } {
+function apiOf(options: HostOptions): { api: GitHubApi; clock: Clock; waits: Waits } {
   const clock = options.clock ?? { now: () => Date.now() };
-  const api = new GitHubApi(options.fetch ?? ((input, init) => fetch(input, init)), clock, options.api);
-  return { api, clock };
+  const waits = { sleep: options.sleep ?? realWaits.sleep, deadline: options.deadline ?? realWaits.deadline };
+  const api = new GitHubApi(
+    options.fetch ?? ((input, init) => fetch(input, init)),
+    clock,
+    options.api,
+    waits,
+  );
+  return { api, clock, waits };
 }
 
 /** Signing a person in to the shared App (contracts' `HostSignIn`): the device flow and the refresh. */
@@ -120,7 +132,7 @@ export function createHostAccounts(options: HostOptions & { keeper: SignInKeeper
 }
 
 export function createGitHub(options: GitHubOptions): GitHub {
-  const { api, clock } = apiOf(options);
+  const { api, clock, waits } = apiOf(options);
   const secret = options.secret ?? (() => {});
   const session =
     "keeper" in options
@@ -129,10 +141,7 @@ export function createGitHub(options: GitHubOptions): GitHub {
   const allowed = allowedOnly(options.repositories);
   return {
     intake: createIntake(api, session, allowed),
-    writer: createWriter(api, session, allowed, {
-      clock,
-      sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
-    }),
+    writer: createWriter(api, session, allowed, { clock, sleep: waits.sleep }),
     rateLimit: () => api.rateLimit(),
     view: createView(api, session, allowed),
     async identity(repo) {

@@ -25,12 +25,13 @@ const REFUSAL: Record<string, "unauthorized" | "not_found" | "rate_limited"> = {
 /**
  * Sends `query` with `variables`, as `token`'s holder, and returns its data as `data` reads it. Throws the
  * `HostError` GitHub's first error means (`what` names the request in its message), or `unavailable` for an answer
- * of a shape it doesn't know.
+ * of a shape it doesn't know. `read` says the query only reads, so it is tried again like a GET; a mutation says false
+ * (ADR 0080): the caller says which, never the query's text.
  */
 export async function graphql<T>(
   api: GitHubApi,
   token: string,
-  request: { query: string; variables: Record<string, unknown>; what: string },
+  request: { query: string; variables: Record<string, unknown>; what: string; read: boolean },
   data: z.ZodType<T>,
 ): Promise<T> {
   const sent = await api.request({
@@ -38,9 +39,10 @@ export async function graphql<T>(
     path: PATH,
     bearer: token,
     body: { query: request.query, variables: request.variables },
+    read: request.read,
   });
-  const read = parse(answer, sent.body, `POST ${PATH} (${request.what})`);
-  const [error] = read.errors ?? [];
+  const parsed = parse(answer, sent.body, `POST ${PATH} (${request.what})`);
+  const [error] = parsed.errors ?? [];
   if (error) {
     const failure = REFUSAL[error.type ?? ""] ?? "invalid";
     // GraphQL's limit resets when its `x-ratelimit-reset` says, as REST's primary limit does.
@@ -48,5 +50,5 @@ export async function graphql<T>(
     const retry = failure === "rate_limited" && Number.isFinite(reset) ? { retryAt: reset * 1000 } : {};
     throw new HostError(failure, `GitHub refused ${request.what}: ${error.message}`, retry);
   }
-  return parse(data, read.data, `POST ${PATH} (${request.what})`);
+  return parse(data, parsed.data, `POST ${PATH} (${request.what})`);
 }

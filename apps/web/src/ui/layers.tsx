@@ -7,10 +7,11 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import { Button, Icon } from "./basics.tsx";
+import { Button, Eyes, Icon, type IconName } from "./basics.tsx";
 
 function focusables(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input, [tabindex='0']")];
@@ -20,10 +21,24 @@ function focusables(root: HTMLElement): HTMLElement[] {
 function arrowKeys(e: ReactKeyboardEvent<HTMLElement>) {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
   const list = focusables(e.currentTarget);
-  const i = list.findIndex((el) => el === document.activeElement);
+  const active = document.activeElement;
+  const i = active instanceof HTMLElement ? list.indexOf(active) : -1;
   const next = e.key === "ArrowDown" ? Math.min(i + 1, list.length - 1) : Math.max(i - 1, 0);
   list[next]?.focus();
   e.preventDefault();
+}
+
+/** A layer closed by Esc or its scrim gives focus back to its trigger, the anchor's first button, never to the page. */
+export function returnFocus(anchor: { querySelector(selector: "button"): { focus(): void } | null } | null) {
+  anchor?.querySelector("button")?.focus();
+}
+
+/**
+ * Focus moved out of the anchor, to `next` (a focusout's `relatedTarget`): a layer with a scrim closes, so Tab never
+ * reaches the dimmed page. Focus going nowhere (a click on the layer's words, another window) keeps it open.
+ */
+export function focusLeaves<N>(anchor: { contains(node: N): boolean } | null, next: N | null): boolean {
+  return next !== null && anchor !== null && !anchor.contains(next);
 }
 
 interface TriggerProps {
@@ -31,19 +46,25 @@ interface TriggerProps {
   onClick: () => void;
 }
 
-/** A layer that opens from its anchor, rises 4 px, and closes on Esc or a click outside. */
+/**
+ * A layer that opens from its anchor, rises 4 px, and closes on Esc or a click outside. `scrim`: the page under the top
+ * bar dims while it is open, as under a dialog (the status menu, wide and over the alert band); a click on it closes the
+ * layer and gives focus back to the trigger, as Esc does, and focus leaving the anchor (Tab) closes it.
+ */
 export function Layer({
   trigger,
   children,
   align = "left",
   className = "",
   width,
+  scrim = false,
 }: {
   trigger: (props: TriggerProps) => ReactNode;
   children: (close: () => void) => ReactNode;
   align?: "left" | "right";
   className?: string;
   width?: number;
+  scrim?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
@@ -60,7 +81,7 @@ export function Layer({
       if (e.key !== "Escape") return;
       e.stopPropagation();
       setOpen(false);
-      anchor.current?.querySelector<HTMLElement>("button")?.focus();
+      returnFocus(anchor.current);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey, true);
@@ -77,8 +98,30 @@ export function Layer({
     transformOrigin: `top ${align}`,
   };
   return (
-    <div className="anchor" ref={anchor}>
+    <div
+      className="anchor"
+      ref={anchor}
+      onBlur={
+        open && scrim
+          ? (e) => {
+              if (focusLeaves(anchor.current, e.relatedTarget)) setOpen(false);
+            }
+          : undefined
+      }
+    >
       {trigger({ "aria-expanded": open, onClick: () => setOpen((o) => !o) })}
+      {open && scrim ? (
+        <div
+          className="scrim"
+          aria-hidden="true"
+          onMouseDown={(e) => {
+            // Keep the browser from moving focus to the page under it: it goes back to the trigger.
+            e.preventDefault();
+            setOpen(false);
+            returnFocus(anchor.current);
+          }}
+        />
+      ) : null}
       {open ? (
         <div className={`layer ${className}`} ref={panel} style={style} onKeyDown={arrowKeys}>
           {children(() => setOpen(false))}
@@ -88,9 +131,15 @@ export function Layer({
   );
 }
 
+/**
+ * A menu's item. With an `icon` it is drawn as an action (`.act`): the icon first, in a place of its own (`.act-ic`)
+ * where the loader stands while it works (`busy`), so its words never move.
+ */
 export function MenuItem({
   children,
   onSelect,
+  icon,
+  busy,
   kbd,
   hint,
   danger,
@@ -98,6 +147,8 @@ export function MenuItem({
 }: {
   children: ReactNode;
   onSelect: () => void;
+  icon?: IconName;
+  busy?: boolean;
   kbd?: string;
   hint?: ReactNode;
   danger?: boolean;
@@ -106,23 +157,22 @@ export function MenuItem({
   return (
     <button
       type="button"
+      className={icon ? "act" : undefined}
       onClick={onSelect}
       disabled={disabled}
       style={danger ? { color: "var(--acc-text)" } : undefined}
     >
+      {icon ? <span className="act-ic">{busy ? <Eyes /> : <Icon name={icon} />}</span> : null}
       {children}
       {kbd ? <span className="kbd">{kbd}</span> : hint ? <span className="r">{hint}</span> : null}
     </button>
   );
 }
 
-/**
- * One line, after 400 ms on hover or focus. Never holds anything clickable. `end`: at the right edge of what holds
- * it, it ends where its anchor ends instead of centring on it.
- */
-export function Tip({ text, children, end }: { text: string; children: ReactNode; end?: boolean }) {
+/** One line, after 400 ms on hover or focus. Never holds anything clickable. */
+export function Tip({ text, children }: { text: string; children: ReactNode }) {
   return (
-    <span className={end ? "anchor end" : "anchor"}>
+    <span className="anchor">
       {children}
       <span className="tip" role="tooltip">
         {text}
@@ -148,7 +198,9 @@ export function Dialog({
   className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  // open before the paint and before what it holds measures itself in its own layout effects (the palette's whole
+  // rows): opened in a passive effect, the palette's list was measured hidden and kept a cut row
+  useLayoutEffect(() => {
     const d = ref.current;
     if (!d) return;
     if (open && !d.open) d.showModal();

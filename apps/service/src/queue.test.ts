@@ -71,6 +71,7 @@ const queued: ReviewJob = {
   state: "queued",
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip: null,
   cancel: null,
   failure: null,
@@ -711,7 +712,13 @@ test("a job whose start rule can't be asked fails, and the queue goes on to the 
   const failed: ReviewJob = {
     ...queued,
     state: "failed",
-    failure: { kind: "unexpected", detail: "Claude's health check threw: health check broke", engine: null },
+    failure: {
+      kind: "unexpected",
+      detail: "Claude's health check threw: health check broke",
+      engine: null,
+      cause: null,
+      limitMs: null,
+    },
   };
   expect(events[2]).toMatchObject({ job: failed });
   expect((await snapshot(service, cookie)).reviews[PLANTED]).toMatchObject({ job: failed, run: null });

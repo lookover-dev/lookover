@@ -321,7 +321,9 @@ interface Visit {
 
 async function shootOne(browser: Browser, visit: Visit, theme: Theme, shot: Shot, file: string) {
   const context = await browser.newContext({
-    viewport: shot.phone ? { width: 390, height: 780 } : { width: 1180, height: 820 },
+    viewport: shot.phone
+      ? { width: shot.phone === "narrow" ? 375 : 390, height: 780 }
+      : { width: 1180, height: 820 },
     reducedMotion: "reduce",
     timezoneId: ZONE,
     locale: "en-GB",
@@ -392,8 +394,9 @@ async function shootOne(browser: Browser, visit: Visit, theme: Theme, shot: Shot
     await page.waitForSelector(screen);
     if (!shot.noSession && (await page.locator(".session").count()) > 0)
       throw new Error("The session screen showed: the service no longer knew the tab");
-    // A sticky top bar would be drawn in the middle of a full-page shot.
-    if (shot.fullPage) await page.addStyleTag({ content: ".app > .top { position: static !important; }" });
+    // A sticky top bar, or setup's sticky footer, would be drawn in the middle of a full-page shot.
+    if (shot.fullPage)
+      await page.addStyleTag({ content: ".app > .top, .setup-acts-footer { position: static !important; }" });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(350);
     await page.screenshot({ path: file, fullPage: shot.fullPage ?? false, animations: "disabled" });

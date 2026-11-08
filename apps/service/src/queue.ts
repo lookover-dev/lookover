@@ -19,6 +19,8 @@
 //   asked, no check; `core.skipOutcome`; nor beside a job waiting or running, such as the owner's request on their
 //   fork: the skip would be the job shown). A push moves the change's waiting job to the new head as it waits, then
 //   asks, trigger "push", the same way (a review only with "review after every push" on). The poll's caller takes.
+//   Until the person has chosen the repositories in setup (ADR 0079, read from the store's setup at each decision),
+//   neither asks anything, whatever the switches say: no job, no check, not even the owner's fork's told skip.
 // - The owner's review request comment the poll saw asks, trigger "comment", as `core.intake` says: on a draft and on
 //   another author's change too (ADR 0016's "requested by the owner"). It joins the change's waiting job (never a
 //   preview: beside the owner's waiting preview it is a review of its own, which posts, behind it), queues a
@@ -194,6 +196,12 @@ export interface QueueDeps {
   openChanges(): ReadonlyMap<ChangeId, ChangeFacts>;
   /** The settings that hold for a repository. */
   settings(repoId: RepositoryId): SettingsInForce;
+  /**
+   * Whether the person has chosen the repositories in setup (`reposChosen`, ADR 0079): read from the store's setup
+   * at each decision, never the snapshot, so the first trigger after `setup.chooseRepos` sees it. Until then an
+   * opening or a push asks nothing.
+   */
+  reposChosen(): boolean;
   emit(body: EventBody): void;
   /** Lists the open changes of the change's repository again, so a request reviews the newest head commit. */
   list(changeId: ChangeId): Promise<void>;
@@ -676,7 +684,12 @@ export function createQueue(d: QueueDeps): Queue {
       failedOn.add(engine);
       return {
         kind: "fail",
-        failure: { kind: "unexpected", detail: `${engineName(engine)}'s health check threw: ${h.detail}` },
+        failure: {
+          kind: "unexpected",
+          detail: `${engineName(engine)}'s health check threw: ${h.detail}`,
+          cause: null,
+          limitMs: null,
+        },
       };
     });
     // A job failed here is logged by its own change, its detail saying which health check threw (ADR 0055).
@@ -790,7 +803,9 @@ export function createQueue(d: QueueDeps): Queue {
   /** What `core.intake` says the trigger asks of the open change, with its repository's switches now. */
   function decided(change: ChangeFacts, trigger: Trigger): Intake {
     const repository = d.settings(change.repoId);
-    return intake(change, { enabled: repository.enabled, settings: repository.values }, trigger);
+    return intake(change, { enabled: repository.enabled, settings: repository.values }, trigger, {
+      reposChosen: d.reposChosen(),
+    });
   }
 
   /**
@@ -952,7 +967,7 @@ export function createQueue(d: QueueDeps): Queue {
       const left = d.store.pause.current();
       if (left !== null && !pausedAt(left, now())) unpause();
       else armPauseEnd(left?.until ?? null);
-      const stopped: FailureFacts = { kind: "service_stopped", detail: "" };
+      const stopped: FailureFacts = { kind: "service_stopped", detail: "", cause: null, limitMs: null };
       for (const left of d.store.jobs.leftRunning()) {
         const after = afterRestart(left);
         if (after === "resumes") {

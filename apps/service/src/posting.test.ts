@@ -115,11 +115,11 @@ test("an hour of GitHub not answering says each wait in the log, then the round 
     wait: { until: refusedAt + 5_000, refusal: "unavailable" },
   });
   const waits = logged.filter((line) =>
-    line.startsWith("sasensi/lookover-sandbox#1 round 1 posts wait: GitHub did not answer"),
+    line.startsWith("sasensi/lookover-sandbox#1 round 1 posts wait: GitHub didn't answer"),
   );
   expect(waits.length).toBeGreaterThan(5);
   expect(waits[0]).toBe(
-    `sasensi/lookover-sandbox#1 round 1 posts wait: GitHub did not answer, trying again at ${local(refusedAt + 5_000)} (1 of 4 sent)`,
+    `sasensi/lookover-sandbox#1 round 1 posts wait: GitHub didn't answer, trying again at ${local(refusedAt + 5_000)} (1 of 4 sent)`,
   );
   expect(logged).toContainEqual(
     expect.stringMatching(/^sasensi\/lookover-sandbox#1 round 1 kept, its posts given up: /),

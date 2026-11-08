@@ -2,7 +2,6 @@
 import { expect, test } from "bun:test";
 import { commitSha, type Deferral, findingId, type Service, type TimelineEntry } from "@lookover/contracts";
 import { deferralText, waitingNotice } from "./deferral.ts";
-import { clock } from "./format.ts";
 import { logLine, startedBy, timelineText } from "./timeline.ts";
 
 const NOW = Date.UTC(2026, 9, 6, 10, 0, 0);
@@ -10,7 +9,7 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const SHA = commitSha("a1f9c2e");
 
-const CHANGE = { openedBy: "sam" };
+const PARIS = "Europe/Paris";
 
 /** What a deferred review's notice reads beside its deferral: the service's clock, the pause, each AI's limit. */
 function around(paused: Service["paused"], codexUntil: number | null = null) {
@@ -118,18 +117,30 @@ test("a review waiting on an AI's limit says when it starts, with the day when i
 test("each timeline entry reads as one line of the review's history", () => {
   const cases: [TimelineEntry, string][] = [
     [{ at: NOW, sha: SHA, kind: "opened", by: "sam" }, "Opened by sam"],
-    [{ at: NOW, sha: SHA, kind: "pushed", by: "you", commits: 1 }, "sam pushed 1 commit"],
+    // Who pushed is not known (ADR 0081): an agent, only when it signed every commit; else no one is named.
+    [{ at: NOW, sha: SHA, kind: "pushed", by: null, commits: 1 }, "1 new commit"],
+    [{ at: NOW, sha: SHA, kind: "pushed", by: null, commits: 3 }, "3 new commits"],
+    [{ at: NOW, sha: SHA, kind: "pushed", by: "agent", commits: 1 }, "The agent pushed 1 commit"],
     [{ at: NOW, sha: SHA, kind: "pushed", by: "agent", commits: 2 }, "The agent pushed 2 commits"],
     // The service's host says only that the head moved, not how many commits (`commits: 0`).
-    [{ at: NOW, sha: SHA, kind: "pushed", by: "you", commits: 0 }, "sam pushed new commits"],
-    [{ at: NOW, sha: null, kind: "queued", trigger: "opened" }, "Pull request opened"],
-    [{ at: NOW, sha: null, kind: "queued", trigger: "push" }, "New commits pushed"],
+    [{ at: NOW, sha: SHA, kind: "pushed", by: null, commits: 0 }, "New commits"],
+    [{ at: NOW, sha: SHA, kind: "pushed", by: "agent", commits: 0 }, "The agent pushed new commits"],
+    [{ at: NOW, sha: null, kind: "queued", trigger: "opened", by: null }, "Pull request opened"],
+    [{ at: NOW, sha: null, kind: "queued", trigger: "push", by: null }, "New commits pushed"],
+    [{ at: NOW, sha: null, kind: "queued", trigger: "comment", by: "agent" }, "The agent asked for a review"],
+    [{ at: NOW, sha: null, kind: "queued", trigger: "comment", by: "person" }, "You asked on GitHub"],
+    // A job an event stored before ADR 0081 carries says nothing of who asked.
     [
-      { at: NOW, sha: null, kind: "queued", trigger: "comment" },
+      { at: NOW, sha: null, kind: "queued", trigger: "comment", by: null },
       "Review asked for on GitHub (/lookover review)",
     ],
-    [{ at: NOW, sha: null, kind: "queued", trigger: "manual" }, "Review asked for in the app"],
-    [{ at: NOW, sha: null, kind: "queued", trigger: "first-review" }, "First review, picked during setup"],
+    [{ at: NOW, sha: null, kind: "asked", by: "agent" }, "The agent asked for a review"],
+    [{ at: NOW, sha: null, kind: "asked", by: "person" }, "You asked on GitHub"],
+    [{ at: NOW, sha: null, kind: "queued", trigger: "manual", by: null }, "Review asked for in the app"],
+    [
+      { at: NOW, sha: null, kind: "queued", trigger: "first-review", by: null },
+      "First review, picked during setup",
+    ],
     [
       { at: NOW, sha: null, kind: "deferred", deferral: { reason: "engine-signed-out", engine: "codex" } },
       "Waiting: Codex is signed out",
@@ -140,6 +151,32 @@ test("each timeline entry reads as one line of the review's history", () => {
     [{ at: NOW, sha: SHA, kind: "posted", round: 1, open: 0 }, "Round 1 done: No open findings"],
     [{ at: NOW, sha: SHA, kind: "posted", round: 2, open: 1 }, "Round 2 done: 1 open finding"],
     [{ at: NOW, sha: SHA, kind: "posted", round: 3, open: 4 }, "Round 3 done: 4 open findings"],
+    // A failure says its cause as the check on GitHub does (ADR 0081); one stored before causes, its kind's words.
+    [
+      {
+        at: NOW,
+        sha: SHA,
+        kind: "failed",
+        failure: {
+          kind: "prepare_failed",
+          detail: "fetch_failed: git took too long (idle)",
+          engine: "claude",
+          cause: "git_silent",
+          limitMs: 120_000,
+        },
+      },
+      "The review failed: git sent nothing for 2 minutes while Lookover got the code ready",
+    ],
+    [
+      {
+        at: NOW,
+        sha: SHA,
+        kind: "failed",
+        failure: JSON.parse('{"kind":"prepare_failed","detail":"","engine":null}'),
+      },
+      "The review failed: the code could not be fetched",
+    ],
+    [{ at: NOW, sha: SHA, kind: "failed", failure: null }, "The review failed: the review could not run"],
     [{ at: NOW, sha: null, kind: "dismissed", findingIds: [findingId("F2")] }, "You marked F2 as wrong"],
     [
       { at: NOW, sha: null, kind: "dismissed", findingIds: [findingId("F2"), findingId("F3")] },
@@ -156,7 +193,7 @@ test("each timeline entry reads as one line of the review's history", () => {
     ],
   ];
   for (const [entry, text] of cases) {
-    expect([entry, timelineText(CHANGE, entry)]).toEqual([entry, text]);
+    expect([entry, timelineText(entry)]).toEqual([entry, text]);
   }
 });
 
@@ -165,15 +202,36 @@ test("a review was started by what asked for its first job; before any, by the p
   expect(
     startedBy([
       { at: NOW, sha: SHA, kind: "opened", by: "sam" },
-      { at: NOW, sha: null, kind: "queued", trigger: "manual" },
-      { at: NOW, sha: null, kind: "queued", trigger: "comment" },
+      { at: NOW, sha: null, kind: "queued", trigger: "manual", by: null },
+      { at: NOW, sha: null, kind: "queued", trigger: "comment", by: "agent" },
     ]),
   ).toBe("Review asked for in the app");
+  expect(startedBy([{ at: NOW, sha: null, kind: "queued", trigger: "comment", by: "agent" }])).toBe(
+    "The agent asked for a review",
+  );
 });
 
 test("a log line names its commit by the first seven characters, as the rounds do", () => {
   const whole = commitSha("a1f9c2e0b4d6f8a1c3e5b7d9f1a3c5e7b9d1f3a5");
-  const line = logLine(CHANGE, { at: NOW, sha: whole, kind: "started", round: 1 });
-  expect(line).toBe(`${clock(NOW)}  Round 1 started  (a1f9c2e)`);
-  expect(logLine(CHANGE, { at: NOW, sha: null, kind: "skipped" })).toBe(`${clock(NOW)}  Skipped`);
+  const line = logLine({ at: NOW, sha: whole, kind: "started", round: 1 }, NOW, PARIS);
+  expect(line).toBe("12:00  Round 1 started  (a1f9c2e)");
+  expect(logLine({ at: NOW, sha: null, kind: "skipped" }, NOW, PARIS)).toBe("12:00  Skipped");
+});
+
+test("a log line from another day says its day (ADR 0081): a pull request opened before Lookover saw it", () => {
+  const opened = {
+    at: Date.parse("2026-10-04T16:02:00+02:00"),
+    sha: SHA,
+    kind: "opened",
+    by: "sam",
+  } as const;
+  expect(logLine(opened, NOW, PARIS)).toBe("Sun 4 Oct 16:02  Opened by sam  (a1f9c2e)");
+  // Earlier today, across no midnight: the time alone.
+  expect(logLine({ ...opened, at: Date.parse("2026-10-06T00:10:00+02:00") }, NOW, PARIS)).toBe(
+    "00:10  Opened by sam  (a1f9c2e)",
+  );
+  // Yesterday evening, an hour before midnight: another day.
+  expect(logLine({ ...opened, at: Date.parse("2026-10-05T23:00:00+02:00") }, NOW, PARIS)).toBe(
+    "Mon 5 Oct 23:00  Opened by sam  (a1f9c2e)",
+  );
 });

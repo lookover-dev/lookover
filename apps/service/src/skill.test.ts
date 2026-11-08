@@ -8,6 +8,7 @@ import { copyFileSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, w
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { SKILL_TEMPLATE, skillTemplateOf } from "@lookover/agent-cli";
+import { REQUEST_MARKER } from "@lookover/contracts";
 import { renderSkill, skillCommandLine, skillStampOf } from "./index.ts";
 
 const EXE = "C:/Users/Your Name/Downloads/lookover.exe";
@@ -17,6 +18,7 @@ const CLONE = skillCommandLine([
   "D:/code/my lookover/apps/service/src/main.ts",
 ]);
 const HOME = skillCommandLine([EXE, "--home=D:/lookover data"]);
+const O = { name: "lookover-review-loop", command: BINARY, version: "0.1.0" };
 
 /** The template's own note, which the stamp replaces: a reader of this repository's, not an agent's. */
 const NOTE = /^<!-- The skill Lookover installs[\s\S]*? -->$/m;
@@ -73,9 +75,45 @@ test("a binary with a space in its path: every spot filled with its command, Pow
   expect(text).not.toMatch(/LOOKOVER_APP|--app/);
   // No bare `lookover <verb>` for an agent to copy: it would run whatever `lookover` its PATH finds, or nothing.
   expect(text).not.toMatch(/`lookover (wait|feedback|reply|status|open|start|stop)\b/);
-  expect(text.startsWith("---\nname: lookover-review-loop\ndescription: Get a pull request through")).toBe(
+  expect(text.startsWith('---\nname: lookover-review-loop\ndescription: "Get a pull request through')).toBe(
     true,
   );
+});
+
+/** The front matter's `description`, the lines between the first two `---` read as YAML, as Claude Code and Codex do. */
+function descriptionOf(text: string): unknown {
+  const read: unknown = Bun.YAML.parse(text.split(/^---$/m)[1] ?? "");
+  return typeof read === "object" && read !== null && "description" in read ? read.description : undefined;
+}
+
+test("the description: valid YAML, naming the sentences that start the loop (I-240)", () => {
+  expect(descriptionOf(renderSkill(O))).toBe(
+    `Get a pull request through Lookover's review: ask for the review of the pushed commit, wait for Lookover's check, fix what it found, push and ask again until it says stop. Use when asked to "look over", "lookover" or "review with Lookover" a pull request (this PR, #123, a link), to "wait for Lookover", "run the review loop" or "get the PR through review", and after pushing to a pull request in a repository Lookover reviews.`,
+  );
+});
+
+test("a failed review stops the loop, and several pull requests are reported one by one (I-235)", () => {
+  const text = renderSkill(O);
+  const seven = text.split("\n").find((line) => line.startsWith("| 7 |")) ?? "";
+  expect(seven).toContain("Stop.");
+  expect(seven).not.toContain("once more after a push");
+  expect(text).not.toContain("once more after a push");
+  expect(text.replaceAll("\n", " ")).toContain(
+    "With several pull requests, run one `wait` for each, in its own process, with `--pr N`, and report each as it ends, never all at the end.",
+  );
+  expect(text).toContain("gh pr checkout N");
+  expect(text).toContain(`\n${BINARY} wait --pr N --json\n`);
+});
+
+test("the requests written by hand carry the line the service writes, then the marker", () => {
+  const requests = renderSkill(O)
+    .split("\n")
+    .filter((line) => line.includes("gh pr comment N"));
+  expect(requests).toHaveLength(2);
+  for (const request of requests)
+    expect(request).toContain(
+      `/lookover review\\nAsked by the coding agent, for \`%.7s\`. Lookover hides this comment once its review is posted.\\n${REQUEST_MARKER}`,
+    );
 });
 
 test("the template's note gives way to the stamp: the version and the command the skill was written for", () => {
@@ -86,7 +124,6 @@ test("the template's note gives way to the stamp: the version and the command th
   expect(text).toMatch(/^---\n[\s\S]*?\n---\n<!-- lookover-skill \{/);
 });
 
-const O = { name: "lookover-review-loop", command: BINARY, version: "0.1.0" };
 /** The template as a checkout with CRLF line ends reads it from disk. */
 const CRLF = SKILL_TEMPLATE.replaceAll("\n", "\r\n");
 

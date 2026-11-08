@@ -16,6 +16,7 @@ import {
   upperFirst,
 } from "@lookover/contracts";
 import { sharedRepositoriesLink, signedIn } from "./accounts.ts";
+import { DEPARTED } from "./departed.ts";
 import { until } from "./format.ts";
 import { connectionText, ENGINE_CHECK_AGAIN, ENGINE_TRY_AGAIN, engineStateText } from "./health.ts";
 
@@ -44,7 +45,7 @@ export function engineSetupText(e: Engine, now: number): string {
 /** Every label an AI row's action in setup can take, by what it does. */
 const ENGINE_SETUP_LABEL = {
   waiting: "Waiting…",
-  signIn: "Sign in in a terminal",
+  signIn: "Sign in from a terminal",
   tryAgain: ENGINE_TRY_AGAIN.label,
   checkAgain: ENGINE_CHECK_AGAIN.label,
 } as const;
@@ -100,31 +101,26 @@ export function engineSetupNext(e: Engine): string | null {
     : null;
 }
 
-/** The AI step's last row: what it says beside Continue, and Continue's label and whether it is enabled. */
+/** The AI step's last row: Continue's label and whether it is enabled. */
 export interface AiStepActs {
-  said: string;
   label: string;
   enabled: boolean;
 }
 
 /**
- * The AI step's last row (ADR 0058, "Setup's Continue"): the step never moves on by itself, and says it is satisfied
- * beside an enabled Continue. Every AI ready says so; one of several ready names it and offers to go on with it only;
- * none ready, Continue waits: for a sign-in when one is signed out, else disabled as plain Continue.
+ * The AI step's last row (ADR 0058, "Setup's Continue"): the step never moves on by itself; its cards say which AI is
+ * ready, so nothing beside Continue says it again (round 5: "Claude is ready." repeated the card). Every AI ready
+ * offers Continue; one of several ready is named by the label, which goes on with it only; none ready, Continue waits:
+ * for a sign-in when one is signed out, else disabled as plain Continue.
  */
 export function aiStepActs(engines: readonly Engine[]): AiStepActs {
   const ready = engines.filter((e) => e.state === "ready");
   const [first] = ready;
   if (first === undefined) {
     const signedOut = engines.some((e) => e.state === "signed-out");
-    return { said: "", label: signedOut ? SIGN_IN_TO_CONTINUE : CONTINUE, enabled: false };
+    return { label: signedOut ? SIGN_IN_TO_CONTINUE : CONTINUE, enabled: false };
   }
-  const all = ready.length === engines.length;
-  return {
-    said: all && ready.length > 1 ? "Both are ready." : `${first.name} is ready.`,
-    label: all ? CONTINUE : onlyWith(first),
-    enabled: true,
-  };
+  return { label: ready.length === engines.length ? CONTINUE : onlyWith(first), enabled: true };
 }
 
 const CONTINUE = "Continue";
@@ -187,7 +183,7 @@ export function departedNotice(
   addBack: string;
 } {
   return {
-    label: "Left",
+    label: DEPARTED.left,
     text: "left the App's installation and is no longer reviewed: moved, deleted, or taken off its access.",
     addBack: sharedRepositoriesLink(connection, repo.owner),
   };

@@ -11,6 +11,7 @@ import type {
   FindingCounts,
   FindingId,
   HostThread,
+  JobFailure,
   ReplyKind,
   ReviewResult,
   ReviewResultFinding,
@@ -26,7 +27,7 @@ import {
 } from "@lookover/contracts";
 import { clip } from "./fit.ts";
 import type { PlacedFinding } from "./place.ts";
-import type { Ended, JobCheck, RoundToPost, SkipWhy } from "./types.ts";
+import type { Ended, JobCheck, RoundToPost, ShownFailure, SkipWhy } from "./types.ts";
 
 /** Contracts' `Trigger`, in the result's snake_case. */
 const TRIGGER: Record<Trigger, ReviewResult["run"]["trigger"]> = {
@@ -112,14 +113,15 @@ function claimOf(finding: Finding): Pick<ReviewResultFinding, "claim"> {
 }
 
 /**
- * What this round's reply on a finding still unsettled says as its resolution (ADR 0052): kept against the claim (a
- * question answered is kept too), or escalated to the owner. A withdrawn or dismissed finding is settled: its status
- * says it.
+ * What this round's reply on a finding still unsettled says as its resolution (ADR 0052, ADR 0081): kept against the
+ * claim (a question answered is kept too), escalated to the owner, or still present after a push, with the finder's
+ * reason as of now. A withdrawn or dismissed finding is settled: its status says it.
  */
-const REPLY_RESOLUTION: Record<ReplyKind, "kept" | "escalated" | null> = {
+const REPLY_RESOLUTION: Record<ReplyKind, "kept" | "escalated" | "still_present" | null> = {
   kept: "kept",
   answered: "kept",
   escalated: "escalated",
+  still_present: "still_present",
   withdrawn: null,
   dismissed: null,
 };
@@ -311,6 +313,15 @@ const NEXT: Record<SkipWhy, ReviewResult["loop"]["next_action"]> = {
 };
 
 /**
+ * What of a job's failure the host is shown; a job failed with none said is `unexpected`. A cause or a limit an event
+ * stored before ADR 0081 lacks is unknown.
+ */
+export function shownFailure(failure: JobFailure | null): ShownFailure {
+  if (failure === null) return { kind: "unexpected", cause: null, limitMs: null };
+  return { kind: failure.kind, cause: failure.cause ?? null, limitMs: failure.limitMs ?? null };
+}
+
+/**
  * The result of a job that ended without a round on `job.sha`: the run's state and its reason, no verdict, no
  * findings and every count at zero (the check shows none). The run is the job's, named by its id, until one ran.
  */
@@ -327,7 +338,7 @@ export function endedResult(job: JobCheck, ended: Ended, headline: string): Revi
     run: {
       id: job.run?.id ?? job.job.id,
       state: failed ? "failed" : "skipped",
-      state_reason: failed ? ended.failure : REASON[ended.why],
+      state_reason: failed ? ended.failure.kind : REASON[ended.why],
       trigger: TRIGGER[job.job.trigger],
       // No round: nothing was confirmed, nothing ruled out.
       ...(job.run

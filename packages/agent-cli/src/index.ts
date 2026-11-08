@@ -27,7 +27,8 @@
 // Interface: `run(argv, world) → exit code`, the whole program against a `World` (the host with the agent's
 // token, the local checkout, a clock and `sleep`, stdout and stderr); `realWorld(cwd, env)` is the machine's (the
 // checkout through `git`, the real clock and streams); `createAgentHost` (`AgentHost` over GitHub's REST API, and its
-// GraphQL API for the threads and resolving, with the agent's token) and `agentToken` (`GH_TOKEN`, `GITHUB_TOKEN`,
+// GraphQL API for the threads and resolving, with the agent's token; a brief network failure tried again as ADR 0080
+// says, its `sleep` and `deadline` injected, real timers by default) and `agentToken` (`GH_TOKEN`, `GITHUB_TOKEN`,
 // else `gh auth token`) are what it builds the host from, and what the live suite uses; `USAGE`, what `help` prints,
 // is part of the `lookover` command's help, and `CLAIMS` the claims' words and openings `reply` takes, which the docs
 // list. It has no program of its own: the one `lookover` command (`apps/service`, ADR 0054) runs it, from a clone

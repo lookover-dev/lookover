@@ -2,10 +2,14 @@
 // installation the person reaches together, each account with its installation and its own cause. Two repositories
 // of one name on two accounts are reviewed side by side; one account suspended, or asking for SSO, keeps its
 // repositories watched and refused while the other keeps reviewing; one no longer reached departs with its
-// repositories. The service runs in this process on the fake host, which plays the accounts and the ports as the
-// person.
+// repositories, the hand-off of ADR 0082, never both at once: an organisation uninstalled outright goes reached, then
+// leaving (the account dropped, its repositories not yet), then gone with them departed; only a suspended one shows its
+// cause first, while its repositories are watched. The service runs in this process on the fake host, which plays the
+// accounts and the ports as the person.
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
+  accountOf,
+  apply,
   type ChangeId,
   changeId,
   commitSha,
@@ -19,9 +23,11 @@ import {
 import { DemoClock, type FakeChange, FakeGitHost } from "@lookover/testkit";
 import { type GitHubSide, memoryKeychain, type RunningService, signInStore } from "./index.ts";
 import {
+  api,
   eventually,
   fakeEngines,
   home,
+  messages,
   OWNER,
   openApp,
   PLANTED,
@@ -33,6 +39,7 @@ import {
   stopAll,
   T0,
   TEST_LIMIT_MS,
+  until,
 } from "./service.test-support.ts";
 
 setDefaultTimeout(TEST_LIMIT_MS);
@@ -339,4 +346,61 @@ test("no account reached any more: every one departs with its repositories, and 
   expect(back.connection.accounts).toEqual([{ account: SASENSI, installationId, cause: null, owner: true }]);
   expect(idsOf(back)).toEqual(["sasensi/lookover-sandbox"]);
   expect(back.departed.map((r) => String(r.id))).toEqual(["lookover-dev/lookover-sandbox"]);
+});
+
+/**
+ * What each state the app passes through says of the organisation while `meet` happens to it, from the events the
+ * service sends over `minutes`, as `apply` follows them: `reached`; `cause`, its account's cause with its repository
+ * still watched (the band, the head); `leaving`, between one listing's two events (the account dropped, its
+ * repository not yet); `gone`, its repository departed and the account no longer reached (the No access notice); and
+ * `both`, departed while the account or its repository is still there, which must never be.
+ */
+async function passage(meet: (host: FakeGitHost, time: DemoClock) => Promise<void>) {
+  const { service, cookie, host, time } = await onTwoAccounts();
+  const before: State = await snapshot(service, cookie);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  await meet(host, time);
+  await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.departed.length === 1,
+  );
+  // A command whose one event closes what the organisation's passage sent.
+  expect((await post(service, cookie, { type: "setup.goto", step: "repos" })).status).toBe(200);
+  const events = await until(stream, "setup.changed");
+  const states = [before];
+  for (const e of events) states.push(apply(states.at(-1) ?? before, e));
+  const org = (s: State) => accountOf(s.connection.accounts, ORG.login);
+  const watched = (s: State) => s.repos.some((r) => r.owner === ORG.login);
+  const said = states.map((s) => {
+    if (s.departed.some((r) => r.owner === ORG.login))
+      return org(s) === undefined && !watched(s) ? "gone" : "both";
+    if (org(s) === undefined) return "leaving";
+    return org(s)?.cause !== null && watched(s) ? "cause" : "reached";
+  });
+  const last = states.at(-1) ?? before;
+  return { said: [...new Set(said)], last };
+}
+
+test("an organisation suspended, then uninstalled: first its account's cause, its repository still watched; at the next listing it departs and the account is gone; never both", async () => {
+  const { said, last } = await passage(async (host, time) => {
+    host.suspend(ORG.login, "rhea-k");
+    // The next listing of the accounts, five minutes on, says the cause.
+    await time.advance(5 * MIN);
+    host.uninstall(ORG.login);
+    // The listing after it.
+    await time.advance(5 * MIN);
+  });
+  expect(said).toEqual(["reached", "cause", "leaving", "gone"]);
+  expect(last.connection).toMatchObject({ state: "connected", cause: null });
+  expect(last.connection.accounts.map((a) => a.account.login)).toEqual([SASENSI.login]);
+});
+
+test("an organisation uninstalled outright: its repository's poll refused, the accounts listed again at once, and it departs with its account; never both", async () => {
+  const { said, last } = await passage(async (host, time) => {
+    host.uninstall(ORG.login);
+    await time.advance(MIN);
+  });
+  // GitHub refuses the repository as not found, no cause: the listing that follows at once finds the account gone.
+  expect(said).toEqual(["reached", "leaving", "gone"]);
+  expect(last.connection).toMatchObject({ state: "connected", cause: null });
 });

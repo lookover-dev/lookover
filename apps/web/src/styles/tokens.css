@@ -7,14 +7,16 @@
   --bg: #17150f;
   --surface: #1f1c15;
   --raised: #27231b;
+  /* an account's head band, set apart from its rows and their hover (design-system.md "Repositories' group heads") */
+  --band: #2c2820;
   --overlay: #2e2921;
   --ink: #f4f1ea;
   --ink-2: #c9c3b6;
-  --muted: #9a948a;
+  --muted: #b9b3a7;
   --faint: #6b665d;
-  --line: #2f2b23;
-  --line-2: #3e382d;
-  --line-overlay: #3e382d;
+  --line: #3a352c;
+  --line-2: #4d473b;
+  --line-overlay: #4a4438;
   --acc: #ff5c9a;
   --acc-ink: #17150f;
   --acc-soft: #3a1e2b;
@@ -34,6 +36,10 @@
   --sel: #3a2e1f;
   --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.55);
+  /* over the page under a dialog or the status menu, in both themes: what is under reads as behind, dimmed and out
+     of focus, so no word of it competes with what is over it */
+  --scrim: rgba(0, 0, 0, 0.65);
+  --scrim-blur: 3px;
   --primary-bg: #f4f1ea;
   --primary-fg: #17150f;
   /* type */
@@ -72,8 +78,30 @@
   --r-pill: 999px;
   --line-w: 1px;
   --h-sm: 28px;
+  /* the top bar's height, its line included: what sticks under it starts there */
+  --h-top: 52px;
+  /* a Repositories group's head stuck under the top bar, at its tallest, a phone's: its padding, the account's line,
+     the count's under it and its gap, its line (about 67 px); what a row reached by Tab scrolls clear of */
+  --h-group-head: calc(2 * var(--s-3) + 1.3 * var(--t-16) + 2px + 1.45 * var(--t-13) + var(--line-w));
+  /* Repositories' search and filter stuck under the top bar, its controls (36 px) and their padding; then its table's
+     column heads, which stick under them, the group heads under those */
+  --h-repos-bar: calc(36px + 2 * var(--s-3));
+  --h-thead: 34px;
+  /* setup's Continue footer stuck to the window's bottom, its large buttons and padding: what Tab scrolls clear of */
+  --h-setup-footer: 68px;
+  /* a checkbox's or a radio's box, and the gap to its label: a label's indent past the box */
+  --check: 18px;
+  --check-gap: 10px;
+  /* an icon's box, a chevron's included; a Disclosure's gap between its chevron and its summary, what opens starting
+     past both */
+  --ic: 16px;
+  --disc-gap: 6px;
   --dot: 7px;
   --w-fix: 232px;
+  /* a state chip in a list (a row, the palette): one width, the widest word's ("Cancelled", "No review") */
+  --w-chip: 96px;
+  /* a settings row's control: a segmented control as wide as a select (`Select`'s width), on the rows' one right edge */
+  --setrow-control: 240px;
   --d-1: 120ms;
   --d-2: 180ms;
   --d-3: 240ms;
@@ -88,6 +116,7 @@
   --bg: #f7f6f2;
   --surface: #ffffff;
   --raised: #ffffff;
+  --band: #e9e5dc;
   --overlay: #ffffff;
   --ink: #16130f;
   --ink-2: #3f3b33;
@@ -108,7 +137,7 @@
   --run-text: #4b4a9e;
   --warn: #d98a14;
   --warn-soft: #fbf0d9;
-  --warn-text: #8a5a0a;
+  --warn-text: #a44f00;
   --hl: #fff0a8;
   --hl-text: #5c4a00;
   --code-bg: #f1efe9;

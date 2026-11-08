@@ -97,6 +97,7 @@ import {
   findingOfMarker,
   HostError,
   repositoryName,
+  sameLogin,
   sameRepository,
   showsStatus,
   spliceStatus,
@@ -549,7 +550,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
    * Returns the new installation's id. Throws for an account that isn't the person's without the App.
    */
   installOn(login: string): number {
-    const at = this.unreached.findIndex((u) => u.account.login.toLowerCase() === login.toLowerCase());
+    const at = this.unreached.findIndex((u) => sameLogin(u.account.login, login));
     const [found] = at === -1 ? [] : this.unreached.splice(at, 1);
     if (found === undefined) throw new Error(`${login} is no account of the person's without the App`);
     const id = this.nextInstallation++;
@@ -562,9 +563,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
    * its repositories under the new login. Throws for an account that is neither.
    */
   rename(login: string, to: string): void {
-    const found = [...this.others, ...this.unreached].find(
-      (a) => a.account.login.toLowerCase() === login.toLowerCase(),
-    );
+    const found = [...this.others, ...this.unreached].find((a) => sameLogin(a.account.login, login));
     if (found === undefined) throw new Error(`${login} is no organisation of the person's`);
     found.account = { ...found.account, login: to };
     found.repositories = found.repositories.map((r) => ({ ...r, owner: to }));
@@ -603,18 +602,46 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
   }
 
   /**
-   * A repository added to the installation on GitHub, made on the person's account first when it is new there (one of
-   * another account's throws, as `repo` does). An installation on every repository takes it as it is.
+   * A repository added to its account's installation on GitHub: the person's own, made on their account first when it
+   * is new there, which an installation on every repository takes as it is; or, of an organisation the person reaches,
+   * that account's (ADR 0066), under the account's login; or, of one of theirs the shared App left (`uninstall`), the
+   * shared App installed there again on that repository alone, with a new id. One of any other account throws, as
+   * `repo` does.
    */
   addRepository(repo: RepositoryRef): void {
+    const login = repo.owner.toLowerCase();
+    const other = this.others.find((o) => o.account.login.toLowerCase() === login);
+    if (other !== undefined) {
+      if (!other.repositories.some((r) => sameRepository(r, repo)))
+        other.repositories.push({ owner: other.account.login, name: repo.name });
+      return;
+    }
+    const left = this.unreached.find((u) => u.account.login.toLowerCase() === login);
+    if (left !== undefined) {
+      this.installOn(left.account.login);
+      this.other(left.account.login).repositories = [{ owner: left.account.login, name: repo.name }];
+      return;
+    }
     this.holdRepository(repo);
     const current = this.current;
     if (current && !current.all && !current.selected.some((r) => sameRepository(r, repo)))
       current.selected.push(repo);
   }
 
-  /** A repository removed from the installation on GitHub: one on every repository then holds all the others. */
+  /**
+   * A repository removed from its account's installation on GitHub: the person's own, where one on every repository
+   * then holds all the others; or, of another account the person reaches, that account's (ADR 0066), whose others
+   * stay. One that installation doesn't grant is the `Error` of a test.
+   */
   removeRepository(repo: RepositoryRef): void {
+    const other = this.others.find((o) => sameLogin(o.account.login, repo.owner));
+    if (other !== undefined) {
+      const left = other.repositories.filter((r) => !sameRepository(r, repo));
+      if (left.length === other.repositories.length)
+        throw new Error(`${other.account.login}'s installation doesn't grant ${repositoryName(repo)}`);
+      other.repositories = left;
+      return;
+    }
     const current = this.installed();
     if (current.all) {
       current.all = false;
@@ -1495,14 +1522,13 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
 
   /** The installation on the person's own account (no login, or its login), or another account's they reach. */
   private installedOn(login?: string): { suspended: boolean; suspendedBy: string | null } {
-    if (login === undefined || login.toLowerCase() === this.account.login.toLowerCase())
-      return this.installed();
+    if (login === undefined || sameLogin(login, this.account.login)) return this.installed();
     return this.other(login);
   }
 
   /** Another account's installation the person reaches, by its login, or the `Error` of a test naming none. */
   private other(login: string): FakeOther {
-    const found = this.others.find((o) => o.account.login.toLowerCase() === login.toLowerCase());
+    const found = this.others.find((o) => sameLogin(o.account.login, login));
     if (found === undefined) throw new Error(`The person reaches no installation on ${login}`);
     return found;
   }

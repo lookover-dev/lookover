@@ -36,13 +36,14 @@
 // text measured as GitHub counts them.
 // The one exception to "never a sentence": `copy.ts`, the phrases the app, GitHub and the service's log file share
 // (`engineName`, `deferralText`, the safety check's states `FAILED_SAFETY_CHECK` and `UNFINISHED_SAFETY_CHECK`,
-// `failureText`, `cancelText` and `cancelPhrase`, `skipText`, `confirmFailureText`, `findersText`,
-// `foundAndCheckedText`, `keptText`, `ruleText`, `CODEX_REVIEWS`, `postWaitText`; the status block's headings
-// `NEEDS_YOUR_LOOK`, `thingsText`, `lookingOverHead`, `waitingHead` and `failedHead`, its lines `roundLine` (with
-// `roundCountsText`), `stoppedText`, `TRY_AGAIN`, `waitingText` and `startsOnceText`, its notes `notInDiffText`
-// and `escalationText`; a thread reply's `replyKind`), and the ways of writing they share
-// (`asSentence`, `shortSha`, `dayText`, `twoDigits`), written once here because the web may import only this package
-// and `publish` words the pull request: everything else either says stays in its own module. `findingPermalink`
+// `failureWords` (a failure by its cause, ADR 0081) and `failedTitle`, `cancelText` and `cancelPhrase`, `skipText`,
+// `confirmFailureText`, `findersText`, `foundAndCheckedText`, `keptText`, `ruleText`, `CODEX_REVIEWS`, `postWaitText`,
+// `pushedText`; the status block's headings `NEEDS_YOUR_LOOK`, `thingsText`, `lookingOverHead`, `waitingHead` and
+// `failedHead`, its lines `roundLine` (with `roundCountsText`), `failedLine` (`stoppedText`, `TRY_AGAIN`),
+// `waitingText` and `startsOnceText`, its notes `notInDiffText` and `escalationText`; a thread reply's `replyKind`
+// and `STILL_PRESENT`), and the ways of writing they share (`asSentence`, `shortSha`, `dayText`, `twoDigits`),
+// written once here because the web may import only this package and `publish` words the pull request: everything
+// else either says stays in its own module. `findingPermalink`
 // (`status-block.ts`): where a finding with no line comment shows its lines, for the block and the simulated page.
 // Ports (ADR 0033): `Clock` and `IdGen` (ADR 0037); `Engines`, `HostIntake` and `HostWriter` (ADR 0039, polling
 // and reactions by ADR 0043), each shaped by what the service calls and nothing more, a host's listing saying
@@ -175,8 +176,11 @@ export {
   engineName,
   escalationText,
   FAILED_SAFETY_CHECK,
+  type FailureWords,
   failedHead,
-  failureText,
+  failedLine,
+  failedTitle,
+  failureWords,
   findersText,
   foundAndCheckedText,
   KEPT_TWICE_WONT_FIX,
@@ -188,12 +192,14 @@ export {
   NOTHING_NEW_TO_CHECK,
   notInDiffText,
   postWaitText,
+  pushedText,
   type ReplyWords,
   type RoundChecks,
   replyKind,
   roundCountsText,
   roundLine,
   ruleText,
+  STILL_PRESENT,
   severityText,
   shortSha,
   skipText,
@@ -335,17 +341,26 @@ export {
   runId,
 } from "./ids.ts";
 export type {
+  AskedBy,
   CancelReason,
   Deferral,
+  FailureCause,
   JobFailure,
   JobFailureKind,
   JobState,
+  PushedBy,
   ReviewJob,
   SkipReason,
   Trigger,
   Turn,
 } from "./job.ts";
-export { deferralEngine, engineDeferral, isWaiting, sameDeferral, sameTurn } from "./job.ts";
+export {
+  deferralEngine,
+  engineDeferral,
+  isWaiting,
+  sameDeferral,
+  sameTurn,
+} from "./job.ts";
 export type { LoopState } from "./loop.ts";
 export type { Prepared } from "./prepared.ts";
 export type {
@@ -420,7 +435,7 @@ export type {
 } from "./settings.ts";
 export type { ResolveSettings, SettingsLayer } from "./settings-resolve.ts";
 export type { Setup, SetupGitHub, SetupStep } from "./setup.ts";
-export { furthestReached, SETUP_ORDER } from "./setup.ts";
+export { furthestReached, reposChosen, SETUP_ORDER } from "./setup.ts";
 export type { SharedApp } from "./shared-app.ts";
 export { SHARED_APP } from "./shared-app.ts";
 export type {

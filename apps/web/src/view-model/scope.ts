@@ -3,6 +3,7 @@
 // Home and All reviews, held while the page is open, its tabs shown once another author's pull request is listed and
 // never taken away after, so they don't come and go under the reader.
 import type { Review, SkipReason, Trigger } from "@lookover/contracts";
+import { HeldValue } from "./held.ts";
 import type { ChangeReview } from "./select.ts";
 
 export type Scope = "mine" | "everyone";
@@ -82,30 +83,20 @@ export interface ScopeChoice {
 
 /**
  * What holds the choice for the app while it is open: Mine at first; `see` shows the tabs once another author's pull
- * request is listed, and nothing hides them again. The value is replaced only when it changes, for
- * `useSyncExternalStore`.
+ * request is listed, and nothing hides them again. The value is replaced only when it changes.
  */
-export class ListScope {
-  private value: ScopeChoice = { scope: "mine", shown: false };
-  private listeners = new Set<() => void>();
-
-  get = (): ScopeChoice => this.value;
-
-  subscribe = (listener: () => void): (() => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  };
+export class ListScope extends HeldValue<ScopeChoice> {
+  constructor() {
+    super({ scope: "mine", shown: false });
+  }
 
   see(items: readonly ChangeReview[]): void {
-    if (!this.value.shown && othersListed(items)) this.set({ ...this.value, shown: true });
+    const value = this.get();
+    if (!value.shown && othersListed(items)) this.set({ ...value, shown: true });
   }
 
   choose = (scope: Scope): void => {
-    if (scope !== this.value.scope) this.set({ ...this.value, scope });
+    const value = this.get();
+    if (scope !== value.scope) this.set({ ...value, scope });
   };
-
-  private set(value: ScopeChoice): void {
-    this.value = value;
-    for (const l of this.listeners) l();
-  }
 }

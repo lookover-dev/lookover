@@ -33,6 +33,8 @@ import m30 from "./migrations/20261031090000-changes-opened-at.sql" with { type:
 import m31 from "./migrations/20261102090000-one-way-in.sql" with { type: "text" };
 import m32 from "./migrations/20261103090000-status-posts.sql" with { type: "text" };
 import m33 from "./migrations/20261103100000-findings-suggestion.sql" with { type: "text" };
+import m34 from "./migrations/20261107090000-jobs-asked-by.sql" with { type: "text" };
+import m35 from "./migrations/20261107120000-jobs-failure-cause.sql" with { type: "text" };
 
 /** Every migration of `src/migrations/`, in name order, its SQL bundled with the code. */
 export const EMBEDDED: { name: string; sql: string }[] = [
@@ -70,4 +72,6 @@ export const EMBEDDED: { name: string; sql: string }[] = [
   { name: "20261102090000-one-way-in", sql: m31 },
   { name: "20261103090000-status-posts", sql: m32 },
   { name: "20261103100000-findings-suggestion", sql: m33 },
+  { name: "20261107090000-jobs-asked-by", sql: m34 },
+  { name: "20261107120000-jobs-failure-cause", sql: m35 },
 ];

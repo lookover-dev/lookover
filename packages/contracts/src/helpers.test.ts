@@ -9,7 +9,10 @@ import {
   isWaiting,
   jobId,
   type ReviewJob,
+  reposChosen,
   repositoryName,
+  SETUP_ORDER,
+  type Setup,
   sameRepository,
   sameTurn,
   stepsDone,
@@ -24,6 +27,7 @@ const job: ReviewJob = {
   state: "queued",
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip: null,
   cancel: null,
   failure: null,
@@ -94,4 +98,39 @@ test("the furthest step reached is the later of two, in the setup's order: going
   expect(furthestReached("first-review", "agent")).toBe("agent");
   expect(furthestReached("agent", "background")).toBe("background");
   expect(furthestReached("background", "background")).toBe("background");
+});
+
+describe("whether the setup has chosen the repositories (ADR 0079)", () => {
+  const at = (step: Setup["step"], reached: Setup["step"] = step, done = false): Setup => ({
+    done,
+    step,
+    reached,
+    github: "done",
+    firstReviewChange: null,
+  });
+
+  test("not before the furthest step reached is past Repositories; chosen from the first review on", () => {
+    expect(SETUP_ORDER.map((step) => [step, reposChosen(at(step))])).toEqual([
+      ["ai", false],
+      ["github", false],
+      ["repos", false],
+      ["first-review", true],
+      ["agent", true],
+      ["background", true],
+    ]);
+  });
+
+  test("a new owner's setup has not; a setup done, or set up at once, has", () => {
+    const newOwner: Setup = { ...at("ai"), github: "start" };
+    expect(reposChosen(newOwner)).toBe(false);
+    expect(reposChosen(at("background", "background", true))).toBe(true);
+    // Done says so whatever the steps say.
+    expect(reposChosen(at("ai", "ai", true))).toBe(true);
+  });
+
+  test("a step gone back keeps the choice: the furthest step reached is what counts", () => {
+    expect(reposChosen(at("repos", "first-review"))).toBe(true);
+    expect(reposChosen(at("github", "agent"))).toBe(true);
+    expect(reposChosen(at("ai", "repos"))).toBe(false);
+  });
 });

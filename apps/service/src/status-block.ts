@@ -14,7 +14,7 @@
 // It must never know: the words of the block (`publish`), or the loop's rules (`core`).
 import type { ChangeId, EngineId, ReviewJob, RunId } from "@lookover/contracts";
 import { loopState } from "@lookover/core";
-import type { RoundToPost, Status, StatusRound } from "@lookover/publish";
+import { type RoundToPost, type Status, type StatusRound, shownFailure } from "@lookover/publish";
 import type { Store } from "@lookover/store";
 
 /** What a round's posts are rendered from, as the run saved it: the round as `publish` takes it. */
@@ -99,7 +99,7 @@ export function statusNow(
         kind: "failed",
         sha,
         round,
-        failure: newest.failure?.kind ?? "unexpected",
+        failure: shownFailure(newest.failure),
         engine: newest.failure?.engine ?? null,
         posted,
       };

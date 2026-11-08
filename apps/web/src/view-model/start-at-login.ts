@@ -71,7 +71,12 @@ export function atLoginStatus(s: Registration): { ok: boolean; text: string } {
 export function atLoginDetail(s: Registration): WithCommand | null {
   const other = takenBy(s);
   if (other === null) return null;
-  return { before: "At login, this computer runs", command: other, after: "." };
+  return {
+    before: "At login, this computer runs",
+    command: other,
+    after: ".",
+    alone: "At login, this computer runs:",
+  };
 }
 
 const WHY = "So reviews happen while the app is closed.";
@@ -88,15 +93,22 @@ export function startAtLoginHelp(s: AtLogin, mode: WebMode): string | WithComman
   const other = takenBy(s);
   if (startAtLogin && startsAtLogin) return `${WHY} Lookover starts each time you log in to this computer.`;
   if (startAtLogin && other !== null)
-    return { before: `${WHY} On, but ${ANOTHER}:`, command: other, after: "." };
-  if (!startAtLogin && !startsAtLogin) {
-    const after = "after you log in.";
     return {
-      before: `${WHY} Off: run`,
-      command: startCommand(mode, s.command),
-      after: other === null ? after : { before: `${after} ${capital(ANOTHER)}:`, command: other, after: "." },
+      before: `${WHY} On, but ${ANOTHER}:`,
+      command: other,
+      after: ".",
+      alone: `${WHY} On, but ${ANOTHER}:`,
     };
-  }
+  if (!startAtLogin && !startsAtLogin)
+    return {
+      before: `${WHY} Off: after you log in, run`,
+      command: startCommand(mode, s.command),
+      after:
+        other === null
+          ? "."
+          : { before: `. ${capital(ANOTHER)}:`, command: other, after: ".", alone: `. ${capital(ANOTHER)}:` },
+      alone: `${WHY} Off: after you log in, start Lookover with:`,
+    };
   if (startAtLogin)
     return `${WHY} On, but this computer refused to start Lookover at login: turn it off and on to try again.`;
   return `${WHY} Off, but this computer still starts Lookover at login: turn it on and off to try again.`;
@@ -125,12 +137,14 @@ export function backgroundLine(
       before: `${capital(ANOTHER)}:`,
       command: other,
       after: `. This one won't: choose “${START_THIS_ONE}” in Settings, under “Start at login”.`,
+      alone: `This one won't start at login: choose “${START_THIS_ONE}” in Settings, under “Start at login”. ${capital(ANOTHER)}:`,
     };
   if (s.startAtLogin) return `It starts each time you log in to this computer. ${CHANGE_IT}`;
   return {
     before: "It won't start at login: run",
     command: startCommand(mode, s.command),
     after: `after you log in. ${CHANGE_IT}`,
+    alone: `It won't start at login. ${CHANGE_IT} After you log in, run:`,
   };
 }
 

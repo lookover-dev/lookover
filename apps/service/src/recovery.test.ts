@@ -8,8 +8,12 @@ import {
   type CommitSha,
   changeId,
   commitSha,
+  type Engines,
   type Event,
+  failureWords,
   HostError,
+  type HostFailure,
+  type JobFailure,
   jobId,
   type ReviewJob,
   type State,
@@ -129,6 +133,8 @@ async function ending(events: ReturnType<typeof messages>): Promise<Event> {
  */
 class RefusingPosts extends FakeGitHost {
   down = true;
+  /** How it refuses: no answer by default, or a limit it asks to wait out. */
+  refusing: HostFailure = "unavailable";
   private heard = () => {};
   readonly refused = new Promise<void>((resolve) => {
     this.heard = resolve;
@@ -137,12 +143,12 @@ class RefusingPosts extends FakeGitHost {
   override publishReview(...args: Parameters<FakeGitHost["publishReview"]>): Promise<string> {
     if (!this.down) return super.publishReview(...args);
     this.heard();
-    return Promise.reject(new HostError("unavailable", "GitHub answered 502"));
+    return Promise.reject(new HostError(this.refusing, "GitHub answered 502"));
   }
 
   override completeCheck(...args: Parameters<FakeGitHost["completeCheck"]>): Promise<void> {
     if (!this.down) return super.completeCheck(...args);
-    return Promise.reject(new HostError("unavailable", "GitHub answered 502"));
+    return Promise.reject(new HostError(this.refusing, "GitHub answered 502"));
   }
 }
 
@@ -173,6 +179,7 @@ const job1: ReviewJob = {
   state: "queued",
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip: null,
   cancel: null,
   failure: null,
@@ -181,7 +188,7 @@ const job1: ReviewJob = {
 const stopped: ReviewJob = {
   ...job1,
   state: "failed",
-  failure: { kind: "service_stopped", detail: "", engine: "claude" },
+  failure: { kind: "service_stopped", detail: "", engine: "claude", cause: null, limitMs: null },
 };
 
 type Started = Awaited<ReturnType<typeof start>>;
@@ -708,7 +715,7 @@ test("a finding whose review GitHub refused is posted by the next round while th
   host.refuseNext("unauthorized", { post: "review" });
   expect((await review(service, cookie)).status).toBe(200);
   expect((await until(events, "round.finished")).at(-1)).toMatchObject({
-    job: { state: "failed", failure: { kind: "publish_failed" } },
+    job: { state: "failed", failure: { kind: "publish_failed", cause: null, limitMs: null } },
     findings: [{ id: "F1", posted: false }],
   });
 
@@ -748,7 +755,7 @@ test("an hour of GitHub refusing the review fails the job, the round kept and it
   // The finding counts as open in the round, and the loop with it: it was found, and nothing fixed it. It is held
   // off the pull request, which never got the review.
   expect(kept).toMatchObject({
-    job: { state: "failed", failure: { kind: "publish_failed" } },
+    job: { state: "failed", failure: { kind: "publish_failed", cause: "network", limitMs: null } },
     round: { n: 1, open: 1 },
     loop: "open",
     findings: [{ id: "F1", status: "open", posted: false }],
@@ -762,6 +769,25 @@ test("an hour of GitHub refusing the review fails the job, the round kept and it
     { status: "completed", conclusion: "neutral" },
   ]);
   expect(host.view({ repo: SANDBOX, number: 1 }).reviews).toEqual([]);
+});
+
+test("a publish that gives up after GitHub's rate limit has no network cause: GitHub answered, and asked to wait (ADR 0081)", async () => {
+  const engines = fakeEngines();
+  engines.answer({ outcome: "ok", text: ONE_FINDING });
+  const host = new RefusingPosts({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1] });
+  host.refusing = "rate_limited";
+  const { service, time } = await start({ host, engines, retrieval: onTheDiff() });
+  const cookie = await openApp(service);
+  const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  expect((await review(service, cookie)).status).toBe(200);
+  await host.refused;
+  await time.advance(65 * MIN);
+  const kept = (await until(events, "round.finished")).at(-1);
+  expect(kept).toMatchObject({
+    job: { state: "failed", failure: { kind: "publish_failed", cause: null, limitMs: null } },
+  });
+  if (kept?.type !== "round.finished" || kept.job.failure === null) throw new Error("no failed round");
+  expect(failureWords(kept.job.failure).phrase).not.toContain("didn't answer");
 });
 
 test("a run that finds Claude signed out, whose deferral can't be recorded twice, fails the job in its own write and frees Claude", async () => {
@@ -797,7 +823,11 @@ test("a host that lists the change but won't say what it is when the run asks fa
   const seen = [...(await until(events, "run.started")), ...(await until(events, "job.changed"))];
   expect(seen.at(-1)).toMatchObject({
     changeId: PLANTED,
-    job: { id: "id-1", state: "failed", failure: { kind: "host_failed", detail: "unavailable" } },
+    job: {
+      id: "id-1",
+      state: "failed",
+      failure: { kind: "host_failed", detail: "unavailable", cause: "network", limitMs: null },
+    },
   });
   expect((await snapshot(service, cookie)).reviews[PLANTED]?.run).toBeNull();
 });
@@ -812,7 +842,11 @@ test("a host that lists the change but refuses to say how to fetch it fails the 
   const seen = [...(await until(events, "run.started")), ...(await until(events, "job.changed"))];
   expect(seen.at(-1)).toMatchObject({
     changeId: PLANTED,
-    job: { id: "id-1", state: "failed", failure: { kind: "host_failed", detail: "unauthorized" } },
+    job: {
+      id: "id-1",
+      state: "failed",
+      failure: { kind: "host_failed", detail: "unauthorized", cause: null, limitMs: null },
+    },
   });
   expect((await snapshot(service, cookie)).reviews[PLANTED]?.run).toBeNull();
 });
@@ -850,6 +884,8 @@ test("a change whose commits the host can't relate fails the job as a prepare th
       failure: {
         kind: "prepare_failed",
         detail: "not_found: No common ancestor between main and planted-bugs",
+        cause: "base_not_found",
+        limitMs: null,
       },
     },
   });
@@ -868,7 +904,10 @@ test("a compare the host can't answer as the round prepares fails the job as the
 
   expect(await ending(events)).toMatchObject({
     changeId: PLANTED,
-    job: { state: "failed", failure: { kind: "host_failed", detail: "unavailable" } },
+    job: {
+      state: "failed",
+      failure: { kind: "host_failed", detail: "unavailable", cause: "network", limitMs: null },
+    },
   });
   expect(asked).toEqual([]);
 });
@@ -900,7 +939,115 @@ test("a prepare that fails fails the job as a prepare that failed, in retrieval'
         kind: "prepare_failed",
         detail:
           "fetch_failed: no credentials from the host: unauthorized: The host refused the credentials (401)",
+        // Git's network is never read from its words (ADR 0081): no cause.
+        cause: null,
+        limitMs: null,
       },
     },
+  });
+});
+
+/** The failure the job of one "Review now" ends with, on `retrieval` and `engines`, as the store keeps it. */
+async function failureOf(options: { retrieval?: Retrieval; engines?: Engines }): Promise<JobFailure | null> {
+  const { service } = await start(options);
+  const cookie = await openApp(service);
+  const events = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  expect((await review(service, cookie)).status).toBe(200);
+  const ended = await ending(events);
+  if (ended.type !== "job.changed") throw new Error(`no job ended: ${ended.type}`);
+  // The snapshot reads it back from the store.
+  expect((await snapshot(service, cookie)).reviews[PLANTED]?.job).toEqual(ended.job);
+  return ended.job.failure;
+}
+
+/** A prepare refused with `error`. */
+function refusing(error: RetrievalError): ScriptedRetrieval {
+  const retrieval = new ScriptedRetrieval();
+  retrieval.refuse(error);
+  return retrieval;
+}
+
+test("a prepare that fails stores its cause from retrieval's typed error, the limit that ran out with it (ADR 0081)", async () => {
+  const idle = new RetrievalError("fetch_failed", "git took too long (idle)", {
+    limit: { kind: "idle", ms: 120_000 },
+  });
+  expect(await failureOf({ retrieval: refusing(idle) })).toEqual({
+    kind: "prepare_failed",
+    detail: "fetch_failed: git took too long (idle)",
+    engine: "claude",
+    cause: "git_silent",
+    limitMs: 120_000,
+  });
+  const whole = new RetrievalError("fetch_failed", "git took too long (wall_clock)", {
+    limit: { kind: "wall_clock", ms: 600_000 },
+  });
+  expect(await failureOf({ retrieval: refusing(whole) })).toMatchObject({
+    cause: "git_time_limit",
+    limitMs: 600_000,
+  });
+  const long = new RetrievalError("worktree_failed", "error: unable to create file a/b: Filename too long", {
+    pathTooLong: true,
+  });
+  expect(await failureOf({ retrieval: refusing(long) })).toMatchObject({
+    cause: "path_too_long",
+    limitMs: null,
+  });
+  const noGit = new RetrievalError("git_not_found", "no git program on PATH");
+  expect(await failureOf({ retrieval: refusing(noGit) })).toMatchObject({
+    cause: "git_missing",
+    limitMs: null,
+  });
+  // Anything else retrieval refuses has no cause.
+  const disk = new RetrievalError("diff_failed", "the diff could not be saved: ENOSPC");
+  expect(await failureOf({ retrieval: refusing(disk) })).toMatchObject({ cause: null, limitMs: null });
+});
+
+test("a git limit that runs out after the fetch, on the diff or the worktree, is said without claiming the fetch (ADR 0081)", async () => {
+  const diff = new RetrievalError("diff_failed", "git took too long (wall_clock)", {
+    limit: { kind: "wall_clock", ms: 60_000 },
+  });
+  const slowDiff = await failureOf({ retrieval: refusing(diff) });
+  expect(slowDiff).toMatchObject({ kind: "prepare_failed", cause: "git_time_limit", limitMs: 60_000 });
+  const worktree = new RetrievalError("worktree_failed", "git took too long (idle)", {
+    limit: { kind: "idle", ms: 120_000 },
+  });
+  const silentWorktree = await failureOf({ retrieval: refusing(worktree) });
+  expect(silentWorktree).toMatchObject({ kind: "prepare_failed", cause: "git_silent", limitMs: 120_000 });
+  for (const failure of [slowDiff, silentWorktree]) {
+    const words = failureWords(failure);
+    expect(`${words.phrase} ${words.sentence} ${words.next}`).not.toMatch(/fetch/i);
+  }
+  expect(failureWords(slowDiff)).toMatchObject({
+    phrase: "getting the code ready ran past its 1-minute limit",
+    retry: false,
+  });
+  expect(failureWords(silentWorktree)).toMatchObject({
+    phrase: "git sent nothing for 2 minutes while Lookover got the code ready",
+    retry: true,
+  });
+});
+
+test("an engine that fails stores its cause: its time limit with the limit, or an answer it didn't give (ADR 0081)", async () => {
+  const late = fakeEngines();
+  late.answer({ outcome: "timeout", text: "" });
+  expect(await failureOf({ engines: late })).toEqual({
+    kind: "review_failed",
+    detail: "timeout",
+    engine: "claude",
+    cause: "engine_time_limit",
+    limitMs: 20 * 60_000,
+  });
+  // No answer scripted: the fake engine crashes.
+  expect(await failureOf({ engines: fakeEngines() })).toMatchObject({
+    kind: "review_failed",
+    engine: "claude",
+    cause: "engine_answer",
+    limitMs: null,
+  });
+  const unread = fakeEngines();
+  unread.answer({ outcome: "ok", text: "No findings, I think." });
+  expect(await failureOf({ engines: unread })).toMatchObject({
+    kind: "review_failed",
+    cause: "engine_answer",
   });
 });

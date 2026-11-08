@@ -134,6 +134,8 @@ test("every scenario starts signed in on the shared App, posting as the owner, b
     S14: "sasensi",
     S16: "sasensi",
     S17: "sasensi",
+    S18: "sasensi",
+    S19: "sasensi",
   });
 });
 

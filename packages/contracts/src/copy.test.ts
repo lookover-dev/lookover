@@ -6,27 +6,34 @@ import {
   cancelText,
   confirmFailureText,
   deferralText,
+  type EngineId,
   engineDeferral,
   engineDetailText,
   engineHealthText,
   engineName,
   escalationText,
+  type FailureCause,
   failedHead,
-  failureText,
+  failedLine,
+  failedTitle,
+  failureWords,
   findersText,
   foundAndCheckedText,
+  type JobFailureKind,
   keptText,
   lookingOverHead,
   NEEDS_YOUR_LOOK,
   NOTHING_NEW_TO_CHECK,
   notInDiffText,
   postWaitText,
+  pushedText,
   replyKind,
   roundCountsText,
   roundLine,
   shortSha,
   skipText,
   startsOnceText,
+  TRY_AGAIN,
   twoDigits,
   UNFINISHED_SAFETY_CHECK,
   unusableFixedText,
@@ -133,7 +140,9 @@ test("an AI found and usable has no detail; one found but unusable says why, wha
   );
 });
 
-test("why a review did not run names the engine that gave no review, or says the reviewer", () => {
+test("why a review did not run, with no cause, names the engine that gave no review, or says the reviewer", () => {
+  const failureText = (failure: { kind: JobFailureKind; engine: EngineId | null } | null) =>
+    failureWords(failure === null ? null : { ...failure, cause: null, limitMs: null }).phrase;
   expect(failureText({ kind: "review_failed", engine: "codex" })).toBe("Codex gave no review");
   expect(failureText({ kind: "review_failed", engine: null })).toBe("the reviewer gave no review");
   expect(failureText({ kind: "service_stopped", engine: "claude" })).toBe(
@@ -141,7 +150,7 @@ test("why a review did not run names the engine that gave no review, or says the
   );
   expect(failureText({ kind: "prepare_failed", engine: "claude" })).toBe("the code could not be fetched");
   expect(failureText({ kind: "publish_failed", engine: "claude" })).toBe("GitHub refused a post");
-  expect(failureText({ kind: "host_failed", engine: null })).toBe("GitHub did not answer");
+  expect(failureText({ kind: "host_failed", engine: null })).toBe("GitHub didn't answer");
   expect(failureText({ kind: "unexpected", engine: null })).toBe("the review could not run");
   // A job that failed before anyone said why.
   expect(failureText(null)).toBe("the review could not run");
@@ -164,7 +173,7 @@ test("why a waiting review was cancelled, as a title and as a phrase", () => {
 });
 
 test("why a post waits says what GitHub did, and when it is tried again (ADR 0055)", () => {
-  expect(postWaitText("unavailable", "at 00:01")).toBe("GitHub did not answer, trying again at 00:01");
+  expect(postWaitText("unavailable", "at 00:01")).toBe("GitHub didn't answer, trying again at 00:01");
   expect(postWaitText("rate_limited", "at 14:05")).toBe("GitHub asked to wait, trying again at 14:05");
 });
 
@@ -275,6 +284,7 @@ test("a reply's kind by what the round decided: kept once warns, kept on an esca
   });
   expect(replyKind("withdrawn", open)).toEqual({ kind: "Withdrawn", why: null, last: null });
   expect(replyKind("answered", open)).toEqual({ kind: "Answer", why: null, last: null });
+  expect(replyKind("still_present", open)).toEqual({ kind: "Still present", why: null, last: null });
   expect(replyKind("dismissed", undefined)).toEqual({
     kind: "Dismissed by the owner",
     why: null,
@@ -309,4 +319,164 @@ test("the status block's headings and its note for a finding not in the diff", (
   expect(waitingHead("C")).toEqual(["Waiting to look over ", "C"]);
   expect(failedHead("C")).toEqual(["Couldn't look over ", "C"]);
   expect(notInDiffText("Reminders go out twice.")).toBe("Not in the diff: reminders go out twice.");
+});
+
+// Each list from a record over its union: a kind or a cause added fails to compile here until it is listed.
+const EVERY_KIND = {
+  service_stopped: true,
+  prepare_failed: true,
+  review_failed: true,
+  publish_failed: true,
+  host_failed: true,
+  unexpected: true,
+} satisfies Record<JobFailureKind, true>;
+const KINDS = Object.keys(EVERY_KIND).filter((k): k is JobFailureKind => k in EVERY_KIND);
+const EVERY_CAUSE = {
+  git_silent: true,
+  git_time_limit: true,
+  engine_time_limit: true,
+  base_not_found: true,
+  path_too_long: true,
+  git_missing: true,
+  network: true,
+  engine_answer: true,
+} satisfies Record<FailureCause, true>;
+const CAUSES = Object.keys(EVERY_CAUSE).filter((k): k is FailureCause => k in EVERY_CAUSE);
+
+test("every failure, by its kind and its cause or none, has a phrase, a sentence and a next line", () => {
+  for (const kind of KINDS)
+    for (const cause of [...CAUSES, null])
+      for (const engine of ["claude", "codex", null] as const) {
+        const words = failureWords({ kind, cause, engine, limitMs: 120_000 });
+        expect(words.phrase).not.toBe("");
+        expect(words.phrase).not.toMatch(/[.!?]$/);
+        expect(words.sentence).toMatch(/^[A-Z].*\.$/);
+        expect(words.next).toMatch(/^[A-Z].*\.$/);
+      }
+});
+
+test("new commits: the agent's when it signed every one, else no one named; not counted, just new commits", () => {
+  expect(pushedText("agent", 1)).toBe("the agent pushed 1 commit");
+  expect(pushedText("agent", 2)).toBe("the agent pushed 2 commits");
+  expect(pushedText("agent", 0)).toBe("the agent pushed new commits");
+  expect(pushedText(null, 1)).toBe("1 new commit");
+  expect(pushedText(null, 3)).toBe("3 new commits");
+  expect(pushedText(null, 0)).toBe("new commits");
+});
+
+test("a time limit is said in words from its milliseconds", () => {
+  const job = { kind: "prepare_failed", engine: null } as const;
+  expect(failureWords({ ...job, cause: "git_silent", limitMs: 120_000 })).toEqual({
+    phrase: "git sent nothing for 2 minutes while Lookover got the code ready",
+    sentence: "Git sent nothing for 2 minutes while Lookover got the code ready.",
+    retry: true,
+    next: TRY_AGAIN,
+  });
+  expect(failureWords({ ...job, cause: "git_silent", limitMs: 60_000 }).phrase).toBe(
+    "git sent nothing for 1 minute while Lookover got the code ready",
+  );
+  expect(failureWords({ ...job, cause: "git_time_limit", limitMs: 600_000 })).toEqual({
+    phrase: "getting the code ready ran past its 10-minute limit",
+    sentence: "Getting the code ready ran past its 10-minute limit.",
+    retry: false,
+    next: "The repository or the change is too large to get ready in that time.",
+  });
+  expect(failureWords({ ...job, cause: "git_time_limit", limitMs: 90_000 }).phrase).toBe(
+    "getting the code ready ran past its 90-second limit",
+  );
+  expect(failureWords({ ...job, cause: "git_time_limit", limitMs: 7_200_000 }).phrase).toBe(
+    "getting the code ready ran past its 2-hour limit",
+  );
+  // A limit nobody recorded, or none above zero: not known.
+  for (const limitMs of [null, 0, -1_000]) {
+    expect(failureWords({ ...job, cause: "git_silent", limitMs }).phrase).toBe(
+      "git sent nothing for too long while Lookover got the code ready",
+    );
+    expect(failureWords({ ...job, cause: "git_time_limit", limitMs }).phrase).toBe(
+      "getting the code ready ran past its time limit",
+    );
+  }
+});
+
+test("an engine's cause names the engine that was reviewing", () => {
+  const failed = { kind: "review_failed", limitMs: null } as const;
+  expect(
+    failureWords({ ...failed, engine: "claude", cause: "engine_time_limit", limitMs: 1_200_000 }),
+  ).toEqual({
+    phrase: "Claude ran past its 20-minute limit",
+    sentence: "Claude ran past its 20-minute limit.",
+    retry: false,
+    next: "A smaller pull request fits in the time.",
+  });
+  expect(failureWords({ ...failed, engine: "codex", cause: "engine_answer" })).toEqual({
+    phrase: "Codex gave no usable review",
+    sentence: "Codex gave no usable review.",
+    retry: true,
+    next: TRY_AGAIN,
+  });
+  expect(failureWords({ ...failed, engine: null, cause: "engine_answer" }).sentence).toBe(
+    "The reviewer gave no usable review.",
+  );
+});
+
+test("a failed review's check title and status block line, from its words", () => {
+  const late = {
+    kind: "review_failed",
+    engine: "codex",
+    cause: "engine_time_limit",
+    limitMs: 1_200_000,
+  } as const;
+  expect(failedTitle(late)).toBe("The review failed: Codex ran past its 20-minute limit");
+  expect(failedLine(late)).toBe(
+    "Codex ran past its 20-minute limit. A smaller pull request fits in the time.",
+  );
+  expect(failedLine({ ...late, cause: "network", kind: "host_failed" })).toBe(
+    `GitHub didn't answer. ${TRY_AGAIN}`,
+  );
+});
+
+test("a cause another try can't change says what would", () => {
+  const job = { kind: "prepare_failed", engine: null, limitMs: null } as const;
+  expect(failureWords({ ...job, cause: "base_not_found" })).toEqual({
+    phrase: "where the commit branches off its base branch couldn't be found",
+    sentence: "Lookover couldn't find where the commit branches off its base branch.",
+    retry: false,
+    next: "Rebase onto the base branch, then push.",
+  });
+  expect(failureWords({ ...job, cause: "path_too_long" })).toEqual({
+    phrase: "a file path is too long for this machine",
+    sentence: "A file path is too long for the machine Lookover runs on.",
+    retry: false,
+    next: "Turning on long paths in Windows, or shorter paths, would fix it.",
+  });
+  expect(failureWords({ ...job, cause: "git_missing" })).toEqual({
+    phrase: "git isn't installed where Lookover runs",
+    sentence: "Git isn't installed where Lookover runs.",
+    retry: false,
+    next: "Install git, then push again.",
+  });
+  expect(failureWords({ kind: "host_failed", engine: null, limitMs: null, cause: "network" })).toEqual({
+    phrase: "GitHub didn't answer",
+    sentence: "GitHub didn't answer.",
+    retry: true,
+    next: TRY_AGAIN,
+  });
+});
+
+test("a failure with no cause, or one stored before causes were, says today's words for its kind", () => {
+  expect(failureWords({ kind: "prepare_failed", engine: null, cause: null, limitMs: null })).toEqual({
+    phrase: "the code could not be fetched",
+    sentence: "Lookover couldn't get the code ready.",
+    retry: true,
+    next: TRY_AGAIN,
+  });
+  // An event stored before ADR 0081 carries no cause and no limit.
+  const old = JSON.parse('{"kind":"review_failed","detail":"crashed","engine":"codex"}');
+  expect(failureWords(old)).toEqual({
+    phrase: "Codex gave no review",
+    sentence: "Codex stopped before it finished.",
+    retry: true,
+    next: TRY_AGAIN,
+  });
+  expect(failureWords(null).phrase).toBe("the review could not run");
 });

@@ -38,18 +38,30 @@ function withReview(state: State, changeId: ChangeId, at: number, update: (revie
   };
 }
 
-/** What the timeline gains when a job changes: what asked for a new one, why a job waits or was skipped. */
+/** A job that ends failed, now and not before (ADR 0081): its entry, on its commit; else none. */
+function failedEntries(before: ReviewJob | null, job: ReviewJob, at: number): TimelineEntry[] {
+  if (job.state !== "failed" || (before?.id === job.id && before.state === "failed")) return [];
+  return [{ at, sha: job.sha, kind: "failed", failure: job.failure }];
+}
+
+/**
+ * What the timeline gains when a job changes: what asked for a new one and who, a request that joined it (ADR 0081),
+ * why a job waits, was skipped or failed. A job stored before ADR 0081 has no `askedBy`: nobody is named.
+ */
 function jobEntries(before: ReviewJob | null, job: ReviewJob, at: number): TimelineEntry[] {
   const fresh = before?.id !== job.id;
   if (job.state === "skipped") {
     return before?.state === "skipped" && !fresh ? [] : [{ at, sha: null, kind: "skipped" }];
   }
-  const out: TimelineEntry[] = fresh ? [{ at, sha: null, kind: "queued", trigger: job.trigger }] : [];
+  const by = job.askedBy ?? null;
+  const out: TimelineEntry[] = [];
+  if (fresh) out.push({ at, sha: null, kind: "queued", trigger: job.trigger, by });
+  else if (by !== null && !before?.askedBy) out.push({ at, sha: null, kind: "asked", by });
   const said = fresh ? null : (before?.deferral ?? null);
   if (job.deferral && !sameDeferral(job.deferral, said)) {
     out.push({ at, sha: null, kind: "deferred", deferral: job.deferral });
   }
-  return out;
+  return [...out, ...failedEntries(before, job, at)];
 }
 
 type Of<T extends Event["type"]> = Extract<Event, { type: T }>;
@@ -106,6 +118,8 @@ function roundFinished(s: State, event: Of<"round.finished">): State {
     timeline: [
       ...r.timeline,
       { at: event.at, sha: round.sha, kind: "posted", round: round.n, open: round.open },
+      // A round kept whose posts were given up (ADR 0044): its job failed.
+      ...failedEntries(r.job, event.job, event.at),
     ],
   }));
   // The round moved its repository's "Too noisy?" counts (ADR 0049), its change still open or closed meanwhile.
@@ -143,12 +157,19 @@ function changeOpened(s: State, event: Of<"change.opened">): State {
     const next: Change = { ...change, newCommits: shown.newCommits };
     return { ...s, changes: { ...s.changes, [change.id]: next } };
   }
-  // New, or reopened: a reopened change goes on with the review it had, as the store goes on with its rounds.
-  const kept = s.reviews[change.id] ?? emptyReview(change.id, event.at);
+  // New, or reopened: a reopened change goes on with the review it had, as the store goes on with its rounds. New, it
+  // was opened when the host says (ADR 0081), before Lookover listed it; reopened, when Lookover saw it again.
+  const kept = s.reviews[change.id];
+  const opened: TimelineEntry = {
+    at: kept === undefined ? change.openedAt : event.at,
+    sha: change.headSha,
+    kind: "opened",
+    by: change.openedBy,
+  };
   const review: Review = {
-    ...kept,
+    ...(kept ?? emptyReview(change.id, event.at)),
     updatedAt: event.at,
-    timeline: [...kept.timeline, { at: event.at, sha: change.headSha, kind: "opened", by: change.openedBy }],
+    timeline: [...(kept?.timeline ?? []), opened],
   };
   return {
     ...s,
@@ -197,7 +218,8 @@ function changePushed(s: State, event: Of<"change.pushed">): State {
     at: event.at,
     sha: event.sha,
     kind: "pushed",
-    by: event.by,
+    // An event stored before ADR 0081 says "you": no one is named.
+    by: event.by === "agent" ? "agent" : null,
     commits: event.commits,
   };
   return withReview(

@@ -28,7 +28,7 @@ test("a round counts what the round raised, verified fixed and left open on the 
       earlier: [],
       candidates: [candidate("a", "blocking", 1), candidate("b", "blocking", 2)],
     },
-    { round: 1, settings: { strictness: "recommended" }, rules: [] },
+    { round: 1, settings: { strictness: "recommended" }, rules: [], lastChecked: null },
   );
   // Round 2: F1 is gone, F2 still there; a new blocking finding and a new Consider (kept off the pull request).
   const second = reconcile(
@@ -41,7 +41,7 @@ test("a round counts what the round raised, verified fixed and left open on the 
       ],
       candidates: [candidate("c", "blocking", 3), candidate("d", "consider", 4)],
     },
-    { round: 2, settings: { strictness: "everything" }, rules: [] },
+    { round: 2, settings: { strictness: "everything" }, rules: [], lastChecked: commitSha("a1b2c3d") },
   );
   const steps: Round["steps"] = [
     { step: "preparing", ms: 1_000 },

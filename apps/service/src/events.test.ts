@@ -36,7 +36,7 @@ test("events are numbered on from the snapshot, and a refresh lists the pull req
   const pushed = await next(stream);
   expect(pushed.id).toBe("6");
   expect(pushed.event).toBe("event");
-  // The commits the push brought, as the host counts them; no pusher but the author.
+  // The commits the push brought, as the host counts them; no agent signed them: no one is named (ADR 0081).
   const event: Event = {
     type: "change.pushed",
     seq: 6,
@@ -44,7 +44,7 @@ test("events are numbered on from the snapshot, and a refresh lists the pull req
     changeId: expectedChange1.id,
     sha: SHA1_PUSHED,
     commits: 1,
-    by: "you",
+    by: null,
   };
   expect(JSON.parse(pushed.data)).toEqual(event);
 

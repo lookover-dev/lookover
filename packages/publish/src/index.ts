@@ -16,19 +16,21 @@
 // its reset known gives it in the service's time with its offset, from `offset`, ADR 0055), `in_progress` while
 // it runs, completed by the round; or, for a job that ended without a round, completed `skipped` (a newer commit or
 // a newer review took its place, the pull request closed, a skip rule such as "it comes from a fork") or `neutral`
-// (the review failed), never `failure` (ADR 0006), with a result block holding the run's state and its reason
-// (snake_case), no verdict, no findings and every count at zero. The result's bytes are counted before posting: when
-// every finding doesn't fit, the result keeps the first findings that do, whole, in urgency order (open on the pull
-// request first), and says `truncated`; nothing is ever cut mid-way. Every sentence that lands on GitHub is product
-// copy and lives here, not in the UI. Findings kept in the app (ADR 0042) are counted, never listed: the check's
-// summary says how many, and "The rest can go." closes a sentence only when nothing else is open, on the pull
-// request or in the app. The confirm pass (ADR 0044): the result names the round's confirmer and each finding's
-// confirmation; a `blocking` finding lowered for want of a confirmation reads "Should fix, unconfirmed" in its
-// comment, the status block and the check; a round whose confirm session gave no answer (`run.confirmFailure`) says
-// in the check its findings are "Not double-checked", and why; a Deep round whose second find pass gave no answer
-// (`run.secondFind`) says "One find pass, not two", and why. Nothing on the pull request names the engines (ADR
-// 0074): the check's result does. A finding that follows one of the repository's rules (ADR 0048) cites it in its
-// comment's body, as the finder wrote it, and the result's `rule` gives its id, its file as `source` and its line.
+// (the review failed: its title says the cause's phrase, its summary how to try again where another try can help,
+// else what would change it, ADR 0081; never the failure's `detail`), never `failure` (ADR 0006), with a result block
+// holding the run's state and its reason (snake_case; a failure's kind, whatever its cause), no verdict, no findings
+// and every count at zero. The result's bytes are counted before posting: when every finding doesn't fit, the result
+// keeps the first findings that do, whole, in urgency order (open on the pull request first), and says `truncated`;
+// nothing is ever cut mid-way. Every sentence that lands on GitHub is product copy and lives here, not in the UI.
+// Findings kept in the app (ADR 0042) are counted, never listed: the check's summary says how many, and "The rest can
+// go." closes a sentence only when nothing else is open, on the pull request or in the app. The confirm pass (ADR
+// 0044): the result names the round's confirmer and each finding's confirmation; a `blocking` finding lowered for want
+// of a confirmation reads "Should fix, unconfirmed" in its comment, the status block and the check; a round whose
+// confirm session gave no answer (`run.confirmFailure`) says in the check its findings are "Not double-checked", and
+// why; a Deep round whose second find pass gave no answer (`run.secondFind`) says "One find pass, not two", and why.
+// Nothing on the pull request names the engines (ADR 0074): the check's result does. A finding that follows one of the
+// repository's rules (ADR 0048) cites it in its comment's body, as the finder wrote it, and the result's `rule` gives
+// its id, its file as `source` and its line.
 // The words (ADR 0074), the owner's prototype's: every post opens with the wordmark (contracts' `wordmark`, 18 px),
 // " · " and its kind, added after the output filter. A review's body is its hidden marker alone. A line comment is
 // "<wordmark> · Blocking" (its severity), its title in bold, its body, then the finding's suggestion as a `suggestion`
@@ -41,22 +43,23 @@
 // render): a heading (the wordmark at 26 px and the state: "Looking over <commit>" and "again" on the same commit, "N
 // things to fix", "One thing to fix", "Nothing to fix", "Needs your look", "Waiting to look over <commit>", "Couldn't look
 // over <commit>"), one line (the round, the commit as a link, "n fixed, m withdrawn" counted over every round, dismissed
-// as withdrawn; or why it waits, its reset in the machine's time, with the day when not today; or what stopped and how
-// to try again), then the last posted round's open findings (none while a round runs): escalated first, then by
-// severity, then by id, none kept in the app; each with a link to its thread, an escalated one's why the owner
-// decides, one with no line comment "Not in the diff: …" and its permalink on the commit its lines are on. Cut to the
-// room left: items from the end, then the permalinks; null when the heading and its line don't fit. It is rendered
-// as it is written, from where the change stands then (`status`, the caller's reader: its newest job and the ledger of
-// its last posted round, with the threads just read; without it, the round or the dismissal being posted), never
-// from a text kept: a block sent again, or late, never puts back an older one. A reader's null writes no block (a
-// pull request Lookover skips).
+// as withdrawn; or why it waits, its reset in the machine's time, with the day when not today; or why it failed, then
+// how to try again only where another try can help, else what would change it, ADR 0081), then the last posted round's
+// open findings (none while a round runs): escalated first, then by severity, then by id, none kept in the app; each
+// with a link to its thread, an escalated one's why the owner decides, one with no line comment "Not in the diff: …"
+// and its permalink on the commit its lines are on. Cut to the room left: items from the end, then the permalinks;
+// null when the heading and its line don't fit. It is rendered as it is written, from where the change stands then
+// (`status`, the caller's reader: its newest job and the ledger of its last posted round, with the threads just read;
+// without it, the round or the dismissal being posted), never from a text kept: a block sent again, or late, never
+// puts back an older one. A reader's null writes no block (a pull request Lookover skips).
 // Claims (ADR 0052): a finding the round kept against its author's claim is answered on its thread (the replies
 // below); the status block says why an escalated one is the owner's. The result gives each finding its claim (its
 // kind, text, author, time, and `count`: how many times a round kept it against one), and its `resolution` `kept`
-// (or `escalated`) with the reason when this round kept it; and, from one read of the change's threads (`threads`,
-// `HostIntake`'s) made before the status block, its `thread` (the root comment's id and URL, and whether it was
-// resolved when the read can tell), null for a finding with none: the block links the same. A transient refusal of
-// that read is tried again like a post; one that stands leaves `thread` out, and the check still completes.
+// (or `escalated`, or `still_present` after a push, ADR 0081) with the reason when this round replied; and, from one
+// read of the change's threads (`threads`, `HostIntake`'s) made before the status block, its `thread` (the root
+// comment's id and URL, and whether it was resolved when the read can tell), null for a finding with none: the block
+// links the same. A transient refusal of that read is tried again like a post; one that stands leaves `thread` out,
+// and the check still completes.
 // Replies and minimizing (ADR 0052): each of `core`'s replies (`reconciled.replies`) on a finding whose thread the run
 // read (`roots`, kept with the round so a resume reads nothing new) is one post, sent after the review and before the
 // status block, under the thread's root, ending with a hidden reply marker (contracts' `replyMarker`: the run, the
@@ -154,6 +157,7 @@
 // UI. It is pure: no `node:` or `bun:` module; the writer and the threads' reader come in as parameters.
 export { postableText } from "./filter.ts";
 export { createPublisher, dismissalPostsOf, postsOf } from "./publish.ts";
+export { shownFailure } from "./result.ts";
 export type {
   DismissalOutbox,
   DismissalPostKind,
@@ -169,6 +173,7 @@ export type {
   RoundToPost,
   SavedDismissalPost,
   SavedPost,
+  ShownFailure,
   SkipWhy,
   Standing,
   Status,

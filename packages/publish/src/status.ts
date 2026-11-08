@@ -12,14 +12,13 @@ import {
   escalationText,
   type Finding,
   failedHead,
+  failedLine,
   findingPermalink,
   lookingOverHead,
   NEEDS_YOUR_LOOK,
   notInDiffText,
   roundLine,
   shortSha,
-  stoppedText,
-  TRY_AGAIN,
   thingsText,
   twoDigits,
   waitingHead,
@@ -117,7 +116,7 @@ function partsOf(
     case "failed":
       return {
         head: failedHead(commitLink(change, status.sha)).join(""),
-        line: ofRound(status.round, `${stoppedText(status.failure, status.engine)} ${TRY_AGAIN}`),
+        line: ofRound(status.round, failedLine({ ...status.failure, engine: status.engine })),
         posted: status.posted,
       };
   }

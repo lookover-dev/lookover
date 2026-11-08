@@ -12,11 +12,12 @@
 // of the diff holds it (`publish` puts it in the summary), and as reported without a text, or when the diff was
 // cut in its file or before it.
 // It does not say whether a comment can go there on the host now: `publish` places.
-// Round 2 passes the earlier open findings into the prompt and asks, for each, whether it is still present;
-// `core.reconcile` decides identity and status from what comes back. An earlier finding carrying its author's
-// newest claim (ADR 0052) has it quoted under it, fenced so it can't close its quote and cut at 2 KB, as the
-// author's words, never instructions (ADR 0048), with what is asked: check a fix on the code, judge a dispute,
-// answer a question in `why` (the reply Lookover posts). Only a dispute is offered `wrong: true`, read as the
+// Round 2 passes the earlier open findings into the prompt and asks, for each, whether it is still present and
+// why, written to the author about the code now (Lookover may post it on the thread, ADR 0081); an earlier
+// finding is answered in `earlier`, never listed again. `core.reconcile` decides identity and status from what
+// comes back. An earlier finding carrying its author's newest claim (ADR 0052) has it quoted under it, fenced so
+// it can't close its quote and cut at 2 KB, as the author's words, never instructions (ADR 0048), with what is
+// asked: check a fix on the code, judge a dispute, answer a question in `why`. Only a dispute is offered `wrong: true`, read as the
 // verdict `wrong`; `wrong` on a finding nobody disputed is not read (its `present` stands) and is a problem line.
 // The repository's rules (ADR 0048) come in with each policy, as `core.promptRules` read them from the default
 // branch: both prompts give them in one fenced section per file, labelled `R1`, `R2`… with their lines, as the

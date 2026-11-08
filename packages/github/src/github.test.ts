@@ -11,7 +11,18 @@ import {
   SHARED_APP,
 } from "@lookover/contracts";
 import { z } from "zod";
-import { AT, type Call, type Route, stubGitHub, withToken } from "./github.test-support.ts";
+import {
+  AT,
+  type Call,
+  type FailsOn,
+  type Failure,
+  failing,
+  fakeWaits,
+  noWaits,
+  type Route,
+  stubGitHub,
+  withToken,
+} from "./github.test-support.ts";
 import { createGitHub, type Session } from "./index.ts";
 
 /** What a GraphQL request sent, read as GitHub reads it. */
@@ -177,7 +188,13 @@ test("an answer whose body breaks off while it is read is unavailable, a HostErr
     });
     return new Response(broken, { status: 200 });
   };
-  const github = createGitHub({ session: SESSION, repositories: LISTED, fetch, clock: { now: () => AT } });
+  const github = createGitHub({
+    session: SESSION,
+    repositories: LISTED,
+    fetch,
+    clock: { now: () => AT },
+    ...noWaits(),
+  });
   await expect(github.intake.listOpenChanges(SANDBOX_REPO)).rejects.toMatchObject({
     name: "HostError",
     failure: "unavailable",
@@ -689,6 +706,7 @@ test("each of GitHub's words for a refused review is the refusal it means", asyn
       repositories: LISTED,
       fetch: api.fetch,
       clock: { now: () => AT },
+      ...noWaits(),
     });
     const refused = await github.writer.publishReview(CHANGE_REF, A_REVIEW).catch((error: unknown) => error);
     const said = refused instanceof HostError ? refused.failure : refused;
@@ -1899,4 +1917,225 @@ test("the threads of a number that is no pull request are not found, though GitH
   await expect(github.intake.threads({ repo: SANDBOX_REPO, number: 8 })).rejects.toMatchObject({
     failure: "unauthorized",
   });
+});
+
+// A brief network failure (ADR 0080): a read is tried 3 times in all, 1 s then 3 s apart; a write is tried again only
+// when it can't have reached GitHub; each try has its time limit, 30 s for a read, 60 s for a write.
+
+/** The adapter on `routes`, its requests meeting `failures` first (on those `which` picks), its waits fake. */
+function flaky(failures: Failure[], which: FailsOn | undefined, ...routes: Route[]) {
+  const api = stubGitHub(...routes);
+  const waits = fakeWaits();
+  const { fetch, sent } = failing(api.fetch, waits, failures, which);
+  const github = createGitHub({
+    session: SESSION,
+    repositories: LISTED,
+    fetch,
+    clock: { now: () => AT },
+    sleep: waits.sleep,
+    deadline: waits.deadline,
+  });
+  return { github, waits, sent, api };
+}
+
+const OWNER_AND_POSTER = { owner: { id: 11247504, login: "sasensi" }, poster: PERSON };
+
+test("a read that fails twice, a connection reset then GitHub's 502, is tried again 1 s then 3 s later, and answers", async () => {
+  const { github, waits, sent } = flaky([{ code: "ECONNRESET" }, { status: 502 }], undefined, repository);
+  expect(await github.identity(SANDBOX_REPO)).toEqual(OWNER_AND_POSTER);
+  expect(sent).toEqual([`GET ${SANDBOX}`, `GET ${SANDBOX}`, `GET ${SANDBOX}`]);
+  expect(waits.sleeps).toEqual([1000, 3000]);
+  expect(waits.limits).toEqual([30_000, 30_000, 30_000]);
+  expect(waits.open()).toBe(0);
+});
+
+test("the rate-limit headers are read from every try that got an answer, a 502 tried again included", async () => {
+  let tries = 0;
+  const once502: Route = withToken(TOKEN, (call) => {
+    if (call.path !== `${SANDBOX}/pulls/7`) return undefined;
+    tries++;
+    if (tries > 1) return { status: 200, body: PULL };
+    const headers = { ...RATE, "x-ratelimit-reset": "1791720000", "x-ratelimit-resource": "core" };
+    return { status: 502, body: { message: "Server Error" }, headers };
+  });
+  const { github, waits } = flaky([], undefined, once502);
+  expect(await github.intake.getChange(SANDBOX_REPO, 7)).toEqual(CHANGE);
+  expect({ tries, sleeps: waits.sleeps, rateLimit: github.rateLimit() }).toEqual({
+    tries: 2,
+    sleeps: [1000],
+    rateLimit: { limit: 5000, remaining: 4999, used: 1, resetAt: 1_791_720_000_000, resource: "core" },
+  });
+});
+
+test("a read that keeps failing is unavailable after 3 tries, in the last failure's words; a last 502 is GitHub's answer", async () => {
+  const broken = flaky(
+    [{ code: "ECONNRESET" }, { status: 503 }, { code: "ECONNRESET" }],
+    undefined,
+    repository,
+  );
+  await expect(broken.github.identity(SANDBOX_REPO)).rejects.toMatchObject({
+    name: "HostError",
+    failure: "unavailable",
+    message: "GitHub could not be reached after 3 tries: ECONNRESET: the connection failed",
+  });
+  expect(broken.sent).toHaveLength(3);
+  expect(broken.waits.sleeps).toEqual([1000, 3000]);
+
+  const down = flaky([{ status: 502 }, { status: 504 }, { status: 502 }], undefined, repository);
+  await expect(down.github.identity(SANDBOX_REPO)).rejects.toMatchObject({
+    failure: "unavailable",
+    message: `GitHub answered GET ${SANDBOX} with 502: Server Error`,
+  });
+  expect(down.sent).toHaveLength(3);
+});
+
+test("a read that never answers ends on its time limit, is tried again, and is unavailable saying so", async () => {
+  for (const hang of ["hang", "hang-body"] as const) {
+    const { github, waits, sent } = flaky([hang, hang, hang], undefined, repository);
+    await expect(github.identity(SANDBOX_REPO)).rejects.toMatchObject({
+      failure: "unavailable",
+      message: "GitHub could not be reached after 3 tries: no answer within 30 s",
+    });
+    expect({ hang, sent: sent.length, limits: waits.limits, open: waits.open() }).toEqual({
+      hang,
+      sent: 3,
+      limits: [30_000, 30_000, 30_000],
+      open: 0,
+    });
+  }
+  // Once is enough when the next try answers.
+  const { github } = flaky(["hang-body"], undefined, repository);
+  expect(await github.identity(SANDBOX_REPO)).toEqual(OWNER_AND_POSTER);
+});
+
+/** Reviews as GitHub takes them: each one posted is saved. */
+const posted: Route = withToken(TOKEN, (call) =>
+  call.method === "POST" && call.path === `${SANDBOX}/pulls/7/reviews`
+    ? { status: 200, body: { id: 3528111001 } }
+    : undefined,
+);
+const isPost = (_input: string, init: RequestInit) => init.method === "POST";
+
+test("a write that may have reached GitHub (a reset, a closed socket, its time limit, a 502) is sent once and fails", async () => {
+  const cases: { failure: Failure; message: string }[] = [
+    {
+      failure: { code: "ECONNRESET" },
+      message: "GitHub could not be reached: ECONNRESET: the connection failed",
+    },
+    {
+      failure: { code: "ConnectionClosed", cause: true },
+      message: "GitHub could not be reached: fetch failed",
+    },
+    { failure: "hang", message: "GitHub could not be reached: no answer within 60 s" },
+    {
+      failure: { status: 502 },
+      message: `GitHub answered POST ${SANDBOX}/pulls/7/reviews with 502: Server Error`,
+    },
+  ];
+  for (const { failure, message } of cases) {
+    const { github, waits, sent } = flaky([failure], isPost, posted);
+    const refused = await github.writer.publishReview(CHANGE_REF, A_REVIEW).catch((error: unknown) => error);
+    expect({
+      failure,
+      refused,
+      sent,
+      sleeps: waits.sleeps,
+      limits: waits.limits,
+      open: waits.open(),
+    }).toEqual({
+      failure,
+      refused: expect.objectContaining({ failure: "unavailable", message }),
+      sent: [`POST ${SANDBOX}/pulls/7/reviews`],
+      sleeps: [],
+      limits: [60_000],
+      open: 0,
+    });
+  }
+});
+
+test("a write that can't have reached GitHub (its certificate refused, the connection refused, no address) is sent again", async () => {
+  const failures: Failure[] = [
+    { code: "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR" },
+    { code: "ConnectionRefused" },
+    { code: "ENOTFOUND", cause: true },
+  ];
+  for (const failure of failures) {
+    const { github, waits, sent } = flaky([failure], isPost, posted);
+    expect(await github.writer.publishReview(CHANGE_REF, A_REVIEW)).toBe("3528111001");
+    expect({ failure, sent: sent.length, sleeps: waits.sleeps }).toEqual({
+      failure,
+      sent: 2,
+      sleeps: [1000],
+    });
+  }
+});
+
+test("a GraphQL query is tried again like a read; a mutation after a reset is sent once", async () => {
+  const query = flaky(
+    [{ code: "ECONNRESET" }],
+    isPost,
+    outdatedNodes("PRRC_10"),
+    conditional(THREADS, () => ({ etag: 'W/"t1"', body: [reviewComment(10, PERSON_USER, finding("F1"))] })),
+  );
+  const [thread] = await query.github.intake.threads(CHANGE_REF);
+  expect(thread?.outdated).toBe(true);
+  expect(query.sent.filter((s) => s === "POST /graphql")).toHaveLength(2);
+  expect(query.waits.limits).toEqual([30_000, 30_000, 30_000]);
+
+  const mutation = flaky(
+    [{ code: "ECONNRESET" }],
+    isPost,
+    graphqlAnswering(() => ({ data: { minimizeComment: { minimizedComment: { isMinimized: true } } } })),
+  );
+  await expect(mutation.github.writer.minimize(SANDBOX_REPO, "PRRC_10", "resolved")).rejects.toMatchObject({
+    failure: "unavailable",
+  });
+  expect(mutation.sent).toEqual(["POST /graphql"]);
+  expect(mutation.waits.limits).toEqual([60_000]);
+});
+
+test("GitHub's limits and refusals of a read are never tried again", async () => {
+  const cases: { status: number; headers?: Record<string, string>; failure: HostFailure }[] = [
+    { status: 429, headers: { "retry-after": "60" }, failure: "rate_limited" },
+    {
+      status: 403,
+      headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "2000" },
+      failure: "rate_limited",
+    },
+    { status: 401, failure: "unauthorized" },
+    { status: 404, failure: "not_found" },
+    { status: 422, failure: "invalid" },
+    // A gateway failure that says when to ask again is a limit: the wait is GitHub's, not ours.
+    { status: 503, headers: { "retry-after": "60" }, failure: "unavailable" },
+    { status: 502, headers: { "x-ratelimit-remaining": "0" }, failure: "unavailable" },
+  ];
+  for (const { status, headers, failure } of cases) {
+    const refusing: Route = (call) =>
+      call.path === SANDBOX
+        ? { status, body: { message: "Refused" }, ...(headers ? { headers } : {}) }
+        : undefined;
+    const { github, waits, sent } = flaky([], undefined, refusing);
+    const refused = await github.identity(SANDBOX_REPO).catch((error: unknown) => error);
+    expect({ status, refused, sent: sent.length, sleeps: waits.sleeps }).toEqual({
+      status,
+      refused: expect.objectContaining({ failure }),
+      sent: 1,
+      sleeps: [],
+    });
+  }
+});
+
+test("a page read tried again keeps its ETag: GitHub's 304 on the next try is the answer kept", async () => {
+  let failNow = false;
+  const { github, sent, api } = flaky(
+    [{ code: "ECONNRESET" }],
+    () => failNow,
+    conditional(OPEN, () => ({ etag: 'W/"p1"', body: [PULL] })),
+  );
+  const first = await github.intake.listOpenChanges(SANDBOX_REPO);
+  failNow = true;
+  const again = await github.intake.listOpenChanges(SANDBOX_REPO);
+  expect(again).toEqual({ ...first, unchanged: true });
+  expect(sent).toEqual([`GET ${OPEN}`, `GET ${OPEN}`, `GET ${OPEN}`]);
+  expect(api.calls.map((c) => c.ifNoneMatch)).toEqual([null, 'W/"p1"']);
 });

@@ -2,7 +2,7 @@
 // the stream opens again, and how a line of the file is shown.
 import { expect, test } from "bun:test";
 import type { LogMessage } from "@lookover/contracts";
-import { followLogs, logLinesShown } from "./logs.ts";
+import { followLogs, logRunsShown } from "./logs.ts";
 
 /** A service whose tail answers when the test says, and whose stream the test speaks on. */
 function service() {
@@ -175,18 +175,84 @@ test("a tail that can't be read shows the lines heard, and nothing after the pag
   expect(shown).toEqual([["a"]]);
 });
 
-test("a line shows its time and its words; the day too when it isn't the newest line's day", () => {
+test("a line shows its time apart from its words, so they wrap under themselves; the day too when it isn't the newest line's day", () => {
   expect(
-    logLinesShown([
+    logRunsShown([
       "2026-10-10T23:59:58.120+02:00 Lookover is stopping (Ctrl+C)",
       "2026-10-11T00:00:03.000+02:00 Lookover service (program) · http://127.0.0.1:4000",
       "2026-10-11T09:30:00.000+02:00 sasensi/lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
       "not a line of the file's",
     ]),
   ).toEqual([
-    "10-10 23:59:58  Lookover is stopping (Ctrl+C)",
-    "00:00:03  Lookover service (program) · http://127.0.0.1:4000",
-    "09:30:00  sasensi/lookover-sandbox#1 review queued (asked in the app) for a1b2c3d",
-    "not a line of the file's",
+    {
+      pr: null,
+      day: true,
+      lines: [
+        { day: "10-10", time: "23:59:58", words: "Lookover is stopping (Ctrl+C)" },
+        { day: null, time: "00:00:03", words: "Lookover service (program) · http://127.0.0.1:4000" },
+      ],
+    },
+    {
+      pr: "sasensi/lookover-sandbox#1",
+      day: false,
+      // A line not of the file's shape stays in the run before it: a stack's lines under its error.
+      lines: [
+        { day: null, time: "09:30:00", words: "review queued (asked in the app) for a1b2c3d" },
+        { day: null, time: null, words: "not a line of the file's" },
+      ],
+    },
   ]);
+});
+
+test("a pull request is named once: its consecutive lines sit under a head naming it, a line about none stands alone", () => {
+  const runs = logRunsShown([
+    "2026-11-08T08:52:00.000+01:00 self-test of claude 2.4.1: passed, 0 ms",
+    "2026-11-08T08:52:00.000+01:00 self-test of codex 0.162.1: passed, 0 ms",
+    "2026-11-08T08:52:00.000+01:00 sasensi/lookover-sandbox#135 opened by sasensi: Format amounts",
+    "2026-11-08T08:52:00.000+01:00 sasensi/lookover-sandbox#135 review queued (on opening) for 135a1b2",
+    "2026-11-08T08:52:00.000+01:00 sasensi/lookover-sandbox#137 opened by mira: Link the testing guide",
+    "2026-11-08T08:52:00.000+01:00 sasensi/lookover-sandbox#135 round 1 posted: no open findings",
+    "2026-11-08T08:52:00.000+01:00 Codex is signed out",
+  ]);
+  expect(runs.map(({ pr, lines }) => ({ pr, words: lines.map((l) => l.words) }))).toEqual([
+    {
+      pr: null,
+      words: ["self-test of claude 2.4.1: passed, 0 ms", "self-test of codex 0.162.1: passed, 0 ms"],
+    },
+    {
+      pr: "sasensi/lookover-sandbox#135",
+      words: ["opened by sasensi: Format amounts", "review queued (on opening) for 135a1b2"],
+    },
+    { pr: "sasensi/lookover-sandbox#137", words: ["opened by mira: Link the testing guide"] },
+    // Another pull request's line came between: named again, under a head of its own.
+    { pr: "sasensi/lookover-sandbox#135", words: ["round 1 posted: no open findings"] },
+    { pr: null, words: ["Codex is signed out"] },
+  ]);
+});
+
+test("a run's time column says the day for all its lines when one does, so a run across midnight keeps its words on one x", () => {
+  const runs = logRunsShown([
+    "2026-11-07T23:59:58.000+01:00 sasensi/lookover-sandbox#135 round 1 started",
+    "2026-11-08T00:00:03.000+01:00 sasensi/lookover-sandbox#135 round 1 posted: no open findings",
+    "2026-11-08T00:00:04.000+01:00 Codex is signed out",
+  ]);
+  expect(runs.map(({ pr, day, lines }) => ({ pr, day, days: lines.map((l) => l.day) }))).toEqual([
+    // Its first line says yesterday, its second doesn't: the head and both lines take the day's wider column.
+    { pr: "sasensi/lookover-sandbox#135", day: true, days: ["11-07", null] },
+    { pr: null, day: false, days: [null] },
+  ]);
+});
+
+test("lines before any of the file's shape stand alone, under no head", () => {
+  expect(logRunsShown(["Error: boom", "    at main.ts:1"])).toEqual([
+    {
+      pr: null,
+      day: false,
+      lines: [
+        { day: null, time: null, words: "Error: boom" },
+        { day: null, time: null, words: "    at main.ts:1" },
+      ],
+    },
+  ]);
+  expect(logRunsShown([])).toEqual([]);
 });

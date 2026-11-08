@@ -22,6 +22,8 @@ const engine = enumOf<EngineId>()(["claude", "codex"]);
 const change = z.string().min(1).transform(changeId);
 const finding = z.string().min(1).transform(findingId);
 const repo = z.string().min(1).transform(repositoryId);
+/** A command on many repositories (ADR 0082) names one at least: an empty list is refused here. */
+const repos = z.tuple([repo], repo);
 const settingKey = enumOf<SettingKey>()(["strictness", "reviewers", "depth", "onOpen", "onPush"]);
 /**
  * What each key accepts is settings' check, the one a file's values are read with: a value no key accepts isn't a
@@ -73,11 +75,12 @@ const command = z.discriminatedUnion("type", [
   z.object({ type: z.literal("agent.check") }),
   z.object({ type: z.literal("settings.set"), key: settingKey, value: settingValue }).refine(fits, FITS),
   z.object({ type: z.literal("repo.setEnabled"), repoId: repo, enabled: z.boolean() }),
+  z.object({ type: z.literal("repos.setEnabled"), repoIds: repos, enabled: z.boolean() }),
   z
     .object({ type: z.literal("repo.setSetting"), repoId: repo, key: settingKey, value: settingValue })
     .refine(fits, FITS),
   z.object({ type: z.literal("repo.resetSetting"), repoId: repo, key: settingKey }),
-  z.object({ type: z.literal("repo.dismiss"), repoId: repo }),
+  z.object({ type: z.literal("repos.dismiss"), repoIds: repos }),
   z.object({ type: z.literal("rule.setEnabled"), ruleId: z.string(), enabled: z.boolean() }),
 ]) satisfies z.ZodType<Command>;
 
@@ -123,6 +126,9 @@ const demoInject = z.object({
     "other-opens-change",
     "you-push",
     "close-change",
+    "fetch-silent",
+    "fetch-too-long",
+    "codex-no-review",
     "codex-updated",
     "settings-unwritable",
     "login-refused",

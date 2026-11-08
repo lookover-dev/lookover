@@ -62,26 +62,22 @@ test("Settings' help says why, then whether Lookover starts at login for real, t
   expect(startAtLoginHelp(on, "program")).toBe(
     "So reviews happen while the app is closed. Lookover starts each time you log in to this computer.",
   );
-  expect(startAtLoginHelp(off, "program")).toEqual({
-    before: "So reviews happen while the app is closed. Off: run",
-    command: "lookover start",
-    after: "after you log in.",
+  const offHelp = (command: string) => ({
+    before: "So reviews happen while the app is closed. Off: after you log in, run",
+    command,
+    after: ".",
+    alone: "So reviews happen while the app is closed. Off: after you log in, start Lookover with:",
   });
-  expect(startAtLoginHelp({ ...off, command: BINARY }, "program")).toEqual({
-    before: "So reviews happen while the app is closed. Off: run",
-    command: String.raw`& 'C:\Users\Your Name\Downloads\lookover.exe' start`,
-    after: "after you log in.",
-  });
-  expect(startAtLoginHelp({ ...off, command: CLONE }, "program")).toEqual({
-    before: "So reviews happen while the app is closed. Off: run",
-    command: "bun run lookover --home=/home/me/.lookover-test start",
-    after: "after you log in.",
-  });
-  expect(startAtLoginHelp({ ...off, command: BINARY }, "demo")).toEqual({
-    before: "So reviews happen while the app is closed. Off: run",
-    command: String.raw`& 'C:\Users\Your Name\Downloads\lookover.exe' start`,
-    after: "after you log in.",
-  });
+  expect(startAtLoginHelp(off, "program")).toEqual(offHelp("lookover start"));
+  expect(startAtLoginHelp({ ...off, command: BINARY }, "program")).toEqual(
+    offHelp(String.raw`& 'C:\Users\Your Name\Downloads\lookover.exe' start`),
+  );
+  expect(startAtLoginHelp({ ...off, command: CLONE }, "program")).toEqual(
+    offHelp("bun run lookover --home=/home/me/.lookover-test start"),
+  );
+  expect(startAtLoginHelp({ ...off, command: BINARY }, "demo")).toEqual(
+    offHelp(String.raw`& 'C:\Users\Your Name\Downloads\lookover.exe' start`),
+  );
   expect(startAtLoginHelp(notRegistered, "program")).toBe(
     "So reviews happen while the app is closed. On, but this computer refused to start Lookover at login: turn it off and on to try again.",
   );
@@ -104,22 +100,23 @@ test("the setup's last step says the terminal can close, and what the choice doe
   expect(backgroundLine(on, "program")).toBe(
     "It starts each time you log in to this computer. Change it any time in Settings, under “Start at login”.",
   );
-  expect(backgroundLine(off, "program")).toEqual({
+  const offLine = (command: string) => ({
     before: "It won't start at login: run",
-    command: "lookover start",
+    command,
     after: "after you log in. Change it any time in Settings, under “Start at login”.",
+    alone:
+      "It won't start at login. Change it any time in Settings, under “Start at login”. After you log in, run:",
   });
+  expect(backgroundLine(off, "program")).toEqual(offLine("lookover start"));
   expect(backgroundLine({ ...off, command: BINARY }, "program")).toMatchObject({
     command: String.raw`& 'C:\Users\Your Name\Downloads\lookover.exe' start`,
   });
   expect(backgroundLine({ ...off, command: CLONE }, "program")).toMatchObject({
     command: "bun run lookover --home=/home/me/.lookover-test start",
   });
-  expect(backgroundLine({ ...off, command: BINARY }, "demo")).toEqual({
-    before: "It won't start at login: run",
-    command: String.raw`& 'C:\Users\Your Name\Downloads\lookover.exe' start`,
-    after: "after you log in. Change it any time in Settings, under “Start at login”.",
-  });
+  expect(backgroundLine({ ...off, command: BINARY }, "demo")).toEqual(
+    offLine(String.raw`& 'C:\Users\Your Name\Downloads\lookover.exe' start`),
+  );
   for (const chosen of [true, false])
     expect(backgroundLine(dev(chosen), "live")).toBe(
       "Start at login isn't set up in development: nothing starts when you log in.",
@@ -141,15 +138,19 @@ test("another Lookover holding start at login: Settings' help names its command,
       "So reviews happen while the app is closed. On, but another Lookover starts at login on this computer:",
     command: OTHER,
     after: ".",
+    alone:
+      "So reviews happen while the app is closed. On, but another Lookover starts at login on this computer:",
   });
   expect(startAtLoginHelp(taken(false), "program")).toEqual({
-    before: "So reviews happen while the app is closed. Off: run",
+    before: "So reviews happen while the app is closed. Off: after you log in, run",
     command: "lookover start",
     after: {
-      before: "after you log in. Another Lookover starts at login on this computer:",
+      before: ". Another Lookover starts at login on this computer:",
       command: OTHER,
       after: ".",
+      alone: ". Another Lookover starts at login on this computer:",
     },
+    alone: "So reviews happen while the app is closed. Off: after you log in, start Lookover with:",
   });
 });
 
@@ -172,6 +173,8 @@ test("the setup's last step says when another Lookover starts at login and this 
     before: "Another Lookover starts at login on this computer:",
     command: OTHER,
     after: ". This one won't: choose “Start this one instead” in Settings, under “Start at login”.",
+    alone:
+      "This one won't start at login: choose “Start this one instead” in Settings, under “Start at login”. Another Lookover starts at login on this computer:",
   });
   // Chosen off, this one won't anyway: the line says what to run, as with nothing registered.
   expect(backgroundLine(taken(false), "program")).toEqual(backgroundLine(off, "program"));
@@ -198,6 +201,7 @@ test("the status menu names the command another Lookover starts at login with, o
       before: "At login, this computer runs",
       command: OTHER,
       after: ".",
+      alone: "At login, this computer runs:",
     });
   for (const s of [on, off, notRegistered, stillRegistered, dev(true)]) expect(atLoginDetail(s)).toBeNull();
 });

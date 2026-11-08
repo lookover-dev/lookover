@@ -16,13 +16,18 @@ import {
 const sha = commitSha("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678");
 
 describe("review requests", () => {
-  test("the request `lookover wait` posts is the command, then a hidden marker naming the commit", () => {
-    expect(reviewRequest(sha)).toBe(`/lookover review\n${REQUEST_MARKER}{"v":1,"commit":"${sha}"} -->`);
+  test("the request `lookover wait` posts is the command, a line saying the agent asked, then a hidden marker naming the commit", () => {
+    expect(reviewRequest(sha)).toBe(
+      "/lookover review\n" +
+        "Asked by the coding agent, for `a1b2c3d`. Lookover hides this comment once its review is posted.\n" +
+        `${REQUEST_MARKER}{"v":1,"commit":"${sha}"} -->`,
+    );
+    expect(readRequest(reviewRequest(sha))).toEqual({ full: false, commit: sha, reply: null });
   });
 
   test("the marker may name the reply the request asks to have answered", () => {
-    expect(reviewRequest(sha, { reply: 4242 })).toBe(
-      `/lookover review\n${REQUEST_MARKER}{"v":1,"commit":"${sha}","reply":4242} -->`,
+    expect(reviewRequest(sha, { reply: 4242 }).split("\n")[2]).toBe(
+      `${REQUEST_MARKER}{"v":1,"commit":"${sha}","reply":4242} -->`,
     );
     expect(readRequest(reviewRequest(sha, { reply: 4242 }))).toEqual({
       full: false,
@@ -86,6 +91,7 @@ describe("review requests", () => {
     expect(isReviewRequest(`/lookover review\n${FINDING_MARKER}{"v":1} -->`)).toBe(false);
     expect(isReviewRequest(`/lookover review\n${reviewRequest(sha)}\n${RESULT_MARKER}{} -->`)).toBe(false);
     expect(isReviewRequest(reviewRequest(sha, { reply: 1 }))).toBe(true);
+    expect(isReviewRequest(`${reviewRequest(sha)}\n${STATUS_MARKER}`)).toBe(false);
   });
 
   test("the commit a request names is read from its marker; a plain request names none", () => {
@@ -95,7 +101,7 @@ describe("review requests", () => {
   });
 
   test("a marker in a comment that is no request names nothing", () => {
-    expect(requestedCommit(`Not now.\n${reviewRequest(sha).split("\n")[1]}`)).toBeNull();
-    expect(readRequest(`Not now.\n${reviewRequest(sha, { reply: 3 }).split("\n")[1]}`)).toBeNull();
+    expect(requestedCommit(`Not now.\n${reviewRequest(sha).split("\n").slice(1).join("\n")}`)).toBeNull();
+    expect(readRequest(`Not now.\n${reviewRequest(sha, { reply: 3 }).split("\n")[2]}`)).toBeNull();
   });
 });

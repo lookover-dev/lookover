@@ -394,9 +394,11 @@ const COMMANDS: { [K in Parsed["type"]]?: Row<K> } = {
     return settingsAnswer(answer);
   },
   "repo.setEnabled": async ({ room }, { repoId, enabled }) =>
-    room.setup.setEnabled(repoId, enabled) === "ok" ? OK : [{ error: "no such repository" }, 404],
-  "repo.dismiss": async ({ room }, { repoId }) =>
-    room.dismissDeparted(repoId) === "ok" ? OK : [{ error: "no such departed repository" }, 404],
+    room.setup.setEnabled([repoId], enabled) === "ok" ? OK : [{ error: "no such repository" }, 404],
+  "repos.setEnabled": async ({ room }, { repoIds, enabled }) =>
+    room.setup.setEnabled(repoIds, enabled) === "ok" ? OK : [{ error: "no such repository" }, 404],
+  "repos.dismiss": async ({ room }, { repoIds }) =>
+    room.dismissDeparted(repoIds) === "ok" ? OK : [{ error: "no such departed repository" }, 404],
   "demo.inject": async ({ demo, restarted, others }, { fault }) => {
     if (demo === null) return [{ error: "nothing scripted in live mode" }, 501];
     const before = demo.room;

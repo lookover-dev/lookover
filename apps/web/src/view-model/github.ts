@@ -12,6 +12,9 @@ import {
   escalationText,
   type Finding,
   failedHead,
+  failedLine,
+  failedTitle,
+  failureWords,
   findingPermalink,
   isCounted,
   isUnsettled,
@@ -27,19 +30,18 @@ import {
   type State,
   shortSha,
   skipText,
-  stoppedText,
   type TimelineEntry,
-  TRY_AGAIN,
   thingsText,
+  upperFirst,
   waitingHead,
   waitingText,
 } from "@lookover/contracts";
 import { severityLabel } from "./confirm.ts";
 import { placeText, roundOnHead } from "./findings.ts";
-import { itOrThem, onDayAt, plural } from "./format.ts";
+import { itOrThem, onDayAt, plural, type Words } from "./format.ts";
 import { stepNow } from "./run.ts";
 import { type ChangeReview, inAgentLoop, keptFindings, openCounts, status, waitText } from "./select.ts";
-import { cancelSentence, failureSentence } from "./status.ts";
+import { cancelSentence } from "./status.ts";
 
 export type Check = { tone: "pending" | "fail" | "ok" | "neutral"; title: string; text: string } | null;
 
@@ -100,7 +102,7 @@ export function checkOf(it: ChangeReview): Check {
     case "skipped":
       return { tone: "neutral", title: "Skipped", text: `Not reviewed: ${skipText(s.reason)}` };
     case "failed":
-      return { tone: "neutral", title: "Failed", text: failureSentence(s.failure).slice(0, -1) };
+      return { tone: "neutral", title: "Failed", text: upperFirst(failureWords(s.failure).phrase) };
     case "to-fix":
     case "needs-you":
     case "settled":
@@ -114,9 +116,6 @@ export function checkOf(it: ChangeReview): Check {
 
 // The status block in the pull request's description (ADR 0074), as `statusBlock` in packages/publish/src/status.ts
 // posts it, in the words both take from contracts' `copy.ts`.
-
-/** A piece of the block's words: text, or a commit, which GitHub shows as a link to it inside the pull request. */
-export type Words = (string | { commit: CommitSha })[];
 
 /** One open finding in the block. */
 export interface BlockItem {
@@ -227,10 +226,9 @@ export function statusBlock(it: ChangeReview, around: Around): StatusBlock | nul
       };
     case "failed": {
       if (review.preview) return null;
-      const failure = job.failure;
       return {
         head: failedHead({ commit: job.sha }),
-        line: ofRound(`${stoppedText(failure?.kind ?? "unexpected", failure?.engine ?? null)} ${TRY_AGAIN}`),
+        line: ofRound(failedLine(job.failure)),
         items: posted()?.items ?? [],
       };
     }
@@ -320,6 +318,7 @@ export interface Reply {
 /**
  * Which reply Lookover last posted on a finding's thread, from what the round decided about the author's claim: kept
  * once, kept again once escalated (kept three times), escalated, withdrawn, dismissed by the owner; null for none.
+ * Never `still_present` (ADR 0081): the finding keeps nothing of that reply, which lives on GitHub's thread alone.
  */
 function replyOn(finding: Finding): ReplyKind | null {
   if (finding.status === "dismissed") return "dismissed";
@@ -390,7 +389,7 @@ export function agentLine(it: ChangeReview): string {
     case "settled":
       return review.preview ? PREVIEW_LINE : `Round ${n} done: nothing left to fix.`;
     case "failed":
-      return failureSentence(s.failure);
+      return `${failedTitle(s.failure)}.`;
     case "cancelled":
       return ["The review was cancelled.", cancelSentence(s.reason)].filter(Boolean).join(" ");
     case "skipped":

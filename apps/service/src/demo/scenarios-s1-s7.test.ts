@@ -13,6 +13,7 @@ import {
   brief,
   inject,
   load,
+  onGitHub,
   send,
   snapshotOf,
   startScenario,
@@ -50,6 +51,10 @@ async function after(ms: number): Promise<State> {
 /** The rounds of a review that finished and posted, by number, as its history says. */
 const posted = (state: State, n: number) =>
   (state.reviews[id(n)]?.timeline ?? []).flatMap((t) => (t.kind === "posted" ? [t.round] : []));
+
+/** How many reviews #148's page on GitHub shows filed: each round's review with a line comment, and each reply. */
+const filed148 = async () =>
+  (await onGitHub(door, "/sasensi/ledger-api/pull/148")).split("<li>Reviewed by ").length - 1;
 
 /** A review's findings: id, severity, status, whether posted. */
 const findingsOf = (state: State, n: number) =>
@@ -158,7 +163,8 @@ test("S1, first run: Codex signed in, signed in with GitHub, three repositories 
   expect((await snapshotOf(door)).setup).toMatchObject({ done: true, step: "agent" });
 });
 
-test("S1, the agent opens #152 while setup shows Repositories: listed at once, with no reload (ADR 0068)", async () => {
+/** S1 on its Repositories step: Codex and GitHub signed in, the two pull requests opened before listed. */
+async function onRepositories(): Promise<void> {
   await loaded("S1");
   expect(await sent({ type: "engine.signIn", id: "codex" })).toBe(200);
   await after(5_000);
@@ -167,19 +173,49 @@ test("S1, the agent opens #152 while setup shows Repositories: listed at once, w
   expect(await sent({ type: "setup.goto", step: "repos" })).toBe(200);
   const onRepos = await after(0);
   expect(Object.keys(onRepos.changes)).toEqual([id(148), id(131)]);
+}
 
+/** Continue on Repositories, ledger-api kept on: the repositories are chosen (ADR 0079). */
+const chooseLedgerApi = () =>
+  sent({ type: "setup.chooseRepos", enabled: [repositoryId("sasensi/ledger-api")] });
+
+/** The drawer's "Your agent opens a pull request": #152, listed at once, with no reload (ADR 0068). */
+async function agentOpens152(): Promise<void> {
   expect(await inject(door, "agent-opens-change")).toBe(200);
   const opened = await snapshotOf(door);
   expect(Object.keys(opened.changes)).toEqual([id(148), id(131), id(152)]);
   expect(opened.changes[id(152)]).toMatchObject({ author: "you", writtenBy: "claude", openedAt: opened.now });
-
   // S1's agent has nothing more to open: the fault says so.
   expect(await inject(door, "agent-opens-change")).toBe(409);
+}
 
-  // #152 is reviewed by itself; picked on First review after its round was posted, it gets no second round (#425).
+test("S1, the agent opens #152 while setup shows Repositories: listed at once, asked nothing until the choice, then reviewed from First review (ADR 0068, ADR 0079)", async () => {
+  await onRepositories();
+  await agentOpens152();
+
+  // Before the repositories are chosen, nothing asks by itself: no job, no round.
+  const waited = await after(5 * MIN);
+  expect([waited.reviews[id(152)]?.job ?? null, posted(waited, 152)]).toEqual([null, []]);
+
+  // Continue on Repositories, then #152 picked on First review: its one round, the first review's.
+  expect(await chooseLedgerApi()).toBe(200);
+  expect(await sent({ type: "setup.firstReview", changeId: id(152), preview: false })).toBe(200);
+  const picked = await after(5 * MIN);
+  expect(posted(picked, 152)).toEqual([1]);
+  expect(picked.reviews[id(152)]).toMatchObject({
+    run: null,
+    job: { trigger: "first-review", state: "done" },
+  });
+  expect(picked.setup.firstReviewChange).toBe(id(152));
+});
+
+test("S1, the agent opens #152 once the repositories are chosen: reviewed by itself; picked on First review after its round was posted, no second round (#425)", async () => {
+  await onRepositories();
+  expect(await chooseLedgerApi()).toBe(200);
+  await agentOpens152();
+
   const reviewed = await after(5 * MIN);
   expect(posted(reviewed, 152)).toEqual([1]);
-  expect(await sent({ type: "setup.goto", step: "first-review" })).toBe(200);
   expect(await sent({ type: "setup.firstReview", changeId: id(152), preview: false })).toBe(200);
   const picked = await after(5 * MIN);
   expect(posted(picked, 152)).toEqual([1]);
@@ -214,10 +250,13 @@ test("S2, the happy loop: #148 by the agent, round 1 posted, the fix and its req
     anchoring: "reported",
   });
   expect(one.reviews[id(148)]?.loop).toBe("open");
+  expect(await filed148()).toBe(1);
 
   // The agent pushes its fix and comments `/lookover review`; round 2 verifies two fixed and raises a Consider,
-  // not posted from round 2: it stays in the app.
+  // not posted from round 2: it stays in the app. F3, still present after the push, gets the finder's reason on its
+  // thread (ADR 0081): a reply, which GitHub files as a review of its own.
   const two = await after(4 * MIN);
+  expect(await filed148()).toBe(2);
   expect(posted(two, 148)).toEqual([1, 2]);
   expect(two.reviews[id(148)]?.job).toMatchObject({ trigger: "comment", state: "done" });
   expect(findingsOf(two, 148)).toEqual([
@@ -238,6 +277,8 @@ test("S2, the happy loop: #148 by the agent, round 1 posted, the fix and its req
     ["F4", "consider", "open", false],
   ]);
   expect(three.reviews[id(148)]?.loop).toBe("settled");
+  // Nothing still present on a thread: no reply, no review.
+  expect(await filed148()).toBe(2);
   expect(three.reviews[id(148)]?.rounds.map((r) => [r.n, r.reviewer, r.confirmer])).toEqual([
     [1, "codex", "claude"],
     [2, "codex", null],
@@ -357,7 +398,7 @@ test("S6, new commits after a review: round 1 posted, the owner pushes two commi
   // The owner pushes two commits at once: shown, not reviewed.
   const pushed = await after(MIN);
   expect(pushed.changes[id(153)]).toMatchObject({ newCommits: 2 });
-  expect(pushed.reviews[id(153)]?.timeline.at(-1)).toMatchObject({ kind: "pushed", by: "you", commits: 2 });
+  expect(pushed.reviews[id(153)]?.timeline.at(-1)).toMatchObject({ kind: "pushed", by: null, commits: 2 });
   expect(pushed.reviews[id(153)]?.job).toMatchObject({ state: "done" });
   expect(pushed.reviews[id(153)]?.run).toBeNull();
 

@@ -1,47 +1,52 @@
 // Settings: your defaults, a short list, then more pages one click away.
 // A repository's page shows the same settings; the few that differ from your defaults say so.
 // Every change goes through the page's save stamp: "Saved" once the service took it (ADR 0049).
-import type {
-  Command,
-  Connection,
-  DepartedRepository,
-  Repository,
-  Rule,
-  SettingKey,
-  SettingValue,
-} from "@lookover/contracts";
+import type { Command, Repository, Rule, SettingKey, SettingValue } from "@lookover/contracts";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { MORE_SETTINGS } from "../shell.tsx";
-import { useApp, useAppState, useSend, useTheme } from "../store.tsx";
+import {
+  useApp,
+  useAppState,
+  useCollapsedGroups,
+  useHeld,
+  useLeftSummary,
+  useRepositoriesBar,
+  useSend,
+  useTheme,
+} from "../store.tsx";
 import {
   Button,
   Card,
   Check,
-  Code,
   Empty,
   Group,
   Icon,
   IconButton,
   LinkButton,
-  Notice,
+  LogFile,
   Row,
   Said,
   SaveState,
+  Search,
   Segmented,
   SetRow,
   Switch,
 } from "../ui/basics.tsx";
-import { Select, Tip } from "../ui/layers.tsx";
-import { type RepositoryGroupHead, repositoryGroups } from "../view-model/accounts.ts";
+import { Select } from "../ui/layers.tsx";
+import { openChangeCount, pullRequestsCell, repositoryStanding } from "../view-model/accounts.ts";
 import { AGENT_INTRO } from "../view-model/coding-agent.ts";
-import { agoSentence, plural } from "../view-model/format.ts";
-import { followLogs, logLinesShown } from "../view-model/logs.ts";
-import { addRepositoryLink, departedNotice, repositoriesFoot } from "../view-model/onboarding.ts";
-import { differences, lastReviewAt, openChangeCount, repositoryLabel } from "../view-model/select.ts";
+import { departedShown } from "../view-model/departed.ts";
+import { plural, repositoryLabel, SEPARATOR } from "../view-model/format.ts";
+import { followLogs, logRunsShown } from "../view-model/logs.ts";
+import { addRepositoryLink, repositoriesFoot } from "../view-model/onboarding.ts";
+import { REPOSITORIES_BAR, RepositoriesChoice, repositoriesList } from "../view-model/repositories.ts";
+import { differences, lastReviewAt } from "../view-model/select.ts";
 import {
+  HELD_WHY,
   pickOf,
-  ruleSourceText,
+  RULES_INTRO,
+  ruleSource,
   ruleSwitch,
   SETTING_KEYS,
   SETTING_TEXT,
@@ -51,9 +56,11 @@ import {
 } from "../view-model/settings.ts";
 import { GITHUB_SETTINGS_TEXT, type GitHubSettingsView, githubSettings } from "../view-model/sign-in.ts";
 import { offersStartThisOne, START_THIS_ONE, startAtLoginHelp } from "../view-model/start-at-login.ts";
-import { AgentRows } from "./coding-agent.tsx";
+import { CodingAgent } from "./coding-agent.tsx";
 import { HeldDetail, Page, Sentence, useSaving } from "./common.tsx";
-import { AccountAction, AccountsList, CodeActions } from "./github-app.tsx";
+import { DepartedNotices } from "./departed.tsx";
+import { AccountsList, CodeActions } from "./github-app.tsx";
+import { RepositoryGroupRows } from "./repository-group.tsx";
 
 /** The control for one setting, used for your defaults and for a repository's own value. */
 function SettingControl({
@@ -83,6 +90,23 @@ function SettingControl({
 /** The settings of your defaults picked from a list, in the order the page shows them. */
 const DEFAULT_PICKS = ["strictness", "depth", "reviewers"] as const satisfies readonly SettingKey[];
 
+/** What `openPlace` scrolls: an element of the page, and the section it lands on when it is one's own place. */
+export interface Place {
+  closest(selector: string): { scrollIntoView(options?: ScrollIntoViewOptions): void } | null;
+  scrollIntoView(options?: ScrollIntoViewOptions): void;
+}
+
+/**
+ * Settings opened at a place: a section's own (#github, #agent, in a `Group` marked `landing`) opens its group, the
+ * label under the top bar and nothing of the card above it showing (`.page > .grp`'s scroll margin); a setting's row
+ * is brought to the middle, where it is lit.
+ */
+export function openPlace(target: Place | null) {
+  const group = target?.closest("[data-landing]");
+  if (group) group.scrollIntoView({ block: "start" });
+  else target?.scrollIntoView({ block: "center" });
+}
+
 export function Settings() {
   const state = useAppState();
   const { mode } = useApp();
@@ -92,8 +116,20 @@ export function Settings() {
   const { hash } = useLocation();
   const s = state.settings;
 
+  // Once the page has come in: measured while `page-in` still lifts it, the place would land 6 px off.
   useEffect(() => {
-    if (hash) document.getElementById(hash.slice(1))?.scrollIntoView({ block: "center" });
+    if (!hash) return;
+    let gone = false;
+    const coming = document
+      .getAnimations()
+      .filter((a) => a instanceof CSSAnimation && a.animationName === "page-in")
+      .map((a) => a.finished);
+    void Promise.allSettled(coming).then(() => {
+      if (!gone) openPlace(document.getElementById(hash.slice(1)));
+    });
+    return () => {
+      gone = true;
+    };
   }, [hash]);
 
   // Changes apply at once and say so quietly (the save stamp), not with a toast each time. A value that is
@@ -174,17 +210,17 @@ export function Settings() {
           </SetRow>
         </div>
       </Card>
-      <Group title="GitHub">
+      <Group title="GitHub" landing>
         <GitHubGroup view={github} anchor={row("github")} />
       </Group>
-      <Group title="Your coding agent">
+      <Group title="Your coding agent" landing>
         <div {...row("agent")}>
-          <p className="t-small">{AGENT_INTRO}</p>
-          <AgentRows place="settings" />
+          <p className="t-small t-help section-intro">{AGENT_INTRO}</p>
+          <CodingAgent place="settings" />
         </div>
       </Group>
       <Group title="More settings">
-        <div className="list">
+        <div className="list more-settings">
           {MORE_SETTINGS.map((m) => (
             <Row
               key={m.id}
@@ -221,7 +257,7 @@ function GitHubGroup({
       <div {...anchor} className="signed-in-row">
         <div>
           <b>{T.title}</b>
-          <div className="t-small code-whole">
+          <div className="t-small t-help">
             <HeldDetail shown={view.signIn.text} details={view.signIn.held} />
           </div>
         </div>
@@ -246,10 +282,13 @@ function GitHubGroup({
   );
 }
 
-/** A rule's switch: its own, or held off with the rule it sits in, the tooltip saying so (ADR 0049). */
-function RuleSwitch({ rule, save }: { rule: Rule; save: (command: Command) => void }) {
+/**
+ * A rule's switch: its own, or held off with the rule it sits in (ADR 0049), the same off switch, disabled. Why is
+ * said by `RuleTitle`, in words on the row, never in a tooltip over the row's values.
+ */
+export function RuleSwitch({ rule, save }: { rule: RuleView; save: (command: Command) => void }) {
   const { checked, why } = ruleSwitch(rule);
-  const control = (
+  return (
     <Switch
       checked={checked}
       label={why === null ? rule.text : `${rule.text} ${why}`}
@@ -257,51 +296,118 @@ function RuleSwitch({ rule, save }: { rule: Rule; save: (command: Command) => vo
       onChange={(enabled) => save({ type: "rule.setEnabled", ruleId: rule.id, enabled })}
     />
   );
-  return why === null ? (
-    control
-  ) : (
-    <Tip text={why} end>
-      {control}
-    </Tip>
+}
+
+/** What a rule's row needs of it. */
+type RuleView = Pick<Rule, "id" | "text" | "enabled" | "parentOff" | "nestedIn">;
+
+/** A page's save stamp, as `useSaving` gives it. */
+type SaveStamp = ReturnType<typeof useSaving>["stamp"];
+
+/**
+ * A rule's words, and under them, when its switch is held, why. A rule nested in another keeps that line's room while
+ * it is not held (`.room`, unseen and unread), so its row never changes height as the rule it sits in toggles.
+ */
+export function RuleTitle({ rule }: { rule: RuleView }) {
+  const { why } = ruleSwitch(rule);
+  return (
+    <>
+      <b>{rule.text}</b>
+      {why !== null ? (
+        <span className="rule-held">{why}</span>
+      ) : rule.nestedIn ? (
+        <span className="rule-held room" aria-hidden="true">
+          {HELD_WHY}
+        </span>
+      ) : null}
+    </>
   );
 }
 
-function SectionBody({ id, save }: { id: string; save: (command: Command) => void }) {
+/**
+ * The line over the rules' table, under the title: the page's one description (round 6: the title's own line and
+ * this one said it twice), and at its end, over the switches, the page's save stamp, by what it confirms rather than
+ * alone by the title.
+ */
+export function RulesIntro({ stamp }: { stamp: SaveStamp }) {
+  return (
+    <div className="rules-intro">
+      <p className="t-small t-help">{RULES_INTRO}</p>
+      <SaveState {...stamp} />
+    </div>
+  );
+}
+
+/**
+ * The rules table's heads: no name a word of another's, so the findings verified fixed (Verified fixed, never "Fixed"
+ * alone, GLOSSARY.md) and whether the rule is checked (In use, its switch) can't be read for each other.
+ */
+export function RulesHead() {
+  return (
+    <thead>
+      <tr>
+        <th>Rule</th>
+        <th>From</th>
+        <th>Raised</th>
+        <th>Verified fixed</th>
+        <th>In use</th>
+      </tr>
+    </thead>
+  );
+}
+
+/**
+ * One rule's row: its words, where it is from, its counts and its switch. A rule nested in another is set in under
+ * it (`.nested`), so its switch, held off with that rule, reads as that rule's.
+ */
+export function RuleRow({
+  rule,
+  source,
+  save,
+}: {
+  rule: RuleView & Pick<Rule, "raised" | "acted">;
+  source: ReturnType<typeof ruleSource>;
+  save: (command: Command) => void;
+}) {
+  return (
+    <tr>
+      <td className={rule.nestedIn ? "rule nested" : "rule"}>
+        <RuleTitle rule={rule} />
+      </td>
+      <td className="from">
+        {source.repo === null ? null : <span className="t-small">{source.repo}</span>}
+        <span className="t-small">{source.where}</span>
+      </td>
+      <td className="num">{rule.raised}×</td>
+      <td className="num">{rule.acted}×</td>
+      <td>
+        <RuleSwitch rule={rule} save={save} />
+      </td>
+    </tr>
+  );
+}
+
+function SectionBody({
+  id,
+  save,
+  stamp,
+}: {
+  id: string;
+  save: (command: Command) => void;
+  stamp: SaveStamp;
+}) {
   const state = useAppState();
   switch (id) {
     case "rules":
       return (
         <>
-          <p className="t-small">
-            What the reviewer is asked to check, read from each repository's default branch. “Acted on” counts
-            findings that were verified fixed.
-          </p>
+          <RulesIntro stamp={stamp} />
           <div className="tbl-wrap">
             <table className="tbl rules">
-              <thead>
-                <tr>
-                  <th>Rule</th>
-                  <th>From</th>
-                  <th>Raised</th>
-                  <th>Acted on</th>
-                  <th>On</th>
-                </tr>
-              </thead>
+              <RulesHead />
               <tbody>
                 {state.rules.map((r) => (
-                  <tr key={r.id}>
-                    <td>
-                      <b>{r.text}</b>
-                    </td>
-                    <td>
-                      <span className="t-small">{ruleSourceText(state.repos, r)}</span>
-                    </td>
-                    <td className="num">{r.raised}×</td>
-                    <td className="num">{r.acted}×</td>
-                    <td>
-                      <RuleSwitch rule={r} save={save} />
-                    </td>
-                  </tr>
+                  <RuleRow key={r.id} rule={r} source={ruleSource(state.repos, r)} save={save} />
                 ))}
               </tbody>
             </table>
@@ -322,12 +428,8 @@ export function SettingsSection() {
       <div className="crumb">
         <Link to="/settings">Settings</Link> / <b>{entry?.title ?? section}</b>
       </div>
-      <Sentence
-        title={`${entry?.title ?? "Settings"}.`}
-        small={entry?.line}
-        action={entry ? <SaveState {...stamp} /> : undefined}
-      />
-      <SectionBody id={section ?? ""} save={save} />
+      <Sentence title={`${entry?.title ?? "Settings"}.`} />
+      <SectionBody id={section ?? ""} save={save} stamp={stamp} />
     </Page>
   );
 }
@@ -353,15 +455,32 @@ export function Logs() {
         title="Logs."
         small="The log file's last lines, and each new one as it is written. Secrets removed."
       />
-      <Code lines={logLinesShown(lines)} />
+      <LogFile runs={logRunsShown(lines)} />
     </Page>
   );
 }
 
 export function Repositories() {
+  // The bar's choice, its filter and search, lives as long as this visit of the page; whether it shows, the app's.
+  const [choice] = useState(() => new RepositoriesChoice());
+  return <RepositoriesOn choice={choice} />;
+}
+
+/**
+ * Repositories on its bar's `choice` (design-system.md "Repositories' search and filter"): the notices, the search
+ * and the filter once more than ten repositories are watched, then the groups they leave, or the empty line in the
+ * table's place, so nothing above the table moves.
+ */
+export function RepositoriesOn({ choice }: { choice: RepositoriesChoice }) {
   const state = useAppState();
   const send = useSend();
-  const navigate = useNavigate();
+  const { collapsed, toggle, remember } = useCollapsedGroups();
+  const chosen = useHeld(choice);
+  const barShown = useRepositoriesBar();
+  const leftSummary = useLeftSummary();
+  const list = repositoriesList(state, chosen, collapsed);
+  // Each group's first fold, held the first time it shows: one growing past ten while watched never folds by itself.
+  useEffect(() => remember(list.firstFolds), [remember, list.firstFolds]);
   // GitHub decides what the App sees: more repositories are granted in the installation's settings (ADR 0053).
   const add = addRepositoryLink(state.connection);
   return (
@@ -371,19 +490,29 @@ export function Repositories() {
         small="Pull requests opened by you or your agents in these repositories are reviewed automatically."
         action={add ? <LinkButton href={add}>Add a repository</LinkButton> : null}
       />
-      {state.departed.length > 0 ? (
-        <div className="departed">
-          {state.departed.map((repo) => (
-            <Departed
-              key={repo.id}
-              repo={repo}
-              connection={state.connection}
-              dismiss={() => send({ type: "repo.dismiss", repoId: repo.id })}
-            />
-          ))}
+      <DepartedNotices shown={departedShown(state, leftSummary)} connection={state.connection} send={send} />
+      {barShown ? (
+        <div className="filters repos-bar">
+          <Segmented
+            label={REPOSITORIES_BAR.filterLabel}
+            value={chosen.filter}
+            options={list.options}
+            onChange={(filter) => choice.filter(state, filter)}
+          />
+          <Search
+            placeholder={REPOSITORIES_BAR.search}
+            aria-label={REPOSITORIES_BAR.search}
+            value={chosen.query}
+            onChange={(e) => choice.search(state, e.target.value)}
+            kbd="/"
+          />
         </div>
       ) : null}
-      <div className="tbl-wrap">
+      {/* Nothing left: the empty line in the table's place, under everything above it. No sideways scroll wrapper: the
+          table never is wider than the page, and its heads stick on the page's scroll. */}
+      {list.empty ? (
+        <Empty title={list.empty.title}>{list.empty.text}</Empty>
+      ) : (
         <table className="tbl repos">
           <thead>
             <tr>
@@ -395,116 +524,83 @@ export function Repositories() {
               <th>Reviewing</th>
             </tr>
           </thead>
-          {repositoryGroups(state).map((group) => (
-            <tbody key={group.key}>
-              <GroupHead head={group.head} />
-              {group.repos.map((r) => {
-                const n = openChangeCount(state, r.id);
-                const last = lastReviewAt(state, r.id);
-                const d = differences(r).length;
-                return (
-                  <tr
-                    key={r.id}
-                    onClick={() => navigate(`/repositories/${r.owner}/${r.name}`)}
-                    className="clickable"
-                  >
-                    <td>
-                      <Link to={`/repositories/${r.owner}/${r.name}`} onClick={(e) => e.stopPropagation()}>
-                        <b>{repositoryLabel(r)}</b>
-                      </Link>
-                      {/* Quiet on purpose: differing from the defaults is the exception. */}
-                      {d > 0 ? <div className="t-small">{plural(d, "setting")} of its own</div> : null}
-                    </td>
-                    <td className="repos-prs">
-                      <span>
-                        {r.enabled ? (
-                          <>
-                            {n === 0 ? "none open" : `${n} open`}
-                            {last ? (
-                              <span className="t-small"> · last review {agoSentence(state.now, last)}</span>
-                            ) : null}
-                          </>
-                        ) : (
-                          <span className="t-small">not reviewed</span>
-                        )}
-                      </span>
-                    </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <Switch
-                        checked={r.enabled}
-                        label={`Review ${repositoryLabel(r)}`}
-                        onChange={(enabled) => send({ type: "repo.setEnabled", repoId: r.id, enabled })}
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
+          {list.groups.map(({ group, collapsed }) => (
+            <RepositoryGroupRows
+              key={group.key}
+              group={group}
+              collapsed={collapsed}
+              // While the search has text, a chevron collapses its group until the search changes.
+              toggle={() =>
+                list.searching ? choice.collapseInSearch(group.key) : toggle(group.key, collapsed)
+              }
+              send={send}
+            >
+              {group.repos.map((r) => (
+                <RepositoryRow key={r.id} repo={r} />
+              ))}
+            </RepositoryGroupRows>
           ))}
         </table>
-      </div>
+      )}
       <div className="foot">{repositoriesFoot(state.connection)}</div>
     </Page>
   );
 }
 
 /**
- * A group of Repositories' head (design-system.md "Repositories' group heads"): the account, in the
- * table's header style and the only text of the group's header cell, then its cause's line held at every line a cause
- * can say, and its one fix on the right, its place as wide as every fix the account can have, so a cause coming or
- * going moves nothing. The cause and the fix are said twice, one shown: beside the account on a wide screen, in a row
- * of their own under it on a phone, where the Pull requests column has no width.
+ * One repository's row: its name and its settings of its own, its pull requests, its switch, a group of one's
+ * included (ADR 0083, round 4).
  */
-function GroupHead({ head }: { head: RepositoryGroupHead }) {
-  const fix = (
-    <span className="repos-group-fix" data-state={head.state}>
-      <span className="t-small repos-group-cause">
-        <HeldDetail shown={head.cause} details={head.held} />
-      </span>
-      <AccountAction link={head.fix} labels={head.labels} variant="secondary" />
-    </span>
+function RepositoryRow({ repo: r }: { repo: Repository }) {
+  const state = useAppState();
+  const send = useSend();
+  const navigate = useNavigate();
+  const cell = pullRequestsCell(
+    { enabled: r.enabled, open: openChangeCount(state, r.id), lastAt: lastReviewAt(state, r.id) },
+    state.now,
   );
+  const d = differences(r).length;
   return (
-    <>
-      <tr className="repos-group">
-        <th scope="rowgroup">{head.account}</th>
-        <td colSpan={2} className="repos-group-wide">
-          {fix}
-        </td>
-      </tr>
-      <tr className="repos-group repos-group-narrow">
-        <td colSpan={3}>{fix}</td>
-      </tr>
-    </>
-  );
-}
-
-/** A repository that left the App's installation (ADR 0059): said until it is back or dismissed. */
-function Departed({
-  repo,
-  connection,
-  dismiss,
-}: {
-  repo: DepartedRepository;
-  connection: Connection;
-  dismiss: () => void;
-}) {
-  const { label, text, addBack } = departedNotice(connection, repo);
-  return (
-    <Notice
-      label={label}
-      tone="mute"
-      action={
-        <span className="banner-acts">
-          <LinkButton size="sm" href={addBack}>
-            Add it back
-          </LinkButton>
-          <IconButton icon="close" label="Dismiss" onClick={dismiss} />
+    <tr onClick={() => navigate(`/repositories/${r.owner}/${r.name}`)} className="clickable">
+      <td>
+        <Link
+          to={`/repositories/${r.owner}/${r.name}`}
+          // Read out of its group, the link still says whose: two accounts may each have an api.
+          aria-label={repositoryLabel(r)}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Its group's head names the account: the owner would repeat on every row of it. */}
+          <b>{r.name}</b>
+        </Link>
+        {/* Quiet on purpose: differing from the defaults is the exception. */}
+        {d > 0 ? <div className="t-small">{plural(d, "setting")} of its own</div> : null}
+      </td>
+      <td className="repos-prs">
+        <span>
+          {cell.on ? (
+            // The count, zero included: zero is data, muted so the few rows with an open pull request stand out.
+            <>
+              <span className={cell.zero ? "repos-open open-zero" : "repos-open"}>{cell.open}</span>
+              {cell.last === null ? null : (
+                <span className="t-small">
+                  {SEPARATOR}
+                  {cell.last}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="t-small">{cell.text}</span>
+          )}
         </span>
-      }
-    >
-      <b className="nowrap">{repositoryLabel(repo)}</b> {text}
-    </Notice>
+      </td>
+      <td onClick={(e) => e.stopPropagation()}>
+        <Switch
+          checked={r.enabled}
+          label={`Review ${repositoryLabel(r)}`}
+          onChange={(enabled) => send({ type: "repo.setEnabled", repoId: r.id, enabled })}
+        />
+      </td>
+    </tr>
   );
 }
 
@@ -568,8 +664,6 @@ export function RepositoryPage() {
       </Page>
     );
   }
-  const n = openChangeCount(state, repo.id);
-  const last = lastReviewAt(state, repo.id);
   const d = differences(repo).length;
   return (
     <Page screen="repository">
@@ -578,11 +672,14 @@ export function RepositoryPage() {
       </div>
       <Sentence
         title={repo.id}
-        small={
-          repo.enabled
-            ? `Reviewing · ${n === 0 ? "no open pull requests" : plural(n, "open pull request")}${last ? ` · last review ${agoSentence(state.now, last)}` : ""}`
-            : "Off · pull requests here are not reviewed"
-        }
+        small={repositoryStanding(
+          {
+            enabled: repo.enabled,
+            open: openChangeCount(state, repo.id),
+            lastAt: lastReviewAt(state, repo.id),
+          },
+          state.now,
+        )}
         action={
           <>
             <SaveState {...stamp} />
@@ -596,7 +693,7 @@ export function RepositoryPage() {
         }
       />
       <Group title="Settings for this repository">
-        <p className="t-small repo-lede">
+        <p className="t-small t-help repo-lede">
           {d === 0 ? "It follows " : `${plural(d, "setting differs", "settings differ")} from `}
           <Link to="/settings">your defaults</Link>. Change a setting here and it applies to {repo.name} only.
         </p>

@@ -146,6 +146,24 @@ describe("lookover wait: exit codes", () => {
     expect(w.json()).toMatchObject({ exit: 7, meaning: "failed", state_reason: "review_failed" });
   });
 
+  test("7: the message says the failure's cause as the check's title does, once (ADR 0081)", async () => {
+    const failed = result({
+      run: { state: "failed", state_reason: "prepare_failed" },
+      verdict: { value: "none", conclusion: "neutral" },
+      loop: { next_action: "ask_human" },
+    });
+    const title = "The review failed: Claude ran past its 20-minute limit";
+    for (const ending of [title, `${title}.`]) {
+      const w = world();
+      w.at(10_000, () => w.check("job", "in_progress"));
+      w.at(20_000, () => w.complete("job", "neutral", failed, ending));
+      expect(await w.lookover("wait")).toBe(7);
+      expect(w.err.at(-1)).toBe(
+        "Lookover couldn't review 5d9114c. The review failed: Claude ran past its 20-minute limit.",
+      );
+    }
+  });
+
   test("9: neither a 👀 nor a check within the appear timeout: run lookover status to see whether it runs", async () => {
     const w = world();
     expect(await w.lookover("wait")).toBe(9);
@@ -478,6 +496,67 @@ describe("lookover wait: what it says", () => {
       "",
     ]);
     expect(w.err.at(-1)).toBe("Lookover: 1 finding to fix on 5d9114c.");
+  });
+
+  test("a finding still present after a push: this round's reason first, then what round 1 said", async () => {
+    const w = world();
+    const still = finding("F1", {
+      title: "Unpaid filter drops drafts",
+      body: "Drafts have no due date.\nKeep them.",
+      resolution: {
+        kind: "still_present",
+        round: 2,
+        explanation: "The filter now skips sent invoices, drafts still go.",
+      },
+    });
+    // A reason from an earlier round is old news: round 1's words alone.
+    const older = finding("F2", {
+      resolution: { kind: "still_present", round: 1, explanation: "Said a round ago." },
+    });
+    await w.check("round", "in_progress");
+    await w.complete(
+      "round",
+      "neutral",
+      result({ loop: { round: 2, next_action: "fix" }, findings: [still, older] }),
+    );
+    expect(await w.lookover("wait")).toBe(3);
+    expect(w.out).toEqual([
+      "F1 blocking src/invoice.ts:12: Unpaid filter drops drafts",
+      "  Still present: The filter now skips sent invoices, drafts still go.",
+      "  Round 1 said: Drafts have no due date.",
+      "  Keep them.",
+      "",
+      "F2 blocking src/invoice.ts:12: Finding F2",
+      "  What F2 is about.",
+      "",
+    ]);
+  });
+
+  test("a still-present reason over several lines: each line indented under the finding", async () => {
+    const w = world();
+    const still = finding("F1", {
+      title: "Unpaid filter drops drafts",
+      body: "Drafts have no due date.",
+      resolution: {
+        kind: "still_present",
+        round: 2,
+        explanation: "The filter now skips sent invoices.\nDrafts still go.",
+      },
+    });
+    await w.check("round", "in_progress");
+    await w.complete(
+      "round",
+      "neutral",
+      result({ loop: { round: 2, next_action: "fix" }, findings: [still] }),
+    );
+    expect(await w.lookover("wait")).toBe(3);
+    expect(w.out).toEqual([
+      "F1 blocking src/invoice.ts:12: Unpaid filter drops drafts",
+      "  Still present: The filter now skips sent invoices.",
+      "  Drafts still go.",
+      "  Round 1 said: Drafts have no due date.",
+      "",
+    ]);
   });
 
   test("a check that ended without a result it can read: 1", async () => {

@@ -435,7 +435,10 @@ test("a review the engine gave none of names the engine; a draft says when it is
   const failed = await publisher.check({
     ...waiting,
     run: RUN,
-    standing: { kind: "ended", ended: { kind: "failed", failure: "review_failed" } },
+    standing: {
+      kind: "ended",
+      ended: { kind: "failed", failure: { kind: "review_failed", cause: null, limitMs: null } },
+    },
   });
   const draft = await publisher.check({
     ...waiting,
@@ -455,7 +458,10 @@ test("a failed review completes its check neutral with the failure, never failur
     ...waiting,
     checkId: id,
     run: RUN,
-    standing: { kind: "ended", ended: { kind: "failed", failure: "prepare_failed" } },
+    standing: {
+      kind: "ended",
+      ended: { kind: "failed", failure: { kind: "prepare_failed", cause: null, limitMs: null } },
+    },
   });
   const [check] = github.view(change).checks;
   expect(check).toMatchObject({
@@ -463,7 +469,7 @@ test("a failed review completes its check neutral with the failure, never failur
     conclusion: "neutral",
     output: {
       title: "The review failed: the code could not be fetched",
-      summary: "Lookover did not look over a1b2c3d. The owner sees why in Lookover.",
+      summary: "Lookover did not look over a1b2c3d. Push again, or comment `/lookover review`, to try again.",
     },
   });
   expect(readResult(check?.output.text ?? "")).toMatchObject({

@@ -14,12 +14,13 @@
 // Every git command runs with the safe options (ADR 0056, SR-06) in its environment, above the user's own configuration
 // and never written to any: hooks from `<root>/no-hooks`, an empty folder; links checked out as plain files; no
 // fsmonitor; LFS's filter off; no submodule followed; no file protocol but in the fetch, where a local folder is a
-// clone URL. The credentials: asked from the `FetchSpec` at fetch time, a username and a secret in the host's own form
-// (retrieval knows no host's), sent as they are as a basic credential in git's `http.extraheader` through that one
-// command's environment (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`: never on a command line,
-// which any process can list), with credential helpers off for that command. The secret is never put in a URL, a config
-// file, a remote, a logged line or an error (`log` and `RetrievalError.detail` have every form of it replaced by
-// `<hidden>`), so no file in the mirror or the worktree holds it and a reviewed change cannot read it.
+// clone URL; long paths on (`core.longpaths`), so a path past Windows' 260 characters checks out, diffs and is
+// removed like any other. The credentials: asked from the `FetchSpec` at fetch time, a username and a secret in the
+// host's own form (retrieval knows no host's), sent as they are as a basic credential in git's `http.extraheader`
+// through that one command's environment (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`: never on
+// a command line, which any process can list), with credential helpers off for that command. The secret is never put
+// in a URL, a config file, a remote, a logged line or an error (`log` and `RetrievalError.detail` have every form of it
+// replaced by `<hidden>`), so no file in the mirror or the worktree holds it and a reviewed change cannot read it.
 // Interface: `createRetrieval({ root, runner, git?, env, log? })` returns `prepare(request, signal?)`, the request
 // `{ repo, job, head, mergeBase, fetch }`, which gives `{ cwd, diff, rules, mergeBase, diffFile, dispose }` (`cwd` and
 // `diff` are contracts' `Prepared`, what `review` reads; `mergeBase` is the request's). `rules`: `REVIEW.md`, `AGENTS.md` and `CLAUDE.md`, in that order, as they stand at the root of the commit the
@@ -52,6 +53,9 @@
 // `cancelled` (the signal fired; the running git was killed). `rules_unread` is never thrown: a rules file git couldn't
 // read is only logged. A git that runs past its limit fails with its step's problem; the fetch reports progress, so its idle limit
 // means silence, and `worktree add` gets the fetch's limits. A `detail` is git's words without its progress lines.
+// Beyond its words, the error says its cause: `limit` is the time limit git ran out of (`idle` or `wall_clock`, with
+// the ms that command was given), null otherwise; `pathTooLong` is git refusing a path too long ("Filename too long" on
+// Windows, "File name too long" elsewhere: the one text of git's read for a cause, kept here).
 // It must never know: what runs in the worktree, the engines, any host's API, ref layout or credential form, the
 // service, the UI.
 export {
@@ -60,6 +64,7 @@ export {
   type PrepareRequest,
   type Retrieval,
   RetrievalError,
+  type RetrievalLimit,
   type RetrievalOptions,
   type RetrievalProblem,
 } from "./retrieval.ts";

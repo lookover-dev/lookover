@@ -189,6 +189,51 @@ describe("FakeGitHost's other accounts, as the person signed in reaches them", (
     expect(fake.installOn("ledger-dev")).not.toBe(id);
   });
 
+  test("a repository removed from an organisation's installation leaves its listing and is not found; its others and the person's own stay", async () => {
+    const fake = signedInHost();
+    fake.open(change(orgSandbox));
+    fake.removeRepository({ owner: "LOOKOVER-DEV", name: "lookover-sandbox" });
+    const reached = await fake.accounts();
+    expect(reached.map((a) => [a.installation.account.login, a.repositories])).toEqual([
+      ["sasensi", [sandbox, ledger, notes]],
+      ["lookover-dev", [orgLookover]],
+      ["acme", [acmeApi]],
+    ]);
+    expect(await why(fake.getChange(orgSandbox, 1))).toEqual(["not_found", null]);
+    expect((await fake.listOpenChanges(orgLookover)).items).toEqual([]);
+    // Removed again, or never there, it is a test's mistake.
+    expect(() => fake.removeRepository(orgSandbox)).toThrow("lookover-dev/lookover-sandbox");
+  });
+
+  test("a repository added back to an organisation's installation is listed there again, never on the person's own", async () => {
+    const fake = signedInHost();
+    fake.install([sandbox]);
+    fake.removeRepository(orgSandbox);
+    fake.addRepository({ owner: "LOOKOVER-DEV", name: "lookover-sandbox" });
+    fake.addRepository(orgLookover);
+    const reached = await fake.accounts();
+    expect(reached.map((a) => [a.installation.account.login, a.repositories])).toEqual([
+      ["sasensi", [sandbox]],
+      ["lookover-dev", [orgLookover, orgSandbox]],
+      ["acme", [acmeApi]],
+    ]);
+  });
+
+  test("a repository added on an organisation the shared App left installs it there again, on that repository alone, with a new id", async () => {
+    const fake = signedInHost();
+    const [, before] = await fake.accounts();
+    fake.uninstall("lookover-dev");
+    fake.addRepository(orgSandbox);
+    const reached = await fake.accounts();
+    expect(reached.map((a) => [a.installation.account.login, a.repositories])).toEqual([
+      ["sasensi", [sandbox, ledger, notes]],
+      ["acme", [acmeApi]],
+      ["lookover-dev", [orgSandbox]],
+    ]);
+    expect(reached[2]?.installation.id).not.toBe(before?.installation.id);
+    expect(fake.onGitHub().unreached).toEqual([]);
+  });
+
   test("another account's repositories are only that account's: one named for another is refused", () => {
     const outside = () =>
       new FakeGitHost({

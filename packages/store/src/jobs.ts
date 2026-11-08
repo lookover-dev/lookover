@@ -12,11 +12,12 @@
 // follow-up reviews the newest commit. A push moves the change's waiting jobs to the new head as they wait (ADR 0040):
 // deferred stays deferred, and no job is made (whether a push asks for a review is the caller's). An interrupted run
 // puts its job back in the queue and counts the retry, which `leftRunning` gives with the step the run reached, for the
-// restart's rule (`core.afterRestart`). A joined job keeps its first trigger; a review request comment that asked is
-// recorded with the job it led to, joined or new (`requests`), and a job that yields to the follow-up hands its
-// requests over. A run's end that says its round was posted (a round, or a failure recorded after its review landed)
-// makes their 🚀 owed. A run ends as a round only once its round was saved (`posts.saved`, ADR 0044), which writes the
-// round.
+// restart's rule (`core.afterRestart`). A joined job keeps its first trigger, and who wrote the first request that
+// asked for it or joined it (`askedBy`, ADR 0081); a review request comment that asked is recorded with the job it led
+// to, joined or new (`requests`), and a job that yields to the follow-up hands its requests over, with who asked when
+// no request asked for the follow-up. A run's end that says its round was posted (a round, or a failure recorded after
+// its review landed) makes their 🚀 owed. A run ends as a round only once its round was saved (`posts.saved`, ADR
+// 0044), which writes the round.
 // The take (ADR 0043) is one immediate transaction: it offers each waiting job (queued or deferred), oldest first, to
 // the caller's decision with the engines reviewing now (the finders and confirmers of the running jobs' runs, a run
 // holding both, but a run posting its round, which freed them, ADR 0044), and those an older job left waiting its turn
@@ -52,6 +53,7 @@
 // caller.
 import type { Database } from "bun:sqlite";
 import {
+  type AskedBy,
   type CancelReason,
   type ChangeId,
   type CommitSha,
@@ -62,6 +64,7 @@ import {
   type EngineId,
   type EngineUnusable,
   enumOf,
+  type FailureCause,
   isWaiting,
   type JobFailure,
   type JobFailureKind,
@@ -122,8 +125,11 @@ export type RunEnd =
   | { kind: "interrupted" }
   | { kind: "failed"; failure: FailureFacts; posted?: boolean };
 
-/** How a job failed, as its caller says it: the store adds the engine that was reviewing, the run's, if one ran. */
-export type FailureFacts = Pick<JobFailure, "kind" | "detail">;
+/**
+ * How a job failed, as its caller says it, its cause and the limit that ran out included (ADR 0081): the store adds
+ * the engine that was reviewing, the run's, if one ran.
+ */
+export type FailureFacts = Omit<JobFailure, "engine">;
 
 /** A job a stopped service left running: its open run, the step that run reached, how often a restart retried it. */
 export interface LeftRunning extends StoredJob {
@@ -358,6 +364,16 @@ const FAILURE = enumOf<JobFailureKind>()([
   "host_failed",
   "unexpected",
 ]);
+const CAUSE = enumOf<FailureCause>()([
+  "git_silent",
+  "git_time_limit",
+  "engine_time_limit",
+  "base_not_found",
+  "path_too_long",
+  "git_missing",
+  "network",
+  "engine_answer",
+]);
 const STEP = enumOf<RunStep>()(["preparing", "finding", "confirming", "publishing"]);
 const TRIGGER = enumOf<Trigger>()(["opened", "push", "comment", "manual", "first-review"]);
 const DEFERRAL = enumOf<Deferral["reason"]>()([
@@ -379,6 +395,7 @@ const SKIP = enumOf<SkipReason>()([
   "fork",
 ]);
 const CANCEL = enumOf<CancelReason>()(["closed", "replaced", "pushed"]);
+const ASKED_BY = enumOf<AskedBy>()(["agent", "person"]);
 
 export const jobRow = z.object({
   id: z.string().transform(jobId),
@@ -394,7 +411,10 @@ export const jobRow = z.object({
   failure_kind: FAILURE.nullable(),
   failure_detail: z.string().nullable(),
   failure_engine: ENGINE.nullable(),
+  failure_cause: CAUSE.nullable(),
+  failure_limit_ms: z.int().nullable(),
   turn: z.string().nullable(),
+  asked_by: ASKED_BY.nullable(),
 });
 const previewRow = z.object({ preview: z.union([z.literal(0), z.literal(1)]).transform((p) => p === 1) });
 const leftRow = jobRow.extend({ run_id: z.string().transform(runId), run_step: STEP, retries: z.int() });
@@ -485,8 +505,15 @@ export function jobOf(r: z.infer<typeof jobRow>): StoredJob {
       failure:
         r.failure_kind === null
           ? null
-          : { kind: r.failure_kind, detail: r.failure_detail ?? "", engine: r.failure_engine },
+          : {
+              kind: r.failure_kind,
+              detail: r.failure_detail ?? "",
+              engine: r.failure_engine,
+              cause: r.failure_cause,
+              limitMs: r.failure_limit_ms,
+            },
       turn: turnOf(r.turn),
+      askedBy: r.asked_by,
     },
   };
 }
@@ -529,6 +556,12 @@ function hold(reviewing: Map<EngineId, ChangeId | null>, taking: Taking): void {
   for (const engine of taking.holds) if (!reviewing.has(engine)) reviewing.set(engine, null);
 }
 
+/** A job's failure as its columns: kind, detail, engine, cause and limit; all null when it didn't fail. */
+function failureColumns(f: JobFailure | null) {
+  if (f === null) return [null, null, null, null, null] as const;
+  return [f.kind, f.detail, f.engine, f.cause ?? null, f.limitMs ?? null] as const;
+}
+
 /** The job after its run, by `reviewer`, ended so. */
 function ending(job: ReviewJob, end: RunEnd, reviewer: EngineId): ReviewJob {
   switch (end.kind) {
@@ -553,16 +586,17 @@ function ending(job: ReviewJob, end: RunEnd, reviewer: EngineId): ReviewJob {
 
 export function jobs(db: Database): Jobs {
   const insert = db.query(`
-    INSERT INTO jobs (id, change_id, sha, trigger, state, preview, retries, check_completed)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?6)
+    INSERT INTO jobs (id, change_id, sha, trigger, state, preview, retries, check_completed, asked_by)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?6, ?7)
   `);
   const insertSkipped = db.query(`
-    INSERT INTO jobs (id, change_id, sha, trigger, state, skip, preview, retries, check_completed)
-    VALUES (?1, ?2, ?3, ?4, 'skipped', ?5, ?6, 0, ?6)
+    INSERT INTO jobs (id, change_id, sha, trigger, state, skip, preview, retries, check_completed, asked_by)
+    VALUES (?1, ?2, ?3, ?4, 'skipped', ?5, ?6, 0, ?6, ?7)
   `);
   const update = db.query(`
     UPDATE jobs SET sha = ?, state = ?, deferral_reason = ?, deferral_engine = ?, deferral_unusable = ?, skip = ?,
-      cancel = ?, failure_kind = ?, failure_detail = ?, failure_engine = ?, turn = ?
+      cancel = ?, failure_kind = ?, failure_detail = ?, failure_engine = ?, failure_cause = ?,
+      failure_limit_ms = ?, turn = ?, asked_by = ?
     WHERE id = ?
   `);
   const selectJob = db.query("SELECT * FROM jobs WHERE id = ?");
@@ -666,10 +700,9 @@ export function jobs(db: Database): Jobs {
         : null,
       job.skip,
       job.cancel,
-      job.failure?.kind ?? null,
-      job.failure?.detail ?? null,
-      job.failure?.engine ?? null,
+      ...failureColumns(job.failure),
       job.state === "queued" && job.turn !== null ? JSON.stringify(job.turn) : null,
+      job.askedBy,
       job.id,
     );
     // Ended without a round: the requests it answers get no 🚀 (those whose round was posted are owed it already).
@@ -731,8 +764,9 @@ export function jobs(db: Database): Jobs {
       cancel: null,
       failure: null,
       turn: null,
+      askedBy: ask.request?.askedBy ?? null,
     };
-    insert.run(job.id, changeId, job.sha, job.trigger, job.state, ask.preview === true ? 1 : 0);
+    insert.run(job.id, changeId, job.sha, job.trigger, job.state, ask.preview === true ? 1 : 0, job.askedBy);
     return { job, changed: true };
   };
 
@@ -740,8 +774,10 @@ export function jobs(db: Database): Jobs {
   const joinedAs = (was: ReviewJob, ask: Ask): Pick<Asked, "job" | "changed"> => {
     // Queued, it waits behind the same; back from deferred, the take says behind what.
     const turn = was.state === "queued" ? was.turn : null;
-    const job: ReviewJob = { ...was, sha: ask.sha, state: "queued", deferral: null, turn };
-    const changed = job.sha !== was.sha || was.state !== "queued";
+    // The first request that joins a job no request asked for says who asked (ADR 0081).
+    const askedBy = was.askedBy ?? ask.request?.askedBy ?? null;
+    const job: ReviewJob = { ...was, sha: ask.sha, state: "queued", deferral: null, turn, askedBy };
+    const changed = job.sha !== was.sha || was.state !== "queued" || job.askedBy !== was.askedBy;
     if (changed) write(job);
     // A preview sticks: the UI's job doesn't carry it, so it is no change to send.
     if (ask.preview === true) previewed.run(job.id);
@@ -770,8 +806,17 @@ export function jobs(db: Database): Jobs {
       cancel: null,
       failure: null,
       turn: null,
+      askedBy: ask.request?.askedBy ?? null,
     };
-    insertSkipped.run(job.id, changeId, job.sha, job.trigger, ask.skip, ask.preview === true ? 1 : 0);
+    insertSkipped.run(
+      job.id,
+      changeId,
+      job.sha,
+      job.trigger,
+      ask.skip,
+      ask.preview === true ? 1 : 0,
+      job.askedBy,
+    );
     if (ask.request) addRequest(ask.request, job.id);
     unanswered(job.id);
     return job;
@@ -831,6 +876,17 @@ export function jobs(db: Database): Jobs {
     }
   };
 
+  /**
+   * `job` yields to the follow-up: cancelled, its requests, its full ask and, unless a request asked for the follow-up
+   * itself, who asked, handed over.
+   */
+  const yieldTo = (job: ReviewJob, followUp: ReviewJob): ReviewJob => {
+    moveRequests(job.id, followUp.id);
+    fullFrom.run(job.id, followUp.id);
+    if (followUp.askedBy === null && job.askedBy !== null) write({ ...followUp, askedBy: job.askedBy });
+    return { ...job, state: "cancelled", deferral: null, cancel: "replaced" };
+  };
+
   const runEnded = db.transaction((id: RunId, end: RunEnd, at: number): ReviewJob => {
     const run = open(id, "runEnded");
     if ((end.kind === "round" || end.kind === "preview") && selectSaved.get(id) === null) {
@@ -843,11 +899,7 @@ export function jobs(db: Database): Jobs {
     const followUp = isWaiting(job)
       ? waitingOf(was.changeId, previewRow.parse(selectPreviewOf.get(run.job_id)).preview)
       : null;
-    if (followUp !== null) {
-      job = { ...job, state: "cancelled", deferral: null, cancel: "replaced" };
-      moveRequests(job.id, followUp.id);
-      fullFrom.run(job.id, followUp.id);
-    }
+    if (followUp !== null) job = yieldTo(job, followUp);
     // Its round is on the host: the requests it answers are owed their 🚀, before a failure would settle them as never.
     if (end.kind === "round" || (end.kind === "failed" && end.posted === true)) answered(job.id);
     write(job);

@@ -21,6 +21,7 @@ import {
 } from "@lookover/contracts";
 import {
   firstReviewCandidates,
+  firstReviewMeta,
   firstReviewPick,
   firstReviewPrimary,
   firstReviewRows,
@@ -67,9 +68,13 @@ const job = (state: JobState, sha = HEAD): ReviewJob => ({
   state,
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip: state === "skipped" ? "on-open-off" : null,
   cancel: state === "cancelled" ? "closed" : null,
-  failure: state === "failed" ? { kind: "review_failed", engine: "claude", detail: "it stopped" } : null,
+  failure:
+    state === "failed"
+      ? { kind: "review_failed", engine: "claude", detail: "it stopped", cause: null, limitMs: null }
+      : null,
   turn: null,
 });
 
@@ -347,9 +352,11 @@ test("when every pull request listed is reviewed, none is picked and the step sa
   ]);
   expect(firstReviewPick(firstReviewRows(state), id(148))).toBeNull();
   expect(noneLeft(firstReviewRows(state))).toBe(true);
-  expect(NONE_LEFT).toBe(
-    "Lookover already reviewed these by itself. Open one on GitHub to see its review, or go on.",
-  );
+  // Each sentence its line, as every line under the list (design-system.md "First review's list").
+  expect(NONE_LEFT).toEqual([
+    "Lookover already reviewed these by itself.",
+    "Open one on GitHub to see its review, or go on.",
+  ]);
 });
 
 test("a pull request reviewed by itself during setup makes Continue the primary, the old one still picked (#458)", () => {
@@ -362,7 +369,39 @@ test("a pull request reviewed by itself during setup makes Continue the primary,
   const picked = firstReviewPick(rows, null);
   expect(picked).toBe(id(131));
   expect(firstReviewPrimary(rows, picked)).toBe("go-on");
-  expect(reviewedLine(rows)).toBe("Lookover already reviewed sasensi/ledger-api #152 by itself: Clean.");
+  // The line names the one picked too, so the radio on #131 and the words on #152 agree (round 4), on a line of its
+  // own: each sentence its line, so neither breaks mid-phrase nor leaves "#131 too." alone (round 6).
+  expect(reviewedLine(rows, picked)).toEqual([
+    "Lookover already reviewed sasensi/ledger-api #152 by itself: Clean.",
+    "Go on, or review sasensi/ledger-api #131 too.",
+  ]);
+});
+
+test("the line names the pull request the person picks, and holds the line for every pick", () => {
+  const rows = firstReviewRows(
+    world([
+      [152, "posted"],
+      [131, "none"],
+      [148, "none"],
+    ]),
+  );
+  expect(reviewedLine(rows, id(148))).toEqual([
+    "Lookover already reviewed sasensi/ledger-api #152 by itself: Clean.",
+    "Go on, or review sasensi/ledger-api #148 too.",
+  ]);
+  // A pick not listed, or reviewed, hands the words on to the pick the list shows.
+  expect(reviewedLine(rows, id(152))).toEqual(reviewedLine(rows, id(131)));
+  const held = reviewedLines(rows, id(148));
+  for (const pick of [131, 148]) {
+    expect(held).toContainEqual([
+      `Lookover already reviewed sasensi/ledger-api #152 by itself: Clean.`,
+      `Go on, or review sasensi/ledger-api #${pick} too.`,
+    ]);
+    expect(held).toContainEqual([
+      `Lookover already reviewed 3 of your pull requests by itself.`,
+      `Go on, or review sasensi/ledger-api #${pick} too.`,
+    ]);
+  }
 });
 
 test("several reviewed by itself and one left: Continue, and the line counts them", () => {
@@ -376,7 +415,10 @@ test("several reviewed by itself and one left: Continue, and the line counts the
   const picked = firstReviewPick(rows, null);
   expect(picked).toBe(id(131));
   expect(firstReviewPrimary(rows, picked)).toBe("go-on");
-  expect(reviewedLine(rows)).toBe("Lookover already reviewed 2 of your pull requests by itself.");
+  expect(reviewedLine(rows, picked)).toEqual([
+    "Lookover already reviewed 2 of your pull requests by itself.",
+    "Go on, or review sasensi/ledger-api #131 too.",
+  ]);
 });
 
 test("nothing reviewed by itself: Review this pull request is the primary, and no line", () => {
@@ -388,7 +430,7 @@ test("nothing reviewed by itself: Review this pull request is the primary, and n
       ]),
     );
     expect(firstReviewPrimary(rows, firstReviewPick(rows, null))).toBe("review");
-    expect(reviewedLine(rows)).toBe("");
+    expect(reviewedLine(rows, firstReviewPick(rows, null))).toEqual([]);
   }
 });
 
@@ -400,7 +442,7 @@ test("a preview never counts as reviewed: the primary stays Review this pull req
     ]),
   );
   expect(firstReviewPrimary(rows, firstReviewPick(rows, null))).toBe("review");
-  expect(reviewedLine(rows)).toBe("");
+  expect(reviewedLine(rows, firstReviewPick(rows, null))).toEqual([]);
 });
 
 test("every row reviewed: Continue, and the line says none is left", () => {
@@ -413,13 +455,13 @@ test("every row reviewed: Continue, and the line says none is left", () => {
   const picked = firstReviewPick(rows, null);
   expect(picked).toBeNull();
   expect(firstReviewPrimary(rows, picked)).toBe("go-on");
-  expect(reviewedLine(rows)).toBe(NONE_LEFT);
+  expect(reviewedLine(rows, picked)).toEqual(NONE_LEFT);
 });
 
 test("nothing listed: Continue, and no line", () => {
   const rows = firstReviewRows(world([]));
   expect(firstReviewPrimary(rows, firstReviewPick(rows, null))).toBe("go-on");
-  expect(reviewedLine(rows)).toBe("");
+  expect(reviewedLine(rows, firstReviewPick(rows, null))).toEqual([]);
 });
 
 test("the line says a reviewed row's chip word: To fix, Needs you", () => {
@@ -429,24 +471,42 @@ test("the line says a reviewed row's chip word: To fix, Needs you", () => {
       [131, "none"],
     ]),
   );
-  expect(reviewedLine(toFix)).toBe("Lookover already reviewed sasensi/ledger-api #152 by itself: To fix.");
+  expect(reviewedLine(toFix, firstReviewPick(toFix, null))).toEqual([
+    "Lookover already reviewed sasensi/ledger-api #152 by itself: To fix.",
+    "Go on, or review sasensi/ledger-api #131 too.",
+  ]);
   const needsYou = firstReviewRows(
     world([
       [152, "postedNeedsYou"],
       [131, "none"],
     ]),
   );
-  expect(reviewedLine(needsYou)).toBe(
+  expect(reviewedLine(needsYou, firstReviewPick(needsYou, null))).toEqual([
     "Lookover already reviewed sasensi/ledger-api #152 by itself: Needs you.",
-  );
+    "Go on, or review sasensi/ledger-api #131 too.",
+  ]);
 });
 
 test("the lines held are the one shown and every one the step could show, so a review landing grows nothing", () => {
+  // Each row named reviewed with each chip word, the other one picked; the count with either picked.
   const held = [
-    ...[152, 131].flatMap((n) =>
-      REVIEWED_CHIPS.map((c) => `Lookover already reviewed sasensi/ledger-api #${n} by itself: ${c.label}.`),
+    ...[
+      [152, 131],
+      [131, 152],
+    ].flatMap(([n, pick]) =>
+      REVIEWED_CHIPS.map((c) => [
+        `Lookover already reviewed sasensi/ledger-api #${n} by itself: ${c.label}.`,
+        `Go on, or review sasensi/ledger-api #${pick} too.`,
+      ]),
     ),
-    "Lookover already reviewed 2 of your pull requests by itself.",
+    [
+      "Lookover already reviewed 2 of your pull requests by itself.",
+      "Go on, or review sasensi/ledger-api #152 too.",
+    ],
+    [
+      "Lookover already reviewed 2 of your pull requests by itself.",
+      "Go on, or review sasensi/ledger-api #131 too.",
+    ],
     NONE_LEFT,
   ];
   const before = firstReviewRows(
@@ -455,7 +515,7 @@ test("the lines held are the one shown and every one the step could show, so a r
       [131, "none"],
     ]),
   );
-  expect(reviewedLines(before)).toEqual(["", ...held]);
+  expect(reviewedLines(before, firstReviewPick(before, null))).toEqual([[], ...held]);
   for (const how of ["posted", "postedToFix", "postedNeedsYou"] as const) {
     const after = firstReviewRows(
       world([
@@ -463,8 +523,10 @@ test("the lines held are the one shown and every one the step could show, so a r
         [131, "none"],
       ]),
     );
-    expect(reviewedLines(after)[0]).toBe(reviewedLine(after));
-    for (const line of held) expect(reviewedLines(after)).toContain(line);
+    expect(reviewedLines(after, firstReviewPick(after, null))[0]).toEqual(
+      reviewedLine(after, firstReviewPick(after, null)),
+    );
+    for (const line of held) expect(reviewedLines(after, firstReviewPick(after, null))).toContainEqual(line);
   }
 });
 
@@ -492,4 +554,35 @@ test("the bar's middle place: the preview until a review was posted, then Review
   expect(firstReviewSecondary(all, firstReviewPick(all, null))).toBe("preview");
   const none = firstReviewRows(world([]));
   expect(firstReviewSecondary(none, firstReviewPick(none, null))).toBe("preview");
+});
+
+test("a row's small line holds every separator's dot to the part after it, so it never wraps after a dot", () => {
+  // Setup 4 wrapped "written by Claude ·" over "6 min ago" (row 47): the break now falls before the dot.
+  expect(firstReviewMeta(change(12), NOW)).toBe(
+    "sasensi/ledger-api #12 · by sasensi · written by Claude · 1 h ago",
+  );
+});
+
+test("a long list holds a handful of lines, the longest names crossed, never every pair (Lookover's round 4 F1)", () => {
+  const many = Array.from({ length: 300 }, (_, i): [number, "none"] => [100 + i, "none"]);
+  const rows = firstReviewRows(world(many));
+  const held = reviewedLines(rows, firstReviewPick(rows, null));
+  expect(held.length).toBeLessThan(40);
+  // the held lines are as long as any the step can show: no shown line is longer than the longest held
+  const longestHeld = Math.max(...held.map((line) => line.join(" ").length));
+  for (const row of rows.slice(0, 20)) {
+    const pick = rows.find((r) => r !== row);
+    if (pick)
+      expect(longestHeld).toBeGreaterThanOrEqual(
+        reviewedLine(
+          firstReviewRows(
+            world([
+              [row.change.number, "posted"],
+              [pick.change.number, "none"],
+            ]),
+          ),
+          pick.change.id,
+        ).join(" ").length,
+      );
+  }
 });

@@ -12,7 +12,7 @@
 // requests' 🚀 as never, so it is not read again. A request is kept with its global id on the host, which the round
 // that answers it minimizes once its check completes (ADR 0052): `of(job)` gives those of a job's requests.
 import type { Database } from "bun:sqlite";
-import type { Reaction, RepositoryRef } from "@lookover/contracts";
+import type { AskedBy, Reaction, RepositoryRef } from "@lookover/contracts";
 import { z } from "zod";
 
 /** A comment as the poll handles it: the host's id for it, and when it was written. */
@@ -21,11 +21,15 @@ export interface SeenComment {
   createdAt: number;
 }
 
-/** A review request comment, recorded with the job it led to, and its global id, which minimizing takes. */
+/**
+ * A review request comment, recorded with the job it led to, its global id, which minimizing takes, and who wrote it
+ * (ADR 0081), which the job keeps.
+ */
 export interface RequestComment {
   repo: RepositoryRef;
   comment: SeenComment;
   nodeId: string;
+  askedBy: AskedBy;
 }
 
 /** A reaction owed to a request: 👀 once recorded, 🚀 once its job's round is posted. */

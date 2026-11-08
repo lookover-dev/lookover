@@ -35,6 +35,7 @@ import {
   type RepositoryRef,
   type ResolvedSettings,
   type Rule,
+  reposChosen,
   repositoryRefOf,
   type SettingKey,
   type SettingValues,
@@ -299,10 +300,11 @@ export interface Room {
    */
   runChecks(): Promise<"ok" | "running">;
   /**
-   * A repository said departed (ADR 0059) dismissed by the person: `repo.dismissed` sent, no longer said, back or not.
-   * Refused for one not said departed.
+   * Repositories said departed (ADR 0059) dismissed by the person, one or many at once (ADR 0082): `repo.dismissed`
+   * sent for each named one said departed, in the order they are said, no longer said, back or not; one not said is
+   * passed over. Refused when none of them is said departed.
    */
-  dismissDeparted(repoId: RepositoryId): "ok" | "no_such_repository";
+  dismissDeparted(repoIds: readonly RepositoryId[]): "ok" | "no_such_repository";
   /** "Unlock" (ADR 0047): the session unlocked, sent once; nothing when it is already. */
   unlock(): void;
   /**
@@ -789,6 +791,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     connection: (repoId) => connectionFor(shown.connection, repoId),
     openChanges,
     settings,
+    // The store's setup at each decision (ADR 0079): nothing asks by itself before the repositories are chosen.
+    reposChosen: () => reposChosen(store.setup.read()),
     // An engine's limit given a new end (the queue sends every one): the checks waiting on it say the new reset.
     emit: (body) => {
       emit(body);
@@ -1096,9 +1100,11 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     signIn: signIn.start,
     reroute: queue.reroute,
     runChecks,
-    dismissDeparted: (repoId) => {
-      if (!shown.departed.some((d) => d.id === repoId)) return "no_such_repository";
-      emit({ type: "repo.dismissed", at: o.clock.now(), repoId });
+    dismissDeparted: (repoIds) => {
+      const named = shown.departed.filter((d) => repoIds.includes(d.id)).map((d) => d.id);
+      if (named.length === 0) return "no_such_repository";
+      const at = o.clock.now();
+      for (const repoId of named) emit({ type: "repo.dismissed", at, repoId });
       return "ok";
     },
     unlock: () => {
@@ -1253,7 +1259,10 @@ async function opened(store: Store, github: Installation): Promise<RepositoryRef
   const listed = await github.open(appInstalled(store.setup.read()));
   const signedIn = github.person() !== null;
   const asked = signedInAtSetup(store.setup.read());
-  if (!signedIn && asked) store.setup.write({ done: false, step: "github", github: "start" });
+  // Its furthest step reached goes back there too: whoever signs in next chooses the repositories again before
+  // anything is asked by itself (ADR 0079).
+  if (!signedIn && asked)
+    store.setup.write({ done: false, step: "github", reached: "github", github: "start" });
   else if (signedIn && !asked) store.setup.write({ github: "waiting-for-install" });
   return listed;
 }

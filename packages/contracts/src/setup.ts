@@ -1,4 +1,5 @@
 // First-run setup: its steps, in order, and how far the owner got.
+import { enumOf } from "./enum-of.ts";
 import type { ChangeId } from "./ids.ts";
 
 /**
@@ -7,11 +8,25 @@ import type { ChangeId } from "./ids.ts";
  */
 export type SetupStep = "ai" | "github" | "repos" | "first-review" | "agent" | "background";
 
-export const SETUP_ORDER: SetupStep[] = ["ai", "github", "repos", "first-review", "agent", "background"];
+/**
+ * The steps in order, each once: tied to `SetupStep` by `enumOf`, so a step added to the union and not placed here
+ * fails to compile.
+ */
+export const SETUP_ORDER: SetupStep[] = [
+  ...enumOf<SetupStep>()(["ai", "github", "repos", "first-review", "agent", "background"]).options,
+];
 
 /** The later of two steps in `SETUP_ORDER`: what `reached` becomes, so going back never loses the way forward. */
 export const furthestReached = (a: SetupStep, b: SetupStep): SetupStep =>
   SETUP_ORDER.indexOf(a) >= SETUP_ORDER.indexOf(b) ? a : b;
+
+/**
+ * Whether the person has chosen the repositories (ADR 0079): setup done, or its furthest step reached past the
+ * Repositories step (Continue there sends `setup.chooseRepos`, which moves it to the first review). Until then
+ * nothing asks a review by itself (`core.intake`). A step gone back keeps the choice: `reached` is what counts.
+ */
+export const reposChosen = (setup: Pick<Setup, "done" | "reached">): boolean =>
+  setup.done || SETUP_ORDER.indexOf(setup.reached) > SETUP_ORDER.indexOf("repos");
 
 /**
  * Where the setup's GitHub step is (ADR 0053, ADR 0073): `start`, nobody signed in yet; `waiting-for-install`, the

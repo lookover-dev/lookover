@@ -4,7 +4,8 @@
 // A trailer names Claude when its address is Claude Code's (`noreply@anthropic.com`) or Claude's GitHub bot's, or
 // its name has the word "Claude" with no address or an `anthropic.com` one; Codex the same way (a `codex` address at
 // `openai.com`, its GitHub bot, or the word "Codex" with no address or an `openai.com` one). A person named Claude
-// elsewhere, another co-author, or the words in a commit's body are no signal.
+// elsewhere, another co-author, or the words in a commit's body are no signal. A push is the agent's (`agentPushed`,
+// ADR 0081) only when every new commit it brought was read and each is signed by Claude or Codex.
 import type { EngineId } from "@lookover/contracts";
 
 /** What the host shows of who wrote a change. */
@@ -75,4 +76,17 @@ export function writerOf(facts: WriterFacts): EngineId | null {
   if (facts.before !== null) return facts.before;
   const prefix = BRANCH.exec(facts.branch)?.[1]?.toLowerCase();
   return prefix === "claude" || prefix === "codex" ? prefix : null;
+}
+
+/**
+ * Whether a push is the agent's (ADR 0081): every new commit's message was read (as many as `commits`, none missing
+ * from a long push or a compare that failed) and each carries a coding agent's `Co-authored-by` trailer. A push with
+ * one commit by hand, or one not all read, names no one.
+ */
+export function agentPushed(push: { commits: number; messages: readonly string[] }): boolean {
+  return (
+    push.commits > 0 &&
+    push.messages.length === push.commits &&
+    push.messages.every((m) => signedBy(m) !== null)
+  );
 }

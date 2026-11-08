@@ -447,7 +447,7 @@ test("a claim written while the round answering the one before ran is read by th
   });
 });
 
-test("of two findings, only the one with a claim is answered, on its own thread", async () => {
+test("after a push, the finding with a claim is answered and the one without says why it is still present, each on its own thread", async () => {
   const w = await roundOne({
     script: (engines) =>
       engines.answer(
@@ -488,21 +488,50 @@ test("of two findings, only the one with a claim is answered, on its own thread"
   const second = threads.find((t) => String(t.findingId) === "F2")?.commentId;
   if (second === undefined) throw new Error("round 1 posted no thread for F2");
   w.host.seedReply(PR1, second, { author: OWNER, body: "Won't fix: the tax is meant twice." });
+  // A push that leaves both lines where they were.
+  w.host.push(PR1, SHA1_PUSHED, pr1.diff);
+  const still = "The loop now stops at length - 2, so the last invoice is still left out.";
   await w.ask(
     answered({
       findings: [],
       earlier: [
-        { id: "F1", present: true, why: STILL },
+        { id: "F1", present: true, why: still },
         { id: "F2", present: true, why: "The tax is still added twice." },
       ],
     }),
   );
   expect(repliesOn(w.host).map((r) => ({ ...r, body: said(r.body) }))).toEqual([
+    { commentId: w.root, body: `Still present\n\n${still}` },
     {
       commentId: second,
       body: "Kept\n\nThe tax is still added twice.\n\nIf it is kept again, the owner decides.",
     },
   ]);
+  // Today's words in the result, round 1's untouched; nothing counted: no claim, no keep, still the agent's to fix.
+  const [first, other] = w.result().findings;
+  expect(first).toMatchObject({
+    id: "F1",
+    status: "open",
+    needs_action_by: "agent",
+    body: "The loop stops one short, so the last invoice is never added.",
+    resolution: { kind: "still_present", round: 2, explanation: still },
+  });
+  expect(first?.claim).toBeUndefined();
+  expect(other).toMatchObject({ id: "F2", claim: { count: 1 }, resolution: { kind: "kept", round: 2 } });
+
+  // Asked again on the same commit, after a reply elsewhere: the thread doesn't repeat itself.
+  w.host.seedReply(PR1, second, { author: OWNER, body: "Which line adds it twice?" });
+  await w.ask(
+    answered({
+      findings: [],
+      earlier: [
+        { id: "F1", present: true, why: still },
+        { id: "F2", present: true, why: "Line 20 adds it again." },
+      ],
+    }),
+  );
+  expect(repliesOn(w.host).map((r) => r.commentId)).toEqual([w.root, second, second]);
+  expect(w.result().findings[0]?.resolution).toBeNull();
 });
 
 test("a question is answered on its thread with the finder's words, and the finding stays as it was", async () => {

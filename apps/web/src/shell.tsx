@@ -1,13 +1,14 @@
 // What is always there: the top bar with the three destinations, the status pill, Ctrl K and the shortcuts.
-import type { Command, Engine, State } from "@lookover/contracts";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import type { Command, State } from "@lookover/contracts";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FixButton } from "./screens/github-app.tsx";
 import { reviewPath, useApp, useAppState, useSend, useStoreStatus, useTheme } from "./store.tsx";
-import { Button, Chip, Eyes, Icon, IconButton, type IconName, Kbd, Mark, Said } from "./ui/basics.tsx";
+import { Button, Chip, Icon, IconButton, type IconName, Kbd, Mark, Said } from "./ui/basics.tsx";
 import { Dialog, Layer, MenuItem, useToast } from "./ui/layers.tsx";
+import { fitWholeRows } from "./ui/whole-rows.ts";
 import { clock } from "./view-model/format.ts";
-import { checkLine, engineStateText, serviceStatus } from "./view-model/health.ts";
+import { checkLine } from "./view-model/health.ts";
 import { type Refusal, refusalText } from "./view-model/refusal.ts";
 import {
   authorLabel,
@@ -15,14 +16,17 @@ import {
   changeLabel,
   changeReviews,
   chip,
-  githubStatus,
   type Problem,
   pill,
   problems,
   REVIEW_KEY,
   REVIEWERS_TEXT,
   reviewList,
+  type StatusDot,
+  type StatusMenuLine,
   sendElsewhere,
+  statusMenuGroups,
+  statusMenuLines,
 } from "./view-model/select.ts";
 import { settingValueText } from "./view-model/settings.ts";
 import { atLoginDetail } from "./view-model/start-at-login.ts";
@@ -76,127 +80,88 @@ export function TabBar() {
 }
 
 /**
- * One status line: the dot says fine, or nothing judged (`ok` null: the fact alone), or not fine in its problem's
- * tone, pink when it needs the person and amber when it waits, as the band says it (ADR 0070); amber with none.
+ * One status line: its dot, green when fine, grey when nothing was judged (the fact alone), else its problem's tone,
+ * pink when it needs the person and amber when it waits, as the band says it (ADR 0070).
  */
-function StatusLine({
-  ok,
-  tone,
-  children,
-  action,
-}: {
-  ok: boolean | null;
-  tone?: Problem["tone"] | null | undefined;
-  children: ReactNode;
-  action?: ReactNode;
-}) {
+function StatusLine({ dot, children }: { dot: StatusDot | "mute"; children: ReactNode }) {
   return (
     <span>
-      <i className={ok === null ? "mute" : ok ? "" : (tone ?? "warn")} />
+      <i className={dot === "ok" ? "" : dot} />
       <span className="st-text">{children}</span>
-      {action}
     </span>
   );
 }
 
-function EngineStatus({ engine }: { engine: Engine }) {
+/** Under an AI's line, reviews waiting for it: the owner may send them to the other one. Never automatic (ADR 0029). */
+function SendElsewhere({ line }: { line: string }) {
   const state = useAppState();
   const send = useSend();
-  const problem = problems(state).find((x) => x.id === engine.id);
-  // Reviews waiting for this AI: the owner may send them to the other one. Never automatic (ADR 0029).
-  const elsewhere = sendElsewhere(state, engine.id);
+  const engine = Object.values(state.engines).find((e) => e.id === line)?.id;
+  const elsewhere = engine ? sendElsewhere(state, engine) : null;
+  if (!(engine && elsewhere)) return null;
   return (
-    <div className="st-block">
-      <StatusLine
-        ok={engine.state === "ready"}
-        tone={problem?.tone}
-        // The view model's fix, the one the band offers too.
-        action={problem ? <FixButton problem={problem} busyLabel="Waiting…" /> : null}
-      >
-        {engine.name}: {engineStateText(engine)}
-      </StatusLine>
-      {problem ? (
-        <small className="code-whole">
-          <Said words={problem.detail} />
-        </small>
-      ) : null}
-      {elsewhere ? (
-        <button
-          type="button"
-          className="st-link"
-          onClick={() => send({ type: "engine.reroute", from: engine.id })}
-        >
-          Send the {elsewhere.count === 1 ? "waiting review" : `${elsewhere.count} waiting reviews`} to{" "}
-          {state.engines[elsewhere.to].name}
-        </button>
-      ) : null}
-    </div>
+    <button type="button" className="st-link" onClick={() => send({ type: "engine.reroute", from: engine })}>
+      Send the {elsewhere.count === 1 ? "waiting review" : `${elsewhere.count} waiting reviews`} to{" "}
+      {state.engines[elsewhere.to].name}
+    </button>
   );
 }
 
-function HostAndServiceStatus() {
+/**
+ * The status lines (`statusMenuLines`): the ones with a problem first, each in a well of its own (`.leads`), then the
+ * fine ones together in one well of the same inset on the menu's surface (`.st-fine`), so every line starts at one x
+ * (round 5: the fine lines flush beside the boxed ones made the list's edge jump). Under problems, the fine well has a
+ * heading, "Fine", so the healthy group reads apart and quieter, never as a third problem (round 6). Every line with a
+ * problem is laid out alike: its line, its detail, its fix under the detail, the view model's, the one the band offers
+ * too. Under, never beside: a fix may name what its line names ("Ask an owner of ledger-dev") and side by side the line
+ * would wrap.
+ */
+function StatusLines() {
   const state = useAppState();
-  // Every GitHub problem (ADR 0067): the connection's on GitHub's own line, with its one fix (Reconnect, or the page
-  // on GitHub that fixes its cause, ADR 0053); then each account's on the shared App, in GitHub's order, a line each.
-  const github = githubStatus(state);
-  const connectionProblem = github.problems.find((x) => x.account === undefined);
-  const accountProblems = github.problems.filter((x) => x.account !== undefined);
-  // Whether it starts at login for real (ADR 0054), with the alert band's fix when the machine didn't do as chosen.
-  const service = serviceStatus(state.service);
-  const login = problems(state).find((x) => x.id === "login");
-  const takenDetail = atLoginDetail(state.service);
+  const { leads, fine, fineHeading } = statusMenuGroups(statusMenuLines(state));
   return (
     <>
-      <div className="st-block">
-        <StatusLine
-          ok={github.ok}
-          tone={github.tone}
-          action={connectionProblem ? <FixButton problem={connectionProblem} busyLabel="Waiting…" /> : null}
-        >
-          GitHub: {github.text}
-        </StatusLine>
-        {connectionProblem ? (
-          <small className="code-whole">
-            <Said words={connectionProblem.detail} />
-          </small>
-        ) : null}
-      </div>
-      {/* An account's line names it, and its fix may too ("Ask an owner of ledger-dev"): the fix goes under the
-          line and its detail, so the title isn't squeezed beside it. */}
-      {accountProblems.map((p) => (
-        <div key={p.id} className="st-block">
-          <StatusLine ok={false} tone={p.tone}>
-            {p.title}
-          </StatusLine>
-          <small className="code-whole">
-            <Said words={p.detail} />
-          </small>
-          <div className="st-fix">
-            <FixButton problem={p} busyLabel="Waiting…" />
-          </div>
-        </div>
+      {leads.map((line) => (
+        <OneStatusLine key={line.id} line={line} className="st-block leads" />
       ))}
-      <div className="st-block">
-        <StatusLine
-          ok={service.ok}
-          tone={login?.tone}
-          action={login ? <FixButton problem={login} busyLabel="Waiting…" /> : null}
-        >
-          Service: {service.text}
-        </StatusLine>
-        {login ? (
-          <small className="code-whole">
-            <Said words={login.detail} />
-          </small>
-        ) : null}
-        {/* Another Lookover holds it (ADR 0068): which one, by its command; said, not warned, no fix. */}
-        {takenDetail ? (
-          <small>
-            <Said words={takenDetail} />
-          </small>
-        ) : null}
-      </div>
+      {fineHeading ? <div className="h st-h">{fineHeading}</div> : null}
+      {fine.length > 0 ? (
+        <div className="st-fine">
+          {fine.map((line) => (
+            <OneStatusLine key={line.id} line={line} className="st-block" />
+          ))}
+        </div>
+      ) : null}
     </>
+  );
+}
+
+function OneStatusLine({ line, className }: { line: StatusMenuLine; className: string }) {
+  const state = useAppState();
+  // Another Lookover holds the start at login (ADR 0068): which one, by its command; said, not warned, no fix.
+  const takenDetail = atLoginDetail(state.service);
+  return (
+    <div className={className}>
+      <StatusLine dot={line.dot}>{line.text}</StatusLine>
+      {line.problem ? (
+        <>
+          <small>
+            <Said words={line.problem.detail} />
+          </small>
+          {line.problem.fix ? (
+            <div className="st-fix">
+              <FixButton problem={line.problem} busyLabel="Waiting…" />
+            </div>
+          ) : null}
+        </>
+      ) : null}
+      <SendElsewhere line={line.id} />
+      {line.id === "service" && takenDetail ? (
+        <small>
+          <Said words={takenDetail} />
+        </small>
+      ) : null}
+    </div>
   );
 }
 
@@ -206,10 +171,10 @@ function PauseControls() {
   if (service.paused) {
     return (
       <MenuItem
+        icon="run"
         onSelect={() => send({ type: "service.resume" })}
         hint={service.paused.until ? `paused until ${clock(service.paused.until)}` : "paused until resumed"}
       >
-        <Icon name="run" />
         Resume reviews
       </MenuItem>
     );
@@ -242,10 +207,11 @@ function Checks() {
   return (
     <>
       <MenuItem
+        icon="again"
+        busy={service.checks?.running === true}
         onSelect={() => send({ type: "service.runChecks" })}
         hint={finished ? `checked at ${clock(finished.at)}` : undefined}
       >
-        {service.checks?.running ? <Eyes /> : null}
         Run all checks
       </MenuItem>
       {finished ? (
@@ -253,7 +219,7 @@ function Checks() {
           {finished.items
             .map((item) => checkLine(engines, item))
             .map((c) => (
-              <StatusLine key={c.label} ok={c.ok}>
+              <StatusLine key={c.label} dot={c.ok === null ? "mute" : c.ok ? "ok" : "warn"}>
                 {c.label}: {c.detail}
               </StatusLine>
             ))}
@@ -271,16 +237,14 @@ function StatusMenu({ close }: { close: () => void }) {
     <div className="menu">
       <div className="h">Status</div>
       <div className="st">
-        {Object.values(state.engines).map((e) => (
-          <EngineStatus key={e.id} engine={e} />
-        ))}
-        <HostAndServiceStatus />
+        <StatusLines />
       </div>
       <hr />
       <PauseControls />
       <hr />
       <Checks />
       <MenuItem
+        icon="copy"
         onSelect={() => {
           navigator.clipboard?.writeText(diagnostics(state));
           toast({ text: "Diagnostics copied. Secrets removed." });
@@ -290,6 +254,7 @@ function StatusMenu({ close }: { close: () => void }) {
         Copy diagnostics
       </MenuItem>
       <MenuItem
+        icon="lines"
         onSelect={() => {
           void navigate("/logs");
           close();
@@ -308,7 +273,8 @@ function StatusPill() {
   return (
     <Layer
       align="right"
-      width={372}
+      width={400}
+      scrim
       className="pill-menu"
       trigger={(props) => (
         <button type="button" className="pill" {...props} data-pill>
@@ -330,7 +296,12 @@ function diagnostics(state: State): string {
 interface PaletteItem {
   group: "Pull requests" | "Actions" | "Settings";
   label: string;
+  /** A setting's value, in the value column on the right. */
   hint?: string;
+  /** The key that does the same from anywhere ("?"), as a key cap at the row's end. */
+  kbd?: string;
+  /** A pull request's second line: its repository and number ("sasensi/ledger-api #151"), whole under its title. */
+  meta?: string;
   lead?: ReactNode;
   keywords: string;
   run: () => void;
@@ -364,13 +335,11 @@ export function Alerts() {
     <section className="alerts" aria-label="Needs you">
       <div className="alerts-in">
         {list.map((p) => (
-          <div className={`alert ${p.tone}`} key={p.id}>
-            <span className="alert-label">{p.tone === "need" ? "Needs you" : "Waiting"}</span>
-            <span className="alert-text code-whole">
-              <b>{p.title}.</b> <Said words={p.detail} />
-            </span>
-            <FixButton problem={p} busyLabel="Waiting for the sign-in…" />
-          </div>
+          <AlertLine
+            problem={p}
+            key={p.id}
+            fix={<FixButton problem={p} busyLabel="Waiting for the sign-in…" />}
+          />
         ))}
         {/* Last, so the lines above keep their place when it appears or goes: only the band's bottom edge moves. */}
         {refusal ? <RefusedLine refusal={refusal} dismiss={store.dismiss} /> : null}
@@ -379,7 +348,24 @@ export function Alerts() {
   );
 }
 
-function RefusedLine({ refusal, dismiss }: { refusal: Refusal; dismiss: () => void }) {
+/**
+ * One line of the band, tinted by its own tone (round 4): pink when it needs the person, amber when it only waits,
+ * so a Waiting line beside one that needs you is never on pink.
+ */
+export function AlertLine({ problem, fix }: { problem: Problem; fix: ReactNode }) {
+  return (
+    <div className={`alert ${problem.tone}`}>
+      <span className="alert-label">{problem.tone === "need" ? "Needs you" : "Waiting"}</span>
+      <span className="alert-text">
+        <b>{problem.title}.</b> <Said words={problem.detail} />
+      </span>
+      {fix}
+    </div>
+  );
+}
+
+/** The refused command's line: amber, as a Waiting line, the band's last. */
+export function RefusedLine({ refusal, dismiss }: { refusal: Refusal; dismiss: () => void }) {
   const { title, detail } = refusalText(refusal);
   return (
     <div className="alert warn refused">
@@ -389,6 +375,29 @@ function RefusedLine({ refusal, dismiss }: { refusal: Refusal; dismiss: () => vo
       </span>
       <IconButton icon="close" label="Dismiss" onClick={dismiss} />
     </div>
+  );
+}
+
+/**
+ * A palette row's words. A pull request's: two lines, its title whole on the first and its repository and number on
+ * the second, so neither is cut. Any other: one line, its value in the value column on the right, or its key as a key
+ * cap at the row's end.
+ */
+export function PaletteRow({ item }: { item: Pick<PaletteItem, "label" | "hint" | "kbd" | "meta"> }) {
+  if (item.meta) {
+    return (
+      <span className="cmdk-title">
+        <span className="cmdk-label">{item.label}</span>
+        <span className="cmdk-meta">{item.meta}</span>
+      </span>
+    );
+  }
+  return (
+    <>
+      <span className="cmdk-label">{item.label}</span>
+      {item.hint ? <span className="r">{item.hint}</span> : null}
+      {item.kbd ? <Kbd>{item.kbd}</Kbd> : null}
+    </>
   );
 }
 
@@ -418,7 +427,7 @@ export function Palette({ mode, onClose }: { mode: "all" | "review" | null; onCl
       return {
         group: "Pull requests",
         label: it.change.title,
-        hint: changeLabel(it.change),
+        meta: changeLabel(it.change),
         lead: <Chip tone={c.tone}>{c.label}</Chip>,
         keywords: `${it.change.title} ${changeLabel(it.change)} ${it.change.number} ${authorLabel(it.change)}`,
         run:
@@ -458,7 +467,7 @@ export function Palette({ mode, onClose }: { mode: "all" | "review" | null; onCl
       {
         group: "Actions",
         label: "Show keyboard shortcuts",
-        hint: "?",
+        kbd: "?",
         keywords: "keyboard shortcuts help",
         run: openShortcuts,
       },
@@ -508,9 +517,21 @@ export function Palette({ mode, onClose }: { mode: "all" | "review" | null; onCl
     item.run();
   };
 
-  useEffect(() => {
-    listRef.current?.querySelector("[data-active='true']")?.scrollIntoView({ block: "nearest" });
+  // whole rows only: the list ends under the last row that fits (design-system.md "Command palette", round 6), fitted
+  // before the paint, so no frame shows a stale height, and again on every resize of the window, whose height its room is
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    fitWholeRows(list);
+    list.querySelector("[data-active='true']")?.scrollIntoView({ block: "nearest" });
   });
+  useLayoutEffect(() => {
+    const refit = () => {
+      if (listRef.current) fitWholeRows(listRef.current);
+    };
+    window.addEventListener("resize", refit);
+    return () => window.removeEventListener("resize", refit);
+  }, []);
 
   let lastGroup = "";
   return (
@@ -544,7 +565,7 @@ export function Palette({ mode, onClose }: { mode: "all" | "review" | null; onCl
           const head = item.group !== lastGroup ? <div className="h">{item.group}</div> : null;
           lastGroup = item.group;
           return (
-            <div key={`${item.group}-${item.label}-${item.hint ?? ""}`}>
+            <div key={`${item.group}-${item.label}-${item.meta ?? ""}${item.hint ?? ""}`}>
               {head}
               <button
                 type="button"
@@ -554,8 +575,7 @@ export function Palette({ mode, onClose }: { mode: "all" | "review" | null; onCl
                 onMouseMove={() => setIndex(i)}
               >
                 {item.lead ? <span className="cmdk-lead">{item.lead}</span> : null}
-                <span className="cmdk-label">{item.label}</span>
-                {item.hint ? <span className="r">{item.hint}</span> : null}
+                <PaletteRow item={item} />
               </button>
             </div>
           );
@@ -642,7 +662,8 @@ function withModifier(e: KeyboardEvent): boolean {
 /** Moves the focus one row down (1) or up (-1); the first key press lands on the first row. */
 function focusRow(step: 1 | -1) {
   const rows = [...document.querySelectorAll<HTMLElement>("[data-row]")];
-  const at = rows.findIndex((row) => row === document.activeElement);
+  const active = document.activeElement;
+  const at = active instanceof HTMLElement ? rows.indexOf(active) : -1;
   rows[Math.min(Math.max(at + step, 0), rows.length - 1)]?.focus();
 }
 

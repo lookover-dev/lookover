@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type AskedBy,
   type ChangeId,
   changeId,
   commitSha,
@@ -518,6 +519,7 @@ const job: ReviewJob = {
   state: "queued",
   deferral: null,
   stepIn: null,
+  askedBy: null,
   skip: null,
   cancel: null,
   failure: null,
@@ -840,7 +842,7 @@ test("a job's reroute is cleared when the job ends, by the take's skip, cancel a
   asked(store, changeId("sasensi/lookover-sandbox#4"), fourth);
   for (const j of [job, second, third, fourth]) store.jobs.reroute(j.id, "codex");
   expect(store.jobs.waiting().jobs.map((w) => w.reroute)).toEqual(["codex", "codex", "codex", "codex"]);
-  const failure = { kind: "host_failed", detail: "not_found" } as const;
+  const failure = { kind: "host_failed", detail: "not_found", cause: null, limitMs: null } as const;
   store.jobs.take((s) => {
     switch (s.job.id) {
       case job.id:
@@ -929,7 +931,7 @@ test("the take writes only what changes: an unchanged deferral or a queued job l
   });
 
   // Cancelled (its change is gone) and failed (whether it may start couldn't be asked): neither waits any more.
-  const failure = { kind: "unexpected", detail: "health check broke" } as const;
+  const failure = { kind: "unexpected", detail: "health check broke", cause: null, limitMs: null } as const;
   expect(
     store.jobs.take((s) =>
       s.job.id === job.id ? { kind: "cancel", reason: "closed" } : { kind: "fail", failure },
@@ -972,7 +974,13 @@ test("the take skips a waiting job with its reason: it waits no more, its check'
   const store = open(migrated());
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
   store.jobs.take(() => ({ kind: "defer", deferral: SIGNED_OUT }));
-  const skipped: ReviewJob = { ...job, trigger: "comment", state: "skipped", skip: "codex-not-yours" };
+  const skipped: ReviewJob = {
+    ...job,
+    trigger: "comment",
+    state: "skipped",
+    skip: "codex-not-yours",
+    askedBy: "agent",
+  };
   expect(store.jobs.take(() => ({ kind: "skip", reason: "codex-not-yours" }))).toEqual({
     changed: [{ changeId: CHANGE, job: skipped }],
     started: null,
@@ -1022,7 +1030,13 @@ test("a fork pushed ends its waiting job cancelled `pushed` on the commit it was
   store.jobs.take(() => ({ kind: "defer", deferral: SIGNED_OUT }));
   // The same head: nothing changes.
   expect(store.jobs.forkPushed(CHANGE, job.sha)).toEqual([]);
-  const cancelled: ReviewJob = { ...job, trigger: "comment", state: "cancelled", cancel: "pushed" };
+  const cancelled: ReviewJob = {
+    ...job,
+    trigger: "comment",
+    state: "cancelled",
+    cancel: "pushed",
+    askedBy: "agent",
+  };
   expect(store.jobs.forkPushed(CHANGE, newest)).toEqual([cancelled]);
   expect(store.jobs.waiting().jobs).toEqual([]);
   expect(store.jobs.latest(CHANGE)).toEqual({ changeId: CHANGE, job: cancelled });
@@ -1139,11 +1153,56 @@ test("a comment the poll handled is never handled again, after a restart too; fo
   expect(again.requests.handled(REPO, ["c1", "c2"])).toEqual(new Set(["c2"]));
 });
 
-/** A review request comment on the sandbox, written at `at`. */
-const request = (id: string, at = T1) => ({
+/** A review request comment on the sandbox, written at `at`, by the agent unless said. */
+const request = (id: string, at = T1, askedBy: AskedBy = "agent") => ({
   repo: REPO,
   comment: { id, createdAt: at },
   nodeId: `IC_${id}`,
+  askedBy,
+});
+
+test("a job keeps who wrote the request that asked for it, or the first that joined it (ADR 0081)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  const pushed = store.jobs.asked(CHANGE, { sha: job.sha, trigger: "push", id: () => job.id });
+  expect(pushed.job.askedBy).toBeNull();
+  // The person's request joins the push's job: the job now says who asked, a change to send.
+  const joined = store.jobs.asked(CHANGE, {
+    sha: job.sha,
+    trigger: "comment",
+    id: () => jobId("j2"),
+    request: request("c1", T1, "person"),
+  });
+  expect(joined).toMatchObject({ job: { id: job.id, trigger: "push", askedBy: "person" }, changed: true });
+  // The agent's request after it changes nothing: the first who asked stays.
+  const again = store.jobs.asked(CHANGE, {
+    sha: job.sha,
+    trigger: "comment",
+    id: () => jobId("j3"),
+    request: request("c2"),
+  });
+  expect(again).toMatchObject({ job: { askedBy: "person" }, changed: false });
+  store.close();
+  expect(open(dir).jobs.latest(CHANGE)?.job).toMatchObject({ id: job.id, askedBy: "person" });
+});
+
+test("a job a request asked for, or skipped, says who wrote it", () => {
+  const store = open(migrated());
+  const asked = store.jobs.asked(CHANGE, {
+    sha: job.sha,
+    trigger: "comment",
+    id: () => job.id,
+    request: request("c1"),
+  });
+  expect(asked.job.askedBy).toBe("agent");
+  const skipped = store.jobs.skipped(changeId("sasensi/lookover-sandbox#9"), {
+    sha: job.sha,
+    trigger: "comment",
+    id: () => jobId("j2"),
+    skip: "repo-off",
+    request: request("c2", T1, "person"),
+  });
+  expect(skipped.askedBy).toBe("person");
 });
 
 test("the requests a job answers are given by their global ids, for its round to minimize (ADR 0052)", () => {
@@ -1220,7 +1279,7 @@ test("a request skipped is handled and waits for 👀, never 🚀; a failed or c
     request: request("c3"),
   });
   started(store, failing.id, run);
-  const failure = { kind: "review_failed", detail: "invalid_output" } as const;
+  const failure = { kind: "review_failed", detail: "invalid_output", cause: null, limitMs: null } as const;
   expect(store.jobs.runEnded(run.id, { kind: "failed", failure }, T2).state).toBe("failed");
   expect(store.requests.unreacted()).toEqual(
     ["c1", "c2", "c3"].map((commentId) => ({ repo: REPO, commentId, reaction: "eyes" })),
@@ -1243,7 +1302,7 @@ test("a request whose round was posted gets its 🚀 when the run's end is recor
   store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
   store.requests.reacted(REPO, "c1", "eyes");
   started(store, job.id, run);
-  const failure = { kind: "unexpected", detail: "disk I/O error" } as const;
+  const failure = { kind: "unexpected", detail: "disk I/O error", cause: null, limitMs: null } as const;
   const ended = store.jobs.runEnded(run.id, { kind: "failed", failure, posted: true }, T2);
   expect(ended).toMatchObject({ state: "failed", failure });
   store.close();
@@ -1274,6 +1333,35 @@ test("a request whose job yields to the follow-up behind it is answered by the f
     { repo: REPO, commentId: "c1", reaction: "rocket" },
     { repo: REPO, commentId: "c2", reaction: "rocket" },
   ]);
+});
+
+test("a follow-up no request asked for takes who asked from the job that yields to it (ADR 0081)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
+  started(store, job.id, run);
+  // A push during the run leaves a follow-up nobody asked for by a comment.
+  const followUp = store.jobs.asked(CHANGE, { sha: NEWEST, trigger: "push", id: () => jobId("j2") }).job;
+  expect(followUp.askedBy).toBeNull();
+  expect(store.jobs.runEnded(run.id, { kind: "interrupted" }, T2).state).toBe("cancelled");
+  // The agent's request now rides on the follow-up: so does who asked.
+  expect(store.jobs.latest(CHANGE)?.job).toMatchObject({ id: followUp.id, askedBy: "agent" });
+  store.close();
+  expect(open(dir).jobs.latest(CHANGE)?.job).toMatchObject({ id: followUp.id, askedBy: "agent" });
+});
+
+test("a follow-up a request asked for keeps its own asker when a job yields to it (ADR 0081)", () => {
+  const store = open(migrated());
+  store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
+  started(store, job.id, run);
+  const followUp = store.jobs.asked(CHANGE, {
+    sha: NEWEST,
+    trigger: "comment",
+    id: () => jobId("j2"),
+    request: request("c2", T1, "person"),
+  }).job;
+  store.jobs.runEnded(run.id, { kind: "interrupted" }, T2);
+  expect(store.jobs.latest(CHANGE)?.job).toMatchObject({ id: followUp.id, askedBy: "person" });
 });
 
 test("a request beside a waiting preview is held by a review of its own, behind it: 👀 at once, 🚀 when its round posts", () => {
@@ -1766,6 +1854,7 @@ test("a job skipped is recorded with its reason, never waits, and lets a review 
     state: "skipped",
     deferral: null,
     stepIn: null,
+    askedBy: null,
     skip: "not-yours",
     cancel: null,
     failure: null,
@@ -1792,7 +1881,7 @@ test("a run cut short leaves its job deferred with the reason, or failed with wh
   // Its turn again, it runs once more, without its reason, and fails.
   const again: Run = { ...run, id: runId("r2"), startedAt: T2, stepAt: T2 };
   expect(started(store, job.id, again)).toEqual({ ...job, state: "running" });
-  const failure = { kind: "review_failed", detail: "invalid_output" } as const;
+  const failure = { kind: "review_failed", detail: "invalid_output", cause: null, limitMs: null } as const;
   // The engine that was reviewing is the run's.
   const failed: ReviewJob = { ...job, state: "failed", failure: { ...failure, engine: "claude" } };
   expect(store.jobs.runEnded(again.id, { kind: "failed", failure }, T2 + 9_000)).toEqual(failed);
@@ -1803,6 +1892,23 @@ test("a run cut short leaves its job deferred with the reason, or failed with wh
     "runEnded: run r1 has ended",
   );
   expect(store.rounds.of(CHANGE)).toEqual([]);
+});
+
+test("a failure's cause and the limit that ran out are kept with the job (ADR 0081)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  asked(store, CHANGE, job);
+  started(store, job.id, run);
+  const failure = {
+    kind: "prepare_failed",
+    detail: "fetch_failed: git took too long (idle)",
+    cause: "git_silent",
+    limitMs: 120_000,
+  } as const;
+  const failed: ReviewJob = { ...job, state: "failed", failure: { ...failure, engine: "claude" } };
+  expect(store.jobs.runEnded(run.id, { kind: "failed", failure }, T2)).toEqual(failed);
+  store.close();
+  expect(open(dir).jobs.latest(CHANGE)).toEqual({ changeId: CHANGE, job: failed });
 });
 
 test("the jobs a stopped service left running are listed with their run, and failing the run fails them", () => {
@@ -1821,7 +1927,7 @@ test("the jobs a stopped service left running are listed with their run, and fai
   expect(again.jobs.leftRunning()).toEqual([
     { changeId: CHANGE, job: running, runId: run.id, step: "preparing", retries: 0 },
   ]);
-  const stopped = { kind: "service_stopped", detail: "" } as const;
+  const stopped = { kind: "service_stopped", detail: "", cause: null, limitMs: null } as const;
   expect(again.jobs.runEnded(run.id, { kind: "failed", failure: stopped }, T2)).toEqual({
     ...job,
     state: "failed",
@@ -1984,7 +2090,7 @@ test("a job that ended without a round owes its check's end, across a restart, u
   asked(store, THIRD, third);
   store.jobs.checked(job.id, { id: "111954805720", sha: job.sha });
   // Its change closed; another failed (whether it may start couldn't be asked); the third still waits.
-  const failure = { kind: "unexpected", detail: "health check broke" } as const;
+  const failure = { kind: "unexpected", detail: "health check broke", cause: null, limitMs: null } as const;
   store.jobs.take((s) =>
     s.job.id === job.id
       ? { kind: "cancel", reason: "closed" }
@@ -2669,7 +2775,11 @@ test("a dismissal's ledger reaches the round whose review hasn't landed: a late 
   store.posts.sending(run.id, "review");
   store.jobs.runEnded(
     run.id,
-    { kind: "failed", failure: { kind: "publish_failed", detail: "422" }, posted: false },
+    {
+      kind: "failed",
+      failure: { kind: "publish_failed", detail: "422", cause: null, limitMs: null },
+      posted: false,
+    },
     T1 + 1,
   );
   store.dismissals.saved({

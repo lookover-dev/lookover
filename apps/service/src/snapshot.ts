@@ -216,6 +216,7 @@ export function rulesOf(
     ...rule,
     enabled: !off.has(rule.id),
     parentOff: parentIds.some((id) => off.has(id)),
+    nestedIn: parentIds.length > 0,
     nested: kept.filter((other) => other.parentIds.includes(rule.id)).length,
   }));
 }

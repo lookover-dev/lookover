@@ -110,7 +110,8 @@
 // every one switched on and the step moved on); once installed, its repositories are listed every 5 minutes and on
 // "Reconnect": one added is polled at once (`repo.added`, switched on), one gone leaves (`repo.removed`, its jobs
 // cancelled, a running one stopped, its unsent posts dropped; said departed in the snapshot until it is added again,
-// when it starts with no waiting job, or dismissed with `repo.dismiss`, ADR 0059). A sign-in finished while the
+// when it starts with no waiting job, or dismissed with `repos.dismiss`, ADR 0059, one `repo.dismissed` for each
+// named one said departed, the others passed over, 404 when none is, ADR 0082). A sign-in finished while the
 // service runs is held without a restart ("Sign in with GitHub", `connection.signIn`).
 // `startDemoService(options)` does the same on a scenario's room (`scenarioOf(id)`): a fresh numbered folder under
 // `<home>/rooms` (the old ones swept, their last event number carried on, so a tab from before reloads), the fake
@@ -121,7 +122,8 @@
 // 30 minutes, every 60 s otherwise, on `options.timers`; a rate-limited listing waits, for every repository, until
 // GitHub's reset time, which the connection's `limitUntil` shows. What a poll sees becomes events and jobs, each through `core.intake` with
 // the repository's switches (the defaults: on open yes, after every push no): a change opened or a draft marked ready
-// is reviewed (`change.opened`, trigger "opened"); another author's is recorded skipped, its check saying why (ADR
+// is reviewed (`change.opened`, trigger "opened") once the repositories are chosen in setup (ADR 0079); another
+// author's is recorded skipped, its check saying why (ADR
 // 0016); a push is `change.pushed` with the commits GitHub counts, moves the waiting job to the new head, and asks for
 // a review only with the switch on; a change no longer listed is `change.closed`, its waiting job cancelled (a running
 // one finishes); the owner's `/lookover review` comment on an open pull request (a draft or another author's too) asks
@@ -181,7 +183,8 @@
 // plans with until the job ends, then takes, so each starts on it or waits for it, and the change's next job plans
 // as usual (ADR 0047); a job sent deferred on an engine says which engine may step in for it, `stepIn`, by the
 // same rule, computed each time it is sent; `setup.goto`, `setup.chooseRepos` (each watched repository's switch,
-// then the first review's step), `setup.finish` and `repo.setEnabled` (404 for a repository not watched) are kept by the
+// then the first review's step), `setup.finish`, `repo.setEnabled` (404 for a repository not watched) and
+// `repos.setEnabled` (many at once, ADR 0082: one not watched passed over, 404 when none is) are kept by the
 // store and sent as `setup.changed` / `repo.changed`, the furthest step reached kept; a start on a data folder
 // whose setup nobody wrote writes it (set up in live mode until onboarding; the scenario's in demo mode, where no bot installed means
 // no connection and no listing); a sign-in kept has the install waited for every 4 s, the step moved on to the

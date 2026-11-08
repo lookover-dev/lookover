@@ -425,6 +425,9 @@ function startedSince(check: HostCheck, reply: ReplyToAnswer): boolean {
   return start !== null && start >= reply.at;
 }
 
+/** A check's title as the end of a message: one stop, whether or not the title ends with its own. */
+const endingOf = (check: HostCheck): string => `${check.output.title.replace(/[.\s]+$/, "")}.`;
+
 /** What a completed check means, or null when it says to keep waiting. */
 export function ending(check: HostCheck, { commit, end }: Pick<Following, "commit" | "end">): Outcome | null {
   const result = readResult(check.output.text);
@@ -434,9 +437,9 @@ export function ending(check: HostCheck, { commit, end }: Pick<Following, "commi
   // Skipped for a newer commit or a newer review (`wait`): the head comparison or the newer check says what next.
   if (result.loop.next_action === "wait") return null;
   if (result.run.state === "skipped" || result.run.state === "cancelled")
-    return end("skipped", `Lookover skipped ${at}. ${check.output.title}.`, result);
+    return end("skipped", `Lookover skipped ${at}. ${endingOf(check)}`, result);
   if (result.run.state === "failed")
-    return end("failed", `Lookover couldn't review ${at}. ${check.output.title}.`, result);
+    return end("failed", `Lookover couldn't review ${at}. ${endingOf(check)}`, result);
   const findings = forTheAgent(result).length;
   switch (result.loop.next_action) {
     case "stop":

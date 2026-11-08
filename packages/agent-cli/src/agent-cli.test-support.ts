@@ -221,11 +221,16 @@ export function world(
     ): Promise<void> {
       made.set(name, await fake.createCheck(repo, on, status, WAITING, externalIdOf(`job-${name}`, by, pr)));
     },
-    /** The App completes its check `name` with the result block. */
-    async complete(name: string, conclusion: CheckConclusion, r: ReviewResult): Promise<void> {
+    /** The App completes its check `name` with the result block, under `title`. */
+    async complete(
+      name: string,
+      conclusion: CheckConclusion,
+      r: ReviewResult,
+      title = "Done",
+    ): Promise<void> {
       const id = made.get(name);
       if (id === undefined) throw new Error(`No check ${name} made by this test`);
-      await fake.completeCheck(repo, id, conclusion, { title: "Done", summary: "Round 1.", text: textOf(r) });
+      await fake.completeCheck(repo, id, conclusion, { title, summary: "Round 1.", text: textOf(r) });
     },
     /**
      * The App's review on the commit, one inline comment per finding on `src/invoice.ts` from line 12 down, each

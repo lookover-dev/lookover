@@ -2,6 +2,24 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.11.0](https://github.com/lookover-dev/lookover/compare/v0.10.0...v0.11.0) (2026-11-08)
+
+### Features
+
+- **setup:** nothing is reviewed or posted on GitHub until you have chosen your repositories in setup; a pull request opened before then gets no check and no comment.
+- **repositories:** Repositories is grouped by account, each with its count and one switch for all of it; heads stay in view as you scroll and fold away. Past ten repositories, search and a filter (All, Reviewing, Off) appear, and setup's Repositories step folds the same way.
+- **repositories:** a repository that left is said by how it left: an account Lookover can no longer reach is one No access notice with its fix, the rest one quiet count you can dismiss at once.
+- **reviews:** a failed review says why and what limit it hit, on the check, in the app with a Failed notice and its log, and in `lookover wait`; Try again is offered only where another try can help.
+- **reviews:** a finding still there after a push that didn't answer it says why on its thread.
+- **reviews:** the request comment says when your coding agent asked, and a review's log says who asked.
+- **app:** a clearer look throughout, in both themes: stronger contrast for muted text, commits and paths drawn as code everywhere, one layout for the coding agent's rows and for notices, status chips alike on every screen, a calmer status menu and palette, and logs that name a pull request once.
+
+### Bug Fixes
+
+- **review:** a brief network failure talking to GitHub is tried again, each try with a time limit, instead of failing the review.
+- **review:** a repository with paths longer than Windows allows checks out and is reviewed on Windows.
+- **review:** git's errors are read in any system language, so a path too long or a fetch limit is said as what it is.
+
 ## [0.10.0](https://github.com/lookover-dev/lookover/compare/v0.9.0...v0.10.0) (2026-11-06)
 
 ### Features

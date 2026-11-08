@@ -10,6 +10,7 @@ import {
   emptyReview,
   GITHUB_WEB,
   type LookoverApi,
+  type RepositoryId,
   type ResolvedSettings,
   repositoryId,
   type State,
@@ -194,6 +195,39 @@ test("a pull request the service doesn't hold is a refusal too; a request that n
   await other.send({ type: "engine.check" });
   await settled();
   expect(other.getStatus().refusal).toEqual({ status: 0, error: null, command: { type: "engine.check" } });
+});
+
+test("a 404 on many repositories says nothing: the ones named are gone already, and the list follows the events (ADR 0082)", async () => {
+  const ids: [RepositoryId] = [repositoryId("sasensi/ledger-api")];
+  for (const [error, command] of [
+    ["no such repository", { type: "repos.setEnabled", repoIds: ids, enabled: false }],
+    ["no such departed repository", { type: "repos.dismiss", repoIds: ids }],
+  ] satisfies [string, Command][]) {
+    const gone = service(snapshot(5, "first"), new Refused(404, { error }));
+    const store = new Store(gone.api);
+    await settled();
+    expect(await store.send(command)).toBe(false);
+    await settled();
+    expect(store.getStatus()).toEqual({ session: "open", refusal: null });
+  }
+  // One repository's switch refused is said, as before.
+  const one = service(snapshot(5, "first"), new Refused(404, { error: "no such repository" }));
+  const single = new Store(one.api);
+  await settled();
+  await single.send({ type: "repo.setEnabled", repoId: ids[0], enabled: false });
+  await settled();
+  expect(single.getStatus().refusal).toMatchObject({ status: 404, error: "no such repository" });
+  // Any other refusal of them is the notice still.
+  const down = service(snapshot(5, "first"), new TypeError("fetch failed"));
+  const store = new Store(down.api);
+  await settled();
+  await store.send({ type: "repos.dismiss", repoIds: ids });
+  await settled();
+  expect(store.getStatus().refusal).toEqual({
+    status: 0,
+    error: null,
+    command: { type: "repos.dismiss", repoIds: ids },
+  });
 });
 
 test("a 401 snapshot, or the client saying the session is lost, shows the session screen; nothing is left unhandled (#68)", async () => {
@@ -400,4 +434,28 @@ test("Mine and Everyone show once another author's pull request is listed, and s
   // The teammate's pull request closed: the tabs and the choice stay.
   s.send({ type: "state.replaced", at: NOW, seq: 7, state: snapshot(7, "closed") });
   expect(store.scope.get()).toEqual({ scope: "everyone", shown: true });
+});
+
+/** `state` watching `count` repositories of sam's. */
+const watching = (state: State, count: number): State => ({
+  ...state,
+  repos: Array.from({ length: count }, (_, i) => ({
+    id: repositoryId(`sam/app-${i}`),
+    owner: "sam",
+    name: `app-${i}`,
+    enabled: true,
+    settings: DEFAULTS,
+  })),
+});
+
+test("Repositories' search and filter show once more than ten are watched, and stay while the app is open (ADR 0082)", async () => {
+  const s = service(watching(snapshot(5, "first"), 10));
+  const store = new Store(s.api);
+  await settled();
+  expect(store.repositoriesBar.get()).toBe(false);
+  s.send({ type: "state.replaced", at: NOW, seq: 6, state: watching(snapshot(6, "x"), 11) });
+  expect(store.repositoriesBar.get()).toBe(true);
+  // Two leave: nine are left, the bar stays.
+  s.send({ type: "state.replaced", at: NOW, seq: 7, state: watching(snapshot(7, "y"), 9) });
+  expect(store.repositoriesBar.get()).toBe(true);
 });

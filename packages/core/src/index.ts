@@ -1,14 +1,16 @@
 // @lookover/core: Lookover's rules (ADR 0028, ADR 0033, ADR 0037).
 // The decision it hides: the rules that make a review loop settle, and who reviews. Whether a change gets a review job
-// or is skipped (`intake`: a push with "review after every push" off asks nothing, whoever's change it is, ADR 0043;
-// nor does a trigger nobody asked in person on another author's change, fork or not, ADR 0078; the owner's fork change
-// is skipped `fork` unless asked by hand, ADR 0048), what a skip leads to (`skipOutcome`: an automatic trigger's
-// recorded with its check only for a fork change, ADR 0043, ADR 0048; a request's always answered, recorded, or joining
-// the change's pending job, ADR 0047), and whether an old skip's end still owed is never sent (`endUnsent`: one on
-// another author's change nobody asked in person, whose check was never created, ADR 0078); how often
+// or is skipped (`intake`: first, a trigger nobody asked in person asks nothing before the repositories are chosen,
+// `setup.reposChosen`, ADR 0079; a push with "review after every push" off asks nothing, whoever's change it is,
+// ADR 0043; nor does a trigger nobody asked in person on another author's change, fork or not, ADR 0078; the owner's
+// fork change is skipped `fork` unless asked by hand, ADR 0048), what a skip leads to (`skipOutcome`: an automatic
+// trigger's recorded with its check only for a fork change, ADR 0043, ADR 0048; a request's always answered, recorded,
+// or joining the change's pending job, ADR 0047), and whether an old skip's end still owed is never sent (`endUnsent`:
+// one on another author's change nobody asked in person, whose check was never created, ADR 0078); how often
 // a watched repository is polled (`pollEvery`: 10 s while a review is asked, waits or runs, or was posted in the last
 // 30 minutes, or while setup shows Repositories or First review, else 60 s, ADR 0043, ADR 0068); who wrote a change
-// (`writerOf`: its commits' `Co-authored-by` trailers and its branch prefix, the newest signal winning, ADR 0044); who
+// (`writerOf`: its commits' `Co-authored-by` trailers and its branch prefix, the newest signal winning, ADR 0044; and
+// whether a push is the agent's, `agentPushed`: every new commit read and signed so, ADR 0081); who
 // reviews it (`roundPlan`: the finder, the allowed engine that didn't write it, Claude when unknown, never Codex on
 // another author's change nor on a fork change, which is skipped `codex-not-yours` where only Codex may review,
 // ADR 0044, ADR 0048, or the engine the owner sent the job to, `finder`, when it may review the change, ADR 0047; and
@@ -45,8 +47,9 @@
 // it reports the finding again (the verdict answers the dispute); won't fix, deferred or a rejected dispute
 // acknowledged, kept on a blocking finding; a question answered, never counted; the second keep escalated; the newest
 // claim and the keep count stored on the finding; what to reply, never for verified fixed nor acknowledged; a claim the
-// finder said nothing about left unread), the loop, the verdict, the agent's next action, who must act on each finding,
-// the check's conclusion, what to post (a finding an earlier round withheld, its review never landed, posted now while
+// finder said nothing about left unread; with no claim, after a push (the round's commit isn't `lastChecked`), a
+// finding open on its own thread and still present says the finder's reason, counted for nothing, ADR 0081), the
+// loop, the verdict, the agent's next action, who must act on each finding, the check's conclusion, what to post (a finding an earlier round withheld, its review never landed, posted now while
 // it is open), the counts over posted findings only and how many findings are kept in the app (unsettled, not posted);
 // `obsolete` waits), answered as contracts' `Reconciled`, which `publish` posts as it is; the claims on Lookover's
 // threads (`readThreads`, ADR 0052, ADR 0048: per unsettled finding, by the root comment's marker, never its line, the
@@ -67,10 +70,11 @@
 // and takes no label, and the rules nested in it go with it, their lines still counted against the budget; each parsed
 // rule carries the ids of the items it sits in, `parentIds`). Interface: pure functions over domain values from
 // @lookover/contracts, never the UI snapshot as a whole (`intake` reads only a change's `author`, `draft` and `fork`,
-// from contracts' `Change`, which the snapshot holds too; `reconcile` gives a new finding the facts the app shows with
-// it when the candidate has none: as its `why`, the text of the rule it cites when the rules given hold it (ADR 0048),
-// else none, `NOT_CHECKED` as its confirmation; who found it and its line's text are the candidate's). Same input, same
-// output: no clock, no IDs, no randomness; a finding's id is its rank on the change, `F<n>`. Invariants: a settled
+// from contracts' `Change`, which the snapshot holds too, and of setup only `{ reposChosen }`, contracts' `reposChosen`;
+// `reconcile` gives a new finding the facts the app shows with it when the candidate has none: as its `why`, the
+// text of the rule it cites when the rules given hold it (ADR 0048), else none, `NOT_CHECKED` as its confirmation; who
+// found it and its line's text are the candidate's). Same input, same output: no clock, no IDs, no randomness; a
+// finding's id is its rank on the change, `F<n>`. Invariants: a settled
 // finding never changes again; a finding is never raised twice on one change; a finding reported again is still
 // present; escalated wins the loop state.
 // Ordering: `reconcile` takes a change's rounds in order, each against the ledger the one before returned (round 1
@@ -116,4 +120,4 @@ export {
   readThreads,
   type ThreadReading,
 } from "./threads.ts";
-export { type WriterFacts, writerOf } from "./writer.ts";
+export { agentPushed, type WriterFacts, writerOf } from "./writer.ts";

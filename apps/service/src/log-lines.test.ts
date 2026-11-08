@@ -59,6 +59,7 @@ function job(state: ReviewJob["state"], extra: Partial<ReviewJob> = {}): ReviewJ
     state,
     deferral: null,
     stepIn: null,
+    askedBy: null,
     skip: null,
     cancel: null,
     failure: null,
@@ -190,8 +191,22 @@ test("a change opened, marked ready, pushed and closed each say so, its title in
     commits: 0,
     by: "agent",
   };
-  expect(logLineOf(pushed, before())).toBe("sasensi/ledger-api#151 pushed b2e8d1f by the agent");
-  expect(logLineOf({ ...pushed, by: "you" }, before())).toBe("sasensi/ledger-api#151 pushed b2e8d1f by you");
+  // An agent only when it signed every commit; else no one is named (ADR 0081). GitHub may not count them.
+  expect(logLineOf(pushed, before())).toBe(
+    "sasensi/ledger-api#151 the agent pushed new commits, now at b2e8d1f",
+  );
+  expect(logLineOf({ ...pushed, commits: 3 }, before())).toBe(
+    "sasensi/ledger-api#151 the agent pushed 3 commits, now at b2e8d1f",
+  );
+  expect(logLineOf({ ...pushed, commits: 3, by: null }, before())).toBe(
+    "sasensi/ledger-api#151 3 new commits, now at b2e8d1f",
+  );
+  expect(logLineOf({ ...pushed, commits: 1, by: null }, before())).toBe(
+    "sasensi/ledger-api#151 1 new commit, now at b2e8d1f",
+  );
+  expect(logLineOf({ ...pushed, by: null }, before())).toBe(
+    "sasensi/ledger-api#151 new commits, now at b2e8d1f",
+  );
   expect(logLineOf({ type: "change.closed", at: AT, changeId: ID }, before())).toBe(
     "sasensi/ledger-api#151 closed",
   );
@@ -209,6 +224,13 @@ test("a job queued says what asked for it and the commit; waiting, back in the q
     expect(logLineOf(jobChanged(job("queued", { trigger })), before())).toBe(
       `sasensi/ledger-api#151 review queued (${words}) for a1f9c2e`,
     );
+  // A request comment says who wrote it (ADR 0081).
+  expect(logLineOf(jobChanged(job("queued", { trigger: "comment", askedBy: "agent" })), before())).toBe(
+    "sasensi/ledger-api#151 review queued (asked by the agent on GitHub) for a1f9c2e",
+  );
+  expect(logLineOf(jobChanged(job("queued", { trigger: "comment", askedBy: "person" })), before())).toBe(
+    "sasensi/ledger-api#151 review queued (asked on GitHub) for a1f9c2e",
+  );
   const paused = job("deferred", { deferral: { reason: "paused" } });
   expect(logLineOf(jobChanged(paused), before())).toBe(
     "sasensi/ledger-api#151 review waits: reviews are paused",
@@ -225,6 +247,21 @@ test("a job queued says what asked for it and the commit; waiting, back in the q
     logLineOf(jobChanged(job("queued", { sha: PUSHED })), before({ review: { job: job("queued") } })),
   ).toBe("sasensi/ledger-api#151 review moved to b2e8d1f");
   expect(logLineOf(jobChanged(job("queued")), before({ review: { job: job("queued") } }))).toBeNull();
+  // A request joining a job no request asked for says who asked, once (ADR 0081), and what else it did to the job.
+  const joined = job("queued", { trigger: "push", askedBy: "person" });
+  expect(logLineOf(jobChanged(joined), before({ review: { job: job("queued", { trigger: "push" }) } }))).toBe(
+    "sasensi/ledger-api#151 review asked for on GitHub",
+  );
+  expect(logLineOf(jobChanged({ ...joined, askedBy: "agent" }), before({ review: { job: paused } }))).toBe(
+    "sasensi/ledger-api#151 review asked for by the agent on GitHub, back in the queue",
+  );
+  expect(
+    logLineOf(
+      jobChanged({ ...joined, sha: PUSHED }),
+      before({ review: { job: job("queued", { trigger: "push" }) } }),
+    ),
+  ).toBe("sasensi/ledger-api#151 review asked for on GitHub, moved to b2e8d1f");
+  expect(logLineOf(jobChanged(joined), before({ review: { job: joined } }))).toBeNull();
 });
 
 test("a job left running at the last stop says it runs again, or failed, once", () => {
@@ -234,7 +271,11 @@ test("a job left running at the last stop says it runs again, or failed, once", 
   );
   expect(
     logLineOf(
-      jobChanged(job("failed", { failure: { kind: "service_stopped", detail: "", engine: null } })),
+      jobChanged(
+        job("failed", {
+          failure: { kind: "service_stopped", detail: "", engine: null, cause: null, limitMs: null },
+        }),
+      ),
       running,
     ),
   ).toBe("sasensi/ledger-api#151 review failed: the service stopped before the review finished");
@@ -249,16 +290,59 @@ test("a job skipped, cancelled or failed says why, a failure with what the modul
   );
   expect(
     logLineOf(
-      jobChanged(job("failed", { failure: { kind: "review_failed", detail: "crashed", engine: "codex" } })),
+      jobChanged(
+        job("failed", {
+          failure: { kind: "review_failed", detail: "crashed", engine: "codex", cause: null, limitMs: null },
+        }),
+      ),
       before(),
     ),
   ).toBe("sasensi/ledger-api#151 review failed: Codex gave no review (crashed)");
   expect(
     logLineOf(
-      jobChanged(job("failed", { failure: { kind: "host_failed", detail: "", engine: null } })),
+      jobChanged(
+        job("failed", {
+          failure: { kind: "host_failed", detail: "", engine: null, cause: null, limitMs: null },
+        }),
+      ),
       before(),
     ),
-  ).toBe("sasensi/ledger-api#151 review failed: GitHub did not answer");
+  ).toBe("sasensi/ledger-api#151 review failed: GitHub didn't answer");
+  // A cause known (ADR 0081): its phrase, the module's own words still in brackets.
+  expect(
+    logLineOf(
+      jobChanged(
+        job("failed", {
+          failure: {
+            kind: "prepare_failed",
+            detail: "fetch_failed: git took too long (idle)",
+            engine: "claude",
+            cause: "git_silent",
+            limitMs: 120_000,
+          },
+        }),
+      ),
+      before(),
+    ),
+  ).toBe(
+    "sasensi/ledger-api#151 review failed: git sent nothing for 2 minutes while Lookover got the code ready (fetch_failed: git took too long (idle))",
+  );
+  expect(
+    logLineOf(
+      jobChanged(
+        job("failed", {
+          failure: {
+            kind: "review_failed",
+            detail: "timeout",
+            engine: "codex",
+            cause: "engine_time_limit",
+            limitMs: 1_200_000,
+          },
+        }),
+      ),
+      before(),
+    ),
+  ).toBe("sasensi/ledger-api#151 review failed: Codex ran past its 20-minute limit (timeout)");
   // Running and done are the run's and the round's lines.
   expect(logLineOf(jobChanged(job("running")), before())).toBeNull();
   expect(logLineOf(jobChanged(job("done")), before())).toBeNull();
@@ -324,7 +408,13 @@ test("a round finished says posted with its open findings and what failed, kept 
       finished(
         round(1),
         job("failed", {
-          failure: { kind: "publish_failed", detail: "GitHub answered 422", engine: "codex" },
+          failure: {
+            kind: "publish_failed",
+            detail: "GitHub answered 422",
+            engine: "codex",
+            cause: null,
+            limitMs: null,
+          },
         }),
       ),
       before(),
@@ -349,7 +439,7 @@ test("a post that meets a refusal and waits says until when and why, once per wa
   );
   const down = { until: new Date(2026, 9, 12, 0, 1).getTime(), refusal: "unavailable" as const };
   expect(logLineOf(posting(0, down), posting1(null))).toBe(
-    "sasensi/ledger-api#151 round 2 posts wait: GitHub did not answer, trying again at 2026-10-12 00:01 (0 of 4 sent)",
+    "sasensi/ledger-api#151 round 2 posts wait: GitHub didn't answer, trying again at 2026-10-12 00:01 (0 of 4 sent)",
   );
   // The same wait said again, a post sent, a wait over: no line.
   expect(logLineOf(posting(2, limited), posting1({ sent: 2, owed: 4, wait: limited }))).toBeNull();

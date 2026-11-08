@@ -301,6 +301,7 @@ export function createWriter(
             query: MINIMIZE,
             variables: { id: nodeId, classifier: CLASSIFIER[reason] },
             what: `minimizeComment on ${nodeId}`,
+            read: false,
           },
           minimizedComment,
         ).then((answer) => {

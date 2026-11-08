@@ -142,7 +142,8 @@ export async function buildSetups(
     const reconciled = reconcile(
       [],
       { ...found.value, candidates: applied.candidates },
-      { round, settings: { strictness: STRICTNESS }, rules: switches },
+      // Round 1: no round checked a commit before it.
+      { round, settings: { strictness: STRICTNESS }, rules: switches, lastChecked: null },
     );
     return {
       kind: "complete",
