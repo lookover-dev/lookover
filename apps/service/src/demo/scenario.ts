@@ -62,6 +62,12 @@ export interface World {
     reaches: { organisation: Account; repositories: RepositoryRef[]; sso?: true; owners?: Account[] }[];
     unreached?: { organisation: Account; repositories: RepositoryRef[]; owners?: Account[] }[];
   };
+  /**
+   * The repositories switched off at the start (ADR 0084), each through the store's repository switch before the
+   * room first reads it, as the owner's untick in setup would leave them: still polled, their pull requests left out
+   * of Reviews. Absent, every repository is on.
+   */
+  off?: RepositoryRef[];
   /** The owner's own `gh` (ADR 0059): signed in as the owner, signed out, or not installed. Absent, signed out. */
   gh?: "signed-in" | "signed-out" | "missing";
   /**

@@ -21,7 +21,7 @@ import type { HeldValue } from "./view-model/held.ts";
 import { type Refusal, refusalOf, saysNothing } from "./view-model/refusal.ts";
 import { RepositoriesBar } from "./view-model/repositories.ts";
 import { ListScope, type ScopeChoice } from "./view-model/scope.ts";
-import { changeReviews } from "./view-model/select.ts";
+import { listedReviews } from "./view-model/select.ts";
 
 /** What the HTTP client adds to `LookoverApi`: it says when the service no longer knows the session. */
 export interface SessionAware {
@@ -111,7 +111,7 @@ export class Store {
 
   private changed(): void {
     if (this.state) {
-      this.scope.see(changeReviews(this.state));
+      this.scope.see(listedReviews(this.state));
       this.repositoriesBar.see(this.state);
       this.leftSummary.see(this.state);
     }

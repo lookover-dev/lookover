@@ -28,7 +28,9 @@ import {
   type State,
   type Turn,
 } from "@lookover/contracts";
+import { allReviews } from "./filters.ts";
 import { repositoryLabel, SEPARATOR } from "./format.ts";
+import { scopeTabs } from "./scope.ts";
 import {
   authorLabel,
   bandOn,
@@ -42,12 +44,14 @@ import {
   failedNotice,
   gitHubPrimary,
   homeGroups,
+  listedReviews,
   lookedOver,
   nextStep,
   nothingReviewedYet,
   notReviewed,
   openVerdict,
   type Problem,
+  paletteReviews,
   pill,
   problems,
   REVIEW_BUTTON,
@@ -2087,6 +2091,88 @@ test("Home: Mine keeps the person's in every group; Everyone adds others' never 
   // An old skip of another's keeps its place among what ended today.
   expect(numbers(everyone.earlier).sort()).toEqual([1, 4]);
   expect(numbers(everyone.notReviewed)).toEqual([3]);
+});
+
+/** The change `sam/app#n` moved to the repository `sam/old`, which `on` says is on or off (ADR 0084). */
+function inOld(state: State, n: number, on: boolean): State {
+  const id = changeId(`sam/app#${n}`);
+  const change = state.changes[id];
+  if (!change) throw new Error("No change");
+  const old = repositoryId("sam/old");
+  const repos = state.repos.some((r) => r.id === old)
+    ? state.repos.map((r) => (r.id === old ? { ...r, enabled: on } : r))
+    : [...state.repos, { id: old, owner: "sam", name: "old", enabled: on, settings: DEFAULTS }];
+  return { ...state, repos, changes: { ...state.changes, [id]: { ...change, repoId: old } } };
+}
+
+test("a repository that is off leaves Reviews: Home, All reviews, the tabs and their counts; on again, it is back", () => {
+  const build = (on: boolean) => {
+    let st = withChange(calm(), 1, "needs-you", MIN);
+    st = inOld(withChange(st, 2, "needs-you", MIN), 2, on);
+    return inOld(asOther(withChange(st, 3, "none", MIN), 3), 3, on);
+  };
+  const off = build(false);
+  expect(numbers(listedReviews(off))).toEqual([1]);
+  expect(numbers(homeGroups(off, "mine").needs)).toEqual([1]);
+  expect(homeGroups(off, "everyone").notReviewed).toEqual([]);
+  expect(numbers(homeGroups(off, "everyone").tab)).toEqual([1]);
+  expect(numbers(allReviews(listedReviews(off), "everyone", "all", "", () => "").rows)).toEqual([1]);
+  // Another's pull request in an off repository is no reason for the tabs.
+  expect(scopeTabs(listedReviews(off), false)).toBeNull();
+  expect(sentence(off).title).toBe("1 pull request needs you.");
+  // Its review page, reached by its address, still opens, and its card, never asked, says the repository is off.
+  const page = changeReviewAt(off, "sam", "old", "3");
+  expect(page?.change.number).toBe(3);
+  if (!page) throw new Error("No page");
+  expect(notReviewed(page)).toEqual({ title: "this repository is off", why: skipWhy(page, "repo-off") });
+
+  const on = build(true);
+  expect(numbers(listedReviews(on)).sort()).toEqual([1, 2, 3]);
+  expect(numbers(homeGroups(on, "everyone").notReviewed)).toEqual([3]);
+  expect(scopeTabs(listedReviews(on), false)).toEqual([
+    { value: "mine", label: "Mine", count: 2 },
+    { value: "everyone", label: "Everyone", count: 3 },
+  ]);
+  expect(sentence(on).title).toBe("2 pull requests need you.");
+});
+
+test("a review queued or running when its repository is switched off stays listed until it ends", () => {
+  let st = withChange(calm(), 1, "running", MIN);
+  st = inOld(st, 1, false);
+  st = inOld(withChange(st, 2, "deferred", MIN), 2, false);
+  st = inOld(withChange(st, 3, "queued", MIN), 3, false);
+  st = inOld(withChange(st, 4, "needs-you", MIN), 4, false);
+  st = inOld(withChange(st, 5, "clean", MIN), 5, false);
+  expect(numbers(listedReviews(st)).sort()).toEqual([1, 2, 3]);
+  const mine = homeGroups(st, "mine");
+  expect(numbers(mine.running)).toEqual([1]);
+  expect(numbers(mine.waiting).sort()).toEqual([2, 3]);
+  expect(sentence(st).small).toContain("1 reviewing now · 2 waiting");
+  expect(numbers(paletteReviews(st, "all")).sort()).toEqual([1, 2, 3]);
+  // The deferred one Codex may step in for is a row the status menu's count speaks of.
+  const job = st.reviews[changeId("sam/app#2")]?.job;
+  if (!job) throw new Error("No job");
+  const offered = inOld(
+    withChange(signedOut(st, "claude"), 2, "none", MIN, { job: { ...job, stepIn: "codex" } }),
+    2,
+    false,
+  );
+  expect(sendElsewhere(offered, "claude")).toEqual({ to: "codex", count: 1 });
+  expect(numbers(homeGroups(offered, "mine").waiting).sort()).toEqual([2, 3]);
+});
+
+test("the palette leaves out a repository that is off, the person's own pull request included; on again, it is back", () => {
+  const build = (on: boolean) => {
+    const st = withChange(withChange(calm(), 1, "needs-you", MIN), 2, "needs-you", MIN);
+    return inOld(st, 2, on);
+  };
+  const off = build(false);
+  expect(numbers(paletteReviews(off, "review"))).toEqual([1]);
+  expect(numbers(paletteReviews(off, "all"))).toEqual([1]);
+  expect(numbers(paletteReviews(off, null))).toEqual([1]);
+  const on = build(true);
+  expect(numbers(paletteReviews(on, "review")).sort()).toEqual([1, 2]);
+  expect(numbers(paletteReviews(on, "all")).sort()).toEqual([1, 2]);
 });
 
 test("Review now only on another's pull request never asked; an old skip's row keeps what it shows", () => {

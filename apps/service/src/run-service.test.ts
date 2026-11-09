@@ -405,6 +405,7 @@ const LINUX: System = {
   homedir: "/home/ada",
   env: { PATH: "/usr/bin" },
   which: (tool) => `/usr/bin/${tool}`,
+  realPath: () => null,
 };
 
 /** This clone, as `main.ts` says it. */
@@ -819,6 +820,7 @@ test("the program's 401 names the command that opens Lookover, and its snapshot 
     homedir: "C:\\Users\\Your Name",
     env: { LOCALAPPDATA: "C:\\Users\\Your Name\\AppData\\Local" },
     which: (program) => (program === "git" ? "C:\\Git\\git.exe" : null),
+    realPath: () => null,
   };
   const config = readConfig([`--home=${home}`], windows, binary);
   const command = `& 'C:\\Users\\Your Name\\Downloads\\lookover.exe' '--home=${home}'`;

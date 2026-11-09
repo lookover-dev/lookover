@@ -72,9 +72,13 @@ const LEFT = FERNHILL_REPOS.slice(20);
 const LEDGER_DEV_REPOS = ["ledger-api", "ledger-web", "ledger-docs"].map((name) => of(LEDGER_DEV, name));
 const LEDGER_LABS_REPOS = ["ledger-cli", "ledger-sdk"].map((name) => of(LEDGER_LABS, name));
 
-/** The world at the start: 40 repositories in four accounts, the owner a member of fernhill and of ledger-dev. */
+/**
+ * The world at the start: 40 repositories in four accounts, the owner a member of fernhill and of ledger-dev, four of
+ * fernhill's that hold others' pull requests switched off (ADR 0084).
+ */
 export const LARGE_ORGANISATION: World = {
   ...LEDGER_API,
+  off: ["web", "mobile", "analytics", "gateway"].map((name) => of(FERNHILL, name)),
   repositories: OWN.filter((r) => r.name !== OWN_API.name),
   gh: "signed-in",
   memberships: [
@@ -253,10 +257,11 @@ export const OPENED: TimedMove[] = [
 export const S18: Scenario = {
   id: "S18",
   title: "A large organisation",
-  what: "You're signed in on four accounts, 40 repositories in all: twelve have left, ten of fernhill's and all of ledger-labs', and others have 22 pull requests open.",
+  what: "You're signed in on four accounts, 40 repositories in all: twelve have left, ten of fernhill's and all of ledger-labs', four of fernhill's are off, and others have 22 pull requests open.",
   steps: [
     "Repositories lists 28 repositories: yours, fernhill's 20 and ledger-dev's 3. fernhill's owner took ten off the App, and ledger-labs uninstalled it.",
-    "Home and All reviews list your three pull requests, reviewed clean. Everyone lists 22 more, by others.",
+    "fernhill's web, mobile, analytics and gateway are off: Repositories says they are not reviewed, and their five pull requests stay out of Reviews.",
+    "Home and All reviews list your three pull requests, reviewed clean. Everyone lists 17 more, by others: none from the four that are off.",
     "Under Everyone, Review now on mira's fernhill/api #412: it is reviewed, nothing to raise.",
   ],
   later: "",

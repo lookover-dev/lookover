@@ -1,10 +1,11 @@
 // The program's configuration (ADR 0054): with neither `--demo` nor `--live` it is the program, on the user
 // profile's data folder unless `LOOKOVER_HOME` or `--home` says another, guarded by a `live.json` when there is one.
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { carriedWebFiles, type LiveConfig, readConfig as readOn, type System } from "./index.ts";
+import { join, resolve, sep } from "node:path";
+import { carriedWebFiles, type LiveConfig, readConfig as readOn, realSystem, type System } from "./index.ts";
+import { noShortNames, otherCase, shortForm, spacedFolder, trailing } from "./spelling.test-support.ts";
 
 /** How this clone runs `lookover`: Bun and its `main.ts`, as `main.ts` says it. */
 const SELF = { kind: "clone", bun: process.execPath, main: join(import.meta.dir, "main.ts") } as const;
@@ -16,6 +17,15 @@ const cleanups: (() => void)[] = [];
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
 });
+
+const made = (folder: string) => cleanups.push(() => rmSync(folder, { recursive: true, force: true }));
+
+/** This machine's disk, on a machine of its OS with no environment of its own. */
+const onDisk: System = {
+  ...realSystem(),
+  env: { PATH: "/usr/bin" },
+  which: (program) => `/usr/bin/${program}`,
+};
 
 function folder(): string {
   const made = mkdtempSync(join(realpathSync.native(tmpdir()), "lookover-config-"));
@@ -29,6 +39,7 @@ const system = (platform: NodeJS.Platform, homedir: string, env: Record<string, 
   homedir,
   env: { PATH: "/usr/bin", ...env },
   which: (program) => `/usr/bin/${program}`,
+  realPath: () => null,
 });
 
 test("on Windows git is found on the PATH whatever its name's case: PowerShell's is Path", () => {
@@ -41,6 +52,7 @@ test("on Windows git is found on the PATH whatever its name's case: PowerShell's
       searched.push(path);
       return path === "C:\\Program Files\\Git\\cmd" ? `${path}\\${program}.exe` : null;
     },
+    realPath: () => null,
   });
   expect(config.git).toBe("C:\\Program Files\\Git\\cmd\\git.exe");
   expect(searched).toEqual(["C:\\Program Files\\Git\\cmd"]);
@@ -80,6 +92,67 @@ test("LOOKOVER_HOME overrides the profile's folder, and --home overrides both", 
   expect(readConfig([], machine).home).toBe(byEnv);
   expect(readConfig([`--home=${byFlag}`], machine).home).toBe(byFlag);
 });
+
+test("one folder is one path (ADR 0084): a trailing separator, another spelling and a folder not made yet all give its real path", () => {
+  const root = resolve("/lookover-disk");
+  const real = join(root, "Sam Doe", "Lookover");
+  const short = join(root, "SAMDOE~1", "Lookover");
+  // The disk: the short form and another case read as the real path; anything under it isn't made yet.
+  const disk = new Map([
+    [short, real],
+    [short.toUpperCase(), real],
+    [real, real],
+  ]);
+  // This OS's paths, so this OS's platform.
+  const machine = {
+    ...system(process.platform, "/home/ada"),
+    realPath: (path: string) => disk.get(path) ?? null,
+  };
+  expect(readConfig([`--home=${short}${sep}`], machine).home).toBe(real);
+  expect(readConfig([`--home=${short.toUpperCase()}`], machine).home).toBe(real);
+  expect(readConfig([], { ...machine, env: { LOOKOVER_HOME: short } }).home).toBe(real);
+  expect(readConfig([`--home=${join(short, "not", "made")}`], machine).home).toBe(join(real, "not", "made"));
+  // A folder nothing on the disk holds is kept as given, made absolute.
+  expect(readConfig([`--home=${join(root, "elsewhere")}`], machine).home).toBe(join(root, "elsewhere"));
+  // The profile's, as `%LOCALAPPDATA%` spells it.
+  const windows = system("win32", "C:\\Shared Folders", {
+    LOCALAPPDATA: "C:\\SHARED~1\\AppData\\Local",
+  });
+  const profile = new Map([
+    ["C:\\SHARED~1\\AppData\\Local\\Lookover", "C:\\Shared Folders\\AppData\\Local\\Lookover"],
+  ]);
+  expect(readConfig([], { ...windows, realPath: (path) => profile.get(path) ?? null }).home).toBe(
+    "C:\\Shared Folders\\AppData\\Local\\Lookover",
+  );
+});
+
+test("one folder is one path on the real disk: a trailing separator, on every OS", () => {
+  const folder = spacedFolder(made);
+  expect(readConfig([`--home=${trailing(folder)}`], onDisk).home).toBe(folder);
+  // The disk's case where the volume ignores case (Windows, macOS's APFS), the typed one where it doesn't (Linux).
+  const inner = existsSync(join(folder, "inner folder")) ? "Inner Folder" : "inner folder";
+  expect(readConfig([`--home=${join(trailing(folder), "inner folder", "new")}`], onDisk).home).toBe(
+    join(folder, inner, "new"),
+  );
+});
+
+test.skipIf(process.platform !== "win32")(
+  "on Windows only: another case and the 8.3 short form of the data folder read as its long form",
+  () => {
+    const folder = spacedFolder(made);
+    expect(readConfig([`--home=${otherCase(folder)}`], onDisk).home).toBe(folder);
+    expect(readConfig([`--home=${join(otherCase(folder), "INNER FOLDER")}`], onDisk).home).toBe(
+      join(folder, "Inner Folder"),
+    );
+    const short = shortForm(folder);
+    if (short === null) return console.log(noShortNames(folder));
+    expect(short).not.toBe(folder);
+    expect(readConfig([`--home=${short}`], onDisk).home).toBe(folder);
+    expect(readConfig([], { ...onDisk, env: { ...onDisk.env, LOOKOVER_HOME: trailing(short) } }).home).toBe(
+      folder,
+    );
+  },
+);
 
 test("the program's start at login runs this clone's lookover start, naming the data folder unless it is the profile's", () => {
   const self = [SELF.bun, SELF.main];

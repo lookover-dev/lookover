@@ -7,8 +7,8 @@ import { allReviews, matchesSearch } from "../view-model/filters.ts";
 import { plural } from "../view-model/format.ts";
 import {
   type ChangeReview,
-  changeReviews,
   homeGroups,
+  listedReviews,
   nothingReviewedYet,
   problems,
   sentence,
@@ -36,7 +36,7 @@ export function Home() {
   const [query, setQuery] = useState("");
   const g = homeGroups(state, scope);
   const s = sentence(state);
-  const all = changeReviews(state);
+  const all = listedReviews(state);
   const fresh = useFresh(all.map((i) => i.change.id));
   const earlier = g.earlier.filter((i) => matchesSearch(i, query, statusLine(state, i)));
   // Problems are shown by the alert band above every page, not here.
@@ -104,14 +104,17 @@ export function AllReviews() {
   const { scope } = useListScope();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
-  const all = changeReviews(state);
+  const all = listedReviews(state);
   const { options, rows } = allReviews(all, scope, filter, query, (i) => statusLine(state, i));
   return (
     <Page screen="reviews">
       <div className="crumb">
         <Link to="/">Reviews</Link> / <b>All reviews</b>
       </div>
-      <Sentence title="All reviews." small="Every pull request Lookover has seen, with its outcome." />
+      <Sentence
+        title="All reviews."
+        small="Every pull request in the repositories that are on, with its outcome."
+      />
       <ScopeTabs items={all} />
       <div className="filters">
         <Segmented label="Outcome" value={filter} options={options} onChange={setFilter} />

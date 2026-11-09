@@ -6,6 +6,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { commandLineOf } from "@lookover/process/background";
 import {
   launchAgentLoginItem,
   loginCommand,
@@ -24,11 +25,13 @@ const windows: System = {
   homedir: "C:\\Users\\Your Name",
   env: { LOCALAPPDATA: "C:\\Users\\Your Name\\AppData\\Local" },
   which: () => null,
+  realPath: () => null,
 };
 const BUN = "D:\\tools\\bun\\bun.exe";
 const ENTRY = "C:\\code\\my clone\\apps\\service\\src\\main.ts";
 const COMMAND = [BUN, ENTRY, "start", "--no-open"];
 const RUN = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+const PROFILE = "C:\\Users\\Your Name\\AppData\\Local\\Lookover";
 
 test("the command is `lookover start --no-open` by absolute paths, naming the data folder only when it isn't the profile's", () => {
   expect(loginCommand("C:\\Users\\Your Name\\AppData\\Local\\Lookover", windows, [BUN, ENTRY])).toEqual(
@@ -42,7 +45,13 @@ test("the command is `lookover start --no-open` by absolute paths, naming the da
     ...COMMAND,
     "--home=D:\\lookover data",
   ]);
-  const linux: System = { platform: "linux", homedir: "/home/sam", env: {}, which: () => null };
+  const linux: System = {
+    platform: "linux",
+    homedir: "/home/sam",
+    env: {},
+    which: () => null,
+    realPath: () => null,
+  };
   expect(loginCommand("/home/sam/.local/share/lookover", linux, ["/usr/bin/bun", "/c/main.ts"])).toEqual([
     "/usr/bin/bun",
     "/c/main.ts",
@@ -372,6 +381,123 @@ X-GNOME-Autostart-enabled=true
 `);
   await item.unregister();
   expect(existsSync(file)).toBe(false);
+});
+
+test("Windows: a value is read word by word, as the C runtime reads it: the same words quoted another way are this install's, and written again", async () => {
+  const words = [
+    BUN,
+    "C:\\a folder\\",
+    "--home=C:\\Shared Folders\\data",
+    'say "hi"',
+    'back\\"slash',
+    "",
+    "tab\there",
+    "plain\\path\\",
+  ];
+  // Every word quoted but the last, blanks of every kind between them.
+  const quoted = [
+    String.raw`  "D:\tools\bun\bun.exe"`,
+    String.raw`"C:\a folder\\"`,
+    String.raw`"--home=C:\Shared Folders\data"`,
+    String.raw`"say \"hi\""`,
+    String.raw`"back\\\"slash"`,
+    `""`,
+    `"tab\there"`,
+    String.raw`plain\path\  `,
+  ].join(" \t  ");
+  const { reg, values } = fakeReg({ values: new Map([["Lookover", quoted]]) });
+  const item = windowsLoginItem(words, { reg });
+  expect(await item.held()).toBe("this");
+  expect(await item.register()).toBe("this");
+  expect(values.get("Lookover")).toBe(commandLineOf(words));
+  // One word another: another install's.
+  const other = fakeReg({ values: new Map([["Lookover", quoted.replace("say", "said")]]) });
+  expect(await windowsLoginItem(words, { reg: other.reg }).held()).toEqual({
+    other: quoted.replace("say", "said"),
+  });
+});
+
+test("Windows: a value naming the data folder in another spelling is this install's, read by the folder's real path, and written again (ADR 0084)", async () => {
+  // The disk: the data folder's short form and the profile's, each read as its real path.
+  const disk = new Map([
+    ["C:\\SHARED~1\\data", "C:\\Shared Folders\\data"],
+    ["C:\\Users\\Your Name\\APPDAT~1\\Local\\Lookover", "C:\\Users\\Your Name\\AppData\\Local\\Lookover"],
+  ]);
+  const machine: System = { ...windows, realPath: (path) => disk.get(path) ?? null };
+  const command = loginCommand("C:\\Shared Folders\\data", machine, [BUN, ENTRY]);
+  const line = `${BUN} "${ENTRY}" start --no-open "--home=C:\\Shared Folders\\data"`;
+  const short = `${BUN} "${ENTRY}" start --no-open --home=C:\\SHARED~1\\data`;
+  const { reg, values } = fakeReg({ values: new Map([["Lookover", short]]) });
+  const item = windowsLoginItem(command, { reg, system: machine });
+  expect(await item.held()).toBe("this");
+  expect(await item.register()).toBe("this");
+  expect(values.get("Lookover")).toBe(line);
+  // The profile's folder in another spelling: the command that names no data folder.
+  const profile = `${BUN} "${ENTRY}" start --no-open "--home=C:\\Users\\Your Name\\APPDAT~1\\Local\\Lookover\\\\"`;
+  const atProfile = fakeReg({ values: new Map([["Lookover", profile]]) });
+  const own = windowsLoginItem(loginCommand(PROFILE, machine, [BUN, ENTRY]), {
+    reg: atProfile.reg,
+    system: machine,
+  });
+  expect(await own.held()).toBe("this");
+  // Another folder is still another install's.
+  const elsewhere = `${BUN} "${ENTRY}" start --no-open --home=D:\\other`;
+  const other = fakeReg({ values: new Map([["Lookover", elsewhere]]) });
+  expect(await windowsLoginItem(command, { reg: other.reg, system: machine }).held()).toEqual({
+    other: elsewhere,
+  });
+});
+
+/** A Mac whose disk reads `/tmp/Data` as `/private/tmp/data`: another case, and `/tmp` a link. */
+const mac: System = {
+  platform: "darwin",
+  homedir: "/Users/sam",
+  env: {},
+  which: () => null,
+  realPath: (path) => (path === "/tmp/Data" ? "/private/tmp/data" : null),
+};
+
+test("macOS: a LaunchAgent naming the data folder in another spelling is this install's, read by the folder's real path, and written again (ADR 0084)", async () => {
+  const home = scratch();
+  const self = ["/opt/bun", "/c/main.ts"];
+  await launchAgentLoginItem(loginCommand("/tmp/Data", mac, self), { home }).register();
+  const command = loginCommand("/private/tmp/data", mac, self);
+  const item = launchAgentLoginItem(command, { home, system: mac });
+  expect(await item.held()).toBe("this");
+  expect(await item.register()).toBe("this");
+  expect(await launchAgentLoginItem(command, { home }).held()).toBe("this");
+  // Another folder is still another install's.
+  const elsewhere = scratch();
+  await launchAgentLoginItem(loginCommand("/other", mac, self), { home: elsewhere }).register();
+  expect(await launchAgentLoginItem(command, { home: elsewhere, system: mac }).held()).toEqual({
+    other: "/opt/bun /c/main.ts start --no-open --home=/other",
+  });
+});
+
+test("Linux: an autostart entry naming the data folder in another spelling is this install's, read by the folder's real path, and written again (ADR 0084)", async () => {
+  const home = scratch();
+  // A link: `/home/sam/link` is `/srv/data`.
+  const linux: System = {
+    platform: "linux",
+    homedir: "/home/sam",
+    env: {},
+    which: () => null,
+    realPath: (path) => (path === "/home/sam/link" ? "/srv/data" : null),
+  };
+  const self = ["/usr/bin/bun", '/c/a "b" $x\\y %u/main.ts'];
+  await xdgLoginItem(loginCommand("/home/sam/link/", linux, self), { home, env: {} }).register();
+  const command = loginCommand("/srv/data", linux, self);
+  const item = xdgLoginItem(command, { home, env: {}, system: linux });
+  expect(await item.held()).toBe("this");
+  expect(await item.register()).toBe("this");
+  expect(await xdgLoginItem(command, { home, env: {} }).held()).toBe("this");
+  // Another folder is still another install's.
+  const elsewhere = scratch();
+  await xdgLoginItem(loginCommand("/other", linux, self), { home: elsewhere, env: {} }).register();
+  expect(await xdgLoginItem(command, { home: elsewhere, env: {}, system: linux }).held()).toEqual({
+    other:
+      '"/usr/bin/bun" "/c/a \\\\"b\\\\" \\\\$x\\\\\\\\y %%u/main.ts" "start" "--no-open" "--home=/other"',
+  });
 });
 
 test("Windows: this install's value in another case is written again on register, exactly", async () => {

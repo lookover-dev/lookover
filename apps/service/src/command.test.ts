@@ -36,6 +36,7 @@ const machine = (data: string, env: Record<string, string> = {}): System => ({
   homedir: "/home/ada",
   env: { PATH: "/usr/bin", XDG_DATA_HOME: data, ...env },
   which: (program) => `/usr/bin/${program}`,
+  realPath: () => null,
 });
 
 /** The App `slug` an earlier version kept in the data folder `home` (`github/app.json`), which Lookover reads no more. */

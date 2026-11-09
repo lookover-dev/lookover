@@ -5,7 +5,7 @@
 // sign-in). With neither `--demo` nor `--live` it is the program (ADR 0054): its data folder the user profile's
 // unless `LOOKOVER_HOME` or `--home` names another, and guarded by a live config when the data folder has one or
 // `--live-config` names one.
-import { statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, posix, resolve, win32 } from "node:path";
 import type { PathOffer } from "@lookover/contracts";
@@ -110,6 +110,11 @@ export interface System {
   env: Record<string, string | undefined>;
   /** A program's absolute path from the PATH, or null when it isn't there. */
   which(program: string, path: string): string | null;
+  /**
+   * An absolute path's real path on the disk (links followed; on Windows every 8.3 name in its long form and the case
+   * the disk holds), or null when nothing is there or it can't be read.
+   */
+  realPath(path: string): string | null;
 }
 
 /** How `lookover serve` is called: every flag it reads. */
@@ -134,14 +139,47 @@ export const realSystem = (): System => ({
   homedir: homedir(),
   env: process.env,
   which: (program, path) => Bun.which(program, { PATH: path }),
+  /** `realpathSync.native`; null when nothing is there or it can't be read. */
+  realPath: (path) => {
+    try {
+      return realpathSync.native(path);
+    } catch {
+      return null;
+    }
+  },
 });
+
+/** The path functions of the system's own path form: Windows' on Windows, POSIX's elsewhere, whatever OS runs this. */
+const pathsOf = (system: System) => (system.platform === "win32" ? win32 : posix);
+
+/**
+ * The data folder `path` names, as one string per folder (ADR 0084): its real path on the disk, so a trailing
+ * separator, another case or an 8.3 short name read as the same folder, which the session cookie's name, start at
+ * login and the commands printed are keyed on. A folder not made yet is its deepest existing parent's real path with
+ * the rest as given; nothing on the disk, `path` as it is.
+ */
+function realFolder(path: string, system: System): string {
+  const { dirname } = pathsOf(system);
+  // The rest is kept as `path` spells it, separators included: a POSIX folder read under a Windows `System` (a
+  // test's) stays POSIX.
+  for (let at = path; ; at = dirname(at)) {
+    const real = system.realPath(at);
+    if (real !== null) return real + path.slice(at.length);
+    if (dirname(at) === at) return path;
+  }
+}
 
 /**
  * The program's data folder in the user's profile (ADR 0054, exploration 07): `%LOCALAPPDATA%\Lookover` on Windows,
  * `~/Library/Application Support/Lookover` on macOS, `$XDG_DATA_HOME/lookover` (else `~/.local/share/lookover`)
  * elsewhere; in the OS's own path form, whatever OS reads it.
  */
-function profileHome({ platform, homedir: user, env }: System): string {
+function profileHome(system: System): string {
+  return realFolder(profileSpelling(system), system);
+}
+
+/** The profile's data folder as its variables spell it. */
+function profileSpelling({ platform, homedir: user, env }: System): string {
   if (platform === "win32")
     return win32.join(env.LOCALAPPDATA || win32.join(user, "AppData", "Local"), "Lookover");
   if (platform === "darwin") return posix.join(user, "Library", "Application Support", "Lookover");
@@ -248,6 +286,21 @@ export function loginCommand(home: string, system: System, self: string[]): stri
   return [...self, "start", "--no-open", ...homeOption(home, system)];
 }
 
+/**
+ * A start-at-login command kept on the machine, as `loginCommand` writes it today (ADR 0084): its `--home=` read by
+ * its folder's real path, and gone when that is the profile's. A line written with another spelling of this data
+ * folder then reads as this Lookover's.
+ */
+export function keptLoginCommand(words: string[], system: System): string[] {
+  const named = words.find(isHomeOption);
+  if (named === undefined) return words;
+  const absolute = pathsOf(system).resolve(named.slice("--home=".length));
+  return [
+    ...words.filter((word) => !isHomeOption(word)),
+    ...homeOption(realFolder(absolute, system), system),
+  ];
+}
+
 /** `--home=<home>` when `home` isn't the profile's data folder; nothing when it is. */
 function homeOption(home: string, system: System): string[] {
   const profile = profileHome(system);
@@ -343,10 +396,14 @@ export const guardedHome = (home: string, system: System): boolean =>
 /** Whether `arg` names the data folder, `--home=<dir>`: the one form every verb reads. */
 export const isHomeOption = (arg: string): boolean => arg.startsWith("--home=");
 
-/** The data folder `--home=` names, else `LOOKOVER_HOME`, made absolute; undefined when neither does. */
+/**
+ * The data folder `--home=` names, else `LOOKOVER_HOME`, made absolute, by its real path; undefined when neither does.
+ * Made absolute by this process's own `resolve`, on its working folder, unlike `keptLoginCommand`'s `pathsOf`: a
+ * relative folder is the host's, and a test's fake Windows on a POSIX host still serves on a real POSIX folder.
+ */
 function givenHome(argv: string[], system: System): string | undefined {
   const given = optionIn(argv, "home") ?? system.env.LOOKOVER_HOME;
-  return given ? resolve(given) : undefined;
+  return given ? realFolder(resolve(given), system) : undefined;
 }
 
 /** The program's data folder: `--home=`, else `LOOKOVER_HOME`, else the profile's (ADR 0054). */

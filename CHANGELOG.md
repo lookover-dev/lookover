@@ -2,6 +2,13 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.12.0](https://github.com/lookover-dev/lookover/compare/v0.11.0...v0.12.0) (2026-11-09)
+
+### Bug Fixes
+
+- **reviews:** a repository you turned off has none of its pull requests in Reviews, under Mine or Everyone, in the counts or in the palette; a review already running or waiting there stays listed until it ends.
+- **cli:** `lookover open`, `stop` and `status` find the running service whatever the spelling of `--home`: a short Windows name, another case or a trailing separator. Start at login reads the data folder the same way.
+
 ## [0.11.0](https://github.com/lookover-dev/lookover/compare/v0.10.0...v0.11.0) (2026-11-08)
 
 ### Features

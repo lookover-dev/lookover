@@ -318,9 +318,10 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     platform: process.platform,
   });
   let own = roomClock(clock);
-  let room = await buildRoom(
-    optionsOn(openStore({ home: o.home, durable: false, eventsFrom: o.eventsFrom ?? 0 }), own),
-  );
+  const store = openStore({ home: o.home, durable: false, eventsFrom: o.eventsFrom ?? 0 });
+  // The world's repositories switched off, through the store's switch before the room first reads it (ADR 0084).
+  for (const repo of scenario.world.off ?? []) store.repos.setEnabled(repo, false);
+  let room = await buildRoom(optionsOn(store, own));
   /**
    * The service stopped and started again on the same folder, as the owner's restart would: the room's timers
    * dropped, the script's and the world's kept; the new room reads its store, its sign-in store and GitHub as any start

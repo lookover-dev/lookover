@@ -8,7 +8,13 @@ import { osLoginItem, windowsLoginItem } from "@lookover/service";
 
 const ROOT = join(import.meta.dir, "..");
 const COMMAND = ["C:\bun.exe", "C:main.ts", "start", "--no-open"];
-const system = { platform: "win32", homedir: "C:Userssam", env: {}, which: () => null } as const;
+const system = {
+  platform: "win32",
+  homedir: "C:Userssam",
+  env: {},
+  which: () => null,
+  realPath: () => null,
+} as const;
 
 test("this test process carries the mark, and the real adapters refuse with NODE_ENV at production", () => {
   expect(process.env.LOOKOVER_UNDER_TEST).toBe("1");

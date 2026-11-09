@@ -32,6 +32,7 @@ import {
   type WebBuild,
 } from "./index.ts";
 import { NO_BACKGROUND } from "./service.test-support.ts";
+import { noShortNames, otherCase, shortForm, spacedFolder, trailing } from "./spelling.test-support.ts";
 
 const MAIN = join(import.meta.dir, "main.ts");
 /** This clone, as `main.ts` runs it. */
@@ -271,6 +272,49 @@ test("start runs the service in the background, start again reuses it; status, o
   expect(await c.run("status", `--home=${home}`, "--json")).toBe(3);
   expect(JSON.parse(c.out.join("\n"))).toEqual({ running: false, home, atLogin: "none" });
 });
+
+/**
+ * One data folder is one folder (#658, ADR 0084): a demo service started on `started`, then `open --no-open` on
+ * `other` prints a link that works and `stop` on `other` stops it through its API, nothing killed.
+ */
+async function oneFolder(home: string, started: string, other: string): Promise<void> {
+  const c = command();
+  expect(await c.run("start", "--demo", `--home=${started}`, "--no-open")).toBe(0);
+  expect(await c.run("status", `--home=${other}`, "--json")).toBe(0);
+  expect(JSON.parse(c.out.join("\n"))).toMatchObject({ running: true, home });
+  expect(await c.run("open", `--home=${other}`, "--no-open")).toBe(0);
+  const followed = await fetch(linkIn(c.out) ?? "", { redirect: "manual" });
+  expect(followed.status).toBe(303);
+  expect(await c.run("stop", `--home=${other}`)).toBe(0);
+  expect(c.out.join("\n")).toContain("Lookover stopped.");
+  expect(c.killed).toEqual([]);
+  expect(probeInstance(home)).toBe("free");
+}
+
+test("one folder whatever its spelling: started without, open and stop with a trailing separator, and the other way", async () => {
+  const home = spacedFolder((made) => cleanups.push(() => rmSync(made, { recursive: true, force: true })));
+  await oneFolder(home, home, trailing(home));
+  await oneFolder(home, trailing(home), home);
+});
+
+test.skipIf(process.platform !== "win32")(
+  "on Windows only: one folder whatever its case: started in one, open and stop in another",
+  async () => {
+    const home = spacedFolder((made) => cleanups.push(() => rmSync(made, { recursive: true, force: true })));
+    await oneFolder(home, home, otherCase(home));
+  },
+);
+
+test.skipIf(process.platform !== "win32")(
+  "on Windows only: one folder whatever its form: started on the 8.3 short form, open and stop on the long one, and the other way",
+  async () => {
+    const home = spacedFolder((made) => cleanups.push(() => rmSync(made, { recursive: true, force: true })));
+    const short = shortForm(home);
+    if (short === null) return console.log(noShortNames(home));
+    await oneFolder(home, short, home);
+    await oneFolder(home, home, short);
+  },
+);
 
 /** The two lines `start` and `open` say once the browser was handed the link (ADR 0058). */
 const opening = (named: string) => [

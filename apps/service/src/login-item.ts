@@ -3,7 +3,8 @@
 // administrator: Windows' `HKCU` `Run` key through `reg.exe` (the value `Lookover`), a LaunchAgent on macOS and an XDG
 // autostart entry on Linux, those two unproven like the sign-in terminal (ADR 0047). The registration belongs to the
 // install whose command it holds: this one, none, or another install (a clone moved, another data folder, a swapped
-// binary), named by the command it holds. Another install's is never removed, and replaced only when asked to take it
+// binary), named by the command it holds. The same data folder spelt another way (a trailing separator, another case,
+// an 8.3 short name, a link) is this install, read by the folder's real path (ADR 0084). Another install's is never removed, and replaced only when asked to take it
 // over. The fake keeps the registration in memory, for demo mode (which plays the machine on it) and the tests; live
 // mode and a guarded program have a stand-in that registers nothing and answers "none", as `lookover status` does
 // (ADR 0070): the loop never registers anything on the owner's machine (ADR 0045). The real ones (`osLoginItem`, and
@@ -14,7 +15,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import type { LoginHolder } from "@lookover/contracts";
 import { commandLineOf } from "@lookover/process/background";
-import { type System, underTest } from "./config.ts";
+import { keptLoginCommand, type System, underTest } from "./config.ts";
 import { type Reg, realReg, regError, regValue } from "./reg.ts";
 
 export type { RegAnswer } from "./reg.ts";
@@ -135,9 +136,26 @@ function notUnderTest(allowed = false): void {
 /** The machine's own start at login, for `command`: its platform's adapter. Throws under `bun test`. */
 export function osLoginItem(command: string[], system: System): LoginItem {
   notUnderTest();
-  if (system.platform === "win32") return windowsLoginItem(command, { env: system.env });
-  if (system.platform === "darwin") return launchAgentLoginItem(command, { home: system.homedir });
-  return xdgLoginItem(command, { home: system.homedir, env: system.env });
+  if (system.platform === "win32") return windowsLoginItem(command, { env: system.env, system });
+  if (system.platform === "darwin") return launchAgentLoginItem(command, { home: system.homedir, system });
+  return xdgLoginItem(command, { home: system.homedir, env: system.env, system });
+}
+
+/**
+ * Whether `held`, the words a registration holds, are this install's `command`: as they are, or once `system` reads
+ * their data folder by its real path on its disk (`keptLoginCommand`, ADR 0084), so the folder spelt another way is
+ * this install's too. `same` says whether two words are one (Windows': whatever their case).
+ */
+function holdsThis(
+  held: string[] | null,
+  command: string[],
+  system: System | undefined,
+  same: (a: string, b: string) => boolean = (a, b) => a === b,
+): boolean {
+  if (held === null) return false;
+  const isCommand = (words: string[]) =>
+    words.length === command.length && words.every((word, at) => same(word, command[at] ?? ""));
+  return isCommand(held) || (system !== undefined && isCommand(keptLoginCommand(held, system)));
 }
 
 /** The current user's `Run` key: what it names runs at their login, with their environment. */
@@ -147,9 +165,42 @@ const RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const RUN_VALUE = "Lookover";
 
 /**
+ * A Windows command line's words, as the C runtime reads them (the inverse of `commandLineOf`): words split on spaces
+ * and tabs outside quotes; `2n` backslashes before a quote are `n` and the quote opens or closes, `2n + 1` are `n` and
+ * a quote; other backslashes are themselves.
+ */
+function wordsOfCommandLine(line: string): string[] {
+  const words: string[] = [];
+  // The pieces of the word being read: none between words (a word may be empty, `""`, one empty piece).
+  let word: string[] = [];
+  for (const piece of [...commandLinePieces(line), null]) {
+    if (piece !== null) {
+      word.push(piece);
+      continue;
+    }
+    if (word.length > 0) words.push(word.join(""));
+    word = [];
+  }
+  return words;
+}
+
+/** A command line's text as the C runtime reads it, piece by piece; null where blanks outside quotes end a word. */
+function commandLinePieces(line: string): (string | null)[] {
+  let quoted = false;
+  // Backslashes and a quote, blanks, backslashes alone, anything else.
+  return [...line.matchAll(/(\\*)"|[ \t]+|\\+|[^ \t"\\]+/g)].map(([token, slashes]) => {
+    if (slashes === undefined) return /^[ \t]/.test(token) && !quoted ? null : token;
+    const escaped = slashes.length % 2 === 1;
+    if (!escaped) quoted = !quoted;
+    return "\\".repeat(slashes.length >> 1) + (escaped ? '"' : "");
+  });
+}
+
+/**
  * Windows: the `Run` value `name` (`Lookover`; `bun run live` names its own `lookover-dev-` one) holding the command
  * as one command line. `reg` is `reg.exe` unless given; the real one refuses under `bun test` but for a `lookover-dev-`
- * value.
+ * value. Given `system`, a value naming the data folder in another spelling is this install's (`holdsThis`), and written
+ * again.
  */
 export function windowsLoginItem(
   command: string[],
@@ -157,18 +208,20 @@ export function windowsLoginItem(
     name?: string;
     reg?: Reg;
     env?: Record<string, string | undefined>;
+    system?: System;
   } = {},
 ): LoginItem {
   const name = o.name ?? RUN_VALUE;
   if (o.reg === undefined) notUnderTest(name.startsWith(DEV_VALUE_PREFIX));
   const reg = o.reg ?? realReg(o.env ?? {});
   const line = commandLineOf(command);
+  // Windows' paths ignore case, and so does what it runs.
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
   return ownedLoginItem({
     read: async () => {
       const data = (await regValue(reg, RUN_KEY, name))?.data ?? null;
       if (data === null) return { holder: "none", exact: false };
-      // Windows' paths ignore case, and so does what it runs.
-      const holder = data.toLowerCase() === line.toLowerCase() ? "this" : { other: data };
+      const holder = holdsThis(wordsOfCommandLine(data), command, o.system, same) ? "this" : { other: data };
       return { holder, exact: data === line };
     },
     write: async () => {
@@ -200,20 +253,27 @@ export async function runValues(
 }
 
 /**
- * A file, `text` written to register and removed to unregister. Who holds it is the command `commandIn` reads in it,
- * never its whole text: this install's when it is the one `text` names (a file an older template wrote, or with CRLF
- * line ends, included, and written again on register), another install's otherwise, named by it (the file itself
- * when it names no command).
+ * A file, `text` written to register `command` and removed to unregister. Who holds it is the command `wordsIn` reads
+ * in it, never its whole text: this install's when it is `command` (a file an older template wrote, or with CRLF line
+ * ends, included, and written again on register; given `system`, one naming the data folder in another spelling too,
+ * `holdsThis`), another install's otherwise, named by the line `commandIn` reads (the file itself when it names no
+ * command).
  */
-function fileLoginItem(file: string, text: string, commandIn: (held: string) => string | null): LoginItem {
-  const own = commandIn(text);
+function fileLoginItem(
+  file: string,
+  text: string,
+  command: string[],
+  read: { commandIn: (held: string) => string | null; wordsIn: (held: string) => string[] | null },
+  system: System | undefined,
+): LoginItem {
   return ownedLoginItem({
     read: async () => {
       try {
         const held = await readFile(file, "utf8");
-        const command = commandIn(held);
         return {
-          holder: command !== null && command === own ? "this" : { other: command ?? file },
+          holder: holdsThis(read.wordsIn(held), command, system)
+            ? "this"
+            : { other: read.commandIn(held) ?? file },
           exact: held === text,
         };
       } catch (error) {
@@ -240,24 +300,45 @@ const unXml = (text: string) =>
     return code <= 0x10ffff ? String.fromCodePoint(code) : whole;
   });
 
-/** A LaunchAgent's `ProgramArguments`, as one line: each word, quoted when it holds a space or a quote. */
-function launchAgentCommand(plist: string): string | null {
+/** A LaunchAgent's `ProgramArguments`, word by word. */
+function launchAgentWords(plist: string): string[] | null {
   const words = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(plist)?.[1];
   if (words === undefined) return null;
-  return [...words.matchAll(/<string>([\s\S]*?)<\/string>/g)]
-    .map(([, word = ""]) => unXml(word))
-    .map((word) => (/[\s"]/.test(word) || word === "" ? JSON.stringify(word) : word))
-    .join(" ");
+  return [...words.matchAll(/<string>([\s\S]*?)<\/string>/g)].map(([, word = ""]) => unXml(word));
 }
+
+/** A LaunchAgent's `ProgramArguments`, as one line: each word, quoted when it holds a space or a quote. */
+const launchAgentCommand = (plist: string): string | null =>
+  launchAgentWords(plist)
+    ?.map((word) => (/[\s"]/.test(word) || word === "" ? JSON.stringify(word) : word))
+    .join(" ") ?? null;
 
 /** A desktop entry's `Exec` line, as it is written, without the spaces or CR around it. */
 const desktopExec = (entry: string): string | null => /^Exec=(.*)$/m.exec(entry)?.[1]?.trim() || null;
 
+/** A string value's escapes in a desktop entry. */
+const STRING_ESCAPES: Record<string, string> = { "\\": "\\", s: " ", n: "\n", t: "\t", r: "\r" };
+
+/**
+ * A desktop entry's `Exec` words (the inverse of `execWord`): the string value's escapes read, `%%` a `%`, then words
+ * split on blanks outside quotes, `\` inside quotes escaping `"`, `` ` ``, `$` and `\`.
+ */
+function desktopExecWords(entry: string): string[] | null {
+  const exec = desktopExec(entry);
+  if (exec === null) return null;
+  const line = exec
+    .replace(/\\(.)/g, (whole, char: string) => STRING_ESCAPES[char] ?? whole)
+    .replaceAll("%%", "%");
+  return [...line.matchAll(/"((?:\\.|[^"\\])*)"|[^\s"]+/g)].map(([word, inQuotes]) =>
+    inQuotes === undefined ? word : inQuotes.replace(/\\(["`$\\])/g, "$1"),
+  );
+}
+
 /**
  * macOS: `<home>/Library/LaunchAgents/dev.lookover.plist`, run at load, which launchd reads at the next login
- * (unproven, ADR 0054). The machine's is `osLoginItem`'s, on the user's home.
+ * (unproven, ADR 0054). The machine's is `osLoginItem`'s, on the user's home. `system`: as `fileLoginItem`'s.
  */
-export function launchAgentLoginItem(command: string[], o: { home: string }): LoginItem {
+export function launchAgentLoginItem(command: string[], o: { home: string; system?: System }): LoginItem {
   const words = command.map((word) => `    <string>${xml(word)}</string>\n`).join("");
   return fileLoginItem(
     join(o.home, "Library", "LaunchAgents", "dev.lookover.plist"),
@@ -275,7 +356,9 @@ ${words}  </array>
 </dict>
 </plist>
 `,
-    launchAgentCommand,
+    command,
+    { commandIn: launchAgentCommand, wordsIn: launchAgentWords },
+    o.system,
   );
 }
 
@@ -289,10 +372,11 @@ const execWord = (word: string): string =>
 /**
  * Linux: the XDG autostart entry `lookover.desktop` in `$XDG_CONFIG_HOME/autostart` (else `<home>/.config/autostart`),
  * which a desktop session starts at login (unproven, ADR 0054). The machine's is `osLoginItem`'s, on the user's home.
+ * `system`: as `fileLoginItem`'s.
  */
 export function xdgLoginItem(
   command: string[],
-  o: { home: string; env: Record<string, string | undefined> },
+  o: { home: string; env: Record<string, string | undefined>; system?: System },
 ): LoginItem {
   const config = o.env.XDG_CONFIG_HOME || join(o.home, ".config");
   return fileLoginItem(
@@ -304,6 +388,8 @@ Exec=${command.map(execWord).join(" ")}
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
 `,
-    desktopExec,
+    command,
+    { commandIn: desktopExec, wordsIn: desktopExecWords },
+    o.system,
   );
 }

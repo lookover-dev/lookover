@@ -122,7 +122,13 @@ function windowsMachine(o: Parameters<typeof fakeReg>[0] = {}, user = "Dell XPS"
 /** The writes `reg` was asked for. */
 const adds = (calls: string[][]) => calls.filter(([verb]) => verb === "add");
 
-const windows: System = { platform: "win32", homedir: "C:\\Users\\Your Name", env: {}, which: () => null };
+const windows: System = {
+  platform: "win32",
+  homedir: "C:\\Users\\Your Name",
+  env: {},
+  which: () => null,
+  realPath: () => null,
+};
 
 test("the real adapters refuse to run under bun test, on every platform, the user's Path above all (ADR 0045)", () => {
   for (const platform of ["win32", "darwin", "linux"] as const)

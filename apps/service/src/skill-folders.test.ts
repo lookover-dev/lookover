@@ -43,7 +43,13 @@ function home(): string {
 const EXE = "'C:/Users/Your Name/Downloads/lookover.exe'";
 
 test("the real adapter refuses to run under bun test on the user's own home, whatever the name (ADR 0045)", () => {
-  const machine: System = { platform: process.platform, homedir: homedir(), env: {}, which: () => null };
+  const machine: System = {
+    platform: process.platform,
+    homedir: homedir(),
+    env: {},
+    which: () => null,
+    realPath: () => null,
+  };
   expect(() => userSkillFolders(machine, "lookover-review-loop")).toThrow(/bun test/);
   expect(() => userSkillFolders(machine, "lookover-dev-review-loop")).toThrow(/bun test/);
   expect(() => homeSkillFolders({ home: homedir() })).toThrow(/bun test/);

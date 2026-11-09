@@ -14,14 +14,13 @@ import {
   authorLabel,
   bandOn,
   changeLabel,
-  changeReviews,
   chip,
   type Problem,
+  paletteReviews,
   pill,
   problems,
   REVIEW_KEY,
   REVIEWERS_TEXT,
-  reviewList,
   type StatusDot,
   type StatusMenuLine,
   sendElsewhere,
@@ -421,7 +420,7 @@ export function Palette({ mode, onClose }: { mode: "all" | "review" | null; onCl
   const all = useMemo<PaletteItem[]>(() => {
     const go = (to: string) => () => navigate(to);
     // Review a pull request…: the person's first, then others' (ADR 0078), none that runs or waits.
-    const reviewable = mode === "review" ? reviewList(changeReviews(state)) : changeReviews(state);
+    const reviewable = paletteReviews(state, mode);
     const changes: PaletteItem[] = reviewable.map((it) => {
       const c = chip(it);
       return {

@@ -122,6 +122,20 @@ test("S18's pull requests: 22 by others (Everyone's), not reviewed; the person's
   }
 });
 
+test("S18 starts with four of fernhill's repositories off, their five pull requests still in the snapshot, and its steps count Everyone's 17 (ADR 0084)", async () => {
+  const state = await loaded("S18");
+  const off = state.repos.filter((r) => !r.enabled).map((r) => r.id);
+  expect(off.map(String)).toEqual([
+    "fernhill/web",
+    "fernhill/mobile",
+    "fernhill/analytics",
+    "fernhill/gateway",
+  ]);
+  const open = (repo: string) => Object.values(state.changes).filter((c) => c.repoId === repo).length;
+  expect(off.map(open)).toEqual([2, 1, 1, 1]);
+  expect(scenarioOf("S18").steps.join(" ")).toContain("17 more");
+});
+
 test("S18's Review now on mira's fernhill/api #412: reviewed, nothing to raise", async () => {
   await loaded("S18");
   const asked = changeId("fernhill/api#412");

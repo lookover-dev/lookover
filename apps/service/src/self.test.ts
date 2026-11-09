@@ -52,6 +52,7 @@ const windows: System = {
   homedir: "C:\\Users\\Your Name",
   env: { LOCALAPPDATA: "C:\\Users\\Your Name\\AppData\\Local" },
   which: () => null,
+  realPath: () => null,
 };
 
 test("lookover is Bun and the clone's main.ts from a clone, the binary alone once compiled", () => {
@@ -75,7 +76,13 @@ test("start at login runs the binary itself once compiled: no Bun, no main.ts, w
 // Lookover's command (ADR 0058): the one that reaches this Lookover from a terminal.
 const PROFILE = "C:\\Users\\Your Name\\AppData\\Local\\Lookover";
 const spaced: Self = { ...binary, path: "C:\\Users\\Your Name\\Downloads\\lookover.exe" };
-const linux: System = { platform: "linux", homedir: "/home/ada", env: {}, which: () => null };
+const linux: System = {
+  platform: "linux",
+  homedir: "/home/ada",
+  env: {},
+  which: () => null,
+  realPath: () => null,
+};
 
 test("lookover's command is lookover when the PATH finds this executable", () => {
   expect(lookoverCommand(binary, PROFILE, windows, true)).toBe("lookover");

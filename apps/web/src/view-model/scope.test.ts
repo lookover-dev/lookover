@@ -188,9 +188,8 @@ test("Review a pull request…: not another's a request wouldn't review, as its 
     item(1, "other", {}, off),
     item(2, "other", {}, codex),
     item(3, "other", { job: job("skipped", "opened", "not-yours") }, codex),
-    item(4, "you", {}, off),
     item(5, "you", {}, codex),
     item(6, "other"),
   ];
-  expect(numbers(reviewList(items))).toEqual([4, 5, 6]);
+  expect(numbers(reviewList(items))).toEqual([5, 6]);
 });

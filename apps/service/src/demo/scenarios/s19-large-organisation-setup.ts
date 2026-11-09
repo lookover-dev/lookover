@@ -18,6 +18,7 @@ export const S19: Scenario = {
   path: "/setup",
   world: {
     ...LARGE_ORGANISATION,
+    off: [],
     setup: { done: false, step: "repos", reached: "repos", github: "done", firstReviewChange: null },
   },
   changes: LARGE_ORGANISATION_CHANGES,

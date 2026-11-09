@@ -93,6 +93,22 @@ export function changeReviews(state: State): ChangeReview[] {
 }
 
 /**
+ * The pull requests Reviews lists: those of the repositories that are on, the person's own included (ADR 0084). Home,
+ * All reviews, the tabs, Home's sentence and the palette read these; a review page reached by its address and the
+ * counts of real jobs read every change. A review queued, deferred or running when its repository was switched off stays
+ * listed until it ends: switching off cancels no job, and its row is where it is watched or cancelled.
+ */
+export function listedReviews(state: State): ChangeReview[] {
+  return changeReviews(state).filter((i) => i.repo.enabled || isPending(i));
+}
+
+/** A review that runs or waits: its job queued, deferred or running. */
+function isPending(it: ChangeReview): boolean {
+  const { kind } = status(it);
+  return kind === "running" || kind === "waiting";
+}
+
+/**
  * The change at a page address: its repository's owner and name, and its number, as in
  * "/reviews/sasensi/ledger-api/148" (ADR 0066).
  */
@@ -521,15 +537,21 @@ function askable(it: ChangeReview): boolean {
 }
 
 /**
- * "Review a pull request…": what can be asked for now (nothing that runs or waits), the person's first, then others'
- * a request would review (`askable`, as their rows' Review now), each in the list's order.
+ * "Review a pull request…": of `items`, what can be asked for now (nothing that runs or waits), the person's first,
+ * then others' a request would review (`askable`, as their rows' Review now), each in the order given.
  */
 export function reviewList(items: readonly ChangeReview[]): ChangeReview[] {
-  const free = items.filter((i) => {
-    const { kind } = status(i);
-    return kind !== "running" && kind !== "waiting";
-  });
+  const free = items.filter((i) => !isPending(i));
   return [...free.filter(isMine), ...free.filter((i) => neverAsked(i) && askable(i))];
+}
+
+/**
+ * The palette's pull requests, of Reviews' list (`listedReviews`: none in a repository that is off, the person's own
+ * included, ADR 0084): in "Review a pull request…" (`review`) those `reviewList` keeps, else every one.
+ */
+export function paletteReviews(state: State, mode: "all" | "review" | null): ChangeReview[] {
+  const listed = listedReviews(state);
+  return mode === "review" ? reviewList(listed) : listed;
 }
 
 /**
@@ -714,7 +736,7 @@ const EARLIER: DisplayStatus["kind"][] = ["to-fix", "settled", "skipped", "cance
 
 /** Home's groups, of the person's pull requests (Mine) or of every open one (Everyone, ADR 0078). */
 export function homeGroups(state: State, scope: Scope): HomeGroups {
-  const all = inTab(scope, changeReviews(state));
+  const all = inTab(scope, listedReviews(state));
   const kind = (i: ChangeReview) => status(i).kind;
   return {
     tab: all,
@@ -1169,7 +1191,7 @@ export function sentence(state: State): { title: string; small: string } {
   // The sentence tells the person's day: their own pull requests, whatever scope Reviews shows.
   const g = homeGroups(state, "mine");
   const list = problems(state);
-  const reviewed = changeReviews(state).filter(
+  const reviewed = listedReviews(state).filter(
     (i) => i.review.rounds.length > 0 && isToday(state.now, i.review.updatedAt),
   );
   const parts = counts(state, g, reviewed, list.length);

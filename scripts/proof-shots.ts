@@ -451,6 +451,23 @@ export const SHOTS: Shot[] = [
   // S10's day on Mine; Everyone adds teammates' pull requests nobody asked about, in Not reviewed (ADR 0078).
   { name: "home-quiet", scenario: "S10" },
   { name: "home-everyone", scenario: "S10", act: toEveryone },
+  // S18's Home with four of fernhill's repositories off (ADR 0084): Mine, then Everyone, whose tabs count 3 and 20,
+  // none of the off repositories' five pull requests listed.
+  { name: "home-org", scenario: "S18", path: "/" },
+  {
+    name: "home-org-everyone",
+    scenario: "S18",
+    path: "/",
+    fullPage: true,
+    act: async (p) => {
+      await p
+        .getByRole("tablist", { name: "Whose pull requests" })
+        .getByRole("tab", { name: /^Everyone/ })
+        .click();
+      await p.getByText("Paginate the audit log").waitFor();
+      await p.mouse.move(0, 0);
+    },
+  },
   // GitHub's rate limit, as the service's poll shows it (ADR 0043): a warning with nothing to do.
   { name: "home-github-limit", scenario: "S10", inject: ["github-limit"] },
   // An AI at its limit until a day that isn't today: the band, then the status menu (ADR 0055).
@@ -908,7 +925,8 @@ export const SHOTS: Shot[] = [
   // A large organisation (row 46, ADR 0082): 28 watched in three accounts, ten gone from fernhill, ledger-labs gone;
   // fernhill's twenty folded at first, its head carrying its counts (ADR 0083, round 4).
   { name: "repositories-org", scenario: "S18", path: "/repositories", fullPage: true },
-  // fernhill switched off from its head (ADR 0082): every one of its repositories off, "None of 20 reviewed".
+  // fernhill switched off from its head (ADR 0082): every one of its repositories off, "None of 20 reviewed". Four of
+  // them start off (ADR 0084), so its switch is mixed: the first press turns every one on, the second off.
   {
     name: "repositories-org-account-off",
     scenario: "S18",
@@ -918,6 +936,8 @@ export const SHOTS: Shot[] = [
       const fernhill = p
         .locator("label.switch")
         .filter({ has: p.getByRole("switch", { name: "Review every repository in fernhill" }) });
+      await fernhill.click();
+      await p.getByText("All 20 reviewed").waitFor();
       await fernhill.click();
       await p.getByText("None of 20 reviewed").waitFor();
       await fernhill.scrollIntoViewIfNeeded();
@@ -988,8 +1008,9 @@ export const SHOTS: Shot[] = [
       await reposBarAtTop(p);
     },
   },
-  // The Off filter after two repositories were switched off: only they are left, their groups' counts the account's;
-  // fernhill folded again, its head saying how many of it the filter shows ("19 of 20 reviewed · 1 off").
+  // The Off filter after two more repositories were switched off, beside the four of fernhill's that start off (ADR
+  // 0084): only they are left, their groups' counts the account's; fernhill folded again, its head saying how many of
+  // it the filter shows ("15 of 20 reviewed · 5 off").
   {
     name: "repositories-org-off",
     scenario: "S18",
@@ -1000,7 +1021,7 @@ export const SHOTS: Shot[] = [
       // Each switched off from its row, its head's count said once the service took it.
       for (const [name, count] of [
         ["sasensi/dotfiles", "4 of 5 reviewed"],
-        ["fernhill/docs", "19 of 20 reviewed"],
+        ["fernhill/docs", "15 of 20 reviewed"],
       ] as const) {
         await p
           .locator("label.switch")
@@ -1027,7 +1048,7 @@ export const SHOTS: Shot[] = [
     act: async (p) => {
       await p.getByRole("group", { name: "Show" }).getByRole("button", { name: "Reviewing" }).click();
       await p.getByRole("button", { name: "Reviewing", pressed: true }).waitFor();
-      await p.getByText("20 shown").first().waitFor();
+      await p.getByText("16 shown").first().waitFor();
       // A short phone's viewport under its browser's bars, an iPhone SE's, so ledger-dev's three rows scroll its head up
       // to where fernhill's is stuck.
       await p.setViewportSize({ width: 375, height: 560 });
