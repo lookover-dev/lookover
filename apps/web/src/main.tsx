@@ -16,6 +16,7 @@ import { App, type DevTools } from "./app.tsx";
 import type { DemoApi } from "./dev/demo-api.ts";
 import { modeOf, scenarioFromAddress } from "./dev/mode.ts";
 import { applyTheme, Store } from "./store.tsx";
+import { Boundary } from "./ui/boundary.tsx";
 
 // The app runs on the service alone (ADR 0046), in the mode its build names (`dev/mode.ts`, ADR 0054): demo, live
 // or the program. Each is served from the page's own origin (a dev server proxies `/api`, the program's service
@@ -70,9 +71,12 @@ async function start(): Promise<void> {
   if (!root) throw new Error("index.html has no #root element");
   createRoot(root).render(
     <StrictMode>
-      <BrowserRouter>
-        <App store={store} embedded={embedded} dev={dev} mode={mode} />
-      </BrowserRouter>
+      {/* The last boundary: whatever threw outside every panel, the window says so, never ends black. */}
+      <Boundary what="app" look="whole">
+        <BrowserRouter>
+          <App store={store} embedded={embedded} dev={dev} mode={mode} />
+        </BrowserRouter>
+      </Boundary>
     </StrictMode>,
   );
 }

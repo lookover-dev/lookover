@@ -158,6 +158,8 @@ const FETCH_IDLE_MS = 2 * 60_000;
 const FETCH_WALL_MS = 10 * 60_000;
 /** How long GitHub is out of reach when the drawer says so: long enough to see, short enough to come back. */
 const CONNECTION_LOST_MS = 20_000;
+/** How long GitHub takes to list the person's accounts when the drawer says it is slow ("accounts-slow"). */
+const ACCOUNTS_SLOW_MS = 30_000;
 /** Who suspends the shared App on an organisation when the drawer says so, as GitHub names them: an owner of it. */
 const SUSPENDED_BY = "mira";
 /** The repositories "A repository is added to the App" makes on the owner's account, in turn. */
@@ -458,6 +460,12 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     // the service's next poll, on the clock, finds it.
     "sign-in-entered": () => onTheCode((code) => world.host.enterCode(code)),
     "sign-in-denied": () => onTheCode((code) => world.host.denyCode(code)),
+    // GitHub slow to list the person's accounts (ADR 0086, #670): every listing for the next 30 s answers then, so a
+    // sign-in now shows who is signed in while Lookover is still looking for their accounts.
+    "accounts-slow": () => {
+      clock.after(ACCOUNTS_SLOW_MS, world.host.holdAccounts());
+      return Promise.resolve("ok" as const);
+    },
     // The person signed out on GitHub (ADR 0066): the sign-in no longer renews, every call refused as signed out until
     // Sign in again's code is entered.
     "github-signed-out": () =>

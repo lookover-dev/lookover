@@ -1,6 +1,6 @@
 // Review detail: the verdict first, then the open findings. Everything else is one click down.
 import { asSentence, type CommitSha, type Finding, type State } from "@lookover/contracts";
-import { Fragment, useEffect, useState } from "react";
+import { createContext, Fragment, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { usePageKeys } from "../shell.tsx";
 import { useAppState, useSend } from "../store.tsx";
@@ -26,6 +26,7 @@ import {
 import { InlineCode } from "../ui/inline-code.tsx";
 import { Layer, MenuItem, Tip, useToast } from "../ui/layers.tsx";
 import { CodePath } from "../ui/path.tsx";
+import { FirstPaint, useArrived } from "../ui/presence.tsx";
 import { Sha, ShaWords } from "../ui/sha.tsx";
 import { liveLog, logSummary } from "../view-model/activity.ts";
 import {
@@ -323,12 +324,31 @@ function verdictClass(s: DisplayStatus): string {
   return tone === null ? "verdict" : `verdict ${tone}`;
 }
 
+/** Whether the outcome being drawn takes the Running card's place: the status before this render was running. */
+const AfterRunning = createContext(false);
+
+/**
+ * An outcome's card (`Card`, `verdict`): one that took the Running card's place after the page's first commit comes
+ * in like a section (ADR 0087, `data-arrived`); one the page opened on, or one taking another outcome's place (the
+ * needs-you notice settling), is still. Fixed at mount, as `useArrived`. The gate is the verdict's own, in `Review`.
+ */
+function VerdictCard({ className, children }: { className: string; children: ReactNode }) {
+  const gate = useArrived();
+  const afterRunning = useContext(AfterRunning);
+  const [arrived] = useState(gate && afterRunning);
+  return (
+    <Card className={className} arrived={arrived}>
+      {children}
+    </Card>
+  );
+}
+
 function NotReviewed({ it }: { it: ChangeReview }) {
   const card = notReviewed(it);
   if (!card) return null;
   const { why } = card;
   return (
-    <Card className={verdictClass(status(it))}>
+    <VerdictCard className={verdictClass(status(it))}>
       <Eyes still />
       <b>Not reviewed: {card.title}.</b>
       <Disclosure summary="Why wasn't it reviewed?">
@@ -342,7 +362,7 @@ function NotReviewed({ it }: { it: ChangeReview }) {
           ) : null}
         </p>
       </Disclosure>
-    </Card>
+    </VerdictCard>
   );
 }
 
@@ -393,7 +413,25 @@ function FailedNotice({ it, state }: { it: ChangeReview; state: State }) {
   );
 }
 
+/**
+ * The review's outcome, or its Running card. It remembers the status it last drew, so an outcome card mounting now
+ * knows whether it takes the Running card's place (`AfterRunning`): only that one comes in.
+ */
 function Verdict({ it, state }: { it: ChangeReview; state: State }) {
+  const kind = status(it).kind;
+  const was = useRef<DisplayStatus["kind"] | null>(null);
+  const afterRunning = was.current === "running";
+  useEffect(() => {
+    was.current = kind;
+  });
+  return (
+    <AfterRunning.Provider value={afterRunning}>
+      <Outcome it={it} state={state} />
+    </AfterRunning.Provider>
+  );
+}
+
+function Outcome({ it, state }: { it: ChangeReview; state: State }) {
   const send = useSend();
   const { change, review } = it;
   const s = status(it);
@@ -414,12 +452,12 @@ function Verdict({ it, state }: { it: ChangeReview; state: State }) {
       return null;
     case "cancelled":
       return (
-        <Card className={verdictClass(s)}>
+        <VerdictCard className={verdictClass(s)}>
           <Eyes still />
           <span>
             <b>This review was cancelled.</b> {cancelSentence(s.reason)}
           </span>
-        </Card>
+        </VerdictCard>
       );
     case "running":
       return <Running it={it} state={state} round={s.round} />;
@@ -459,7 +497,7 @@ function SettledVerdict({ it, state, clean }: { it: ChangeReview; state: State; 
   const verdict = settledVerdict(review);
   const className = verdictClass(status(it));
   return clean ? (
-    <Card className={className}>
+    <VerdictCard className={className}>
       <Eyes still />
       <span>
         <b>
@@ -467,9 +505,9 @@ function SettledVerdict({ it, state, clean }: { it: ChangeReview; state: State; 
         </b>
         <span className="t-small"> {agoSentence(state.now, review.updatedAt)}</span>
       </span>
-    </Card>
+    </VerdictCard>
   ) : (
-    <Card className={className}>
+    <VerdictCard className={className}>
       <Eyes still />
       <span>
         <b>
@@ -477,7 +515,7 @@ function SettledVerdict({ it, state, clean }: { it: ChangeReview; state: State; 
         </b>
         <span className="t-small t-help"> {verdict.rest}</span>
       </span>
-    </Card>
+    </VerdictCard>
   );
 }
 
@@ -487,7 +525,7 @@ function SettledVerdict({ it, state, clean }: { it: ChangeReview; state: State; 
  */
 function OpenVerdict({ it }: { it: ChangeReview }) {
   return (
-    <Card className={verdictClass(status(it))}>
+    <VerdictCard className={verdictClass(status(it))}>
       <Eyes still />
       <span>
         <b>
@@ -495,7 +533,7 @@ function OpenVerdict({ it }: { it: ChangeReview }) {
         </b>
         <span className="t-small t-help"> {nextStep(it)}</span>
       </span>
-    </Card>
+    </VerdictCard>
   );
 }
 
@@ -835,7 +873,10 @@ export function Review() {
       <ReviewHead it={it} state={state} />
       <ReviewActions it={it} again={again} copy={copy} />
       <FailedNotice it={it} state={state} />
-      <Verdict it={it} state={state} />
+      {/* The verdict's own gate, one per pull request: opening a review, or another, its outcome is still. */}
+      <FirstPaint key={it.change.id}>
+        <Verdict it={it} state={state} />
+      </FirstPaint>
       <Findings it={it} />
       <Details it={it} state={state} />
     </Page>

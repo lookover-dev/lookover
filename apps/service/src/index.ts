@@ -6,7 +6,8 @@
 // program, ADR 0054, on live mode's real adapters guarded by its live config when it has one, its data folder the user
 // profile's by default, making no one-time link at start, `openUrl` null, serving the web app only when the program's
 // build made it) and `bun run live` pick one, and everything inside takes its ports as parameters. `VERSION` is
-// Lookover's version, written once.
+// Lookover's version, written once; `CSP` the content security policy every answer carries, written once too, which
+// the web build's test and `proof` check against (ADR 0085).
 // `lookover(argv, deps)` is the one `lookover` command (ADR 0054; `main.ts` runs it on this machine, from a clone as
 // `bun run lookover`, or the compiled binary `bun run build` makes, which carries the web app). Its verbs:
 // - `serve`: the service in this terminal until Ctrl+C or a signal (null once it serves); `serve --background` the
@@ -102,7 +103,10 @@
 // (`options.github`, ADR 0066, ADR 0073: the sign-in store's; with none, the setup's GitHub step shows and nothing is
 // listed, whatever else the folder holds, an earlier version's own App included), and, once the setup says the App is
 // installed, the repositories its installations list, cut to the allow-list when one
-// is given (two of one name are refused); checks the engines' health, records its start as the first event, forgets
+// is given (two of one name are refused); checks the engines' health, reads the replayed log through the state's
+// schema (ADR 0085: an event `apply` throws on skipped, a piece it can't read dropped, each said in the log) and records
+// its start as the first event (its own facts, or the state it read as one `state.replaced` when it dropped or renamed
+// anything), sends again each watched repository and open change the state lacks, forgets
 // the repositories the installation no longer lists, lists the open changes of each one it watches (one repository
 // refused is logged, the start failing only when every one is or the installation is), and serves the API on
 // 127.0.0.1. The owner is the person signed in; the snapshot's connection carries them and every account reached with
@@ -310,6 +314,7 @@ export {
   type System,
   selfCommand,
 } from "./config.ts";
+export { CSP } from "./csp.ts";
 export { buildDemoRoom, type DemoRoom } from "./demo/driver.ts";
 export type { Scenario } from "./demo/scenario.ts";
 export { SCENARIOS, scenarioOf } from "./demo/scenarios.ts";
@@ -340,7 +345,7 @@ export {
   WATCH_IGNORED,
 } from "./live-config.ts";
 export { acquireLiveLock, type LiveLock, LiveLockHeld } from "./live-lock.ts";
-export { logLineOf } from "./log-lines.ts";
+export { droppedLine, logLineOf } from "./log-lines.ts";
 export { type LogReader, type LogSink, openLogSink } from "./log-sink.ts";
 export {
   DEV_VALUE_PREFIX,

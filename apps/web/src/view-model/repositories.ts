@@ -5,6 +5,7 @@
 // Repositories step takes the same search past ten repositories, with no filter (`setupRepoList`).
 import type { Repository, RepositoryId, State } from "@lookover/contracts";
 import { type RepositoryGroup, repositoryGroups, type SetupRepoGroup, setupRepoGroups } from "./accounts.ts";
+import { plural } from "./format.ts";
 import { HeldValue } from "./held.ts";
 import { chosenRepos } from "./onboarding.ts";
 
@@ -107,15 +108,19 @@ const foldsAtFirst = (watched: number, groups: number, group: { total: number })
   watched > BAR_FROM && groups > 1 && group.total > BAR_FROM;
 
 /**
- * A group's head under a filter: the account's count as ever, and how many of its repositories the filter shows, a
- * line of its own ("10 shown"), so the two never read as one claim ("None of 12 reviewed · 10 reviewing", the account
- * switched off after the filter was chosen) and the account's name keeps its width beside the count. Said while it is
- * folded (open, its rows say it), held empty while open, so every head under the filter is as tall: a table cell
- * sticks for the whole table, and a taller head stuck under a later one showed from under it (Lookover's F5).
+ * A group's head under a filter: the account's count as ever, and, while it is folded, how many of its repositories
+ * the filter shows ("10 repositories shown", its noun named: "10 shown" alone, under the Pull requests column, read
+ * as pull requests), apart from the count, in the head's second row, where a cause goes, so the two never read as one
+ * claim ("None of 12 reviewed · 10 reviewing", the account switched off after the filter was chosen) and the head's
+ * stuck row is as tall as every other's: a table cell sticks for the whole table, and a taller head stuck under a
+ * later one showed from under it (Lookover's F5). Open, its rows say it, and the head holds nothing for it (ADR 0086).
  */
 const withMatching = (group: RepositoryGroup, folded: boolean): RepositoryGroup => ({
   ...group,
-  head: { ...group.head, shows: { line: `${group.repos.length} shown`, said: folded } },
+  head: {
+    ...group.head,
+    shows: folded ? `${plural(group.repos.length, "repository", "repositories")} shown` : null,
+  },
 });
 
 /**

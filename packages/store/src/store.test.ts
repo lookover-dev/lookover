@@ -1936,6 +1936,32 @@ test("the jobs a stopped service left running are listed with their run, and fai
   expect(again.jobs.leftRunning()).toEqual([]);
 });
 
+test("a run left running is given back as it started, at the step it reached, its live parts empty (ADR 0085)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  asked(store, CHANGE, job);
+  const deep: Run = {
+    ...run,
+    secondFinder: "codex",
+    confirmer: "claude",
+    confirmFallback: { reason: "not-ready", engine: "claude", state: "limit" },
+  };
+  started(store, job.id, deep);
+  store.jobs.runStepped(run.id, "finding", T1 + 5);
+  store.jobs.runStepped(run.id, "confirming", T1 + 12);
+  store.close();
+
+  expect(open(dir).jobs.runOf(run.id)).toEqual({
+    ...deep,
+    step: "confirming",
+    stepAt: T1 + 12,
+    steps: [
+      { step: "preparing", ms: 5 },
+      { step: "finding", ms: 7 },
+    ],
+  });
+});
+
 test("a run's age, for its folder (ADR 0056): unknown, open while it or its job runs, else when it ended", () => {
   const store = open(migrated());
   expect(store.jobs.runAge("r9")).toEqual({ kind: "unknown" });

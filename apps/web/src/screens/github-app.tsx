@@ -17,7 +17,6 @@ import {
 import { pullRequestLink } from "../view-model/onboarding.ts";
 import type { Problem } from "../view-model/select.ts";
 import { codeToast, SIGN_IN_TEXT } from "../view-model/sign-in.ts";
-import { HeldDetail } from "./common.tsx";
 
 /** A `SameWidth` place's key while it shows nothing. */
 const NONE = "";
@@ -125,6 +124,7 @@ const MARK_ICONS = {
   ask: "owners",
   waiting: "time",
   "needs-you": "alert",
+  looking: "search",
   another: "add",
 } as const satisfies Record<AccountMark, IconName>;
 
@@ -138,7 +138,7 @@ function AskAgain({ link }: { link: AccountLink }) {
   return (
     <span className="anchor account-again">
       <a
-        className="btn btn-ghost btn-sm"
+        className="btn btn-ghost btn-sm btn-square"
         href={link.href}
         target="_blank"
         rel="noopener noreferrer"
@@ -164,10 +164,10 @@ function AccountLine({ row }: { row: AccountRow }) {
           <span className="account-mark" data-mark={mark}>
             <Icon name={MARK_ICONS[mark]} />
           </span>
-          <HeldDetail shown={row.detail} details={row.details} />
+          <span>{row.detail}</span>
         </span>
       </span>
-      {/* The fix's one place, centred on the login and its detail; on a row waiting for an owner, Ask again beside the
+      {/* The fix's one place, pinned to the row's top, level with the login; on a row waiting for an owner, Ask again beside the
           fix inside it, so no row is taller for being able to wait. */}
       <span className="account-actions">
         <AccountAction
@@ -191,11 +191,11 @@ function AccountLine({ row }: { row: AccountRow }) {
 }
 
 /**
- * The accounts list (design-system.md "Accounts list", ADR 0067): one row per account, its login, its detail held at
- * the tallest it can show, two lines at least, its one fix's place, as wide as every label its own row can show, the
+ * The accounts list (design-system.md "Accounts list", ADR 0067): one row per account, its login, its detail, as tall
+ * as it says and holding no other (ADR 0086), its one fix's place, as wide as every label its own row can show, the
  * button as wide as its own label on the place's right edge (Installed there on an account installed and used; Ask
- * again beside the fix on a row waiting for an owner), so every row is as tall, a row changing state moves nothing and
- * a row appended moves only what is under it. Nothing before a sign-in.
+ * again beside the fix on a row waiting for an owner), so a row changing state moves nothing beside its detail and a
+ * row growing or appended moves only what is under it. Nothing before a sign-in.
  */
 export function AccountsList({ list }: { list: AccountsListView }) {
   if (list.rows.length === 0) return null;
@@ -277,6 +277,8 @@ export function GitHubButton({
   variant = "secondary",
   size = "md",
   kbd,
+  label,
+  square = false,
   children,
 }: {
   change: Change;
@@ -284,21 +286,35 @@ export function GitHubButton({
   variant?: "primary" | "secondary" | "ghost";
   size?: "sm" | "md";
   kbd?: string;
+  /** Its accessible name, when its words may be hidden (an icon alone on a phone). */
+  label?: string;
+  /** An Icon button at a small button's size: its icon alone, in a square (`btn-square`); give it a `label`. */
+  square?: boolean;
   children: ReactNode;
 }) {
   const { connection } = useAppState();
   const navigate = useNavigate();
   const link = pullRequestLink(connection, change);
   const key = kbd === undefined ? {} : { kbd };
+  const named = label === undefined ? {} : { label };
+  const className = square ? "btn-square" : "";
   if ("href" in link) {
     return (
-      <LinkButton href={link.href} variant={variant} size={size} {...key}>
+      <LinkButton href={link.href} variant={variant} size={size} className={className} {...key} {...named}>
         {children}
       </LinkButton>
     );
   }
   return (
-    <Button icon="external" variant={variant} size={size} {...key} onClick={() => navigate(link.path)}>
+    <Button
+      icon="external"
+      variant={variant}
+      size={size}
+      className={className}
+      {...key}
+      aria-label={label}
+      onClick={() => navigate(link.path)}
+    >
       {children}
     </Button>
   );

@@ -543,6 +543,8 @@ export interface StartOptions {
   agent?: RoomOptions["agent"];
   /** The person's own `gh` (ADR 0059): none unless given, as a room without one reads it: not installed. */
   gh?: Gh;
+  /** The version this start says it runs: "0.1.0" unless given (a data folder an older version wrote, ADR 0085). */
+  version?: string;
 }
 
 /** Where the room logs: the test's `log`, else the sink when given, else `logged`. */
@@ -583,7 +585,7 @@ async function roomOf(options: StartOptions) {
     signIn: options.signIn ?? NO_TERMINAL,
     retrieval,
     ...(options.settingsFiles === undefined ? {} : { settingsFiles: options.settingsFiles }),
-    version: "0.1.0",
+    version: options.version ?? "0.1.0",
     ...(options.eventsKept === undefined ? {} : { eventsKept: options.eventsKept }),
     // A test's data is thrown away: its store's commits don't wait for the disk (about 3 ms each on Windows).
     store: options.store ?? openStore({ home: dir, durable: false }),

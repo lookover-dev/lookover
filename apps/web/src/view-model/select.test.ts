@@ -120,6 +120,8 @@ function calm(): State {
       state: "connected",
       cause: null,
       accounts: [],
+      listed: true,
+      listingCause: null,
       unreached: [],
       signIn: null,
       person: { id: 7, login: "sam" },

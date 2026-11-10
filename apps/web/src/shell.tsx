@@ -5,7 +5,9 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FixButton } from "./screens/github-app.tsx";
 import { reviewPath, useApp, useAppState, useSend, useStoreStatus, useTheme } from "./store.tsx";
 import { Button, Chip, Icon, IconButton, type IconName, Kbd, Mark, Said } from "./ui/basics.tsx";
+import { Boundary } from "./ui/boundary.tsx";
 import { Dialog, Layer, MenuItem, useToast } from "./ui/layers.tsx";
+import { arrivedProps, leavingProps, PresenceList, type Shown, useArrived } from "./ui/presence.tsx";
 import { fitWholeRows } from "./ui/whole-rows.ts";
 import { clock } from "./view-model/format.ts";
 import { checkLine } from "./view-model/health.ts";
@@ -15,6 +17,7 @@ import {
   bandOn,
   changeLabel,
   chip,
+  type PaletteMode,
   type Problem,
   paletteReviews,
   pill,
@@ -58,7 +61,9 @@ export function TopBar() {
           </Link>
         ))}
       </nav>
-      <StatusPill />
+      <Boundary what="status" look="pill">
+        <StatusPill />
+      </Boundary>
     </header>
   );
 }
@@ -282,7 +287,13 @@ function StatusPill() {
         </button>
       )}
     >
-      {(close) => <StatusMenu close={close} />}
+      {(close) => (
+        // Inside the layer, which gives each opening fresh content, a reopening while it leaves too: a menu that failed
+        // tries again on the next.
+        <Boundary what="status-menu">
+          <StatusMenu close={close} />
+        </Boundary>
+      )}
     </Layer>
   );
 }
@@ -328,21 +339,54 @@ export function Alerts() {
   const { store } = useApp();
   const { refusal } = useStoreStatus(store);
   const { pathname } = useLocation();
-  const list = problems(state).map((p) => bandOn(p, pathname));
-  if (list.length === 0 && !refusal) return null;
+  const lines: BandLine[] = [
+    ...problems(state).map((p): BandLine => ({ problem: bandOn(p, pathname) })),
+    // Last, so the lines above keep their place when it appears or goes: only the band's bottom edge moves.
+    ...(refusal ? [{ refusal }] : []),
+  ];
+  // A line resolved or dismissed leaves (ADR 0087); the band leaves with its last one, whole, as it last was.
   return (
-    <section className="alerts" aria-label="Needs you">
-      <div className="alerts-in">
-        {list.map((p) => (
-          <AlertLine
-            problem={p}
-            key={p.id}
-            fix={<FixButton problem={p} busyLabel="Waiting for the sign-in…" />}
-          />
-        ))}
-        {/* Last, so the lines above keep their place when it appears or goes: only the band's bottom edge moves. */}
-        {refusal ? <RefusedLine refusal={refusal} dismiss={store.dismiss} /> : null}
-      </div>
+    <PresenceList items={lines.length > 0 ? [lines] : []} keyOf={() => "band"} exits>
+      {(held, band) => (
+        <Band shown={band}>
+          <div className="alerts-in">
+            <PresenceList
+              items={held}
+              keyOf={(line) => ("problem" in line ? line.problem.id : REFUSED)}
+              exits
+            >
+              {(line, shown) =>
+                "problem" in line ? (
+                  <AlertLine
+                    problem={line.problem}
+                    fix={<FixButton problem={line.problem} busyLabel="Waiting for the sign-in…" />}
+                    shown={shown}
+                  />
+                ) : (
+                  <RefusedLine refusal={line.refusal} dismiss={store.dismiss} shown={shown} />
+                )
+              }
+            </PresenceList>
+          </div>
+        </Band>
+      )}
+    </PresenceList>
+  );
+}
+
+/** One line of the band: a problem, or the command the service refused. */
+type BandLine = { problem: Problem } | { refusal: Refusal };
+const REFUSED = "refused";
+
+/**
+ * The band itself, there while it has a line to hold: one that appears after the page's first paint slides in
+ * (`data-arrived`), one there when the page first shows is still.
+ */
+function Band({ shown, children }: { shown: Shown; children: ReactNode }) {
+  const arrived = useArrived();
+  return (
+    <section {...leavingProps("alerts", shown)} aria-label="Needs you" {...arrivedProps(arrived)}>
+      {children}
     </section>
   );
 }
@@ -351,9 +395,9 @@ export function Alerts() {
  * One line of the band, tinted by its own tone (round 4): pink when it needs the person, amber when it only waits,
  * so a Waiting line beside one that needs you is never on pink.
  */
-export function AlertLine({ problem, fix }: { problem: Problem; fix: ReactNode }) {
+export function AlertLine({ problem, fix, shown }: { problem: Problem; fix: ReactNode; shown?: Shown }) {
   return (
-    <div className={`alert ${problem.tone}`}>
+    <div {...leavingProps(`alert ${problem.tone}`, shown)}>
       <span className="alert-label">{problem.tone === "need" ? "Needs you" : "Waiting"}</span>
       <span className="alert-text">
         <b>{problem.title}.</b> <Said words={problem.detail} />
@@ -364,10 +408,18 @@ export function AlertLine({ problem, fix }: { problem: Problem; fix: ReactNode }
 }
 
 /** The refused command's line: amber, as a Waiting line, the band's last. */
-export function RefusedLine({ refusal, dismiss }: { refusal: Refusal; dismiss: () => void }) {
+export function RefusedLine({
+  refusal,
+  dismiss,
+  shown,
+}: {
+  refusal: Refusal;
+  dismiss: () => void;
+  shown?: Shown;
+}) {
   const { title, detail } = refusalText(refusal);
   return (
-    <div className="alert warn refused">
+    <div {...leavingProps("alert warn refused", shown)}>
       <span className="alert-label">Refused</span>
       <span className="alert-text">
         <b>{title}.</b> {detail}
@@ -401,7 +453,10 @@ export function PaletteRow({ item }: { item: Pick<PaletteItem, "label" | "hint" 
 }
 
 /** Ctrl K: pull requests, actions, settings, in this order. Enter runs the first match. */
-export function Palette({ mode, onClose }: { mode: "all" | "review" | null; onClose: () => void }) {
+export function Palette({ mode: asked, onClose }: { mode: PaletteMode | null; onClose: () => void }) {
+  // What it shows is the last mode it was opened in: closed, it fades out showing what it showed (ADR 0087).
+  const [mode, setMode] = useState<PaletteMode>(asked ?? "all");
+  if (asked !== null && asked !== mode) setMode(asked);
   const state = useAppState();
   const send = useSend();
   const navigate = useNavigate();
@@ -534,7 +589,7 @@ export function Palette({ mode, onClose }: { mode: "all" | "review" | null; onCl
 
   let lastGroup = "";
   return (
-    <Dialog open={mode !== null} onClose={onClose} className="cmdk">
+    <Dialog open={asked !== null} onClose={onClose} className="cmdk">
       <div className="search">
         <Icon name="search" />
         <input
@@ -658,9 +713,14 @@ function withModifier(e: KeyboardEvent): boolean {
   );
 }
 
-/** Moves the focus one row down (1) or up (-1); the first key press lands on the first row. */
+/**
+ * Moves the focus one row down (1) or up (-1); the first key press lands on the first row. What leaves (marked
+ * `data-leaving`, the row or the section around it) is no row any more: its copy is inert.
+ */
 function focusRow(step: 1 | -1) {
-  const rows = [...document.querySelectorAll<HTMLElement>("[data-row]")];
+  const rows = [...document.querySelectorAll<HTMLElement>("[data-row]")].filter(
+    (r) => !r.closest("[data-leaving]"),
+  );
   const active = document.activeElement;
   const at = active instanceof HTMLElement ? rows.indexOf(active) : -1;
   rows[Math.min(Math.max(at + step, 0), rows.length - 1)]?.focus();

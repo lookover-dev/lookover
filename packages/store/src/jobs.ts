@@ -282,6 +282,11 @@ export interface Jobs {
   runEnded(runId: RunId, end: RunEnd, at: number): ReviewJob;
   /** The jobs still running, oldest first: at start, those a stopped service left behind. */
   leftRunning(): LeftRunning[];
+  /**
+   * Run `id` as recorded, for a review shown again whose run goes on (ADR 0085): what it does live (its engines'
+   * activities, its outbox) empty, its job's preview, its start the sum of its steps before the current one.
+   */
+  runOf(id: RunId): Run;
   /** How old run `id` is (ADR 0056): `id` is a run folder's name, which may be no run the record holds. */
   runAge(id: string): RunAge;
   /** The job the change has now: the last one asked for, or null. */
@@ -465,6 +470,9 @@ export const runRow = z.object({
   step_at: z.int(),
   steps: z.string(),
   ended_at: z.int().nullable(),
+  confirmer: ENGINE.nullable(),
+  second_finder: ENGINE.nullable(),
+  confirm_fallback: z.string().nullable(),
 });
 
 export function jobOf(r: z.infer<typeof jobRow>): StoredJob {
@@ -646,7 +654,8 @@ export function jobs(db: Database): Jobs {
     WHERE jobs.state = 'running' ORDER BY jobs.rowid
   `);
   const insertRun = db.query(
-    "INSERT INTO runs (id, job_id, reviewer, confirmer, sha, step, step_at, steps) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    `INSERT INTO runs (id, job_id, reviewer, confirmer, second_finder, confirm_fallback, sha, step, step_at, steps)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const selectRun = db.query("SELECT * FROM runs WHERE id = ?");
   const selectAge = db.query(
@@ -862,6 +871,8 @@ export function jobs(db: Database): Jobs {
       job.id,
       run.reviewer,
       run.confirmer,
+      run.secondFinder,
+      run.confirmFallback === null ? null : JSON.stringify(run.confirmFallback),
       run.sha,
       run.step,
       run.stepAt,
@@ -932,6 +943,26 @@ export function jobs(db: Database): Jobs {
       leftRows
         .parse(selectLeft.all())
         .map((r) => ({ ...jobOf(r), runId: r.run_id, step: r.run_step, retries: r.retries })),
+    runOf: (id) => {
+      const r = runRow.parse(selectRun.get(id));
+      const { step, stepAt, steps } = stepsOf(r);
+      return {
+        id: r.id,
+        reviewer: r.reviewer,
+        secondFinder: r.second_finder,
+        confirmer: r.confirmer,
+        // Written below from a typed value: reading it back is reading our own JSON.
+        confirmFallback: r.confirm_fallback === null ? null : JSON.parse(r.confirm_fallback),
+        sha: r.sha,
+        preview: previewRow.parse(selectPreviewOf.get(r.job_id)).preview,
+        startedAt: stepAt - steps.reduce((ms, done) => ms + done.ms, 0),
+        step,
+        stepAt,
+        steps,
+        activities: [],
+        posting: null,
+      };
+    },
     runAge: (id) => {
       const row = selectAge.get(id);
       if (row === null) return { kind: "unknown" };

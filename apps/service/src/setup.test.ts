@@ -230,18 +230,26 @@ test("Sign in with GitHub: the code shown, entered on GitHub, the install waited
   expect(installed.setup).toMatchObject({ github: "done", step: "github", reached: "repos" });
 
   // In this order, each once (the clock's events are the advances'): the code shown, the person signed in, the
-  // install waited for, the code gone, the install listed, and only then connected.
+  // install waited for, the code gone, the first check listing no installation, the install's accounts sent before
+  // its repository's first poll (ADR 0086), the repository listed, and only then connected and the step done.
   const sent = logOf(door).filter((e) => e.seq > from && e.type !== "clock");
   expect(sent.map((e) => e.type)).toEqual([
     "connection.changed",
     "connection.changed",
     "setup.changed",
     "connection.changed",
+    "connection.changed",
+    "connection.changed",
     "repo.added",
     "change.opened",
     "connection.changed",
     "setup.changed",
   ]);
+  expect(sent[1]).toMatchObject({ patch: { person: OWNER, listed: false } });
+  expect(sent[4]).toMatchObject({ patch: { listed: true } });
+  expect(sent[5]).toMatchObject({ patch: { accounts: [{ account: { login: OWNER.login } }] } });
+  expect(sent[8]).toMatchObject({ patch: { state: "connected" } });
+  expect(sent[9]).toMatchObject({ setup: { github: "done" } });
 });
 
 test("a listing refused once the App is installed is checked again a few seconds later, and connects with no command", async () => {

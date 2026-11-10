@@ -156,14 +156,11 @@ export interface JobFailure {
   /** The engine that was reviewing when it failed; null when no run had started. */
   engine: EngineId | null;
   /**
-   * What it came from, when known; null otherwise. An event stored before ADR 0081 has no such field: a reader
-   * treats `undefined` as unknown, the same as null (`failure.cause ?? null`).
+   * What it came from, when known; null otherwise. An event stored before ADR 0081 has no such field: a start drops
+   * the review it reaches rather than read it (ADR 0085).
    */
   cause: FailureCause | null;
-  /**
-   * The time limit that ran out, in ms, as it was configured; null for any other cause. `undefined` on an event
-   * stored before ADR 0081: unknown, as for `cause`.
-   */
+  /** The time limit that ran out, in ms, as it was configured; null for any other cause. Missing as `cause` is. */
   limitMs: number | null;
 }
 
@@ -191,7 +188,8 @@ export interface ReviewJob {
   turn: Turn | null;
   /**
    * Who wrote the review request comment that asked for it, or the first that joined it (ADR 0081); null when no
-   * request did. Missing on a job an event stored before ADR 0081 carries: read as null.
+   * request did. Missing on a job an event stored before ADR 0081 carries: the replay names nobody (`apply`), and the
+   * start then drops the review that job is still on (ADR 0085).
    */
   askedBy: AskedBy | null;
 }

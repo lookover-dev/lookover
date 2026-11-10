@@ -8,22 +8,10 @@
 // (`s19-large-organisation-setup.ts`). Every pull request's diff is generated (one new file), its sha the SHA-1 of its
 // name, so 25 changes stay a table: only the owner's commits, and mira's #412 that a step invites asking about, have
 // a `find` scripted.
-import { createHash } from "node:crypto";
-import { type ChangeRef, type CommitSha, commitSha, type RepositoryRef } from "@lookover/contracts";
-import type { ScriptedFindAnswer } from "@lookover/testkit/demo";
+import type { ChangeRef, RepositoryRef } from "@lookover/contracts";
 import type { Account, Scenario, ScenarioChange, TimedMove, World } from "../scenario.ts";
-import {
-  BY_CLAUDE,
-  DEPENDABOT,
-  LEDGER_API,
-  LEDGER_DEV,
-  LEDGER_LABS,
-  MIN,
-  MIRA,
-  OWNER,
-  of,
-  unified,
-} from "./ledger-api.ts";
+import { change, clean, DAY } from "./generated.ts";
+import { DEPENDABOT, LEDGER_API, LEDGER_DEV, LEDGER_LABS, MIN, MIRA, OWNER, of } from "./ledger-api.ts";
 
 /** The company the owner works at: 30 repositories, the owner a member, mira an owner. */
 const FERNHILL: Account = { id: 342, login: "fernhill" };
@@ -95,56 +83,6 @@ export const LARGE_ORGANISATION: World = {
   },
 };
 
-/** A commit's sha, generated: the SHA-1 of what names it, so no two changes share one. */
-const shaOf = (name: string): CommitSha => commitSha(createHash("sha1").update(`S18 ${name}`).digest("hex"));
-
-/** A clean find pass, as Claude answers on a short change. */
-const clean = (why: string): ScriptedFindAnswer => ({
-  notes: "A short change.",
-  findings: [],
-  emptyReason: why,
-  usage: { inputTokens: 1_800, outputTokens: 120 },
-  tookMs: 30_000,
-});
-
-/**
- * A pull request of one generated commit: a new file at `path` holding one line. `find` scripted only where a review
- * runs (the owner's, or one a step invites asking about).
- */
-function change(
-  repo: RepositoryRef,
-  number: number,
-  title: string,
-  author: Account,
-  path: string,
-  options: { openedAgo?: number; find?: ScriptedFindAnswer; byClaude?: true } = {},
-): ScenarioChange {
-  const branch = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-  const message = options.byClaude ? `${title}\n\n${BY_CLAUDE}` : title;
-  const diff = unified(
-    `diff --git a/${path} b/${path}`,
-    "new file mode 100644",
-    "--- /dev/null",
-    `+++ b/${path}`,
-    "@@ -0,0 +1,1 @@",
-    `+// ${title}`,
-  );
-  const sha = shaOf(`${repo.owner}/${repo.name}#${number}`);
-  return {
-    repo,
-    number,
-    title,
-    branch,
-    author,
-    ...(options.openedAgo === undefined ? {} : { openedAgo: options.openedAgo }),
-    commits: [{ sha, message, diff, ...(options.find === undefined ? {} : { find: options.find }) }],
-  };
-}
-
-const DAY = 24 * 60 * MIN;
 const fern = (name: string): RepositoryRef => of(FERNHILL, name);
 
 /** mira's #412 on fernhill/api: the one a step invites asking about with Review now, which finds nothing. */

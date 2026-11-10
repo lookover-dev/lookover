@@ -33,6 +33,7 @@ import {
   SetRow,
   Switch,
 } from "../ui/basics.tsx";
+import { type Fold, foldMarks } from "../ui/fold.tsx";
 import { Select } from "../ui/layers.tsx";
 import { openChangeCount, pullRequestsCell, repositoryStanding } from "../view-model/accounts.ts";
 import { AGENT_INTRO } from "../view-model/coding-agent.ts";
@@ -43,7 +44,6 @@ import { addRepositoryLink, repositoriesFoot } from "../view-model/onboarding.ts
 import { REPOSITORIES_BAR, RepositoriesChoice, repositoriesList } from "../view-model/repositories.ts";
 import { differences, lastReviewAt } from "../view-model/select.ts";
 import {
-  HELD_WHY,
   pickOf,
   RULES_INTRO,
   ruleSource,
@@ -57,7 +57,7 @@ import {
 import { GITHUB_SETTINGS_TEXT, type GitHubSettingsView, githubSettings } from "../view-model/sign-in.ts";
 import { offersStartThisOne, START_THIS_ONE, startAtLoginHelp } from "../view-model/start-at-login.ts";
 import { CodingAgent } from "./coding-agent.tsx";
-import { HeldDetail, Page, Sentence, useSaving } from "./common.tsx";
+import { Page, Sentence, useSaving } from "./common.tsx";
 import { DepartedNotices } from "./departed.tsx";
 import { AccountsList, CodeActions } from "./github-app.tsx";
 import { RepositoryGroupRows } from "./repository-group.tsx";
@@ -258,7 +258,7 @@ function GitHubGroup({
         <div>
           <b>{T.title}</b>
           <div className="t-small t-help">
-            <HeldDetail shown={view.signIn.text} details={view.signIn.held} />
+            <Said words={view.signIn.text} />
           </div>
         </div>
         <div className="sign-in-acts">
@@ -305,21 +305,15 @@ type RuleView = Pick<Rule, "id" | "text" | "enabled" | "parentOff" | "nestedIn">
 type SaveStamp = ReturnType<typeof useSaving>["stamp"];
 
 /**
- * A rule's words, and under them, when its switch is held, why. A rule nested in another keeps that line's room while
- * it is not held (`.room`, unseen and unread), so its row never changes height as the rule it sits in toggles.
+ * A rule's words, and under them, when its switch is held, why: only then, no room kept for it (ADR 0086), so the
+ * line comes under the switch of the rule it sits in, which stays put.
  */
 export function RuleTitle({ rule }: { rule: RuleView }) {
   const { why } = ruleSwitch(rule);
   return (
     <>
       <b>{rule.text}</b>
-      {why !== null ? (
-        <span className="rule-held">{why}</span>
-      ) : rule.nestedIn ? (
-        <span className="rule-held room" aria-hidden="true">
-          {HELD_WHY}
-        </span>
-      ) : null}
+      {why === null ? null : <span className="rule-held">{why}</span>}
     </>
   );
 }
@@ -529,6 +523,7 @@ export function RepositoriesOn({ choice }: { choice: RepositoriesChoice }) {
               key={group.key}
               group={group}
               collapsed={collapsed}
+              chosenBy={chosen.held}
               // While the search has text, a chevron collapses its group until the search changes.
               toggle={() =>
                 list.searching ? choice.collapseInSearch(group.key) : toggle(group.key, collapsed)
@@ -551,7 +546,7 @@ export function RepositoriesOn({ choice }: { choice: RepositoriesChoice }) {
  * One repository's row: its name and its settings of its own, its pull requests, its switch, a group of one's
  * included (ADR 0083, round 4).
  */
-function RepositoryRow({ repo: r }: { repo: Repository }) {
+function RepositoryRow({ repo: r, fold }: { repo: Repository; fold?: Fold }) {
   const state = useAppState();
   const send = useSend();
   const navigate = useNavigate();
@@ -561,7 +556,11 @@ function RepositoryRow({ repo: r }: { repo: Repository }) {
   );
   const d = differences(r).length;
   return (
-    <tr onClick={() => navigate(`/repositories/${r.owner}/${r.name}`)} className="clickable">
+    <tr
+      onClick={() => navigate(`/repositories/${r.owner}/${r.name}`)}
+      className={fold?.leaving ? "clickable fold-row leaving" : "clickable fold-row"}
+      {...foldMarks(fold)}
+    >
       <td>
         <Link
           to={`/repositories/${r.owner}/${r.name}`}
@@ -641,6 +640,7 @@ function RepoSetting({
               icon="revert"
               label={`Set by you, here. Use my default: ${settingValueText(k, under.value)}`}
               onClick={reset}
+              end
             />
           ) : null}
         </span>

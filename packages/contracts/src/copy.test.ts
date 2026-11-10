@@ -463,16 +463,14 @@ test("a cause another try can't change says what would", () => {
   });
 });
 
-test("a failure with no cause, or one stored before causes were, says today's words for its kind", () => {
+test("a failure with no cause says today's words for its kind", () => {
   expect(failureWords({ kind: "prepare_failed", engine: null, cause: null, limitMs: null })).toEqual({
     phrase: "the code could not be fetched",
     sentence: "Lookover couldn't get the code ready.",
     retry: true,
     next: TRY_AGAIN,
   });
-  // An event stored before ADR 0081 carries no cause and no limit.
-  const old = JSON.parse('{"kind":"review_failed","detail":"crashed","engine":"codex"}');
-  expect(failureWords(old)).toEqual({
+  expect(failureWords({ kind: "review_failed", engine: "codex", cause: null, limitMs: null })).toEqual({
     phrase: "Codex gave no review",
     sentence: "Codex stopped before it finished.",
     retry: true,

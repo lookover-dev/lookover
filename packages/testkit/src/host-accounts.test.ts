@@ -87,6 +87,27 @@ describeHostAccounts("FakeGitHost, the person signed in on three accounts", {
   },
 });
 
+test("accounts held: the listing answers only once released, then as before; who is signed in still answers", async () => {
+  const fake = signedInHost();
+  const release = fake.holdAccounts();
+  let answered = false;
+  const listing = fake.accounts().then((accounts) => {
+    answered = true;
+    return accounts;
+  });
+  expect(await fake.person()).toEqual(person);
+  await Promise.resolve();
+  expect(answered).toBe(false);
+  release();
+  expect((await listing).map((a) => a.installation.account.login)).toEqual([
+    "sasensi",
+    "lookover-dev",
+    "acme",
+  ]);
+  // Released, the next listing answers at once.
+  expect(await fake.accounts()).toHaveLength(3);
+});
+
 const why = async (call: Promise<unknown>) => {
   const error = await call.catch((e: unknown) => e);
   if (!(error instanceof HostError)) throw new Error("not refused");

@@ -306,6 +306,10 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
       host.uninstall(login);
       return Promise.resolve();
     },
+    sso: (move, room) => {
+      host.askSso(move.organisation.login);
+      return listed(room);
+    },
     reconnect: (_move, room) =>
       room.reconnect().catch((error: unknown) => {
         if (!(error instanceof HostError)) throw error;

@@ -29,6 +29,8 @@ import {
   SameWidth,
   Search,
 } from "../ui/basics.tsx";
+import { FoldRows } from "../ui/fold.tsx";
+import { Tip } from "../ui/layers.tsx";
 import { SetupTicks, signedIn } from "../view-model/accounts.ts";
 import { AGENT_INTRO } from "../view-model/coding-agent.ts";
 import { CollapsedGroups } from "../view-model/collapsed.ts";
@@ -39,9 +41,10 @@ import {
   firstReviewPrimary,
   firstReviewRows,
   firstReviewSecondary,
+  OPEN_ON_GITHUB,
   REVIEWED_CHIPS,
   reviewedLine,
-  reviewedLines,
+  titleEnd,
 } from "../view-model/first-review.ts";
 import { plural } from "../view-model/format.ts";
 import {
@@ -56,10 +59,10 @@ import { REPOSITORIES_BAR, RepositoriesChoice, setupRepoList } from "../view-mod
 import { type ChangeReview, changeLabel, changeReviews, problems } from "../view-model/select.ts";
 import { SETUP_REVIEWERS_TEXT } from "../view-model/settings.ts";
 import { SIGN_IN_TEXT, signInEnd, signInStep } from "../view-model/sign-in.ts";
-import { BACKGROUND_TEXT, backgroundLine, backgroundLines } from "../view-model/start-at-login.ts";
+import { BACKGROUND_TEXT, backgroundLine } from "../view-model/start-at-login.ts";
 import { engineMark } from "../view-model/state-square.ts";
 import { CodingAgent } from "./coding-agent.tsx";
-import { HeldDetail, roundDuration, Sentence, StateSquare, StepList, SubStep } from "./common.tsx";
+import { roundDuration, Sentence, StateSquare, StepList, SubStep } from "./common.tsx";
 import { AccountsList, CodeActions, FixButton, GitHubButton } from "./github-app.tsx";
 
 const STEPS: { id: SetupStep; label: string }[] = [
@@ -259,7 +262,7 @@ function StepGitHub() {
         title={T.signIn}
         action={<CodeActions code={step.signIn.code} onCancel={cancel} />}
       >
-        <HeldDetail shown={step.signIn.text} details={step.signIn.held} />
+        <Said words={step.signIn.text} />
       </SubStep>
       <SubStep
         state={step.accounts.state}
@@ -267,12 +270,13 @@ function StepGitHub() {
         title={T.accounts}
         below={step.accounts.list.rows.length > 0 ? <AccountsList list={step.accounts.list} /> : null}
       >
-        <HeldDetail shown={step.accounts.text} details={step.accounts.held} />
+        {step.accounts.text}
       </SubStep>
       <div className="setup-acts">
         {/* Against the primary it is about: a refusal of a sign-in it started, else the step satisfied. Always there,
-            two lines tall, so nothing moves when one is said or cleared. */}
-        <p className={`setup-said held ${step.refused === null ? "t-small" : "refused-line"}`} role="status">
+            as tall as it says, beside buttons taller than its two lines (on a phone, under them), so nothing moves
+            when one is said or cleared (ADR 0086). */}
+        <p className={`setup-said ${step.refused === null ? "t-small" : "refused-line"}`} role="status">
           {step.refused ?? (step.done ? T.done : "")}
         </p>
         <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "ai" })}>
@@ -374,7 +378,8 @@ export function StepReposOn({ visit }: { visit: SetupReposVisit }) {
                   {g.key}
                 </b>
                 <span id={`${login}-count`} className="group-band-count">
-                  <HeldDetail shown={g.count} details={g.counts} />
+                  {/* As wide as every count it may say, as tall as the one it says: a tick changes no width. */}
+                  <SameWidth shown={g.count} labels={Object.fromEntries(g.counts.map((c) => [c, c]))} />
                 </span>
               </>
             ) : (
@@ -425,25 +430,28 @@ export function StepReposOn({ visit }: { visit: SetupReposVisit }) {
                 ) : (
                   box
                 )}
-                {collapsed
-                  ? null
-                  : g.rows.map(({ repo: r, ticked, open, zero, label }) => (
-                      // Shown by its name alone under its account's head; its label names it in full, open pull
-                      // requests included. Its count in Repositories' words, zero said too, muted: zero is data.
-                      <Check
-                        key={r.id}
-                        checked={ticked}
-                        label={label}
-                        onChange={(on) => ticks.tick([r.id], on)}
-                      >
-                        <b>{r.name}</b>
-                        <span
-                          className={zero ? "t-small checklist-open open-zero" : "t-small checklist-open"}
+                {/* Its rows fold by its chevron (ADR 0087): a search moves none. */}
+                <FoldRows open={!collapsed} chosenBy={chosen.held}>
+                  {collapsed
+                    ? null
+                    : g.rows.map(({ repo: r, ticked, open, zero, label }) => (
+                        // Shown by its name alone under its account's head; its label names it in full, open pull
+                        // requests included. Its count in Repositories' words, zero said too, muted: zero is data.
+                        <Check
+                          key={r.id}
+                          checked={ticked}
+                          label={label}
+                          onChange={(on) => ticks.tick([r.id], on)}
                         >
-                          {open}
-                        </span>
-                      </Check>
-                    ))}
+                          <b>{r.name}</b>
+                          <span
+                            className={zero ? "t-small checklist-open open-zero" : "t-small checklist-open"}
+                          >
+                            {open}
+                          </span>
+                        </Check>
+                      ))}
+                </FoldRows>
               </div>
             );
           })}
@@ -516,7 +524,7 @@ function FirstReviewDone({ item }: { item: ChangeReview }) {
         {review.preview ? "This was a preview: nothing was posted on GitHub." : null}
       </p>
       <div className="setup-acts">
-        {review.preview ? null : <GitHubButton change={change}>Open on GitHub</GitHubButton>}
+        {review.preview ? null : <GitHubButton change={change}>{OPEN_ON_GITHUB}</GitHubButton>}
         <Button variant="primary" size="lg" onClick={() => send({ type: "setup.goto", step: "agent" })}>
           Continue
         </Button>
@@ -543,79 +551,64 @@ function StepAgent() {
   );
 }
 
-/**
- * "Reviews keep running in the background", its line the start at login's. The footer under it holds still when the
- * line changes: every line it can say is a card laid in one place, only its own seen, so the room the tallest takes
- * is under the card, never inside it, and the card ends at the padding its siblings do.
- */
+/** "Reviews keep running in the background": the same words whatever is chosen, so the footer under it never moves. */
 export function BackgroundCard() {
-  const state = useAppState();
-  const { mode } = useApp();
-  const seen = JSON.stringify(backgroundLine(state.service, mode));
   return (
-    <div className="background-hold">
-      {backgroundLines(state.service, mode).map((line) => {
-        const key = JSON.stringify(line);
-        const shown = key === seen;
-        return (
-          <div
-            key={key}
-            className={shown ? "card background-note" : "card background-note held-room"}
-            aria-hidden={shown ? undefined : true}
-          >
-            <h4 className="card-title">Reviews keep running in the background</h4>
-            <p>{BACKGROUND_TEXT}</p>
-            <p className="t-small t-help">
-              <Said words={line} />
-            </p>
-          </div>
-        );
-      })}
+    <div className="card background-note">
+      <h4 className="card-title">Reviews keep running in the background</h4>
+      <p>{BACKGROUND_TEXT}</p>
     </div>
   );
 }
 
 /**
  * The setup's last footer: Back to the first review, as every step has; start at login off or on again; and the end
- * of setup, which works whatever was done.
+ * of setup, which works whatever was done. Under it, the step's end, what start at login does: the button changes
+ * it, and there its growth moves nothing (ADR 0086).
  */
 export function AgentActs() {
   const state = useAppState();
+  const { mode } = useApp();
   const send = useSend();
   const navigate = useNavigate();
   return (
-    <div className="setup-acts">
-      <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "first-review" })}>
-        Back
-      </Button>
-      {/* One width for both labels, so the row keeps its places when it is pressed (#279). A secondary, outlined: a
+    <>
+      <div className="setup-acts">
+        <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "first-review" })}>
+          Back
+        </Button>
+        {/* One width for both labels, so the row keeps its places when it is pressed (#279). A secondary, outlined: a
           choice, never a link beside Back (round 5). */}
-      <SameWidth
-        shown={state.service.startAtLogin ? "on" : "off"}
-        labels={{
-          on: (
-            <Button onClick={() => send({ type: "service.startAtLogin", on: false })}>
-              Don't start at login
-            </Button>
-          ),
-          off: (
-            <Button onClick={() => send({ type: "service.startAtLogin", on: true })}>
-              Start at login after all
-            </Button>
-          ),
-        }}
-      />
-      <Button
-        variant="primary"
-        size="lg"
-        onClick={() => {
-          send({ type: "setup.finish" });
-          void navigate("/");
-        }}
-      >
-        Go to my reviews
-      </Button>
-    </div>
+        <SameWidth
+          shown={state.service.startAtLogin ? "on" : "off"}
+          labels={{
+            on: (
+              <Button onClick={() => send({ type: "service.startAtLogin", on: false })}>
+                Don't start at login
+              </Button>
+            ),
+            off: (
+              <Button onClick={() => send({ type: "service.startAtLogin", on: true })}>
+                Start at login after all
+              </Button>
+            ),
+          }}
+        />
+        <Button
+          variant="primary"
+          size="lg"
+          onClick={() => {
+            send({ type: "setup.finish" });
+            void navigate("/");
+          }}
+        >
+          Go to my reviews
+        </Button>
+      </div>
+      <p className="t-small t-help at-login-line">
+        <Said words={backgroundLine(state.service, mode)} />
+      </p>
+    </>
   );
 }
 
@@ -673,6 +666,7 @@ export function StepFirstReview() {
     : null;
 
   if (running) return <FirstReviewRunning item={running} />;
+  const reviewed = reviewedLine(rows, picked);
 
   return (
     <>
@@ -698,12 +692,6 @@ export function StepFirstReview() {
           itself.
         </Card>
       )}
-      {/* Held as tall as every line it can show under a list, so a row getting reviewed moves nothing under it. */}
-      {rows.length > 0 ? (
-        <p className="t-small first-reviewed-line">
-          <HeldDetail shown={reviewedLine(rows, picked)} details={reviewedLines(rows, picked)} />
-        </p>
-      ) : null}
       <div className="setup-acts first-review-acts">
         <Button variant="ghost" onClick={() => send({ type: "setup.goto", step: "repos" })}>
           Back
@@ -734,14 +722,26 @@ export function StepFirstReview() {
           }}
         />
       </div>
+      {/* Under the bar, the step's end, as tall as what it says (ADR 0086): a review landing or another pick may
+          grow it, moving nothing about to be clicked. */}
+      {reviewed.length > 0 ? (
+        <p className="t-small first-reviewed-line">
+          {reviewed.map((sentence) => (
+            <span key={sentence} className="line-sentence">
+              {sentence}
+            </span>
+          ))}
+        </p>
+      ) : null}
     </>
   );
 }
 
 /**
- * One pull request First review offers (design-system.md "First review's list"): its radio, and, held on every row,
- * the state chip at the end of its title and "Open on GitHub" alone at its right, centred on both lines, of one
- * Lookover already reviewed on its head, whose radio is off.
+ * One pull request First review offers (design-system.md "First review's list"): its radio, and, their widths held on
+ * every row (never their heights, ADR 0086), the state chip at the end of its title and "Open on GitHub" alone at its
+ * right, centred on both lines (its icon alone on a phone), of one Lookover already reviewed on its head, whose radio
+ * is off.
  */
 function FirstReviewChoice({
   row,
@@ -758,21 +758,38 @@ function FirstReviewChoice({
   // Only the chips a reviewed row can show hold the place, so its width never follows a label that isn't shown.
   const chips: Record<string, ReactNode> = {};
   for (const { tone, label } of REVIEWED_CHIPS) chips[label] = <Chip tone={tone}>{label}</Chip>;
+  const [lead, last] = titleEnd(change.title);
   return (
     <div className={`first-row${reviewed ? " reviewed" : ""}`}>
       <Radio name="first" checked={picked} disabled={reviewed} onChange={onPick}>
         <b>
-          {change.title}
-          <span className="first-row-chip" aria-hidden={reviewed ? undefined : true}>
-            <SameWidth shown={reviewed && chip.label in chips ? chip.label : ""} labels={chips} />
+          {lead}
+          {/* The chip's place wraps with the title's last character (its word with it), never onto a line of its own. */}
+          <span className="first-row-title-end">
+            {last}
+            <span className="first-row-chip" aria-hidden={reviewed ? undefined : true}>
+              <SameWidth shown={reviewed && chip.label in chips ? chip.label : ""} labels={chips} />
+            </span>
           </span>
         </b>
         <span className="t-small">{firstReviewMeta(change, now)}</span>
       </Radio>
       <span className="first-row-reviewed" aria-hidden={reviewed ? undefined : true}>
-        <GitHubButton change={change} variant="ghost" size="sm">
-          Open on GitHub
-        </GitHubButton>
+        {/* Its words at the desktop width; on a phone, which has no room for them, the Icon button: a small square,
+            its external icon alone, named by its words and said on hover by its tip (design-system.md "Icon
+            button"). Only one of the two is laid out at a time. */}
+        <span className="first-row-link-words">
+          <GitHubButton change={change} variant="ghost" size="sm">
+            {OPEN_ON_GITHUB}
+          </GitHubButton>
+        </span>
+        <span className="first-row-link-icon">
+          <Tip text={OPEN_ON_GITHUB} end>
+            <GitHubButton change={change} variant="ghost" size="sm" square label={OPEN_ON_GITHUB}>
+              {null}
+            </GitHubButton>
+          </Tip>
+        </span>
       </span>
     </div>
   );

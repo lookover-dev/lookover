@@ -13,6 +13,7 @@ import {
   repositoryId,
   type State,
 } from "@lookover/contracts";
+import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AppContext, StateProvider } from "../store.tsx";
@@ -76,6 +77,14 @@ export function finding(id: string, status: Finding["status"], more: Partial<Fin
 
 /** The review page of sasensi/ledger-api #7, its review as `review` makes it. */
 export function page(review: Partial<Review>): string {
+  return renderToStaticMarkup(pageOf(review));
+}
+
+/**
+ * The same page as an element, for a test that renders it in a DOM and renders it again as the review moves; `id`,
+ * the pull request's id, for one that puts another pull request at the same address.
+ */
+export function pageOf(review: Partial<Review>, id: ChangeId = ID): ReactElement {
   const base = world();
   const at = base.now - 60_000;
   const round = {
@@ -99,8 +108,8 @@ export function page(review: Partial<Review>): string {
   const state: State = {
     ...base,
     changes: {
-      [ID]: {
-        id: ID,
+      [id]: {
+        id,
         repoId: repositoryId("sasensi/ledger-api"),
         number: 7,
         title: "Change 7",
@@ -114,9 +123,9 @@ export function page(review: Partial<Review>): string {
         newCommits: 0,
       },
     },
-    reviews: { [ID]: { ...emptyReview(ID, at), rounds: review.rounds ?? [round], ...review } },
+    reviews: { [id]: { ...emptyReview(id, at), rounds: review.rounds ?? [round], ...review } },
   };
-  return renderToStaticMarkup(
+  return (
     <MemoryRouter initialEntries={["/reviews/sasensi/ledger-api/7"]}>
       <AppContext.Provider
         value={{
@@ -134,6 +143,6 @@ export function page(review: Partial<Review>): string {
           </Routes>
         </StateProvider>
       </AppContext.Provider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }

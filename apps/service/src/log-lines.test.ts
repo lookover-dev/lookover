@@ -5,6 +5,7 @@ import {
   type Change,
   changeId,
   commitSha,
+  type Dropped,
   type EventBody,
   emptyReview,
   findingId,
@@ -20,7 +21,7 @@ import {
   runId,
   type State,
 } from "@lookover/contracts";
-import { logLineOf } from "./index.ts";
+import { droppedLine, logLineOf } from "./index.ts";
 
 /** Sunday 11 October 2026, 10:00 in the machine's own zone. */
 const AT = new Date(2026, 9, 11, 10, 0).getTime();
@@ -138,6 +139,8 @@ function before(
       state: "connected",
       cause: null,
       accounts: [],
+      listed: true,
+      listingCause: null,
       unreached: [],
       signIn: null,
       person: null,
@@ -475,6 +478,8 @@ test("the service paused until when, or until resumed, and resumed", () => {
   const resumed: EventBody = { type: "service.changed", at: AT, patch: { paused: null } };
   expect(logLineOf(resumed, before({ paused: { since: AT - 1, until: null } }))).toBe("reviews resumed");
   expect(logLineOf(resumed, before())).toBeNull();
+  // A start states the pause the store keeps again (ADR 0085): the same pause moved nothing.
+  expect(logLineOf(paused(null), before({ paused: { since: AT, until: null } }))).toBeNull();
   expect(logLineOf({ type: "service.changed", at: AT, patch: { unlocked: true } }, before())).toBeNull();
 });
 
@@ -508,4 +513,29 @@ test("what changes no review writes no line", () => {
     logLineOf({ type: "connection.changed", at: AT, patch: { state: "connected" } }, before()),
   ).toBeNull();
   expect(logLineOf({ type: "rule.changed", at: AT, ruleId: "r", enabled: false }, before())).toBeNull();
+});
+
+test("each piece a start dropped says where it was and why, in the log's words (ADR 0085)", () => {
+  const pieces: Dropped[] = [
+    { section: "state", key: null, why: { kind: "not-object", found: "list" } },
+    { section: "repos", key: null, why: { kind: "not-list", found: "object" } },
+    { section: "reviews", key: null, why: { kind: "not-record", found: "missing" } },
+    { section: "changes", key: ID, why: { kind: "partner-dropped" } },
+    { section: "reviews", key: ID, why: { kind: "partner-dropped" } },
+    {
+      section: "repos",
+      key: "sasensi/ledger-api",
+      why: { kind: "unreadable", path: "enabled", message: "Invalid input: expected boolean" },
+    },
+    { section: "rules", key: "1", why: { kind: "unreadable", path: "", message: "" } },
+  ];
+  expect(pieces.map(droppedLine)).toEqual([
+    "dropped state: not an object: a list",
+    "dropped repos: not a list: object",
+    "dropped reviews: not a record: missing",
+    `dropped changes ${ID}: its review was dropped`,
+    `dropped reviews ${ID}: its change was dropped`,
+    "dropped repos sasensi/ledger-api: enabled: Invalid input: expected boolean",
+    "dropped rules 1: unreadable",
+  ]);
 });

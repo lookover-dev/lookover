@@ -193,7 +193,7 @@ test("a service stopped mid-check ends the checks before it closes; started agai
   await first.service.stop();
   await asked;
 
-  // Restarted: the log holds the checks ended, not running, so nothing stale is replayed, and "Run all checks"
+  // Restarted: check results belong to the start that ran them (ADR 0085), so none is shown, and "Run all checks"
   // answers.
   const second = await start({
     home: dir,
@@ -203,7 +203,7 @@ test("a service stopped mid-check ends the checks before it closes; started agai
     idsFrom: 100,
   });
   const again = await openApp(second.service);
-  expect((await snapshot(second.service, again)).service.checks).toMatchObject({ running: false });
+  expect((await snapshot(second.service, again)).service.checks).toBeNull();
   expect((await post(second.service, again, { type: "service.runChecks" })).status).toBe(200);
   const shown = await snapshot(second.service, again);
   expect(shown.service.checks.running).toBe(false);

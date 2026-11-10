@@ -75,6 +75,8 @@ function world(repos: Repository[], departed: DepartedRepository[] = []): State 
       person: { id: 1, login: "sasensi" },
       // GitHub writes Fernhill with a capital; its repositories' owner is in lower case.
       accounts: [account(1, "sasensi"), account(2, "Fernhill"), account(3, "ledger-dev")],
+      listed: true,
+      listingCause: null,
       unreached: [],
       web: GITHUB_WEB,
       since: NOW,
@@ -422,28 +424,26 @@ test("the filter keeps a folded group folded, its head saying apart how many of 
       group.head.shows,
     ]);
   choice.filter(state, "off");
-  expect(heads()).toEqual([["Fernhill", true, "10 of 12 reviewed", { line: "2 shown", said: true }]]);
+  expect(heads()).toEqual([["Fernhill", true, "10 of 12 reviewed", "2 repositories shown"]]);
   choice.filter(state, "reviewing");
-  // An open head holds the line empty, so every head under the filter is as tall (Lookover's F5).
+  // An open head says nothing of it and holds nothing for it: its rows say it (ADR 0086).
   expect(heads()).toEqual([
-    ["sasensi", false, "All 2 reviewed", { line: "2 shown", said: false }],
-    ["Fernhill", true, "10 of 12 reviewed", { line: "10 shown", said: true }],
-    ["ledger-dev", false, "All 3 reviewed", { line: "3 shown", said: false }],
+    ["sasensi", false, "All 2 reviewed", null],
+    ["Fernhill", true, "10 of 12 reviewed", "10 repositories shown"],
+    ["ledger-dev", false, "All 3 reviewed", null],
   ]);
-  // Its count is the account's alone, held at every count; what the filter shows is a line of its own.
-  const [, fernhill] = repositoriesList(state, choice.get(), new Map()).groups;
-  expect(fernhill?.group.head.counts).toContain("All 12 reviewed");
   // The account switched off under Reviewing: the rows it left stay, and the head never says "None reviewed · 10 reviewing".
   const off = world(withFernhill(12).map((r) => (r.owner === "fernhill" ? { ...r, enabled: false } : r)));
-  expect(heads(off)[1]).toEqual(["Fernhill", true, "None of 12 reviewed", { line: "10 shown", said: true }]);
-  // Opened, its rows say what the filter shows: the head says the account's count alone, the line held.
+  expect(heads(off)[1]).toEqual(["Fernhill", true, "None of 12 reviewed", "10 repositories shown"]);
+  // Opened, its rows say what the filter shows: the head says the account's count alone.
   const opened = repositoriesList(state, choice.get(), new Map([["Fernhill", false]])).groups[1];
-  expect([opened?.group.head.count, opened?.group.head.shows]).toEqual([
-    "10 of 12 reviewed",
-    { line: "10 shown", said: false },
-  ]);
+  expect([opened?.group.head.count, opened?.group.head.shows]).toEqual(["10 of 12 reviewed", null]);
   choice.filter(state, "all");
   expect(heads()[1]).toEqual(["Fernhill", true, "10 of 12 reviewed", null]);
+  // One left: its noun as one. "16 shown" alone, in a head's row under the Pull requests column, read as pull requests.
+  const one = world(withFernhill(12).map((r) => (r.name === "repo-1" ? r : { ...r, enabled: true })));
+  choice.filter(one, "off");
+  expect(heads(one)).toEqual([["Fernhill", true, "11 of 12 reviewed", "1 repository shown"]]);
 });
 
 // ---- Setup's Repositories step past ten (ADR 0082, 0083) ----

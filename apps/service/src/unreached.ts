@@ -4,7 +4,8 @@
 // own `gh` again (`read`).
 // - Owners: the person's own account (GitHub's id for it is theirs) is theirs; an organisation is theirs as their
 //   `gh` gave their role there; null when it said nothing of it. Always null before a sign-in.
-// - Not reached, once signed in: the person's own account first while the App isn't installed there (owner true),
+// - Not reached, once signed in and the installations listed under that sign-in (`listed`, ADR 0086: none while
+//   still looking): the person's own account first while the App isn't installed there (owner true),
 //   then the organisations their `gh` names, in its order, without the App, then those asked that it doesn't name,
 //   oldest ask first (an ask shows until its organisation is reached). `gh` counts only signed in as the person signed
 //   in, compared by GitHub's id, never the login, and only when it lists their organisations: one signed in as
@@ -51,7 +52,8 @@ export interface UnreachedDeps {
 export interface Unreached {
   /**
    * A `connection.changed` patch, sent while the UI holds `was`, with the owners and the accounts not reached as they
-   * follow from it, when it moves the person or the accounts. Any other patch as it is. Keeps nothing.
+   * follow from it, when it moves the person, the accounts or whether they are listed. Any other patch as it is.
+   * Keeps nothing.
    */
   completed(patch: Partial<Connection>, was: Connection): Partial<Connection>;
   /**
@@ -114,6 +116,8 @@ export function createUnreached(d: UnreachedDeps): Unreached {
       return found === undefined ? null : found.role === "owner";
     };
     const accounts: ConnectionAccount[] = c.accounts.map((a) => ({ ...a, owner: ownerOf(a.account) }));
+    // Still looking for the accounts (ADR 0086): none is said to be not reached before they are listed.
+    if (!c.listed) return { accounts, unreached: [] };
     // By GitHub's id: an organisation renamed since it was asked, listed or named is still the same one.
     const notReached = (account: HostLogin) => !c.accounts.some((a) => a.account.id === account.id);
     const asks = d.asks.of(person.id).filter((a) => notReached(a.account));
@@ -178,7 +182,7 @@ export function createUnreached(d: UnreachedDeps): Unreached {
 
   return {
     completed: (patch, was) => {
-      if (!("accounts" in patch || "person" in patch)) return patch;
+      if (!("accounts" in patch || "person" in patch || "listed" in patch)) return patch;
       const { accounts, unreached } = derived({ ...was, ...patch });
       return {
         ...patch,

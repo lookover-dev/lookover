@@ -4,9 +4,10 @@ import { Fragment, type ReactNode, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { reviewPath, useAppState, useListScope, useSend } from "../store.tsx";
 import { useTickingNow } from "../ticking.tsx";
-import { Button, Chip, Eyes, Icon, Row, Said, Tabs } from "../ui/basics.tsx";
+import { Button, Chip, Eyes, Icon, Row, Tabs } from "../ui/basics.tsx";
 import { Tip } from "../ui/layers.tsx";
-import { duration, LONGEST_RUNNING_TIMES, SEPARATOR, type WithCommand } from "../view-model/format.ts";
+import { arrivedProps, FirstPaint, type Shown, useArrived } from "../ui/presence.tsx";
+import { duration, LONGEST_RUNNING_TIMES, SEPARATOR } from "../view-model/format.ts";
 import {
   confirmerOf,
   confirmSkipped,
@@ -65,7 +66,7 @@ export function ScopeTabs({ items }: { items: ChangeReview[] }) {
   return tabs ? <Tabs split label="Whose pull requests" value={scope} tabs={tabs} onChange={choose} /> : null;
 }
 
-export function ReviewRow({ item, fresh }: { item: ChangeReview; fresh?: boolean }) {
+export function ReviewRow({ item, fresh, shown }: { item: ChangeReview; fresh?: boolean; shown?: Shown }) {
   const state = useAppState();
   const now = useTickingNow(state);
   const send = useSend();
@@ -83,6 +84,7 @@ export function ReviewRow({ item, fresh }: { item: ChangeReview; fresh?: boolean
     <Row
       status
       fresh={fresh ?? false}
+      {...(shown === undefined ? {} : { shown })}
       lead={<Chip tone={c.tone}>{c.label}</Chip>}
       title={item.change.title}
       meta={
@@ -143,7 +145,7 @@ function RunningTime({ time }: { time: string }) {
 /**
  * The steps of the running round, ticking live, or else of the last round. The confirm step names the AI that
  * double-checks; a planned one the run passed by says there was nothing new to double-check, in the same row. The
- * posting step says the round's outbox as it posts (ADR 0055), in a row always two lines tall.
+ * posting step says the round's outbox as it posts (ADR 0055), in two lines at most.
  */
 export function StepList({ review, state }: { review: Review; state: State }) {
   const reviewer = reviewerOf(review);
@@ -151,18 +153,36 @@ export function StepList({ review, state }: { review: Review; state: State }) {
   const name = reviewer ? state.engines[reviewer].name : "The AI";
   const checker = confirmer ? state.engines[confirmer].name : name;
   const now = useTickingNow(state);
+  // The list's own gate: the marks it opened with are still, on a page or a card opening; one a step takes later
+  // comes in (`StepMark`).
   return (
-    <ol className="steplist">
-      {runSteps(review).map((step) => (
-        <StepItem
-          key={step}
-          step={step}
-          name={step === "confirming" ? checker : name}
-          review={review}
-          now={now}
-        />
-      ))}
-    </ol>
+    <FirstPaint>
+      <ol className="steplist">
+        {runSteps(review).map((step) => (
+          <StepItem
+            key={step}
+            step={step}
+            name={step === "confirming" ? checker : name}
+            review={review}
+            now={now}
+          />
+        ))}
+      </ol>
+    </FirstPaint>
+  );
+}
+
+/**
+ * A step's mark, the reading eyes or the check (ADR 0087): one the step took after the list's first commit comes in
+ * (`data-arrived`: a fade and a scale from .9), one it had when the list first showed is still. Keyed by its kind,
+ * so the check taking the eyes' place is a new mark. The wrapper moves, never the eyes' own reading (ADR 0063).
+ */
+function StepMark({ children }: { children: ReactNode }) {
+  const arrived = useArrived();
+  return (
+    <span className="step-mark" {...arrivedProps(arrived)}>
+      {children}
+    </span>
   );
 }
 
@@ -189,7 +209,9 @@ function StepItem({ step, name, review, now }: { step: RunStep; name: string; re
   if (done) {
     return (
       <li className="done">
-        <Icon name="check" />
+        <StepMark key="check">
+          <Icon name="check" />
+        </StepMark>
         <StepText step={step}>{did}</StepText>
         {time}
       </li>
@@ -197,7 +219,13 @@ function StepItem({ step, name, review, now }: { step: RunStep; name: string; re
   }
   return (
     <li className={active ? "active" : ""}>
-      {active ? <Eyes /> : <span className="dot" />}
+      {active ? (
+        <StepMark key="eyes">
+          <Eyes />
+        </StepMark>
+      ) : (
+        <span className="dot" />
+      )}
       <StepText step={step}>
         {active && step === "publishing" ? postingText(run.posting, now) : doing}
       </StepText>
@@ -207,8 +235,8 @@ function StepItem({ step, name, review, now }: { step: RunStep; name: string; re
 }
 
 /**
- * A step's words. The posting step's hold two lines, never more, whether it waits, posts or is done: its outbox and
- * GitHub's wait never move the list, nor does the run's end.
+ * A step's words. The posting step's take the lines its outbox says, two at most, cut past them; no line is held for
+ * them (ADR 0086): one line at 1024 px and wider, so the list keeps its height as it posts.
  */
 function StepText({ step, children }: { step: RunStep; children: string }) {
   if (step !== "publishing") return <span>{children}</span>;
@@ -294,45 +322,6 @@ const CLASSES: Record<SquareState, string> = {
 /** The state of a step or an AI, in a square holding its mark, in its state's colour. */
 export function StateSquare({ state }: { state: SquareState }) {
   return <span className={`lg ${CLASSES[state]}`}>{MARKS[state]}</span>;
-}
-
-/** A detail given as its sentences, not as words with a command in them. */
-const isSentences = (detail: string | WithCommand | readonly string[]): detail is readonly string[] =>
-  Array.isArray(detail);
-
-/**
- * A sub-step's detail, held at the height of the tallest it can show: every one in the same cell, only `shown` seen
- * (as `SameWidth` does for widths), so a sub-step done or undone moves nothing under it, at any width. A detail given
- * as sentences (first review's line) draws each as a block of its own (`.held-sentence`), in every copy held.
- */
-export function HeldDetail({
-  shown,
-  details,
-}: {
-  shown: string | WithCommand | readonly string[];
-  details: readonly (string | WithCommand | readonly string[])[];
-}) {
-  const seen = JSON.stringify(shown);
-  return (
-    <span className="held-detail">
-      {details.map((detail) => {
-        const key = JSON.stringify(detail);
-        return (
-          <span key={key} aria-hidden={key === seen ? undefined : true}>
-            {isSentences(detail) ? (
-              detail.map((sentence) => (
-                <span key={sentence} className="held-sentence">
-                  {sentence}
-                </span>
-              ))
-            ) : (
-              <Said words={detail} />
-            )}
-          </span>
-        );
-      })}
-    </span>
-  );
 }
 
 /**

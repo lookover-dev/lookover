@@ -3,7 +3,7 @@
 // armed on the clock) and the catalogue as the drawer lists it. Each scenario's milestones are in
 // `scenarios-s1-s7.test.ts` and `scenarios-s8-s14.test.ts`.
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
-import { apply, changeId, FAULTS } from "@lookover/contracts";
+import { apply, changeId, FAULTS, readState, type State, stateSchema } from "@lookover/contracts";
 import { SCENARIOS, type Scenario, scenarioOf } from "../index.ts";
 import { SANDBOX, TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
@@ -110,13 +110,40 @@ test("the moves after the seed are armed on the clock: a pause the owner sets, t
   expect(state.reviews[id(146)]?.job).toMatchObject({ state: "deferred", deferral: { reason: "paused" } });
 });
 
+/** Every scenario's snapshot once its seed is played, by id: each scenario started once for the file (S10 is `door`). */
+let everySeeded: Promise<[string, State][]> | undefined;
+function seededStates(): Promise<[string, State][]> {
+  if (everySeeded === undefined)
+    everySeeded = (async () => {
+      const states: [string, State][] = [];
+      for (const scenario of SCENARIOS) {
+        const at = scenario.id === "S10" ? door : await startScenario(scenario);
+        states.push([scenario.id, await snapshotOf(at)]);
+      }
+      return states;
+    })();
+  return everySeeded;
+}
+
+test("every scenario's state reads through the state's schema as it is: nothing refused, nothing stripped (ADR 0085)", async () => {
+  for (const [id, state] of await seededStates()) {
+    const read = stateSchema.safeParse(state);
+    expect({ id, issues: read.error?.issues ?? [] }).toStrictEqual({ id, issues: [] });
+    expect(read.data).toStrictEqual(state);
+  }
+});
+
+test("every scenario's state, stored as JSON and replayed, comes back equal from readState with nothing dropped (ADR 0085)", async () => {
+  for (const [id, state] of await seededStates()) {
+    const read = readState(JSON.parse(JSON.stringify(state)), state);
+    expect({ id, dropped: read.dropped }).toStrictEqual({ id, dropped: [] });
+    expect(read.state).toStrictEqual(state);
+  }
+});
+
 test("every scenario starts signed in on the shared App, posting as the owner, but S1, at the setup's GitHub step; S15 is retired", async () => {
   const people: Record<string, string | null> = {};
-  for (const scenario of SCENARIOS) {
-    const at = scenario.id === "S10" ? door : await startScenario(scenario);
-    const { connection } = await snapshotOf(at);
-    people[scenario.id] = connection.person?.login ?? null;
-  }
+  for (const [id, { connection }] of await seededStates()) people[id] = connection.person?.login ?? null;
   expect(people).toEqual({
     S1: null,
     S2: "sasensi",
@@ -136,6 +163,8 @@ test("every scenario starts signed in on the shared App, posting as the owner, b
     S17: "sasensi",
     S18: "sasensi",
     S19: "sasensi",
+    S20: "sasensi",
+    S21: "sasensi",
   });
 });
 

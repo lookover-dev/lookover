@@ -10,6 +10,7 @@ import {
   type Event,
   type LookoverApi,
   type State,
+  UnknownEvent,
 } from "@lookover/contracts";
 import { createContext, useContext, useState, useSyncExternalStore } from "react";
 import { openOf, Refused } from "./api/http.ts";
@@ -21,7 +22,22 @@ import type { HeldValue } from "./view-model/held.ts";
 import { type Refusal, refusalOf, saysNothing } from "./view-model/refusal.ts";
 import { RepositoriesBar } from "./view-model/repositories.ts";
 import { ListScope, type ScopeChoice } from "./view-model/scope.ts";
-import { listedReviews } from "./view-model/select.ts";
+import { listedReviews, type PaletteMode } from "./view-model/select.ts";
+
+/**
+ * The copy with `event` applied, or as it was when `apply` throws on it, the console saying which, and whether the
+ * copy is now behind: a type a newer service sends to a tab left open across an update (ADR 0085) is skipped, nothing
+ * missed; a throw on a known type is a bug that left out what the service holds, and the HTTP client already counted
+ * the event seen, so it never comes again.
+ */
+function applied(state: State, event: Event): { state: State; behind: boolean } {
+  try {
+    return { state: apply(state, event), behind: false };
+  } catch (error) {
+    console.error(`Lookover skipped event ${event.seq} (${String(event.type)})`, error);
+    return { state, behind: !(error instanceof UnknownEvent) };
+  }
+}
 
 /** What the HTTP client adds to `LookoverApi`: it says when the service no longer knows the session. */
 export interface SessionAware {
@@ -42,8 +58,11 @@ export interface StoreStatus {
 export class Store {
   state: State | null = null;
   private status: StoreStatus = { session: "open", refusal: null };
-  /** Events that arrived before the first snapshot: applied on it once it comes. */
-  private early: Event[] = [];
+  /**
+   * Events that arrived while a snapshot was on its way, the first or one asked for again: applied on it once it
+   * comes. Null when none is.
+   */
+  private held: Event[] | null = null;
   private listeners = new Set<() => void>();
   /** Mine or Everyone, one choice for Home and All reviews while the page is open (ADR 0078). */
   readonly scope = new ListScope();
@@ -58,21 +77,44 @@ export class Store {
 
   constructor(api: LookoverApi & Partial<SessionAware>) {
     this.api = api;
-    api.subscribe((event) => {
-      if (this.state) this.state = apply(this.state, event);
-      else this.early.push(event);
-      this.changed();
-    });
+    api.subscribe((event) => this.receive(event));
     api.onSessionLost?.((open) => this.lost(open));
-    api.snapshot().then(
+    this.load();
+  }
+
+  private receive(event: Event): void {
+    this.held?.push(event);
+    if (this.state) {
+      const next = applied(this.state, event);
+      this.state = next.state;
+      // Behind the service: the snapshot again, as on the stream's `reload`, once at a time.
+      if (next.behind && !this.held) this.load();
+    }
+    this.changed();
+  }
+
+  /**
+   * Asks for the snapshot; meanwhile the copy, if any, goes on with the events, which then follow the snapshot. One
+   * that throws on it leaves the copy behind again: one more snapshot, once this one is in.
+   */
+  private load(): void {
+    this.held = [];
+    this.api.snapshot().then(
       (snapshot) => {
         // Events the snapshot already includes change nothing: `apply` skips them by their number.
-        this.state = this.early.reduce(apply, snapshot);
-        this.early = [];
+        let behind = false;
+        this.state = (this.held ?? []).reduce((state, event) => {
+          const next = applied(state, event);
+          behind ||= next.behind;
+          return next.state;
+        }, snapshot);
+        this.held = null;
+        if (behind) this.load();
         this.changed();
       },
       (error: unknown) => {
-        // A 401 is the session screen; anything else keeps the loading eyes, and the console the reason.
+        this.held = null;
+        // A 401 is the session screen; anything else keeps the loading eyes, or the copy, and the console the reason.
         if (error instanceof Refused && error.status === 401) this.lost(openOf(error.answer));
         else console.error("Lookover's snapshot could not be loaded", error);
       },
@@ -183,7 +225,7 @@ export interface AppServices {
   embedded: boolean;
   /** The build's mode (`dev/mode.ts`): which command the copy names, the program's or the developer's. */
   mode: WebMode;
-  openPalette: (mode?: "all" | "review") => void;
+  openPalette: (mode?: PaletteMode) => void;
   openShortcuts: () => void;
 }
 

@@ -27,7 +27,7 @@ import {
   type State,
   sameLogin,
 } from "@lookover/contracts";
-import { agoSentence, metaLine, onDay, plural, startsAt } from "./format.ts";
+import { agoSentence, metaLine, plural, startsAt } from "./format.ts";
 import { HeldValue } from "./held.ts";
 
 /**
@@ -41,10 +41,19 @@ export interface AccountLink {
 }
 
 /**
- * Where an account stands: `installed`, its repositories used; `needs-you`, a cause holds it (SSO, suspended, gone);
- * `not-installed`, the App isn't on it; `waiting`, asked, for an owner; `another`, Install on another account's row.
+ * Where an account stands: `installed`, its repositories used; `reading`, installed, its repositories read for the
+ * first time while setup's GitHub step waits on them; `needs-you`, a cause holds it (SSO, suspended, gone);
+ * `not-installed`, the App isn't on it; `waiting`, asked, for an owner; `looking`, the person's own while their
+ * accounts aren't listed yet; `another`, Install on another account's row.
  */
-type AccountRowState = "installed" | "needs-you" | "not-installed" | "waiting" | "another";
+type AccountRowState =
+  | "installed"
+  | "reading"
+  | "needs-you"
+  | "not-installed"
+  | "waiting"
+  | "looking"
+  | "another";
 
 export interface AccountRow {
   /** The row's key: the account's login, or `another`. */
@@ -54,19 +63,17 @@ export interface AccountRow {
   /** What the row is named by: the login, or Another account. */
   name: string;
   state: AccountRowState;
-  /** One line: its repositories, its cause, or what it waits for. */
-  detail: string;
   /**
-   * Every detail the row can show in its part of the list, whatever state it moves to there, `detail` among them: the
-   * row is as tall as the tallest, so a state changing in place moves nothing.
+   * One line: its repositories, its cause, or what it waits for. The row is as tall as it is, holding no other detail
+   * (ADR 0086): a longer one arriving grows its own row.
    */
-  details: string[];
+  detail: string;
   /** Its one fix, or its one action. */
   fix: AccountLink | null;
   /**
    * Every label its fix can show in its part of the list, the fix's own among them, a login past a usual length held
-   * at that length: the fix's place is as wide as the widest and no wider, so a state changing in place moves nothing
-   * and the button stays as wide as its own label.
+   * at that length: the fix's place is as wide as the widest and no wider (width, never height), so a state changing in
+   * place moves nothing beside it and the button stays as wide as its own label.
    */
   labels: string[];
   /** The labels of `labels` shown with Ask again beside them: their room holds Ask again's square too. */
@@ -82,14 +89,23 @@ export interface AccountRow {
 
 /**
  * The mark before a row's detail, its state said by an icon as well as its words (design-system.md "Accounts list"):
- * `repositories`, installed (its repositories' line); `not-installed`, the person's own to install; `ask`, a member's,
- * whose owners are asked; `waiting`, asked; `needs-you`, a cause holds it; `another`, Install on another account's row.
+ * `repositories`, installed (its repositories' line, or their first read); `not-installed`, the person's own to
+ * install; `ask`, a member's, whose owners are asked; `waiting`, asked; `needs-you`, a cause holds it; `looking`, the
+ * accounts not listed yet; `another`, Install on another account's row.
  */
-export type AccountMark = "repositories" | "not-installed" | "ask" | "waiting" | "needs-you" | "another";
+export type AccountMark =
+  | "repositories"
+  | "not-installed"
+  | "ask"
+  | "waiting"
+  | "needs-you"
+  | "looking"
+  | "another";
 
 export function accountMark(row: AccountRow): AccountMark {
   switch (row.state) {
     case "installed":
+    case "reading":
       return "repositories";
     // A member's fix keeps the ask as GitHub's page opens; the person's own never asks.
     case "not-installed":
@@ -146,7 +162,12 @@ function unreachedLabels(owns: boolean, login: string): Pick<AccountRow, "labels
 
 const DETAIL = {
   none: "No repository yet.",
-  sso: "Asks you to sign in with SSO.",
+  /** Installed, its repositories not read yet: setup's GitHub step waits on their first read (ADR 0086). */
+  reading: "Reading its repositories…",
+  /** The person's own, while their accounts aren't listed yet: nothing is said missing (ADR 0086, #670). */
+  looking: "Looking…",
+  /** The person's own, while GitHub refused the listing out of reach: it only waits (ADR 0070). */
+  unreachable: "GitHub can't be reached. Lookover tries again every minute.",
   gone: "No longer installed.",
   notInstalled: "Not installed.",
   ask: "Not installed. On GitHub, you ask its owners to install it.",
@@ -155,12 +176,18 @@ const DETAIL = {
 
 const suspendedText = (by: string | undefined) => (by === undefined ? "Suspended." : `Suspended by ${by}.`);
 
+/** SSO asked, on the organisation's own row; on another's row (`organisation`), the organisation named first. */
+const ssoText = (organisation?: string) =>
+  organisation === undefined
+    ? "Asks you to sign in with SSO."
+    : `${organisation} asks you to sign in with SSO.`;
+
 /**
  * The line each cause of an account reached says, by its kind, a suspended installation apart (who suspended it
- * unsaid): every line a row or a group head holds, so a cause coming or going moves nothing.
+ * unsaid).
  */
 const CAUSE_LINES = {
-  sso: DETAIL.sso,
+  sso: ssoText(),
   suspended: suspendedText(undefined),
   uninstalled: DETAIL.gone,
 } as const satisfies Record<AccountCause["kind"] | "suspended", string>;
@@ -231,19 +258,20 @@ const ask = (connection: Pick<Connection, "web">, label: string, login: string):
  * The one fix of an account reached that a cause holds (ADR 0067's table), the same in every place: SSO, its page
  * (the 403's, else the organisation's); suspended, Unsuspend it on GitHub when the person owns it, else ask an owner;
  * no longer installed, Install on it when the person owns it, else ask an owner (Ask to install on keeps an ask, which
- * only an account not reached has).
+ * only an account not reached has). `a` is an account reached, or the person's own while their accounts' listing is
+ * refused (its installation unknown: unsuspended where the person's repositories are chosen).
  */
 export function accountFix(
-  connection: Pick<Connection, "person" | "web">,
-  a: ConnectionAccount,
+  connection: Pick<Connection, "person" | "web" | "accounts">,
+  a: Pick<ConnectionAccount, "owner"> & { account: HostLogin },
   cause: AccountCause,
 ): { label: string; href: string } {
-  const { account, installationId } = a;
+  const { login } = a.account;
   if (cause.kind === "sso") return ssoFix(connection, cause.organisation, cause.url);
-  if (!ownsAccount(connection, a)) return askAnOwner(connection, account.login);
+  if (!ownsAccount(connection, a)) return askAnOwner(connection, login);
   return cause.suspended
-    ? { label: UNSUSPEND, href: githubLinks.installation(connection.web, account, installationId) }
-    : { label: installOn(account.login), href: installPage(connection) };
+    ? { label: UNSUSPEND, href: sharedRepositoriesLink(connection, login) }
+    : { label: installOn(login), href: installPage(connection) };
 }
 
 /** Whether the App is still installed on an account reached: any cause but no longer installed (a suspended one is). */
@@ -270,17 +298,18 @@ export function sharedRepositoriesLink(
     : githubLinks.installation(connection.web, only.account, only.installationId);
 }
 
-function causeDetail(cause: AccountCause): string {
-  if (cause.kind === "sso") return CAUSE_LINES.sso;
+/** A cause's line on its account's row; on another's (`elsewhere`: the person's own), SSO names its organisation. */
+function causeDetail(cause: AccountCause, elsewhere = false): string {
+  if (cause.kind === "sso") return elsewhere ? ssoText(cause.organisation) : CAUSE_LINES.sso;
   return cause.suspended ? suspendedText(cause.suspendedBy) : CAUSE_LINES.uninstalled;
 }
 
 /**
- * Every detail a reached account's row can show: its own, no repository and every cause. Never a line of an account
- * not reached: an account crossing over moves to the list's other part, so its height can't hold the rows under it
- * still anyway.
+ * Whether the repositories are being read for the first time: setup's GitHub step waits on the first read of every
+ * repository of the accounts listed (ADR 0083, ADR 0086). The step's accounts line and an account's row both say so.
  */
-const reachedDetails = (detail: string) => [...new Set([detail, DETAIL.none, ...Object.values(CAUSE_LINES)])];
+export const readingRepositories = ({ setup, connection }: Pick<State, "setup" | "connection">): boolean =>
+  setup.github === "waiting-for-install" && connection.listed && connection.accounts.length > 0;
 
 function reachedRow(state: State, a: ConnectionAccount): AccountRow {
   const { connection } = state;
@@ -299,19 +328,20 @@ function reachedRow(state: State, a: ConnectionAccount): AccountRow {
       ...said,
       state: "needs-you",
       detail,
-      details: reachedDetails(detail),
       fix: accountFix(connection, a, a.cause),
     };
   }
   const n = state.repos.filter(
     (r) => accountOf(connection.accounts, r.owner)?.account.id === a.account.id,
   ).length;
+  // Setup's GitHub step waits for every repository's first read: one not read yet isn't "No repository yet".
+  if (n === 0 && readingRepositories(state))
+    return { ...said, state: "reading", detail: DETAIL.reading, fix: null };
   const detail = n === 0 ? DETAIL.none : `${plural(n, "repository", "repositories")}.`;
   return {
     ...said,
     state: "installed",
     detail,
-    details: reachedDetails(detail),
     ...(n === 0
       ? { fix: { label: CHOOSE, href: sharedRepositoriesLink(connection, login) } }
       : { fix: null, status: INSTALLED }),
@@ -320,7 +350,7 @@ function reachedRow(state: State, a: ConnectionAccount): AccountRow {
 
 /**
  * A row of an account not reached. One the person owns offers Install on it, never an ask: it never waits for an
- * owner, so "Not installed." is all it holds. A member's holds its asked and waiting lines (`now` said as asked now).
+ * owner. A member's asks, then waits.
  */
 function unreachedRow(
   state: State,
@@ -336,39 +366,21 @@ function unreachedRow(
       ...said,
       state: "not-installed",
       detail: DETAIL.notInstalled,
-      details: [DETAIL.notInstalled],
       fix: { label: installOn(login), href: installPage(connection) },
       again: null,
     };
-  // A waiting line asked at `at`, as said today and as said once its day has passed ("on Thu 29 Oct at 14:00"),
-  // the longer: held both, so a day passing moves nothing.
-  const waiting = (at: number) => [
-    waitingText(startsAt(state.now, at, timeZone)),
-    waitingText(onDay(at, timeZone)),
-  ];
-  const asked = (detail: string) => [
-    ...new Set([
-      detail,
-      ...(u.askedAt === null ? [] : waiting(u.askedAt)),
-      DETAIL.ask,
-      ...waiting(state.now),
-    ]),
-  ];
   if (u.askedAt === null)
     return {
       ...said,
       state: "not-installed",
       detail: DETAIL.ask,
-      details: asked(DETAIL.ask),
       fix: ask(connection, askToInstallOn(login), login),
       again: null,
     };
-  const detail = waitingText(startsAt(state.now, u.askedAt, timeZone));
   return {
     ...said,
     state: "waiting",
-    detail,
-    details: asked(detail),
+    detail: waitingText(startsAt(state.now, u.askedAt, timeZone)),
     fix: askAnOwner(connection, login),
     again: ask(connection, ASK_AGAIN, login),
   };
@@ -389,20 +401,69 @@ export const signedIn = ({ person, cause }: Pick<Connection, "person" | "cause">
   person !== null && !saidSignedOut(cause);
 
 /**
+ * The person's own row while their accounts aren't listed under this sign-in (`Connection.listed`, ADR 0086): their
+ * login, looking, no action, so no account is said missing before GitHub has answered (#670).
+ */
+const lookingRow = (login: string): AccountRow => ({
+  key: login,
+  account: login,
+  name: login,
+  state: "looking",
+  detail: DETAIL.looking,
+  fix: null,
+  labels: [],
+  againLabels: [],
+  again: null,
+  status: null,
+});
+
+/** A cause the connection can hold while the person is signed in. */
+type SignedInCause = Exclude<ConnectionCause, SignedOutCause>;
+
+/**
+ * The line and fix of a cause that refused the listing of the person's accounts (ADR 0086: a refused listing shows its
+ * cause instead of looking): GitHub out of reach only waits, Lookover trying again by itself, so no fix; any other,
+ * said and mended as on an account the person owns (`causeDetail`, `accountFix`), on their own row.
+ */
+function refusedListing(
+  connection: Connection,
+  person: HostLogin,
+  cause: SignedInCause,
+): Pick<AccountRow, "detail" | "fix"> {
+  if (cause.kind === "unreachable") return { detail: DETAIL.unreachable, fix: null };
+  return {
+    detail: causeDetail(cause, true),
+    fix: accountFix(connection, { account: person, owner: true }, cause),
+  };
+}
+
+/**
  * The accounts list at the state the service says: reached first in GitHub's order, then the ones not reached in
- * the order the service gave, then Install on another account; empty before a sign-in and once signed out.
- * `timeZone`, the zone a time is said in (the browser's by default).
+ * the order the service gave, then Install on another account; empty before a sign-in and once signed out; the
+ * person's own row alone until their accounts are listed, looking, or saying the cause that refused the listing with
+ * its fix. `timeZone`, the zone a time is said in (the browser's by default).
  */
 export function accountRows(state: State, o: { timeZone?: string } = {}): AccountsList {
   const { connection } = state;
   if (!signedIn(connection)) return { rows: [] };
+  if (!connection.listed && connection.person !== null) {
+    const looking = lookingRow(connection.person.login);
+    // Only this sign-in's listing says what refused it, whatever the repositories' polls say: the connection's cause
+    // can be left from before it (Sign in again while uninstalled), and nothing is said missing before the listing
+    // answers (ADR 0086). Every refused listing sets it: the start's, discovery's, the install check's.
+    const cause = connection.listingCause;
+    if (cause === null || saidSignedOut(cause)) return { rows: [looking] };
+    const said = refusedListing(connection, connection.person, cause);
+    return {
+      rows: [{ ...looking, ...said, state: "needs-you", labels: said.fix === null ? [] : [said.fix.label] }],
+    };
+  }
   const another: AccountRow = {
     key: "another",
     account: null,
     name: ANOTHER_ACCOUNT,
     state: "another",
     detail: DETAIL.another,
-    details: [DETAIL.another],
     fix: { label: ANOTHER, href: installPage(connection) },
     labels: [ANOTHER],
     againLabels: [],
@@ -419,9 +480,8 @@ export function accountRows(state: State, o: { timeZone?: string } = {}): Accoun
 
 /**
  * A group of Repositories' head (design-system.md "Repositories' group heads"): the account, how many of its
- * repositories are reviewed held with every count its total can say, its cause's line ("" with
- * none) held with every line a cause can say, and its one fix, its place as wide as every label `accountFix` can
- * return for it.
+ * repositories are reviewed, its cause's line (null with none: a head with no problem holds no room for one, ADR 0086)
+ * and its one fix, its place as wide as every label `accountFix` can return for it.
  */
 interface RepositoryGroupHead {
   /** The account's login, as GitHub writes it (the repositories' owner when no account reached is theirs). */
@@ -430,18 +490,19 @@ interface RepositoryGroupHead {
   toggleLabel: string;
   /** "3 of 40 reviewed", "All 40 reviewed", "None of 40 reviewed"; of a group of one, "1 repository, reviewed" or "not reviewed". */
   count: string;
-  counts: string[];
   /**
-   * Under Repositories' filter, every head's line under the count: how many of it the filter shows ("10 shown"), said
-   * (`said`) while it is folded, held empty while it is open, so every head is as tall and a later one stuck covers an
-   * earlier one whole; else null.
+   * Under Repositories' filter, a folded group's head says how many of it the filter shows ("10 repositories shown"), where a cause
+   * goes; null while it is open (its rows say it) and with no filter.
    */
-  shows: { line: string; said: boolean } | null;
+  shows: string | null;
   /** `needs-you` while a cause holds the account, else `fine`. */
   state: "fine" | "needs-you";
-  cause: string;
-  held: string[];
+  cause: string | null;
   fix: { label: string; href: string } | null;
+  /**
+   * Every label `accountFix` can return for the account, by who owns it, a login past a usual length held at the
+   * accounts list's 16 characters: the fix's place is as wide as the widest. None on an account not reached.
+   */
   labels: string[];
 }
 
@@ -471,9 +532,6 @@ export interface RepositoryGroup {
   } | null;
 }
 
-/** Every line a head's cause can say, `own` (the one said now) among them. */
-const causeLines = (own: string) => [...new Set(["", ...Object.values(CAUSE_LINES), own])];
-
 /**
  * What a head says of `reviewed` of `total` repositories reviewed; of one, whether it is, naming the repository so the
  * count reads as its row's, never as a pull request reviewed (ADR 0083, round 6).
@@ -493,19 +551,25 @@ function groupHead(
   total: number,
 ): RepositoryGroupHead {
   const cause = a?.cause ?? null;
-  const line = cause === null ? "" : causeDetail(cause);
   return {
     account: login,
     toggleLabel: `${login}'s repositories`,
     count: countLine(reviewed, total),
-    counts: Array.from({ length: total + 1 }, (_, n) => countLine(n, total)),
     shows: null,
     state: cause === null ? "fine" : "needs-you",
-    cause: line,
-    held: causeLines(line),
+    cause: cause === null ? null : causeDetail(cause),
     fix: a === undefined || cause === null ? null : accountFix(connection, a, cause),
-    labels: [SSO, UNSUSPEND, installOn(login), askAnOwnerOf(login)],
+    labels: a === undefined ? [] : headLabels(ownsAccount(connection, a), login),
   };
+}
+
+/**
+ * The labels a head's fix place holds (`accountFix`'s, by who owns the account): SSO, then suspended and gone, an
+ * owner's own fixes or a member's ask of an owner.
+ */
+function headLabels(owns: boolean, login: string): string[] {
+  const held = heldLogin(login);
+  return owns ? [SSO, UNSUSPEND, installOn(held)] : [SSO, askAnOwnerOf(held)];
 }
 
 /** An account's group: its switch and count from every repository of it, its rows only those `shown`. */

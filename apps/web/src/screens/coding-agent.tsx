@@ -26,9 +26,8 @@ import {
   SKILL_LABELS,
   skillRows,
   tryIt,
-  tryItLines,
 } from "../view-model/coding-agent.ts";
-import { HeldDetail, StateSquare } from "./common.tsx";
+import { StateSquare } from "./common.tsx";
 
 const NONE = "";
 
@@ -59,7 +58,7 @@ function Row({
   onAct,
 }: {
   row: AgentRow;
-  /** Its mark, the detail it shows and every one it can show (`rowView`). */
+  /** Its mark and the detail it shows (`rowView`). */
   view: RowView;
   /** Every label this row's kind can show, so its action keeps one width; null for a row with none. */
   labels: RowLabels | null;
@@ -67,7 +66,7 @@ function Row({
   onAct: (command: Command) => void;
 }) {
   const title = typeof row.title === "string" ? row.title : <Said words={row.title} />;
-  const { mark, shown, held } = rowLine(view);
+  const { mark, shown } = rowLine(view);
   return (
     <div className={`engine substep agent-row ${row.state === "done" ? "done" : "current"} mark-${mark}`}>
       <StateSquare state={mark} />
@@ -85,23 +84,6 @@ function Row({
           <CodePath text={shown.line.value} kind={shown.line.kind} line />
         </span>
       )}
-      {/* Every detail the row can show, each with its line, laid in one cell under it: the row as tall as the
-          tallest, the room held under the line shown, so a row done, undone or refused moves nothing. */}
-      <div className="agent-held" aria-hidden="true">
-        {held.map((d) => (
-          <div key={JSON.stringify(d)} className="agent-held-one">
-            <b>{title}</b>
-            <span className="substep-detail">
-              <Said words={d.sentence} />
-            </span>
-            {d.line === null ? null : (
-              <span className="agent-line">
-                <CodePath text={d.line.value} kind={d.line.kind} line />
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -129,8 +111,10 @@ function TryIt() {
           />
         </>
       )}
+      {/* What happens next, then Lookover's `wait` on a line of its own, long or short: Add to my PATH changes its
+          words, never the card's lines, and the card is as tall as what it says (ADR 0086). */}
       <p className="t-small t-help try-next">
-        <HeldDetail shown={line} details={tryItLines(state)} />
+        <Said words={line} />
       </p>
     </Card>
   );
@@ -175,7 +159,7 @@ function AgentRows({ place }: { place: AgentPlace }) {
       <StatusLine>{agentRefusal(refusal) ?? ""}</StatusLine>
       <Row
         row={path}
-        view={rowView(agent, command, path, refusal)}
+        view={rowView(path, refusal)}
         labels={agent.offer === "binary" ? PATH_LABELS : null}
         place={place}
         onAct={act}
@@ -184,7 +168,7 @@ function AgentRows({ place }: { place: AgentPlace }) {
         <Row
           key={row.id}
           row={row}
-          view={rowView(agent, command, row, refusal)}
+          view={rowView(row, refusal)}
           labels={SKILL_LABELS}
           place={place}
           onAct={act}

@@ -15,7 +15,8 @@
 // refused `invalid`, as GitHub's 403 reaches the port.
 // It is brought to refuse as GitHub does on a bad day: every call (`refuse`), the check writes (`refuseChecks`), the
 // compare, merge base included (`refuseCounts`), or the next post once (`refuseNext`), kept on the host or not:
-// GitHub answered a review it had saved "422 An internal error occurred". The compare answers from the commits'
+// GitHub answered a review it had saved "422 An internal error occurred". It is slow to list the accounts on demand
+// (`holdAccounts`: the listing answers once released). The compare answers from the commits'
 // lineage: the nearest commit both hold is the merge base; two with none in common are `not_found`, as on GitHub.
 // The repository ports post as the person signed in to the shared App (ADR 0066, ADR 0073), as spike 20 saw GitHub
 // do it: the review, its line comments, the replies, the reactions and the description's status block are theirs,
@@ -444,6 +445,8 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
   private readonly repo: RepositoryRef;
   /** The owner's repositories, in the order GitHub lists them. */
   private readonly held: RepositoryRef[] = [];
+  /** While GitHub is slow to list the accounts (`holdAccounts`): what `accounts` waits for. */
+  private accountsHeld: Promise<void> | null = null;
   /** The shared App's bot: its login names the App's slug. */
   private readonly bot: { id: number; login: string };
   /** The person signed in to the shared App, whom the ports post as. */
@@ -706,6 +709,8 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
    * each with what it grants (archived ones left out), or its cause: suspended, else SAML SSO asked.
    */
   accounts(): Promise<ReachedAccount[]> {
+    const held = this.accountsHeld;
+    if (held !== null) return held.then(() => this.accounts());
     return this.answerAgent(() => {
       this.stillSignedIn();
       const reached: ReachedAccount[] = [];
@@ -769,6 +774,22 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
   /** The next `GET /user` of a sign-in refused once as `failure`, the tokens already issued. */
   refuseSignInPerson(failure: HostFailure): void {
     this.signIns.refusePerson(failure);
+  }
+
+  /**
+   * GitHub slow to list the person's installations: from now on `accounts` answers only once the function returned is
+   * called, then as it would have; every other call answers as before.
+   */
+  holdAccounts(): () => void {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.accountsHeld = held;
+    return () => {
+      if (this.accountsHeld === held) this.accountsHeld = null;
+      release();
+    };
   }
 
   /** GitHub asks to slow down at the device code's next poll: to `interval` (ms) when given, else 5 s more. */

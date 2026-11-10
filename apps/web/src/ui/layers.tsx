@@ -2,6 +2,7 @@
 import {
   type CSSProperties,
   createContext,
+  Fragment,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useCallback,
@@ -12,6 +13,8 @@ import {
   useState,
 } from "react";
 import { Button, Eyes, Icon, type IconName } from "./basics.tsx";
+import { Boundary } from "./boundary.tsx";
+import { leavingProps, Presence, PresenceList, type Shown } from "./presence.tsx";
 
 function focusables(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input, [tabindex='0']")];
@@ -67,12 +70,16 @@ export function Layer({
   scrim?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  // Each opening's own content: a menu reopened while it still leaves is the same panel, holding what it holds afresh
+  // (a boundary that failed tries again, a menu's own state starts over).
+  const [opens, setOpens] = useState(0);
   const anchor = useRef<HTMLDivElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    const first = panel.current ? focusables(panel.current)[0] : null;
+    // The panel, even one still leaving from its last close: reopened, it is the same element, and takes focus again.
+    const panel = anchor.current?.querySelector<HTMLElement>(":scope > .layer");
+    const first = panel ? focusables(panel)[0] : null;
     first?.focus();
     const onDown = (e: MouseEvent) => {
       if (!(e.target instanceof Node && anchor.current?.contains(e.target))) setOpen(false);
@@ -109,24 +116,35 @@ export function Layer({
           : undefined
       }
     >
-      {trigger({ "aria-expanded": open, onClick: () => setOpen((o) => !o) })}
-      {open && scrim ? (
-        <div
-          className="scrim"
-          aria-hidden="true"
-          onMouseDown={(e) => {
-            // Keep the browser from moving focus to the page under it: it goes back to the trigger.
-            e.preventDefault();
-            setOpen(false);
-            returnFocus(anchor.current);
-          }}
-        />
-      ) : null}
-      {open ? (
-        <div className={`layer ${className}`} ref={panel} style={style} onKeyDown={arrowKeys}>
-          {children(() => setOpen(false))}
-        </div>
-      ) : null}
+      {trigger({
+        "aria-expanded": open,
+        onClick: () => {
+          if (!open) setOpens((n) => n + 1);
+          setOpen(!open);
+        },
+      })}
+      {/* Closed, it leaves through the presence: inert at once, the page live, gone when its fade ends. */}
+      <Presence present={open}>
+        {(shown) => (
+          <>
+            {scrim ? (
+              <div
+                {...leavingProps("scrim", shown)}
+                aria-hidden="true"
+                onMouseDown={(e) => {
+                  // Keep the browser from moving focus to the page under it: it goes back to the trigger.
+                  e.preventDefault();
+                  setOpen(false);
+                  returnFocus(anchor.current);
+                }}
+              />
+            ) : null}
+            <div {...leavingProps(`layer ${className}`, shown)} style={style} onKeyDown={arrowKeys}>
+              <Fragment key={opens}>{children(() => setOpen(false))}</Fragment>
+            </div>
+          </>
+        )}
+      </Presence>
     </div>
   );
 }
@@ -170,9 +188,18 @@ export function MenuItem({
 }
 
 /** One line, after 400 ms on hover or focus. Never holds anything clickable. */
-export function Tip({ text, children }: { text: string; children: ReactNode }) {
+export function Tip({
+  text,
+  end = false,
+  children,
+}: {
+  text: string;
+  /** Ends at its anchor's right edge rather than centred on it: for an anchor near the screen's right edge. */
+  end?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <span className="anchor">
+    <span className={end ? "anchor tip-end" : "anchor"}>
       {children}
       <span className="tip" role="tooltip">
         {text}
@@ -197,31 +224,60 @@ export function Dialog({
   actions?: ReactNode;
   className?: string;
 }) {
+  // Closed, it leaves through the presence (ADR 0087): closed at once by its own close(), so the browser gives focus
+  // back and the page is live, and kept with what it holds while its CSS fade runs; gone at once when none runs.
+  return (
+    <Presence present={open}>
+      {({ leaving, mark }) => (
+        <ModalDialog leaving={leaving} mark={mark} onClose={onClose} className={className}>
+          {/* What it holds fails alone, inside it: the dialog still closes on Esc and its scrim, the page stays. */}
+          <Boundary what="dialog">
+            {title ? <h4>{title}</h4> : null}
+            {children}
+            {actions ? <div className="acts">{actions}</div> : null}
+          </Boundary>
+        </ModalDialog>
+      )}
+    </Presence>
+  );
+}
+
+/** The native dialog, shown modal while present and closed by its own close() the moment it starts leaving. */
+function ModalDialog({
+  leaving,
+  mark,
+  onClose,
+  className,
+  children,
+}: Shown & { onClose: () => void; className: string; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
-  // open before the paint and before what it holds measures itself in its own layout effects (the palette's whole
-  // rows): opened in a passive effect, the palette's list was measured hidden and kept a cut row
+  const markRef = mark.ref;
+  const refs = useCallback(
+    (el: HTMLDialogElement | null) => {
+      ref.current = el;
+      return markRef(el);
+    },
+    [markRef],
+  );
+  // Opened before the paint and before what it holds measures itself in its own layout effects (the palette's whole
+  // rows): opened in a passive effect, the palette's list was measured hidden and kept a cut row. Closed here, before
+  // the presence reads what runs: the fade starts with the close.
   useLayoutEffect(() => {
     const d = ref.current;
     if (!d) return;
-    if (open && !d.open) d.showModal();
-    if (!open && d.open) d.close();
-  }, [open]);
+    if (!leaving && !d.open) d.showModal();
+    if (leaving && d.open) d.close();
+  }, [leaving]);
   return (
     <dialog
-      className={`dlg ${className}`}
-      ref={ref}
+      {...leavingProps(`dlg ${className}`, { leaving, mark })}
+      ref={refs}
       onClose={onClose}
       onClick={(e) => {
         if (e.target === ref.current) onClose();
       }}
     >
-      {open ? (
-        <>
-          {title ? <h4>{title}</h4> : null}
-          {children}
-          {actions ? <div className="acts">{actions}</div> : null}
-        </>
-      ) : null}
+      {children}
     </dialog>
   );
 }
@@ -231,7 +287,6 @@ interface ToastItem {
   text: string;
   tone: "ok" | "need";
   action?: { label: string; run: () => void };
-  out: boolean;
 }
 type ToastInput = { text: string; tone?: "ok" | "need"; action?: { label: string; run: () => void } };
 
@@ -242,14 +297,12 @@ export const useToast = () => useContext(ToastContext);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(1);
-  const dismiss = useCallback((id: number) => {
-    setToasts((list) => list.map((t) => (t.id === id ? { ...t, out: true } : t)));
-    setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), 220);
-  }, []);
+  // Gone from the list at once; the presence keeps it on screen while its exit runs.
+  const dismiss = useCallback((id: number) => setToasts((list) => list.filter((t) => t.id !== id)), []);
   const push = useCallback(
     (toast: ToastInput) => {
       const id = nextId.current++;
-      setToasts((list) => [...list.slice(-2), { id, tone: "ok", out: false, ...toast }]);
+      setToasts((list) => [...list.slice(-2), { id, tone: "ok", ...toast }]);
       setTimeout(() => dismiss(id), 5000);
     },
     [dismiss],
@@ -258,36 +311,38 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={push}>
       {children}
       <div className="toasts" aria-live="polite">
-        {toasts.map((t) => (
-          <div className={`toast ${t.tone === "need" ? "need" : ""} ${t.out ? "out" : ""}`} key={t.id}>
-            <i>
-              <svg
-                viewBox="0 0 12 12"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                {t.tone === "need" ? <path d="M6 2.5v4M6 9.2v.1" /> : <path d="M2.5 6.5l2.3 2.3L9.5 4" />}
-              </svg>
-            </i>
-            <span>{t.text}</span>
-            {t.action ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  t.action?.run();
-                  dismiss(t.id);
-                }}
-              >
-                {t.action.label}
-              </Button>
-            ) : null}
-          </div>
-        ))}
+        <PresenceList items={toasts} keyOf={(t) => t.id} exits>
+          {(t, shown) => (
+            <div {...leavingProps(`toast ${t.tone === "need" ? "need" : ""}`, shown)}>
+              <i>
+                <svg
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  {t.tone === "need" ? <path d="M6 2.5v4M6 9.2v.1" /> : <path d="M2.5 6.5l2.3 2.3L9.5 4" />}
+                </svg>
+              </i>
+              <span>{t.text}</span>
+              {t.action ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    t.action?.run();
+                    dismiss(t.id);
+                  }}
+                >
+                  {t.action.label}
+                </Button>
+              ) : null}
+            </div>
+          )}
+        </PresenceList>
       </div>
     </ToastContext.Provider>
   );
@@ -315,12 +370,13 @@ export function Select<T extends string | number>({
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  const list = useRef<HTMLDivElement>(null);
+  // The listbox, even one still leaving from its last close: reopened, it is the same element.
+  const listbox = () => root.current?.querySelector<HTMLElement>(":scope > [role='listbox']") ?? null;
   const current = options.find((o) => o.value === value);
 
   useEffect(() => {
     if (!open) return;
-    list.current?.querySelector<HTMLElement>("[aria-selected='true']")?.focus();
+    listbox()?.querySelector<HTMLElement>("[aria-selected='true']")?.focus();
     const onDown = (e: MouseEvent) => {
       if (!(e.target instanceof Node && root.current?.contains(e.target))) setOpen(false);
     };
@@ -340,7 +396,8 @@ export function Select<T extends string | number>({
       e.preventDefault();
       setOpen(true);
     } else if (open && /^[a-z]$/i.test(e.key)) {
-      const items = list.current ? focusables(list.current) : [];
+      const list = listbox();
+      const items = list ? focusables(list) : [];
       items.find((el) => el.textContent?.trim().toLowerCase().startsWith(e.key.toLowerCase()))?.focus();
     }
   };
@@ -357,25 +414,27 @@ export function Select<T extends string | number>({
         <span className="v">{current?.label}</span>
         <Icon name="chevron" />
       </button>
-      {open ? (
-        <div className="layer" role="listbox" ref={list} style={{ top: 40 }} onKeyDown={arrowKeys}>
-          {options.map((o) => (
-            <button
-              type="button"
-              role="option"
-              key={o.value}
-              aria-selected={o.value === value}
-              onClick={() => {
-                onChange(o.value);
-                close();
-              }}
-            >
-              {o.label}
-              {o.description ? <small>{o.description}</small> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      <Presence present={open}>
+        {(shown) => (
+          <div {...leavingProps("layer", shown)} role="listbox" style={{ top: 40 }} onKeyDown={arrowKeys}>
+            {options.map((o) => (
+              <button
+                type="button"
+                role="option"
+                key={o.value}
+                aria-selected={o.value === value}
+                onClick={() => {
+                  onChange(o.value);
+                  close();
+                }}
+              >
+                {o.label}
+                {o.description ? <small>{o.description}</small> : null}
+              </button>
+            ))}
+          </div>
+        )}
+      </Presence>
     </div>
   );
 }

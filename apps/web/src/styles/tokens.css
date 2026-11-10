@@ -109,6 +109,15 @@
   --e-out: cubic-bezier(0.2, 0, 0, 1);
   --e-in: cubic-bezier(0.4, 0, 1, 1);
   --e-io: cubic-bezier(0.4, 0, 0.2, 1);
+  /* the skeleton's shimmer travels at one speed */
+  --e-linear: linear;
+  /* the loops (design-system.md "Motion"): the running pulse, the skeleton's shimmer, a linked setting's highlight;
+     the eyes' 1.8 s is the brand's region in system.css (ADR 0063) */
+  --loop-pulse: 2s;
+  --loop-shimmer: 1.4s;
+  --loop-highlight: 1.6s;
+  /* how long a pointer rests on an anchor before its tooltip comes in */
+  --delay-tip: 400ms;
   --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--acc);
   color-scheme: dark;
 }

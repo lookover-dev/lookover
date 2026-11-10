@@ -174,8 +174,10 @@ type Refusal = Extract<HostFailure, "unavailable" | "rate_limited">;
  * account's installation on GitHub, the owner's own or an organisation's; `uninstall`: the shared App uninstalled from
  * `organisation`, one the sign-in reaches, so the account is no longer reached. Neither is listed: a `reconnect` after
  * them (the drawer's "Reconnect", or the 5-minute discovery) lists the installations again, and what they no longer
- * list departs. A repository departs only once listed (`apply` says departed only what it held): each of these
- * throws on one the room doesn't watch yet.
+ * list departs. A repository departs only once listed (`apply` says departed only what it held): each of these throws
+ * on one the room doesn't watch yet. `sso`: `organisation`, one the sign-in reaches, asks for SAML SSO the sign-in
+ * hasn't, and the move lists at once (`room.refresh()`): that listing finds it, its repositories stay, its account
+ * holds the cause.
  */
 export type Move =
   | { kind: "open"; change: ChangeRef }
@@ -193,6 +195,7 @@ export type Move =
   | { kind: "command"; command: OwnerCommand }
   | { kind: "leave"; repos: RepositoryRef[] }
   | { kind: "uninstall"; organisation: Account }
+  | { kind: "sso"; organisation: Account }
   | { kind: "reconnect" };
 
 export interface TimedMove {

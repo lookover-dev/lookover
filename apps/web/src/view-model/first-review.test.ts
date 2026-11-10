@@ -30,8 +30,21 @@ import {
   noneLeft,
   REVIEWED_CHIPS,
   reviewedLine,
-  reviewedLines,
+  titleEnd,
 } from "./first-review.ts";
+
+test("a row's title ends on its last character, which its chip's place stays beside: no line holds the chip alone", () => {
+  // A word has no break inside it, so its whole last word still wraps with the place.
+  expect(titleEnd("Cache exchange rates for an hour")).toEqual(["Cache exchange rates for an hou", "r"]);
+  expect(titleEnd("Refactor")).toEqual(["Refacto", "r"]);
+  // A title with no space (Chinese, Japanese) or a long word keeps its every other break: only its last character
+  // goes with the place, so the rest wraps in its column on a phone.
+  expect(titleEnd("缓存汇率一小时")).toEqual(["缓存汇率一小", "时"]);
+  expect(titleEnd("為替レートを一時間キャッシュする")).toEqual(["為替レートを一時間キャッシュす", "る"]);
+  // One character as a person reads it, never half of one.
+  expect(titleEnd("Ship the pairing mode 👩‍💻")).toEqual(["Ship the pairing mode ", "👩‍💻"]);
+  expect(titleEnd("")).toEqual(["", ""]);
+});
 
 const NOW = Date.UTC(2026, 9, 31, 21, 42, 0);
 const MIN = 60_000;
@@ -161,6 +174,8 @@ function world(prs: [number, Reviewed][]): State {
       state: "connected",
       cause: null,
       accounts: [],
+      listed: true,
+      listingCause: null,
       unreached: [],
       signIn: null,
       person: null,
@@ -377,7 +392,7 @@ test("a pull request reviewed by itself during setup makes Continue the primary,
   ]);
 });
 
-test("the line names the pull request the person picks, and holds the line for every pick", () => {
+test("the line names the pull request the person picks", () => {
   const rows = firstReviewRows(
     world([
       [152, "posted"],
@@ -391,17 +406,6 @@ test("the line names the pull request the person picks, and holds the line for e
   ]);
   // A pick not listed, or reviewed, hands the words on to the pick the list shows.
   expect(reviewedLine(rows, id(152))).toEqual(reviewedLine(rows, id(131)));
-  const held = reviewedLines(rows, id(148));
-  for (const pick of [131, 148]) {
-    expect(held).toContainEqual([
-      `Lookover already reviewed sasensi/ledger-api #152 by itself: Clean.`,
-      `Go on, or review sasensi/ledger-api #${pick} too.`,
-    ]);
-    expect(held).toContainEqual([
-      `Lookover already reviewed 3 of your pull requests by itself.`,
-      `Go on, or review sasensi/ledger-api #${pick} too.`,
-    ]);
-  }
 });
 
 test("several reviewed by itself and one left: Continue, and the line counts them", () => {
@@ -487,49 +491,6 @@ test("the line says a reviewed row's chip word: To fix, Needs you", () => {
   ]);
 });
 
-test("the lines held are the one shown and every one the step could show, so a review landing grows nothing", () => {
-  // Each row named reviewed with each chip word, the other one picked; the count with either picked.
-  const held = [
-    ...[
-      [152, 131],
-      [131, 152],
-    ].flatMap(([n, pick]) =>
-      REVIEWED_CHIPS.map((c) => [
-        `Lookover already reviewed sasensi/ledger-api #${n} by itself: ${c.label}.`,
-        `Go on, or review sasensi/ledger-api #${pick} too.`,
-      ]),
-    ),
-    [
-      "Lookover already reviewed 2 of your pull requests by itself.",
-      "Go on, or review sasensi/ledger-api #152 too.",
-    ],
-    [
-      "Lookover already reviewed 2 of your pull requests by itself.",
-      "Go on, or review sasensi/ledger-api #131 too.",
-    ],
-    NONE_LEFT,
-  ];
-  const before = firstReviewRows(
-    world([
-      [152, "none"],
-      [131, "none"],
-    ]),
-  );
-  expect(reviewedLines(before, firstReviewPick(before, null))).toEqual([[], ...held]);
-  for (const how of ["posted", "postedToFix", "postedNeedsYou"] as const) {
-    const after = firstReviewRows(
-      world([
-        [152, how],
-        [131, "none"],
-      ]),
-    );
-    expect(reviewedLines(after, firstReviewPick(after, null))[0]).toEqual(
-      reviewedLine(after, firstReviewPick(after, null)),
-    );
-    for (const line of held) expect(reviewedLines(after, firstReviewPick(after, null))).toContainEqual(line);
-  }
-});
-
 test("the bar's middle place: the preview until a review was posted, then Review this pull request while one is left", () => {
   const fresh = firstReviewRows(
     world([
@@ -561,28 +522,4 @@ test("a row's small line holds every separator's dot to the part after it, so it
   expect(firstReviewMeta(change(12), NOW)).toBe(
     "sasensi/ledger-api #12 · by sasensi · written by Claude · 1 h ago",
   );
-});
-
-test("a long list holds a handful of lines, the longest names crossed, never every pair (Lookover's round 4 F1)", () => {
-  const many = Array.from({ length: 300 }, (_, i): [number, "none"] => [100 + i, "none"]);
-  const rows = firstReviewRows(world(many));
-  const held = reviewedLines(rows, firstReviewPick(rows, null));
-  expect(held.length).toBeLessThan(40);
-  // the held lines are as long as any the step can show: no shown line is longer than the longest held
-  const longestHeld = Math.max(...held.map((line) => line.join(" ").length));
-  for (const row of rows.slice(0, 20)) {
-    const pick = rows.find((r) => r !== row);
-    if (pick)
-      expect(longestHeld).toBeGreaterThanOrEqual(
-        reviewedLine(
-          firstReviewRows(
-            world([
-              [row.change.number, "posted"],
-              [pick.change.number, "none"],
-            ]),
-          ),
-          pick.change.id,
-        ).join(" ").length,
-      );
-  }
 });

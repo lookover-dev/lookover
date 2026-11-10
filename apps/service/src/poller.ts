@@ -119,12 +119,13 @@ import {
   type RepositoryRef,
   type ReviewRequestText,
   readRequest,
+  type State,
   sameRepository,
 } from "@lookover/contracts";
 import { agentPushed, pollEvery, writerOf } from "@lookover/core";
 import type { CommentPlace, OpenChange, RequestComment, Store, WriterRead } from "@lookover/store";
 import { said } from "./said.ts";
-import { changeOf, repoIdOf } from "./snapshot.ts";
+import { changeOf, changesLeft, repoIdOf } from "./snapshot.ts";
 import type { Timers } from "./timers.ts";
 
 /** How often the loop wakes: the hot cadence, `pollEvery`'s shortest. */
@@ -168,6 +169,13 @@ export interface PollerDeps {
   emit(body: EventBody): void;
   /** The connection as the UI shows it now: the service's in-memory copy. */
   connection(): Connection;
+  /**
+   * The changes and reviews the UI shows now: an open change listed and missing from them is sent again, with the
+   * job it still has (ADR 0085).
+   */
+  shown(): Pick<State, "changes" | "reviews">;
+  /** The queue's: the UI's review of the change was made anew; its job waiting or running is sent again. */
+  rebuilt(changeId: ChangeId): void;
   /** The queue's: a change opened, or a draft marked ready, asks for a review as `core.intake` says. */
   opened(changeId: ChangeId): void;
   /** The queue's: a change pushed to `sha`, its waiting job moved there, and a review asked if the switch says. */
@@ -599,9 +607,25 @@ export function createPoller(d: PollerDeps): Poller {
     return changed || asked || regained;
   }
 
+  /**
+   * Each open change listed that the UI lacks (an older version's, dropped at start, ADR 0085), sent as listed; then
+   * the job each review made anew with none (`remade`, by number) still has waiting or running in the record, which
+   * no take would send again (a deferral it leaves unchanged says nothing).
+   */
+  function sendMissing(repo: RepositoryRef, items: HostChange[], remade: number[], at: number): void {
+    const writtenBy = new Map(d.store.inbox.open(repo).map((c) => [c.number, c.writtenBy]));
+    const listed = items.map((change) => ({ repo, change, writtenBy: writtenBy.get(change.number) ?? null }));
+    for (const body of changesLeft({ changes: d.shown().changes }, listed, d.owner, at)) d.emit(body);
+    for (const number of remade) d.rebuilt(changeIdOf(repo, number));
+  }
+
   /** The listing kept in the inbox, what changed sent and handed to the queue; true when anything changed. */
   function recorded(repo: RepositoryRef, items: HostChange[], { counts, writers }: Compared): boolean {
     const at = now();
+    // The open changes the UI shows no review of: one whose review an older version wrote, dropped at start (ADR
+    // 0085), which the events below make anew with no job; or one new to the inbox, whose opening asks its job.
+    const reviews = d.shown().reviews;
+    const unreviewed = items.map((c) => c.number).filter((n) => reviews[changeIdOf(repo, n)] === undefined);
     const delta = d.store.inbox.replace(repo, items, writers);
     // The first listing of a repository: what was open before Lookover watched it is shown, not reviewed.
     const asking = !delta.repositoryAdded;
@@ -623,6 +647,13 @@ export function createPoller(d: PollerDeps): Poller {
       d.emit({ type: "change.opened", at, change: changeOf(entry, d.owner) });
     for (const number of delta.closed)
       d.emit({ type: "change.closed", at, changeId: changeIdOf(repo, number) });
+    const opened = new Set(delta.opened.map((entry) => entry.change.number));
+    sendMissing(
+      repo,
+      items,
+      unreviewed.filter((n) => !opened.has(n)),
+      at,
+    );
     return delta.opened.length + delta.ready.length + delta.pushed.length + delta.closed.length > 0;
   }
 

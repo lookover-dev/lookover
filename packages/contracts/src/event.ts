@@ -76,8 +76,11 @@ export type EventBody =
       commits: number;
       by: PushedBy;
     }
-  /** A job was asked for, or its state changed. A job that is not running has no run. */
-  | { type: "job.changed"; at: number; changeId: ChangeId; job: ReviewJob }
+  /**
+   * A job was asked for, or its state changed. A job that is not running has no run. A running job shown again on a
+   * review rebuilt at start (ADR 0085) carries its run as the store holds it: no `run.started` says it again.
+   */
+  | { type: "job.changed"; at: number; changeId: ChangeId; job: ReviewJob; run?: Run }
   /** A run of the current job started. `job` is the job as it now is: running. */
   | { type: "run.started"; at: number; changeId: ChangeId; job: ReviewJob; run: Run }
   | { type: "run.step"; at: number; changeId: ChangeId; step: RunStep }

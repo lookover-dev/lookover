@@ -2,6 +2,22 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.13.0](https://github.com/lookover-dev/lookover/compare/v0.12.0...v0.13.0) (2026-11-10)
+
+### Features
+
+- **app:** motion where it helps you follow a change: menus, the palette, toasts and notices appear and leave, a group folds and opens by its rows, a review moves to its new section on Home, and a review's steps advance as its verdict comes in. It is short, never delays what you do, and stops entirely when your system asks for reduced motion.
+- **setup:** your accounts show as soon as you are signed in, before their repositories are read, and an account Lookover is still looking at says Looking… instead of being called not installed.
+
+### Bug Fixes
+
+- **app:** updating from an older version on the same data folder no longer leaves a blank page or a status menu that won't open: what the new version can't read is dropped, and its log says so.
+- **app:** an error in one screen or panel stays there, and the rest of the app keeps working.
+- **app:** the fonts load under the app's content security policy, with no error in the browser's console.
+- **app:** no empty room is held for text you can't see: Repositories' heads, the accounts list, Try it, Your coding agent and setup take only the lines they show, at any window width.
+- **repositories:** a folded group under a filter says what it counts, as in "16 repositories shown".
+- **reviews:** on a phone, First review's Open on GitHub is an icon button, and a long title wraps in its column.
+
 ## [0.12.0](https://github.com/lookover-dev/lookover/compare/v0.11.0...v0.12.0) (2026-11-09)
 
 ### Bug Fixes

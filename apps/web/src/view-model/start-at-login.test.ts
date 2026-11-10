@@ -7,7 +7,6 @@ import {
   atLoginStatus,
   BACKGROUND_TEXT,
   backgroundLine,
-  backgroundLines,
   devCommand,
   offersStartThisOne,
   START_THIS_ONE,
@@ -178,21 +177,6 @@ test("the setup's last step says when another Lookover starts at login and this 
   });
   // Chosen off, this one won't anyway: the line says what to run, as with nothing registered.
   expect(backgroundLine(taken(false), "program")).toEqual(backgroundLine(off, "program"));
-});
-
-test("the setup's last step holds every line its button can switch to, so the button row never moves", () => {
-  for (const chosen of [true, false]) {
-    expect(backgroundLines(taken(chosen), "program")).toEqual([
-      backgroundLine(taken(true), "program"),
-      backgroundLine(taken(false), "program"),
-    ]);
-    expect(backgroundLines(chosen ? on : off, "program")).toEqual([
-      backgroundLine(on, "program"),
-      backgroundLine(off, "program"),
-    ]);
-    // In development both choices say the same: one line.
-    expect(backgroundLines(dev(chosen), "live")).toEqual([backgroundLine(dev(chosen), "live")]);
-  }
 });
 
 test("the status menu names the command another Lookover starts at login with, on or off, as Settings does (ADR 0068)", () => {

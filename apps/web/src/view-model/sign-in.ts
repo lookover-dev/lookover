@@ -8,7 +8,7 @@
 // Settings › GitHub (`githubSettings`) says who is signed in, with Sign in again and its code in place, also while
 // connected, and the same accounts list. Every link is built on `Connection.web`, so demo mode stays on GitHub's fake.
 import type { Connection, DeviceCode, SignInStartRefusal, State } from "@lookover/contracts";
-import { type AccountsList, accountRows, saidSignedOut, signedIn } from "./accounts.ts";
+import { type AccountsList, accountRows, readingRepositories, saidSignedOut, signedIn } from "./accounts.ts";
 import { until, type WithCommand } from "./format.ts";
 
 /** How a code went without a sign-in: it ran out, or GitHub didn't sign the person in (refused, or failed). */
@@ -40,9 +40,8 @@ type RowState = "done" | "busy" | "current" | "later";
 
 interface SignInRowView {
   state: RowState;
+  /** As tall as it says, holding no other text (ADR 0086): what follows it moves with it, the list included. */
   text: string | WithCommand;
-  /** Every text the row can show, `text` among them: as tall as the tallest, so nothing moves. */
-  held: (string | WithCommand)[];
   /** The code to enter, while one waits: copied and opened by the row's one button. */
   code: DeviceCode | null;
 }
@@ -51,7 +50,6 @@ interface AccountsRowView {
   state: RowState;
   /** One line over the list: where the step is with the accounts. */
   text: string;
-  held: string[];
   /** Every account, one row each, with its state or its one fix (ADR 0067): empty until signed in. */
   list: AccountsList;
 }
@@ -80,10 +78,6 @@ export const SIGN_IN_TEXT = {
 
 const START = "You enter a code on GitHub, then authorise Lookover there.";
 export const FINISHING = "Finishing the sign-in with GitHub…";
-/** As long as any code GitHub gives (`XXXX-XXXX`), for the row's held height before one is given. */
-const ANY_CODE = "XXXX-XXXX";
-/** How long GitHub's device codes work: 15 minutes. */
-const CODE_LIFETIME_MS = 15 * 60_000;
 
 /**
  * "Enter `D054-61DC` on GitHub. It works until 10:26.": the setup's sign-in row, Settings', and Sign in again's
@@ -100,13 +94,20 @@ export const waitingText = (userCode: string, works: string): WithCommand => ({
 export const codeToast = (userCode: string, copied: boolean): string =>
   copied ? `${userCode} copied.` : `Type ${userCode} on GitHub.`;
 
-const ACCOUNTS_TEXT = {
+/**
+ * What "Your accounts" says under its title, each on one line at a phone's 375 px: it sits right above the list's
+ * buttons and holds no height (ADR 0086), so a line wrapping as the state changes would move them under the pointer
+ * (proof's `accountsLinesFit` lays every one out there).
+ */
+export const ACCOUNTS_TEXT = {
   later: "Right after you sign in.",
-  looking: "Looking for your accounts with Lookover's App.",
-  nothing: "Installed, with no repository. On GitHub, pick the ones it may see.",
+  looking: "Looking for your accounts on GitHub.",
+  /** Listed, their repositories' first read still under way: the step goes on once it ends (ADR 0083, ADR 0086). */
+  reading: "Reading your accounts' repositories…",
+  nothing: "Installed, with no repository chosen.",
   done: "Install it on more accounts any time.",
   /** Done, with an account still to set up: one is enough to go on (Repositories, First review and the agent come next), the rest can wait. */
-  rest: "Enough to go on. Set up the other accounts below now, or later in Settings.",
+  rest: "Enough to go on. The rest can wait.",
 } as const;
 
 const ENDED: Record<SignInEnd, string> = {
@@ -133,49 +134,30 @@ const signedInText = ({ person }: Connection) =>
   person === null ? "Signed in." : `Signed in as ${person.login}.`;
 
 /**
- * A sign-in row's texts: `idle` while no code waits, else the code's (past its expiry, the wait for who signed in),
- * all held with `others`, the row's other texts, and a code as long as any, until when the code shown (or one given
- * now) works.
+ * A sign-in row's text: `idle` while no code waits, else the code's with until when it works (past its expiry, the
+ * wait for who signed in).
  */
-function codeTexts(state: State, timeZone: string | undefined, idle: string, others: string[]) {
+function codeText(state: State, timeZone: string | undefined, idle: string): string | WithCommand {
   const { signIn } = state.connection;
-  const works = (expiresAt: number) => until(state.now, expiresAt, timeZone);
-  const anyCode = waitingText(ANY_CODE, works(signIn?.expiresAt ?? state.now + CODE_LIFETIME_MS));
+  if (signIn === null) return idle;
   // Past its expiry and still shown, the code was taken: the service asks GitHub who signed in (ADR 0066).
-  const text =
-    signIn === null
-      ? idle
-      : state.now >= signIn.expiresAt
-        ? FINISHING
-        : waitingText(signIn.userCode, works(signIn.expiresAt));
-  const held = [
-    ...new Map([...others, anyCode, FINISHING, text].map((t) => [JSON.stringify(t), t])).values(),
-  ];
-  return { text, held };
+  return state.now >= signIn.expiresAt
+    ? FINISHING
+    : waitingText(signIn.userCode, until(state.now, signIn.expiresAt, timeZone));
 }
 
 function signInRow(state: State, timeZone: string | undefined): SignInRowView {
   const { signIn } = state.connection;
-  if (signedIn(state.connection)) {
-    const text = signedInText(state.connection);
-    return { state: "done", text, held: codeTexts(state, timeZone, text, [START, text]).held, code: null };
-  }
-  const { text, held } = codeTexts(state, timeZone, START, [START]);
-  return signIn === null
-    ? { state: "current", text, held, code: null }
-    : { state: "busy", text, held, code: signIn };
+  if (signedIn(state.connection)) return { state: "done", text: signedInText(state.connection), code: null };
+  const text = codeText(state, timeZone, START);
+  return signIn === null ? { state: "current", text, code: null } : { state: "busy", text, code: signIn };
 }
 
 const zoned = (timeZone: string | undefined) => (timeZone === undefined ? {} : { timeZone });
 
 function accountsRow(state: State, timeZone: string | undefined): AccountsRowView {
   const list = accountRows(state, zoned(timeZone));
-  const row = (rowState: RowState, text: string): AccountsRowView => ({
-    state: rowState,
-    text,
-    held: Object.values(ACCOUNTS_TEXT),
-    list,
-  });
+  const row = (rowState: RowState, text: string): AccountsRowView => ({ state: rowState, text, list });
   if (!signedIn(state.connection)) return row("later", ACCOUNTS_TEXT.later);
   switch (state.setup.github) {
     case "done":
@@ -187,7 +169,7 @@ function accountsRow(state: State, timeZone: string | undefined): AccountsRowVie
     case "nothing-granted":
       return row("current", ACCOUNTS_TEXT.nothing);
     default:
-      return row("busy", ACCOUNTS_TEXT.looking);
+      return row("busy", readingRepositories(state) ? ACCOUNTS_TEXT.reading : ACCOUNTS_TEXT.looking);
   }
 }
 
@@ -229,9 +211,8 @@ export const GITHUB_SETTINGS_TEXT = {
 
 /** Settings › GitHub's sign-in row: who is signed in, or the code Sign in again gave, as setup's row says it. */
 interface SettingsSignInView {
+  /** As tall as it says, holding no other text (ADR 0086): a code's sentence may grow the row over the list. */
   text: string | WithCommand;
-  /** Every text the row can show, `text` among them: as tall as the tallest, so nothing moves. */
-  held: (string | WithCommand)[];
   /** The code to enter, while one waits: copied and opened by the row's one button, Cancel beside it. */
   code: DeviceCode | null;
 }
@@ -249,9 +230,8 @@ export interface GitHubSettingsView {
 export function githubSettings(state: State, o: { timeZone?: string } = {}): GitHubSettingsView {
   const { connection } = state;
   const who = signedIn(connection) ? signedInText(connection) : SIGNED_OUT_ROW;
-  const { text, held } = codeTexts(state, o.timeZone, who, [signedInText(connection), SIGNED_OUT_ROW]);
   return {
-    signIn: { text, held, code: connection.signIn },
+    signIn: { text: codeText(state, o.timeZone, who), code: connection.signIn },
     list: accountRows(state, zoned(o.timeZone)),
   };
 }

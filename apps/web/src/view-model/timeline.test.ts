@@ -151,7 +151,7 @@ test("each timeline entry reads as one line of the review's history", () => {
     [{ at: NOW, sha: SHA, kind: "posted", round: 1, open: 0 }, "Round 1 done: No open findings"],
     [{ at: NOW, sha: SHA, kind: "posted", round: 2, open: 1 }, "Round 2 done: 1 open finding"],
     [{ at: NOW, sha: SHA, kind: "posted", round: 3, open: 4 }, "Round 3 done: 4 open findings"],
-    // A failure says its cause as the check on GitHub does (ADR 0081); one stored before causes, its kind's words.
+    // A failure says its cause as the check on GitHub does (ADR 0081); one with no cause known, its kind's words.
     [
       {
         at: NOW,
@@ -172,7 +172,7 @@ test("each timeline entry reads as one line of the review's history", () => {
         at: NOW,
         sha: SHA,
         kind: "failed",
-        failure: JSON.parse('{"kind":"prepare_failed","detail":"","engine":null}'),
+        failure: { kind: "prepare_failed", detail: "", engine: null, cause: null, limitMs: null },
       },
       "The review failed: the code could not be fetched",
     ],

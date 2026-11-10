@@ -1,14 +1,15 @@
 // Repositories' group heads (design-system.md "Repositories' group heads", "Sticky, collapsible group heads"; ADR
 // 0082): the account's switch sends one command for the whole account, and the chevron collapses the group, which
 // keeps its head and hides its rows, held while the app is open. The screen is rendered to markup; a control's wiring
-// is read from the head's elements, there being no page to click in here.
+// is read from the head's elements. How the rows fold (ADR 0087) is read on a page to click in, at the end.
 import { expect, test } from "bun:test";
 import { apply, type Command, repositoryId, type State } from "@lookover/contracts";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { Switch } from "../ui/basics.tsx";
-import { repositoryGroups } from "../view-model/accounts.ts";
+import { withDom } from "../ui/dom.test-support.tsx";
+import { type RepositoryGroup, repositoryGroups } from "../view-model/accounts.ts";
 import { RepositoriesChoice } from "../view-model/repositories.ts";
-import { app, elements, repo, screen, world } from "./repositories.test-support.tsx";
+import { app, elements, foldNames, Providers, repo, screen, world } from "./repositories.test-support.tsx";
 import { GroupHead, RepositoryGroupRows, uncoverBy } from "./repository-group.tsx";
 import { RepositoriesOn } from "./settings.tsx";
 
@@ -256,22 +257,195 @@ test("a group of one's two switches, the head's and the row's, both flip when it
   expect(switches(after)).toEqual([true, true]);
 });
 
-test("a head under a filter has what the filter shows on a line of its own under the count, said folded, held open", () => {
+/** A head's elements, its components left unrendered, with `head` changed. */
+function headOf(change: Partial<RepositoryGroup["head"]>, collapsed = true): ReturnType<typeof elements> {
   const fernhill = repositoryGroups(world())[1];
   if (fernhill === undefined) throw new Error("no fernhill group");
-  const shows = (said: { line: string; said: boolean } | null) =>
-    elements(
-      GroupHead({
-        group: { ...fernhill, head: { ...fernhill.head, shows: said } },
-        collapsed: true,
-        toggle: () => undefined,
-        send: () => undefined,
-      }),
-    ).find((e) => e.props.className === "repos-group-shows");
-  const folded = shows({ line: "2 shown", said: true });
-  expect([folded?.props.children, folded?.props["aria-hidden"]]).toEqual(["2 shown", undefined]);
-  // Open, the line is held, hidden, so the head is as tall as a folded one: a later head stuck covers it whole.
-  const open = shows({ line: "2 shown", said: false });
-  expect([open?.props.children, open?.props["aria-hidden"]]).toEqual(["2 shown", true]);
-  expect(shows(null)).toBeUndefined();
+  return elements(
+    GroupHead({
+      group: { ...fernhill, head: { ...fernhill.head, ...change } },
+      collapsed,
+      toggle: () => undefined,
+      send: () => undefined,
+    }),
+  );
+}
+const classed = (els: ReturnType<typeof elements>, name: string) =>
+  els.filter((e) => typeof e.props.className === "string" && e.props.className.split(" ").includes(name));
+
+test("a head with no cause holds none: no cause line, no fix, no second row (ADR 0086)", () => {
+  const head = headOf({});
+  expect(classed(head, "repos-group-cause")).toEqual([]);
+  expect(classed(head, "repos-group-fix")).toEqual([]);
+  expect(classed(head, "repos-group-more")).toEqual([]);
+  expect(elements(head).some((e) => e.props.details !== undefined)).toBe(false);
+});
+
+/** The elements of a head's first row, the one that sticks. */
+const stuckRow = (head: ReturnType<typeof elements>) => elements(head.find((e) => e.type === "tr"));
+
+test("a head a cause holds says it once with its fix, in a second row under the head, wide as on a phone", () => {
+  const head = headOf({
+    state: "needs-you",
+    cause: "Asks you to sign in with SSO.",
+    fix: { label: "Sign in with SSO", href: "https://github.com/orgs/fernhill/sso" },
+    labels: ["Sign in with SSO", "Ask an owner of fernhill"],
+  });
+  expect(classed(head, "repos-group-cause").map((e) => e.props.children)).toEqual([
+    "Asks you to sign in with SSO.",
+  ]);
+  const [more] = classed(head, "repos-group-more");
+  expect(classed(elements(more), "repos-group-cause")).toHaveLength(1);
+  // Only what every head has sticks: its first row holds no cause and no fix, the Pull requests cell empty, so a head
+  // with a cause is as tall stuck as one with none, a cause on two lines included.
+  expect(classed(stuckRow(head), "repos-group-fix")).toEqual([]);
+});
+
+test("a folded head under a filter says what the filter shows in its second row; open, nothing and no room for it", () => {
+  const head = headOf({ shows: "2 repositories shown" });
+  expect(classed(head, "repos-group-shows").map((e) => e.props.children)).toEqual(["2 repositories shown"]);
+  expect(classed(stuckRow(head), "repos-group-shows")).toEqual([]);
+  // Nothing under the count: the stuck part of every head is as tall (Lookover's F5).
+  const [count] = classed(head, "repos-group-count");
+  // The count alone, its own words: nothing held under it.
+  expect(count?.props.children).toBe("2 of 3 reviewed");
+  const open = headOf({ shows: null }, false);
+  expect(classed(open, "repos-group-shows")).toEqual([]);
+  expect(classed(open, "repos-group-more")).toEqual([]);
+});
+
+// A group folds by its rows (ADR 0087), on a page to click in: folding, its rows leave through the presence, then go;
+// opening, they come in by the fold. A search or the filter takes and brings rows still.
+const dom = withDom();
+const exiting = (el: Element) => dom.exiting(el);
+
+/** `account`'s rows on the page. */
+const rowsOf = (account: string) =>
+  [...dom.host().querySelectorAll<HTMLElement>("tr.clickable")].filter(
+    (tr) => tr.querySelector(`a[href^="/repositories/${account}/"]`) !== null,
+  );
+
+/** fernhill's rows by name: `~` leaving (inert, hidden), `+` come in by the fold (its entry plays). */
+const fernhill = () => foldNames(rowsOf("fernhill"));
+
+const chevron = (account: string) => {
+  const button = dom
+    .host()
+    .querySelector<HTMLButtonElement>(`button[aria-label="${account}'s repositories"]`);
+  if (button === null) throw new Error(`no chevron for ${account}`);
+  return button;
+};
+
+/** Repositories on `choice`, in a fresh app. */
+async function page(state = world(), choice = new RepositoriesChoice()) {
+  await dom.render(
+    <Providers store={app()} state={state}>
+      <RepositoriesOn choice={choice} />
+    </Providers>,
+  );
+  return choice;
+}
+
+test("folding a group, its rows leave, inert and hidden, then go; opening it, they come in by the fold", async () => {
+  await page();
+  // There when the page first showed: still.
+  expect(fernhill()).toEqual(["api", "web", "cli"]);
+  const exits = rowsOf("fernhill").map(exiting);
+
+  await dom.act(() => chevron("fernhill").click());
+  expect(fernhill()).toEqual(["api~", "web~", "cli~"]);
+  expect(rowsOf("sasensi")).toHaveLength(2);
+  for (const exit of exits) await dom.act(() => exit.finish());
+  expect(fernhill()).toEqual([]);
+
+  await dom.act(() => chevron("fernhill").click());
+  expect(fernhill()).toEqual(["api+", "web+", "cli+"]);
+  await dom.unmount();
+});
+
+test("a row come in by the fold plays its entry once: over, it keeps none; folded and opened again, it plays anew", async () => {
+  const entry = dom.entries(".fold-row[data-unfolded]");
+  await page();
+  await dom.act(() => chevron("fernhill").click());
+  for (const exit of rowsOf("fernhill").map(exiting)) await dom.act(() => exit.finish());
+  await dom.act(() => chevron("fernhill").click());
+  expect(fernhill()).toEqual(["api+", "web+", "cli+"]);
+  const [api, web, cli] = rowsOf("fernhill");
+  await dom.act(() => entry(api).finish());
+  await dom.act(() => entry(web).cancel());
+  expect(fernhill()).toEqual(["api", "web", "cli+"]);
+  await dom.act(() => entry(cli).finish());
+  expect(fernhill()).toEqual(["api", "web", "cli"]);
+
+  await dom.act(() => chevron("fernhill").click());
+  await dom.act(() => chevron("fernhill").click());
+  expect(fernhill()).toEqual(["api+", "web+", "cli+"]);
+  await dom.unmount();
+});
+
+test("a group opened again while its rows leave keeps the same rows, come in by the fold", async () => {
+  await page();
+  const before = rowsOf("fernhill");
+  before.map(exiting);
+  await dom.act(() => chevron("fernhill").click());
+  await dom.act(() => chevron("fernhill").click());
+  expect(rowsOf("fernhill")).toEqual(before);
+  expect(fernhill()).toEqual(["api+", "web+", "cli+"]);
+  await dom.unmount();
+});
+
+test("a search or the filter takes rows at once and brings them still: no row leaves, none comes in", async () => {
+  const state = world();
+  const choice = await page(state);
+  rowsOf("fernhill").map(exiting);
+  await dom.act(() => choice.search(state, "api"));
+  expect(fernhill()).toEqual(["api"]);
+  await dom.act(() => choice.search(state, ""));
+  expect(fernhill()).toEqual(["api", "web", "cli"]);
+
+  rowsOf("fernhill").map(exiting);
+  await dom.act(() => choice.filter(state, "off"));
+  expect(fernhill()).toEqual(["web"]);
+  await dom.act(() => choice.filter(state, "all"));
+  expect(fernhill()).toEqual(["api", "web", "cli"]);
+  await dom.unmount();
+});
+
+test("the filter changing while a group's rows leave takes them at once", async () => {
+  const state = world();
+  const choice = await page(state);
+  rowsOf("fernhill").map(exiting);
+  await dom.act(() => chevron("fernhill").click());
+  expect(fernhill()).toEqual(["api~", "web~", "cli~"]);
+  await dom.act(() => choice.filter(state, "reviewing"));
+  expect(fernhill()).toEqual([]);
+  await dom.unmount();
+});
+
+test("a search opening a folded group brings its rows still, and clearing it folds the group without motion", async () => {
+  const state = world();
+  const choice = await page(state);
+  await dom.act(() => chevron("fernhill").click());
+  expect(fernhill()).toEqual([]);
+  // While the search has text, a folded group shows its matches, open.
+  await dom.act(() => choice.search(state, "fernhill"));
+  expect(fernhill()).toEqual(["api", "web", "cli"]);
+  rowsOf("fernhill").map(exiting);
+  await dom.act(() => choice.search(state, ""));
+  expect(fernhill()).toEqual([]);
+  await dom.unmount();
+});
+
+test("a group folded on first show shows no row, and opened, its rows come in by the fold", async () => {
+  await page(
+    world([
+      repo("sasensi", "ledger-api"),
+      ...Array.from({ length: 11 }, (_, i) => repo("fernhill", `repo-${i + 1}`)),
+    ]),
+  );
+  expect(fernhill()).toEqual([]);
+  await dom.act(() => chevron("fernhill").click());
+  expect(fernhill()).toHaveLength(11);
+  expect(fernhill().every((row) => row.endsWith("+"))).toBe(true);
+  await dom.unmount();
 });

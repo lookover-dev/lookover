@@ -7,6 +7,11 @@
 // elsewhere (the session screen, the setup in place of the app, "No such pull request") fails.
 import { API, type ConnectionCause, DEMO_API, type FaultId } from "@lookover/contracts";
 import type { Page } from "playwright";
+// Every line "Your accounts" can say, of which the page shows only the one its state picks: only the view model holds
+// them all (a copy here would go stale without a word), and apps/web has no module entry (its `exports` are
+// stylesheets), so this relative import is the one way to them (ADR 0086's `accountsLinesFit`).
+import { ACCOUNTS_TEXT } from "../apps/web/src/view-model/sign-in.ts";
+import { NARROW_PHONE, PHONE, WIDTHS } from "./proof-layout.ts";
 
 /** What an act may ask of the demo, as the developer drawer would. */
 export interface Demo {
@@ -30,6 +35,8 @@ export interface Shot {
   path?: string;
   /** A phone's width, 390 px; `narrow`, the narrowest phone a screen must fit, 375 px. */
   phone?: boolean | "narrow";
+  /** A desktop window's width in px, 1180 by default: 1024 and 1440 show what a held width does (ADR 0086). */
+  width?: number;
   drawer?: boolean;
   fullPage?: boolean;
   /** A tab without the session cookie, as one left open across a restart (the session screen). */
@@ -42,7 +49,32 @@ export interface Shot {
    */
   screen?: string;
   act?: (page: Page, demo: Demo) => Promise<unknown>;
+  /**
+   * A frames shot (ADR 0087, scripts/proof-motion.ts): its act starts a motion, the page's timeline standing still
+   * from just before it. proof pauses every animation, seeks each with `currentTime` to fixed times from 0 to the
+   * motion's end, then finishes it and settles the page, shooting each, and lays the frames side by side into one
+   * strip per theme, `.proof/frames/<name>-<theme>.png`: listed in the index, never compared by `--diff`. `around`:
+   * the elements whose box at the motion's end the frames show, a margin round it; the window when absent. The
+   * reduced-motion pass replays its act under `reduce`, where nothing may start.
+   */
+  frames?: { around?: string };
+  /**
+   * The errors its page is made to log, each a pattern of a line proof reads ("console error: …", "page error: …"):
+   * every one must match a line, and every line one of them. Any other error fails the shot (ADR 0085).
+   */
+  console?: readonly RegExp[];
 }
+
+/** The browser's line for an answer of `status` to a request at one of `paths`, proof naming the address after " at ". */
+function failedLoad(status: number, ...paths: string[]): RegExp {
+  const at = paths.map((path) => path.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|");
+  return new RegExp(
+    `^console error: Failed to load resource: the server responded with a status of ${status} .* at https?://[^/]+(?:${at})$`,
+  );
+}
+
+/** What a command the service refuses logs: the browser's line for the answer, then the app's (`store.tsx`). */
+const REFUSED_COMMAND = [failedLoad(500, API.commands), /^console error: Lookover refused a command /];
 
 /**
  * The app's routes (apps/web/src/app.tsx: proof-shots.test.ts keeps the two lists the same) and the screen each
@@ -79,6 +111,33 @@ export function screenOf(shot: Shot): string {
 const SEC = 1_000;
 const MIN = 60_000;
 const button = (page: Page, name: string) => page.getByRole("button", { name }).first();
+/**
+ * Waits up to 5 s for every finite animation in the page to play out on its own (ADR 0087: shots run with motion on),
+ * and fails naming those that didn't. An act that measures where things rest waits for it: a screen or a step coming
+ * in rises 6 px while its entry plays. Unlike proof's settle, it finishes nothing: the act sees the motion end.
+ */
+async function entriesPlayed(page: Page) {
+  const left = await page.evaluate(async (limit) => {
+    const playing = document
+      .getAnimations()
+      .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity);
+    const ended = Promise.allSettled(playing.map((a) => a.finished)).then(() => []);
+    const late = new Promise<string[]>((ok) =>
+      setTimeout(() => {
+        const names = playing
+          .filter((a) => a.playState === "running" || a.playState === "paused")
+          .map((a) => {
+            if (a instanceof CSSAnimation) return `animation ${a.animationName}`;
+            if (a instanceof CSSTransition) return `transition of ${a.transitionProperty}`;
+            return a.id === "" ? "a script's animation" : `animation ${a.id}`;
+          });
+        ok(names);
+      }, limit),
+    );
+    return Promise.race([ended, late]);
+  }, 5 * SEC);
+  if (left.length > 0) throw new Error(`Motion didn't play out within 5 s: ${left.join(", ")}`);
+}
 /** Repositories scrolled to its search and filter, a little under the top bar, the pointer off the table. */
 async function reposBarAtTop(page: Page) {
   await page
@@ -98,7 +157,7 @@ async function openFernhill(page: Page) {
 async function headCovered(page: Page, earlier: string, later: string) {
   const cells = (account: string) =>
     page
-      .locator("tr.repos-group:not(.repos-group-narrow)")
+      .locator("tr.repos-group:not(.repos-group-more)")
       .filter({ has: page.getByRole("button", { name: `${account}'s repositories` }) })
       .locator(":scope > *");
   const boxes = async (account: string) => {
@@ -126,6 +185,49 @@ async function headCovered(page: Page, earlier: string, later: string) {
       `${earlier}'s head shows from under ${later}'s: down to ${underBottom}, ${later}'s to ${overBottom}`,
     );
 }
+/** The shortest window `headToStuckLine` shortens to: below it a shot shows a head and little else. */
+const SHORTEST = 400;
+/**
+ * Scrolls Repositories so `account`'s head comes up to the line heads stick at, its rows under it, every earlier head
+ * stuck under it there.
+ *
+ * This changes the window's height. When the page ends too soon under `account`'s head, no scroll brings that head up
+ * to the stuck line, so the window is first made shorter by exactly what the page lacks (S18's phone page under the
+ * Reviewing filter lacks 60 px at 560, so 500; S20's, 8 repositories, about 390 at 820, so about 430). On a window as
+ * tall as the shot's first one, a person can't reach this state at all: the shot shows it on the tallest window that
+ * can. It hides no failure: no rule here reads the window's height (the `100vh` floors only grow a page shorter than
+ * the window), and `headCovered` after it still throws when the head didn't reach the stuck line. A window under
+ * `SHORTEST` throws instead of making a shot of almost nothing.
+ */
+async function headToStuckLine(page: Page, account: string) {
+  const group = page
+    .locator("tbody")
+    .filter({ has: page.getByRole("button", { name: `${account}'s repositories` }) });
+  const lacks = await group.evaluate((g) => {
+    const cell = g.querySelector("tr > :is(th, td)");
+    if (cell === null) throw new Error("a group with no head");
+    const stuckAt = Number.parseFloat(getComputedStyle(cell).top);
+    const by = g.getBoundingClientRect().top - stuckAt;
+    const room = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+    return Math.max(0, Math.ceil(by - room));
+  });
+  const size = page.viewportSize();
+  if (size === null) throw new Error("no viewport");
+  if (size.height - lacks < SHORTEST)
+    throw new Error(
+      `${account}'s head can't reach the stuck line: the page lacks ${lacks} px, a window under ${SHORTEST} px tall`,
+    );
+  if (lacks > 0) await page.setViewportSize({ width: size.width, height: size.height - lacks });
+  await group.evaluate((g) => {
+    const cell = g.querySelector("tr > :is(th, td)");
+    if (cell === null) throw new Error("a group with no head");
+    window.scrollBy({
+      top: g.getBoundingClientRect().top - Number.parseFloat(getComputedStyle(cell).top),
+      behavior: "instant",
+    });
+  });
+  await page.mouse.move(0, 0);
+}
 /** Opens Details › Log on a review page: its history, then the live log (ADR 0055). */
 const openLog = (page: Page) => page.getByRole("button", { name: /^Log/ }).first().click();
 /** A link that opens a page in a new tab: "Create it on GitHub" (ADR 0053). */
@@ -152,26 +254,127 @@ async function switchLoginOffWhileTaken(page: Page) {
 }
 
 /**
- * Clicks Add to my PATH, waits for `landed`, and fails when the PATH row's state square or action place moved or
- * changed size, at the desktop width and at 375 px (#642): the row holds every detail it can show, so the button stays
- * under the pointer whichever sentence, and line, follows.
+ * Every line "Your accounts" can say (`ACCOUNTS_TEXT`), laid out in its place at 390 and 375 px: each fails unless it
+ * keeps to one line and leaves the list's action places where they were, so the buttons under it stay under the
+ * pointer whichever state the step is in (ADR 0086: the line holds no height). The page's own words are put back.
  */
-async function addToPathStays(page: Page, landed: () => Promise<void>) {
+async function accountsLinesFit(page: Page) {
+  const desktop = page.viewportSize();
+  if (desktop === null) throw new Error("The page has no viewport size");
+  // Your accounts is the sub-step holding the accounts list.
+  const detail = page.locator(".substep:has(.account-row) > .substep-detail");
+  const lines = Object.values(ACCOUNTS_TEXT);
+  for (const width of [PHONE, NARROW_PHONE]) {
+    await page.setViewportSize({ width, height: desktop.height });
+    await entriesPlayed(page);
+    const wrong = await detail.evaluate((e, lines) => {
+      const text = e.firstChild;
+      if (e.childNodes.length !== 1 || text?.nodeType !== Node.TEXT_NODE)
+        return ["Your accounts' detail is not one line of text"];
+      const own = text.nodeValue;
+      const lineHeight = Number.parseFloat(getComputedStyle(e).lineHeight);
+      const places = () =>
+        JSON.stringify(
+          [...document.querySelectorAll(".account-actions")].map((a) => {
+            const r = a.getBoundingClientRect();
+            return [r.x, r.y + window.scrollY, r.width, r.height];
+          }),
+        );
+      const at = places();
+      const said: string[] = [];
+      for (const line of lines) {
+        text.nodeValue = line;
+        const { height } = e.getBoundingClientRect();
+        if (height > lineHeight * 1.5)
+          said.push(`"${line}" takes ${height} px, more than a line of ${lineHeight}`);
+        else if (places() !== at) said.push(`"${line}" moved the list's action places`);
+      }
+      text.nodeValue = own;
+      return said;
+    }, lines);
+    if (wrong.length > 0) throw new Error(`At ${width} px: ${wrong.join("; ")}`);
+  }
+  await page.setViewportSize(desktop);
+}
+
+/**
+ * "Don't start at login" pressed on setup's last step: the line it changes is under the footer, so the footer's
+ * buttons keep their boxes, at the desktop width and at 375 px (ADR 0086), and the line says the new choice.
+ */
+async function startAtLoginStays(page: Page) {
+  const desktop = page.viewportSize();
+  if (desktop === null) throw new Error("The page has no viewport size");
+  const places = page.locator(".setup-acts, .setup-acts > *");
+  const boxes = async () => {
+    const at: string[] = [];
+    for (const width of [desktop.width, NARROW_PHONE]) {
+      await page.setViewportSize({ width, height: desktop.height });
+      await entriesPlayed(page);
+      // On the page, not the window: the click scrolls the button into view.
+      at.push(
+        JSON.stringify(
+          await places.evaluateAll((all) =>
+            all.map((e) => {
+              const r = e.getBoundingClientRect();
+              return { x: r.x + window.scrollX, y: r.y + window.scrollY, width: r.width, height: r.height };
+            }),
+          ),
+        ),
+      );
+    }
+    await page.setViewportSize(desktop);
+    return at;
+  };
+  const before = await boxes();
+  await button(page, "Don't start at login").click();
+  await button(page, "Start at login after all").waitFor();
+  await page.locator(".at-login-line").getByText("won't start at login", { exact: false }).waitFor();
+  const after = await boxes();
+  if (before.join() !== after.join())
+    throw new Error(`The last step's footer moved: from ${before.join(" ")} to ${after.join(" ")}`);
+}
+
+/**
+ * Clicks Add to my PATH, waits for `landed`, and fails when the PATH row's state square moved or changed size, or its
+ * action place moved sideways or changed width, at the desktop width and at 375 px (#642): both sit on the title's line,
+ * so the button stays under the pointer whichever sentence, and line, follows. The place holds width,
+ * never height (ADR 0086): with no button left it is as tall as nothing, so its height and its top are not compared.
+ * Unless the click is `refused` (a problem arriving, said alone on the row, may take its line), it also fails when,
+ * at the desktop width, anything under the row moved: the skill rows' buttons the pointer goes to next, and the end of
+ * Try it, which the setup's footer and Settings' next section sit under (ADR 0086: the PATH row keeps its shape, Try
+ * it changes its command's words, never its lines).
+ */
+async function addToPathStays(page: Page, landed: () => Promise<void>, { refused = false } = {}) {
+  const below = async () => {
+    const ys = await page.evaluate(() => {
+      const top = document.querySelector(".coding-agent")?.getBoundingClientRect().top ?? 0;
+      return [
+        ...document.querySelectorAll(".agent-row ~ .agent-row > .agent-act, .coding-agent > .try-it"),
+      ].map((e) => Math.round(e.getBoundingClientRect().bottom - top));
+    });
+    // A skill row's action and Try it at least, or the check compares nothing.
+    if (ys.length < 2)
+      throw new Error(`Found ${ys.length} of a skill row's action and Try it under the PATH row`);
+    return ys.join(",");
+  };
+  const under = await below();
   const row = page.locator(".agent-row").filter({ hasText: "in your terminal" });
   const places = row.locator(":scope > .lg, :scope > .agent-act");
   const desktop = page.viewportSize();
   if (desktop === null) throw new Error("The page has no viewport size");
   const boxes = async () => {
     const at: string[] = [];
-    for (const width of [desktop.width, 375]) {
+    for (const width of [desktop.width, NARROW_PHONE]) {
       await page.setViewportSize({ width, height: desktop.height });
+      await entriesPlayed(page);
       at.push(
         JSON.stringify(
           await places.evaluateAll((all) =>
             all.map((e) => {
               const r = e.getBoundingClientRect();
               const top = e.closest(".agent-row")?.getBoundingClientRect().top ?? 0;
-              return { x: r.x, y: r.y - top, width: r.width, height: r.height };
+              const held = e.classList.contains("agent-act") ? {} : { y: r.y - top, height: r.height };
+              return { x: r.x, width: r.width, ...held };
             }),
           ),
         ),
@@ -186,6 +389,11 @@ async function addToPathStays(page: Page, landed: () => Promise<void>) {
   const after = await boxes();
   if (JSON.stringify(before) !== JSON.stringify(after))
     throw new Error(`The PATH row's square or action moved: from ${before.join(" ")} to ${after.join(" ")}`);
+  const now = await below();
+  if (!refused && now !== under)
+    throw new Error(
+      `Add to my PATH moved what is under its row: the buttons and Try it's end from ${under} to ${now}`,
+    );
 }
 
 /**
@@ -195,6 +403,8 @@ async function addToPathStays(page: Page, landed: () => Promise<void>) {
 async function paletteShowsWholeRows(page: Page) {
   const list = page.locator(".cmdk .menu");
   await list.waitFor();
+  // At rest: the dialog's entry scales it while it plays, and the rule is the palette's resting edge.
+  await entriesPlayed(page);
   const cut = await list.evaluate((menu) => {
     const box = menu.getBoundingClientRect();
     const bottom =
@@ -285,6 +495,20 @@ const toSharedGitHub = async (page: Page) => {
   await landedUnderTopBar(page, "github");
 };
 
+/** S20's and S21's organisation as long as a GitHub login can be (39 characters), which asks for SSO. */
+const LONGEST = "northwind-platform-infrastructure-group";
+/** S20's and S21's meridian pull request title, in Chinese (`s20-real-names.ts`'s `CLAIMS_TITLE`). */
+const CLAIMS_TITLE = "记录每笔被拒绝理赔的原因，并在月度报表中按原因汇总";
+/** S20's other organisation, long-named, with no problem: its group comes after northwind's. */
+const MERIDIAN = "meridian-health-analytics";
+
+/** Settings › GitHub on S20, opened by link as `toSharedGitHub` does, once the list names the longest login. */
+const toNamesGitHub = async (page: Page) => {
+  await page.locator(".accounts-list").getByText(LONGEST, { exact: true }).waitFor();
+  await scrollAtRest(page);
+  await landedUnderTopBar(page, "github");
+};
+
 /**
  * Settings › Your coding agent, opened by link (`/settings#agent`) as the app scrolls to it, its label under the top
  * bar, once GitHub's list above it is whole (the owner's account says its repositories), so it moves it no more.
@@ -293,7 +517,7 @@ const toAgent = async (page: Page) => {
   await page
     .locator(".accounts-list .account-row")
     .first()
-    .locator(".held-detail > span:not([aria-hidden])")
+    .locator(".account-detail")
     .getByText(/repositor/)
     .waitFor();
   await scrollAtRest(page);
@@ -443,7 +667,7 @@ const ROUND_2 = 5 * MIN;
 const CLOSED = 6 * MIN;
 const PAUSED = 8 * MIN;
 
-export const SHOTS: Shot[] = [
+const LISTED: Shot[] = [
   // Home
   { name: "home-needs-you", scenario: "S12" },
   // The narrowest phone: a running row's meta line wraps, its dot going down with the running time.
@@ -454,6 +678,8 @@ export const SHOTS: Shot[] = [
   // S18's Home with four of fernhill's repositories off (ADR 0084): Mine, then Everyone, whose tabs count 3 and 20,
   // none of the off repositories' five pull requests listed.
   { name: "home-org", scenario: "S18", path: "/" },
+  // S20's real-looking names (ADR 0086): the person's two pull requests, one on an organisation's long-named repository.
+  { name: "home-names", scenario: "S20", path: "/" },
   {
     name: "home-org-everyone",
     scenario: "S18",
@@ -669,6 +895,26 @@ export const SHOTS: Shot[] = [
     advance: MIN,
     inject: ["github-limit"],
     act: (_p, demo) => demo.advance(3 * MIN),
+  },
+  // The posting step saying the longest it can (`postingText`'s two-digit counts and a day named, run.test.ts): no
+  // demo world waits on GitHub into another day with fourteen posts owed, so the waiting step's words are set to it.
+  // Measured at 1024 and 1440 px: one line there, the step's row as tall as every other (ADR 0086).
+  {
+    name: "review-posting-longest",
+    scenario: "S2",
+    path: "/reviews/sasensi/ledger-api/148",
+    advance: MIN,
+    inject: ["github-limit"],
+    // The clock moved on before the page opens, so its shots (three widths, two themes, the layout pass) don't move
+    // it again, each, past GitHub's wait.
+    afterFaults: 3 * MIN,
+    act: async (p) => {
+      const words = p.locator(".steplist .two-lines > span").getByText("GitHub asked to wait");
+      await words.waitFor();
+      await words.evaluate((span) => {
+        span.textContent = "Posted 12 of 14. GitHub didn't answer, trying again on Wed 14 Oct at 14:05.";
+      });
+    },
   },
   // The same on a phone: the longest outbox still holds its two lines.
   {
@@ -925,6 +1171,31 @@ export const SHOTS: Shot[] = [
   // A large organisation (row 46, ADR 0082): 28 watched in three accounts, ten gone from fernhill, ledger-labs gone;
   // fernhill's twenty folded at first, its head carrying its counts (ADR 0083, round 4).
   { name: "repositories-org", scenario: "S18", path: "/repositories", fullPage: true },
+  // S20 (ADR 0086): a short login and two long ones, northwind's head (39 characters) asking for SSO with its fix,
+  // the others holding no problem.
+  {
+    name: "repositories-names",
+    scenario: "S20",
+    path: "/repositories",
+    fullPage: true,
+    act: (p) => p.getByRole("button", { name: `${LONGEST}'s repositories` }).waitFor(),
+  },
+  // S20 at 1024 and 1440 (ADR 0086): northwind's head, its SSO cause and fix in its second row, scrolled past,
+  // meridian's head stuck over its stuck row: only the first row sticks, so meridian's covers it whole, a long cause
+  // or none.
+  ...WIDTHS.map(
+    (width): Shot => ({
+      name: `repositories-names-covered-${width}`,
+      scenario: "S20",
+      path: "/repositories",
+      width,
+      act: async (p) => {
+        await p.locator(".repos-group-more").getByText("Asks you to sign in with SSO.").waitFor();
+        await headToStuckLine(p, MERIDIAN);
+        await headCovered(p, LONGEST, MERIDIAN);
+      },
+    }),
+  ),
   // fernhill switched off from its head (ADR 0082): every one of its repositories off, "None of 20 reviewed". Four of
   // them start off (ADR 0084), so its switch is mixed: the first press turns every one on, the second off.
   {
@@ -1037,9 +1308,22 @@ export const SHOTS: Shot[] = [
       await reposBarAtTop(p);
     },
   },
+  // The Reviewing filter: fernhill, folded, says "16 repositories shown" in its head's second row, where a cause goes,
+  // never under its count; the heads holding nothing to say have no second row.
+  {
+    name: "repositories-org-reviewing",
+    scenario: "S18",
+    path: "/repositories",
+    act: async (p) => {
+      await p.getByRole("group", { name: "Show" }).getByRole("button", { name: "Reviewing" }).click();
+      await p.getByRole("button", { name: "Reviewing", pressed: true }).waitFor();
+      await p.locator(".repos-group-more").getByText("16 repositories shown").waitFor();
+      await reposBarAtTop(p);
+    },
+  },
   // The Reviewing filter on the narrowest phone, scrolled into ledger-dev's rows: fernhill, folded, says what the
-  // filter shows under its count; ledger-dev's head, open, holds that line empty, so it is as tall and covers
-  // fernhill's head stuck under it whole (Lookover's F5).
+  // filter shows in its head's second row, never under its count; ledger-dev's head, open, has no second row, its
+  // stuck row as tall as fernhill's, so it covers fernhill's head stuck under it whole (Lookover's F5).
   {
     name: "repositories-org-reviewing-phone",
     scenario: "S18",
@@ -1048,12 +1332,11 @@ export const SHOTS: Shot[] = [
     act: async (p) => {
       await p.getByRole("group", { name: "Show" }).getByRole("button", { name: "Reviewing" }).click();
       await p.getByRole("button", { name: "Reviewing", pressed: true }).waitFor();
-      await p.getByText("16 shown").first().waitFor();
-      // A short phone's viewport under its browser's bars, an iPhone SE's, so ledger-dev's three rows scroll its head up
-      // to where fernhill's is stuck.
-      await p.setViewportSize({ width: 375, height: 560 });
-      await p.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-      await p.mouse.move(0, 0);
+      await p.locator(".repos-group-more").getByText("16 repositories shown").waitFor();
+      // A short phone's viewport, an iPhone SE's under its browser's bars, ledger-dev's head scrolled up to the line
+      // fernhill's is stuck at (the window shortened by what the page lacks, `headToStuckLine`).
+      await p.setViewportSize({ width: NARROW_PHONE, height: 560 });
+      await headToStuckLine(p, "ledger-dev");
       await headCovered(p, "fernhill", "ledger-dev");
     },
   },
@@ -1207,6 +1490,8 @@ export const SHOTS: Shot[] = [
   },
   // Settings › GitHub on the shared App (ADR 0067): signed in, the accounts list setup shows.
   { name: "settings-github-shared", scenario: "S16", path: "/settings#github", act: toSharedGitHub },
+  // The same list on S20's real-looking names (ADR 0086).
+  { name: "settings-github-names", scenario: "S20", path: "/settings#github", act: toNamesGitHub },
   // On a phone each row stacks: the account over its detail, its fix's place beneath (Ask again inside it).
   {
     name: "settings-github-shared-phone",
@@ -1398,9 +1683,33 @@ export const SHOTS: Shot[] = [
   },
   // Kept on disk, then the install's next check (4 s) finds the accounts.
   { name: "setup-github-signed-in", scenario: "S1", screen: ".setup", alone: true, act: setupUntilSignedIn },
-  // Signed in, the shared App installed on none of your accounts: the accounts row looks, the list offers the installs.
+  // Signed in, GitHub still listing the accounts (#670, ADR 0086): who you are, your own row looking, with no action
+  // and nothing said missing, until GitHub answers.
   {
     name: "setup-github-signed-in-looking",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await setupUntilCode(p, demo);
+      await demo.inject("accounts-slow");
+      await demo.inject("sign-in-entered");
+      await demo.advance(5 * SEC);
+      await p.getByText("Signed in as sasensi.").waitFor();
+      const row = p.locator('.account-row[data-state="looking"]');
+      await row.getByText("Looking…").waitFor();
+      const rows = await p.locator(".account-row").count();
+      if (rows !== 1) throw new Error(`Setup lists ${rows} account rows while looking, not 1`);
+      if ((await row.locator(".account-actions a, .account-actions button").count()) !== 0)
+        throw new Error("Setup's looking row offers an action");
+      if ((await p.getByText("Not installed", { exact: false }).count()) !== 0)
+        throw new Error("Setup says an account isn't installed while it is still looking");
+    },
+  },
+  // Signed in, the shared App installed on none of your accounts: GitHub has answered, so your own row says so, with
+  // Install on it, and the list offers the installs.
+  {
+    name: "setup-github-installed-nowhere",
     scenario: "S1",
     screen: ".setup",
     alone: true,
@@ -1412,6 +1721,7 @@ export const SHOTS: Shot[] = [
       await p.locator(".substep.done").first().waitFor();
       await demo.advance(4 * SEC);
       await p.getByText("Looking for your accounts", { exact: false }).waitFor();
+      await p.getByRole("link", { name: "Install on sasensi" }).waitFor();
       // Install on another account's link is the fake's install page for the shared App, not a 404.
       const [tab] = await Promise.all([
         p.waitForEvent("popup"),
@@ -1452,7 +1762,69 @@ export const SHOTS: Shot[] = [
       await demo.advance(5 * SEC);
       await p.locator(".substep.done").first().waitFor();
       await demo.advance(4 * SEC);
-      await p.getByText("Installed, with no repository.", { exact: false }).waitFor();
+      await p.getByText("Installed, with no repository chosen.", { exact: true }).waitFor();
+    },
+  },
+  // S21 (ADR 0086): setup's GitHub step on S20's real-looking names, northwind (39 characters) asking for SSO.
+  {
+    name: "setup-github-names",
+    scenario: "S21",
+    screen: ".setup",
+    fullPage: true,
+    act: (p) => p.locator(".accounts-list").getByText(LONGEST, { exact: true }).waitFor(),
+  },
+  // Its Repositories step, the same names on the groups' heads.
+  {
+    name: "setup-3-repositories-names",
+    scenario: "S21",
+    screen: ".setup",
+    alone: true,
+    act: async (p) => {
+      await button(p, "Continue").click();
+      await p.getByRole("group", { name: LONGEST, exact: true }).waitFor();
+    },
+  },
+  // Its First review step: meridian's pull request titled in Chinese, no space to break at (row 52). Its title wraps
+  // in its own column at every width, a phone's too, never past it into the link's or off the screen.
+  {
+    name: "setup-4-first-review-names",
+    scenario: "S21",
+    screen: ".setup",
+    alone: true,
+    act: async (p) => {
+      await button(p, "Continue").click();
+      await p.getByRole("group", { name: LONGEST, exact: true }).waitFor();
+      await button(p, "Continue").click();
+      await p.locator(".first-row").getByText(CLAIMS_TITLE.slice(0, 8)).waitFor();
+      const desktop = p.viewportSize();
+      if (desktop === null) throw new Error("The page has no viewport size");
+      for (const width of [desktop.width, PHONE, NARROW_PHONE]) {
+        await p.setViewportSize({ width, height: desktop.height });
+        await entriesPlayed(p);
+        const past = await p.locator(".first-row > .check > span > b").evaluateAll((titles) =>
+          titles.flatMap((b) => {
+            // The title's own words, the chip's held labels left out.
+            const box = b.getBoundingClientRect();
+            const texts: Text[] = [];
+            const walk = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+            for (let n = walk.nextNode(); n !== null; n = walk.nextNode())
+              if (n instanceof Text && n.parentElement?.closest(".first-row-chip") === null) texts.push(n);
+            const right = Math.max(
+              ...texts.flatMap((t) => {
+                const words = document.createRange();
+                words.selectNodeContents(t);
+                return [...words.getClientRects()].map((r) => r.right);
+              }),
+            );
+            const title = texts.map((t) => t.data).join("");
+            return right > box.right + 0.5 || right > window.innerWidth
+              ? [`${title}: ${Math.round(right - box.right)} px past its column`]
+              : [];
+          }),
+        );
+        if (past.length > 0) throw new Error(`First review's titles at ${width} px: ${past.join("; ")}`);
+      }
+      await p.setViewportSize(desktop);
     },
   },
   // S17 (ADR 0067): every account state at setup: ledger-dev reached, ledger-ops asking for SSO, sasensi and
@@ -1471,7 +1843,10 @@ export const SHOTS: Shot[] = [
     screen: ".setup",
     fullPage: true,
     phone: true,
-    act: (p) => link(p, "Ask to install on ledger-hq").waitFor(),
+    act: async (p) => {
+      await link(p, "Ask to install on ledger-hq").waitFor();
+      await accountsLinesFit(p);
+    },
   },
   // Asked: ledger-hq's row waits for an owner, with Ask again; then an owner installs it, and it is reached.
   {
@@ -1670,8 +2045,8 @@ export const SHOTS: Shot[] = [
   // #152, opened while First review is on screen, is reviewed by itself (#425): its row stays, its radio off, with
   // its state chip and "Open on GitHub"; #148 still picked. A review by itself is a first review (ADR 0072): Continue
   // is the primary, the line names #152 and what #148's pick leaves, and Review this pull request is still there as a
-  // ghost. The bar and the
-  // line hold their places and sizes, at the desktop width and at 375 px.
+  // ghost. The bar holds its places and sizes, at the desktop width and at 375 px; the line arrives under it, the
+  // step's end, where it moves nothing (ADR 0086).
   {
     name: "setup-4-first-review-reviewed",
     scenario: "S1",
@@ -1687,14 +2062,15 @@ export const SHOTS: Shot[] = [
       const reviews = await p.getByRole("button", { name: "Review this pull request" }).count();
       if (reviews !== 1)
         throw new Error(`First review offers ${reviews} Review this pull request buttons, not 1`);
-      // The boxes of the bar, each of its places and the line, at the desktop width and at 375 px.
+      // The boxes of the bar and each of its places, at the desktop width and at 375 px.
       const desktop = p.viewportSize();
       if (desktop === null) throw new Error("The page has no viewport size");
-      const places = p.locator(".first-review-acts, .first-review-acts > *, .first-reviewed-line");
+      const places = p.locator(".first-review-acts, .first-review-acts > *");
       const boxes = async () => {
         const at: string[] = [];
-        for (const width of [desktop.width, 375]) {
+        for (const width of [desktop.width, NARROW_PHONE]) {
           await p.setViewportSize({ width, height: desktop.height });
+          await entriesPlayed(p);
           at.push(
             JSON.stringify(await places.evaluateAll((all) => all.map((e) => e.getBoundingClientRect()))),
           );
@@ -1713,11 +2089,9 @@ export const SHOTS: Shot[] = [
         .getByRole("radio", { name: /Add rate limiting to \/v1\/invoices/ })
         .and(p.locator(":checked"))
         .waitFor();
-      // The line shown (the ones held are hidden) names #152 and the pull request picked, whose radio is on (round 4).
-      // Each sentence a block of its own (round 6).
-      const sentences = p.locator(
-        ".first-reviewed-line .held-detail > span:not([aria-hidden]) > .held-sentence",
-      );
+      // The line names #152 and the pull request picked, whose radio is on (round 4). Each sentence a block of its own
+      // (round 6).
+      const sentences = p.locator(".first-reviewed-line > .line-sentence");
       await sentences
         .nth(0)
         .filter({ hasText: /^Lookover already reviewed sasensi\/ledger-api #152 by itself: Clean\.$/ })
@@ -1754,11 +2128,47 @@ export const SHOTS: Shot[] = [
       const after = await boxes();
       if (before.join() !== after.join())
         throw new Error(`First review's bar or line moved: from ${before.join(" ")} to ${after.join(" ")}`);
-      // At the desktop width, the bar's three places on one line.
+      // At the desktop width, the bar's three places on one line (on a phone, where the layout pass lays it out too,
+      // it wraps by design).
       const middles = await p
         .locator(".first-review-acts > *")
         .evaluateAll((all) => all.map((e) => e.getBoundingClientRect()).map((r) => r.top + r.height / 2));
-      if (new Set(middles).size !== 1) throw new Error(`First review's bar wraps: ${middles.join(", ")}`);
+      if (desktop.width > PHONE && new Set(middles).size !== 1)
+        throw new Error(`First review's bar wraps: ${middles.join(", ")}`);
+    },
+  },
+  // The same on a phone: the reviewed row's Open on GitHub is a small square, its icon alone, said on hover by its tip
+  // (design-system.md "Icon button"), which ends inside the screen.
+  {
+    name: "setup-4-first-review-reviewed-phone",
+    scenario: "S1",
+    screen: ".setup",
+    alone: true,
+    phone: true,
+    act: async (p, demo) => {
+      await setupUntilRepositories(p, demo);
+      await button(p, "Continue").click();
+      await button(p, "Review this pull request").waitFor();
+      await demo.inject("agent-opens-change");
+      await p.getByText("Cache exchange rates for an hour").waitFor();
+      await demo.advance(5 * MIN);
+      // A button in demo mode (the simulated page), a link in live mode: named by its words either way.
+      const link = p.locator(
+        '.first-row.reviewed .first-row-reviewed .btn-square[aria-label="Open on GitHub"]',
+      );
+      await link.hover();
+      // The tooltip waits 400 ms before it shows.
+      await p.waitForTimeout(700);
+      const square = await link.boundingBox();
+      if (square === null || Math.abs(square.width - square.height) > 0.5)
+        throw new Error(`Open on GitHub is not a square on a phone: ${JSON.stringify(square)}`);
+      const tip = p.locator(".first-row.reviewed .tip", { hasText: "Open on GitHub" });
+      const box = await tip.boundingBox();
+      const width = p.viewportSize()?.width ?? 0;
+      if (box === null || box.x < 0 || box.x + box.width > width)
+        throw new Error(`Open on GitHub's tip runs past the screen: ${JSON.stringify(box)}`);
+      if (Number(await tip.evaluate((e) => getComputedStyle(e).opacity)) !== 1)
+        throw new Error("Open on GitHub's tip does not show on hover");
     },
   },
   // The agent opens #152 while Repositories is on screen: before the repositories are chosen nothing is asked of it
@@ -1800,7 +2210,7 @@ export const SHOTS: Shot[] = [
       await p.getByText("Cache exchange rates for an hour").waitFor();
       await demo.advance(5 * MIN);
       await p
-        .locator(".first-reviewed-line .held-detail > span:not([aria-hidden])")
+        .locator(".first-reviewed-line")
         .getByText(/^Lookover already reviewed sasensi\/ledger-api #152 by itself: Clean\./)
         .waitFor();
       await p.locator(".first-review-acts .btn-primary").getByText("Continue").click();
@@ -1844,7 +2254,8 @@ export const SHOTS: Shot[] = [
       await p.getByText("Done in").waitFor();
     },
   },
-  // "Don't start at login" clicked on the last step (ADR 0054): the line under it says what to run after a login.
+  // "Don't start at login" clicked on the last step (ADR 0054): the line under the footer says what to run after a
+  // login, and the footer's buttons stay where they were (ADR 0086).
   {
     name: "setup-5-agent-no-start-at-login",
     scenario: "S1",
@@ -1853,8 +2264,7 @@ export const SHOTS: Shot[] = [
     alone: true,
     act: async (p, demo) => {
       await setupUntilAgent(p, demo);
-      await button(p, "Don't start at login").click();
-      await button(p, "Start at login after all").waitFor();
+      await startAtLoginStays(p);
     },
   },
   // Another Lookover holds start at login (ADR 0068): the last step says this one won't start, with its command, and
@@ -1868,7 +2278,7 @@ export const SHOTS: Shot[] = [
     inject: ["login-taken"],
     act: setupUntilAgent,
   },
-  // Taken, then "Don't start at login": the shorter line in the taken one's height, the buttons where they were.
+  // Taken, then "Don't start at login": the line under the footer changes, the buttons where they were.
   {
     name: "setup-5-agent-login-taken-off",
     scenario: "S1",
@@ -1878,8 +2288,7 @@ export const SHOTS: Shot[] = [
     inject: ["login-taken"],
     act: async (p, demo) => {
       await setupUntilAgent(p, demo);
-      await button(p, "Don't start at login").click();
-      await button(p, "Start at login after all").waitFor();
+      await startAtLoginStays(p);
     },
   },
   // On a phone, reaching the service from another device: looking is free, a change asks to unlock.
@@ -1951,6 +2360,7 @@ export const SHOTS: Shot[] = [
     scenario: "S14",
     path: "/settings",
     inject: ["settings-unwritable"],
+    console: REFUSED_COMMAND,
     act: async (p) => {
       await p.getByLabel("Again after every push", { exact: true }).click();
       await p.getByText("Refused", { exact: true }).first().waitFor();
@@ -1958,7 +2368,14 @@ export const SHOTS: Shot[] = [
   },
   // A tab without the session (401, #68): the session screen in place of the app, with the program's sentence: S14
   // plants the binary's command, which the 401 names (ADR 0058).
-  { name: "service-session", scenario: "S14", path: "/", noSession: true },
+  {
+    name: "service-session",
+    scenario: "S14",
+    path: "/",
+    noSession: true,
+    // The snapshot's answer, and the event stream's when it opens before the app stops.
+    console: [failedLoad(401, API.snapshot, API.events)],
+  },
   // Round 1 posted: F1 blocking confirmed, F2 unsure, one candidate ruled out by Codex.
   { name: "service-review-round-1", scenario: "S14", path: PLANTED, advance: ROUND_1, fullPage: true },
   {
@@ -2028,7 +2445,7 @@ export const SHOTS: Shot[] = [
     act: async (p, demo) => {
       await setupUntilAgent(p, demo);
       await button(p, "Install the skill").click();
-      // Each row holds its other details, hidden: Claude Code's is the first to show.
+      // Claude Code's row says its skill is in.
       await p.getByText("which calls this Lookover, is in").first().waitFor();
     },
   },
@@ -2040,7 +2457,7 @@ export const SHOTS: Shot[] = [
     alone: true,
     act: async (p, demo) => {
       await setupUntilAgent(p, demo);
-      await addToPathStays(p, () => p.getByText("runs this Lookover.").waitFor());
+      await addToPathStays(p, () => p.getByText("A terminal runs this Lookover as:").waitFor());
     },
   },
   {
@@ -2050,13 +2467,17 @@ export const SHOTS: Shot[] = [
     fullPage: true,
     alone: true,
     inject: ["path-refused"],
+    console: REFUSED_COMMAND,
     act: async (p, demo) => {
       await setupUntilAgent(p, demo);
-      await addToPathStays(p, () =>
-        p
-          .locator(".agent-row.mark-refused > .substep-detail")
-          .getByText("This computer refused to change your PATH.")
-          .waitFor(),
+      await addToPathStays(
+        p,
+        () =>
+          p
+            .locator(".agent-row.mark-refused > .substep-detail")
+            .getByText("This computer refused to change your PATH.")
+            .waitFor(),
+        { refused: true },
       );
     },
   },
@@ -2092,11 +2513,8 @@ export const SHOTS: Shot[] = [
       await demo.advance(5 * MIN);
       await button(p, "Continue").click();
       await p.getByText("Get pull request #152 of sasensi/ledger-api through Lookover's review.").waitFor();
-      // Try it holds the line Add to my PATH switches it to: the one shown is the one not hidden.
-      await p
-        .locator(".try-next .held-detail > span:not([aria-hidden])")
-        .getByText("Lookover found nothing to fix there")
-        .waitFor();
+      // Try it says the clean pull request's next step, its command on a line of its own.
+      await p.locator(".try-next").getByText("Lookover found nothing to fix there").waitFor();
     },
   },
   // Settings › Your coding agent (ADR 0058): the setup step's rows, read again when shown. Fresh (the binary off the
@@ -2126,13 +2544,17 @@ export const SHOTS: Shot[] = [
     path: "/settings#agent",
     alone: true,
     inject: ["path-refused"],
+    console: REFUSED_COMMAND,
     act: async (p) => {
       await toAgent(p);
-      await addToPathStays(p, () =>
-        p
-          .locator(".agent-row.mark-refused > .substep-detail")
-          .getByText("This computer refused to change your PATH.")
-          .waitFor(),
+      await addToPathStays(
+        p,
+        () =>
+          p
+            .locator(".agent-row.mark-refused > .substep-detail")
+            .getByText("This computer refused to change your PATH.")
+            .waitFor(),
+        { refused: true },
       );
     },
   },
@@ -2184,4 +2606,319 @@ export const SHOTS: Shot[] = [
       await p.getByText("npm put it on your PATH").waitFor();
     },
   },
+  // Frames shots (ADR 0087): each motion stopped at fixed times from its start to its end, into a strip per theme.
+  // A repository's switch flipped off: the knob slides, the track takes the off colour.
+  {
+    name: "frames-switch",
+    scenario: "S9",
+    path: "/repositories",
+    alone: true,
+    // The Reviewing column: the repository's switch and its account's under the head.
+    frames: { around: ".tbl.repos :is(td, th):has(.switch)" },
+    act: (p) =>
+      p
+        .locator("label.switch")
+        .filter({ has: p.getByRole("switch", { name: "Review sasensi/lookover-sandbox" }) })
+        .click(),
+  },
+  // A review's "How this review ran" opening: the chevron turns, the content slides open.
+  {
+    name: "frames-disclosure",
+    scenario: "S10",
+    path: "/reviews/sasensi/lookover-sandbox/146",
+    frames: { around: ".disc.open" },
+    act: async (p) => {
+      // Its button a little under the top bar, so what opens under it shows whole.
+      await button(p, "How this review ran").evaluate((b) =>
+        window.scrollTo({ top: b.getBoundingClientRect().top + window.scrollY - 120, behavior: "instant" }),
+      );
+      await button(p, "How this review ran").click();
+    },
+  },
+  // The status menu opening from the pill: the menu comes down, the page under the top bar dims.
+  {
+    name: "frames-status-menu",
+    scenario: "S12",
+    frames: { around: ".anchor:has(> .layer), .layer" },
+    act: (p) => button(p, "Claude needs attention").click(),
+  },
+  // The status menu closing by Esc (the presence, #699): focus is back on the pill at once, the menu and the scrim
+  // fade out, easing in, and are gone at the end.
+  {
+    name: "frames-status-menu-closing",
+    scenario: "S12",
+    frames: { around: ".anchor:has(> .layer), .layer" },
+    act: async (p) => {
+      await button(p, "Claude needs attention").click();
+      await p.keyboard.press("Escape");
+    },
+  },
+  // A toast leaving when its 5 s are up: back out to the right, the way it came. Under reduced motion it is gone at
+  // once, so the act waits for no toast left that isn't leaving, which both read.
+  {
+    name: "frames-toast-leaving",
+    scenario: "S14",
+    path: "/settings",
+    inject: ["settings-unwritable"],
+    console: REFUSED_COMMAND,
+    frames: { around: ".toasts" },
+    act: async (p) => {
+      await p.getByLabel("Again after every push", { exact: true }).click();
+      await p.locator(".toast").waitFor({ state: "attached" });
+      await p.waitForFunction(() => document.querySelector(".toast:not(.leaving)") === null, null, {
+        timeout: 8000,
+      });
+    },
+  },
+  // Dialogs (ADR 0087 "A dialog closes at once", #700). The palette opening: it rises in, the page dims.
+  {
+    name: "frames-palette-opening",
+    scenario: "S12",
+    frames: { around: "dialog.cmdk" },
+    act: (p) => p.keyboard.press("Control+k"),
+  },
+  // The palette closing by Esc: closed at once, focus back where it was and the page under it live, while it and its
+  // backdrop fade out, easing in. The whole window: at the fade's end the dialog is no longer displayed, so it has no
+  // box to frame, and the backdrop's fade is the page's.
+  {
+    name: "frames-palette-closing",
+    scenario: "S12",
+    frames: {},
+    act: paletteClosesAtOnce,
+  },
+  // Opened again while it fades: shown as on any opening, its input taking the keys.
+  {
+    name: "palette-reopened",
+    scenario: "S12",
+    act: async (p) => {
+      await p.keyboard.press("Control+k");
+      await p.locator("dialog.cmdk[open]").waitFor();
+      await p.keyboard.press("Escape");
+      // The app heard the close a task later: the old palette is fading when it is asked for again.
+      await p.locator("dialog.cmdk[data-leaving]").waitFor({ state: "attached" });
+      await p.keyboard.press("Control+k");
+      const typed = await p
+        .locator("dialog.cmdk[open] input")
+        .evaluate((input) => document.activeElement === input);
+      if (!typed)
+        throw new Error("The palette opened again during its fade, but its input doesn't have focus");
+      await paletteShowsWholeRows(p);
+    },
+  },
+  // A review's steps (#703): the page opens on #148's round 1 with Codex finding, still; the clock moves on past
+  // the find, and its eyes give way to the check while the double-check's dot gives way to the eyes, each a fade and
+  // a scale from .9. The words and the times change in place.
+  {
+    name: "frames-step-advancing",
+    scenario: "S2",
+    path: "/reviews/sasensi/ledger-api/148",
+    advance: MIN,
+    alone: true,
+    frames: { around: ".running" },
+    act: async (p, demo) => {
+      await p.locator(".steplist li.active .step-mark:not([data-arrived])").waitFor();
+      await demo.advance(100 * SEC);
+      await p.locator(".steplist li.done .step-mark[data-arrived]").waitFor();
+      await p.locator(".steplist li.active .step-mark[data-arrived]").waitFor();
+    },
+  },
+  // The page opens on #148's round 1 double-checking; the clock moves on past its end, and the verdict takes the
+  // Running card's place, coming in like a section.
+  {
+    name: "frames-verdict-arriving",
+    scenario: "S2",
+    path: "/reviews/sasensi/ledger-api/148",
+    advance: 3 * MIN,
+    alone: true,
+    frames: { around: ".verdict" },
+    act: async (p, demo) => {
+      await p.locator(".running").waitFor();
+      await demo.advance(2 * MIN);
+      await p.locator(".verdict[data-arrived]").waitFor();
+    },
+  },
+  // A group folding by its rows (#701): ledger-dev's three on Repositories leave, falling 4 px as they fade, and the
+  // group closes up at the end; opened again, they rise in. Then setup's checklist, the same.
+  {
+    name: "frames-repositories-folding",
+    scenario: "S18",
+    path: "/repositories",
+    frames: { around: groupOf("tbody", "ledger-dev") },
+    act: async (p) => {
+      await headNearTop(p, "ledger-dev");
+      await chevron(p, "ledger-dev", true).click();
+    },
+  },
+  {
+    name: "frames-repositories-unfolding",
+    scenario: "S18",
+    path: "/repositories",
+    frames: { around: groupOf("tbody", "ledger-dev") },
+    act: async (p) => {
+      await headNearTop(p, "ledger-dev");
+      await foldAway(p, "ledger-dev", `${groupOf("tbody", "ledger-dev")} .fold-row`);
+      await chevron(p, "ledger-dev", false).click();
+    },
+  },
+  {
+    name: "frames-setup-repos-folding",
+    scenario: "S19",
+    screen: ".setup",
+    frames: { around: groupOf(".checklist-group", "ledger-dev") },
+    act: async (p) => {
+      await headNearTop(p, "ledger-dev");
+      await chevron(p, "ledger-dev", true).click();
+    },
+  },
+  {
+    name: "frames-setup-repos-unfolding",
+    scenario: "S19",
+    screen: ".setup",
+    frames: { around: groupOf(".checklist-group", "ledger-dev") },
+    act: async (p) => {
+      await headNearTop(p, "ledger-dev");
+      await foldAway(p, "ledger-dev", `${groupOf(".checklist-group", "ledger-dev")} .fold-row`);
+      await chevron(p, "ledger-dev", false).click();
+    },
+  },
+  // Rows and notices leaving (#702). A review ending on Home: #192's row leaves Reviewing now, the section with its
+  // last row, and rises in where it lands. The act waits for the row in its new section, which both motion and
+  // reduced motion show.
+  {
+    name: "frames-row-moving",
+    scenario: "S12",
+    alone: true,
+    frames: { around: ".page > .grp" },
+    act: async (p, demo) => {
+      await demo.advance(5 * MIN);
+      await p
+        .locator(".grp:not(.leaving)")
+        .filter({ hasNot: p.locator("h4", { hasText: "Reviewing now" }) })
+        .locator(".rowi", { hasText: "Kinder words in the payment reminder" })
+        .waitFor();
+    },
+  },
+  // A departed notice dismissed: fernhill's summary, Dismiss all, fades out; ledger-labs' No access stays.
+  {
+    name: "frames-notice-dismissed",
+    scenario: "S18",
+    path: "/repositories",
+    alone: true,
+    frames: { around: ".departed" },
+    act: (p) => button(p, "Dismiss all").click(),
+  },
+  // A line of the alert band leaving: the refused command's line dismissed by its ×, Claude's line staying.
+  {
+    name: "frames-alert-line-leaving",
+    scenario: "S12",
+    path: "/settings",
+    alone: true,
+    inject: ["settings-unwritable"],
+    console: REFUSED_COMMAND,
+    frames: { around: ".alerts" },
+    act: async (p) => {
+      await p.getByLabel("Again after every push", { exact: true }).click();
+      await p.locator(".alert.refused").getByRole("button", { name: "Dismiss" }).click();
+    },
+  },
 ];
+
+/** `account`'s group, as `element` (Repositories' `tbody`, setup's `.checklist-group`): the one holding its chevron. */
+function groupOf(element: string, account: string): string {
+  return `${element}:has(button[aria-label="${account}'s repositories"])`;
+}
+
+/** `account`'s chevron, open or folded. */
+const chevron = (p: Page, account: string, expanded: boolean) =>
+  p.getByRole("button", { name: `${account}'s repositories`, expanded });
+
+/** `account`'s head a little under the top bar, the pointer off the rows: its group shows whole. */
+async function headNearTop(p: Page, account: string) {
+  await chevron(p, account, true).evaluate((head) =>
+    window.scrollTo({ top: head.getBoundingClientRect().top + window.scrollY - 160, behavior: "instant" }),
+  );
+  await p.mouse.move(0, 0);
+}
+
+/**
+ * Folds `account`'s group and lets its rows leave, the page's timeline standing still for the frames: their exit (and
+ * the chevron's turn) finished by hand, then nothing matches `rows`. Under reduced motion nothing runs: gone at once.
+ */
+async function foldAway(p: Page, account: string, rows: string) {
+  await chevron(p, account, true).click();
+  await p.evaluate(() => {
+    for (const a of document.getAnimations())
+      if (a.effect?.getComputedTiming().endTime !== Infinity) a.finish();
+  });
+  await p.waitForFunction((selector) => document.querySelector(selector) === null, rows);
+}
+
+/**
+ * The palette, opened from the top bar's Reviews link, closed by Esc: fails unless focus is back on the link at once
+ * and the page under the dialog takes a click while the dialog still shows, fading. Its entry is played to its end
+ * first: the frames shot's timeline stands still from before the act, and a fade started mid-entry would start from
+ * its first frame, where the dialog is not yet shown.
+ */
+async function paletteClosesAtOnce(page: Page) {
+  const reviews = page.locator(".navtop a", { hasText: "Reviews" }).first();
+  await reviews.focus();
+  await page.keyboard.press("Control+k");
+  const dialog = page.locator("dialog.cmdk[open]");
+  await dialog.waitFor();
+  await page.evaluate(() => {
+    for (const a of document.getAnimations())
+      if (a.effect?.getComputedTiming().endTime !== Infinity) a.finish();
+  });
+  const box = await dialog.boundingBox();
+  await page.keyboard.press("Escape");
+  const back = await reviews.evaluate((link) => document.activeElement === link);
+  if (!back)
+    throw new Error("Esc closed the palette, but focus isn't back on the Reviews link it was opened from");
+  if (!box) throw new Error("The palette had no box on screen");
+  const under = await page.evaluate(
+    ({ x, y }) => {
+      const hit = document.elementFromPoint(x, y);
+      return hit === null ? "nothing" : hit.closest("dialog") ? "the dialog" : null;
+    },
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+  );
+  if (under)
+    throw new Error(`The palette is closed, but a click at its centre lands on ${under}, not the page`);
+  // The app heard the close (the dialog's close event comes a task after it): the presence holds it, leaving, before
+  // proof pauses its fade. Only under reduced motion may it be gone at once: anywhere else, a palette gone without
+  // its leaving mark is a fade that never started, and the strip would show no palette at all.
+  const reduced = await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
+  if (reduced) {
+    await page.waitForFunction(() => document.querySelector("dialog.cmdk:not([data-leaving])") === null);
+    return;
+  }
+  const leaving = await page
+    .locator("dialog.cmdk[data-leaving]")
+    .waitFor({ state: "attached", timeout: 2_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!leaving) throw new Error("Esc closed the palette, but it never faded: it left with no leaving mark");
+}
+
+/**
+ * The shots also taken at 1024 and 1440 px wide (ADR 0086): what a held width does with a long name or a short line
+ * shows at the window's width, not at proof's 1180 alone. Each is named `<shot>-<width>`.
+ */
+const WIDE = [
+  "repositories-org",
+  "repositories-names",
+  "settings-github-names",
+  "settings-agent",
+  "review-posting-longest",
+  "setup-github-names",
+  "setup-github-signed-in-looking",
+] as const;
+
+/** `name`'s shot at each of the two widths. */
+function atWidths(name: string): Shot[] {
+  const shot = LISTED.find((s) => s.name === name);
+  if (shot === undefined) throw new Error(`No shot ${name} to take at other widths`);
+  return WIDTHS.map((width) => ({ ...shot, name: `${name}-${width}`, width }));
+}
+
+export const SHOTS: Shot[] = [...LISTED, ...WIDE.flatMap(atWidths)];

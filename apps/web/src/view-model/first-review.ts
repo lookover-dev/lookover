@@ -38,9 +38,25 @@ export interface FirstReviewRow extends ChangeReview {
   chip: StateChip;
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 /**
- * The chips a reviewed row can show (a done job leaves the loop's state), each held in its place so a row becoming
- * reviewed moves nothing.
+ * A row's title cut before its last character (as a person reads one): the chip's place stays beside it (they wrap
+ * together), so a title that fills its line never leaves the place a line of its own, empty while the row can be
+ * picked (ADR 0086: width, never height). A word has no break inside it, so a last word still wraps whole with the
+ * place; a title with no space (Chinese, Japanese) keeps every other break, and wraps in its column (row 52).
+ */
+export function titleEnd(title: string): [string, string] {
+  const last = [...graphemes.segment(title)].at(-1);
+  return last === undefined ? ["", ""] : [title.slice(0, last.index), last.segment];
+}
+
+/** A reviewed row's link to its pull request: its words, its accessible name, and on a phone its tip. */
+export const OPEN_ON_GITHUB = "Open on GitHub";
+
+/**
+ * The chips a reviewed row can show (a done job leaves the loop's state), each keeping its width at the title's end
+ * (width, never height: ADR 0086), so a row becoming reviewed wraps its title as before.
  */
 export const REVIEWED_CHIPS: readonly StateChip[] = [
   CHIPS.clean,
@@ -50,7 +66,7 @@ export const REVIEWED_CHIPS: readonly StateChip[] = [
 ];
 
 /**
- * The line under the list, in its sentences: the screen draws each as a block of its own, so neither breaks
+ * The line under the bar, in its sentences: the screen draws each as a block of its own, so neither breaks
  * mid-phrase nor leaves "#148 too." alone (round 6: `pretty` left it, `balance` across both split "by / itself").
  */
 export type Sentences = readonly string[];
@@ -130,7 +146,7 @@ const countedLine = (n: number, pick: FirstReviewRow): Sentences => [
 ];
 
 /**
- * The line above the bar once a row is reviewed (ADR 0072): the one reviewed, named with its chip's word; a count
+ * The line under the bar once a row is reviewed (ADR 0072): the one reviewed, named with its chip's word; a count
  * when several are; either with the pick still left (`picked`, else the one `firstReviewPick` hands it to) by name;
  * `NONE_LEFT` when every one is; no sentence while none is.
  */
@@ -154,30 +170,4 @@ export function firstReviewSecondary(
   picked: ChangeId | null,
 ): "preview" | "review" {
   return picked !== null && firstReviewPrimary(rows, picked) === "go-on" ? "review" : "preview";
-}
-
-/** How many of the longest-named rows the held lines name: a few, so a long list holds a handful of lines, not n². */
-const HELD_NAMES = 3;
-
-/**
- * The lines laid in one place (`HeldDetail`) so the line never grows when a review lands or the pick changes: the one
- * shown, and the longest the step could show for these rows: the few rows with the longest names, each named with
- * each chip word a reviewed row can show and each other of them picked, the count as large as it can be with each of
- * them picked, and `NONE_LEFT`. Only the longest names are crossed (Lookover's round 4 F1: every pair of 300 rows
- * was 359,102 hidden lines).
- */
-export function reviewedLines(rows: readonly FirstReviewRow[], picked: ChangeId | null): Sentences[] {
-  const longest = [...rows].sort((a, b) => named(b).length - named(a).length).slice(0, HELD_NAMES);
-  const lines = [
-    reviewedLine(rows, picked),
-    ...longest.flatMap((row) =>
-      longest
-        .filter((pick) => pick !== row)
-        .flatMap((pick) => REVIEWED_CHIPS.map((c) => namedLine(row, c.label, pick))),
-    ),
-    ...longest.map((pick) => countedLine(Math.max(2, rows.length), pick)),
-    NONE_LEFT,
-  ];
-  // One copy of each line, its sentences compared, not the arrays.
-  return [...new Map(lines.map((line) => [JSON.stringify(line), line])).values()];
 }

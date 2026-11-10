@@ -58,6 +58,8 @@ function snapshot(seq: number, title: string): State {
       state: "connected",
       cause: null,
       accounts: [],
+      listed: true,
+      listingCause: null,
       unreached: [],
       signIn: null,
       person: null,
@@ -93,13 +95,19 @@ const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /**
  * A service that sends the events a test gives it. `refuse` is what its `send` rejects with; `lost` tells the
- * store the session is gone, as the HTTP client does when its stream reconnects into a 401.
+ * store the session is gone, as the HTTP client does when its stream reconnects into a 401. `next` is the snapshot
+ * it serves from then on; `snapshots`, how many times it was asked for one.
  */
 function service(first: State | Error, refuse?: Error) {
   const listeners: ((event: Event) => void)[] = [];
   const lostListeners: ((open: string | null) => void)[] = [];
+  let served = first;
+  let asked = 0;
   const api: LookoverApi & SessionAware = {
-    snapshot: () => (first instanceof Error ? Promise.reject(first) : Promise.resolve(first)),
+    snapshot: () => {
+      asked++;
+      return served instanceof Error ? Promise.reject(served) : Promise.resolve(served);
+    },
     subscribe: (listener) => {
       listeners.push(listener);
       return () => undefined;
@@ -119,7 +127,10 @@ function service(first: State | Error, refuse?: Error) {
   const lost = (open: string | null = null) => {
     for (const l of lostListeners) l(open);
   };
-  return { api, send, lost };
+  const next = (state: State) => {
+    served = state;
+  };
+  return { api, send, lost, next, snapshots: () => asked };
 }
 
 test("a replaced snapshot takes the copy's place whatever its number, and an ordinary older event changes nothing", async () => {
@@ -271,6 +282,64 @@ test("events that arrive before the first snapshot are applied on it, by their n
   s.send({ type: "state.replaced", at: NOW, seq: 7, state: snapshot(30, "newer") });
   await settled();
   expect(store.get()).toMatchObject({ seq: 7, now: NOW, engines: { codex: { name: "newer" } } });
+});
+
+test("an event this version doesn't know keeps the copy as it was, before the first snapshot or after (ADR 0085)", async () => {
+  // A tab left open across an update: the newer service sends a type its `apply` doesn't know.
+  const unknown: Event = JSON.parse(JSON.stringify({ type: "review.pinned", at: NOW, seq: 6 }));
+  const s = service(snapshot(5, "first"));
+  const store = new Store(s.api);
+  s.send(unknown);
+  await settled();
+  expect(store.get()).toMatchObject({ seq: 5, engines: { codex: { name: "first" } } });
+  s.send({ ...unknown, seq: 7 });
+  s.send({ type: "clock", at: NOW + 1000, seq: 8 });
+  expect(store.get()).toMatchObject({ seq: 8, now: NOW + 1000, engines: { codex: { name: "first" } } });
+  // Skipped and nothing more: the snapshot was asked for once, at the start.
+  expect(s.snapshots()).toBe(1);
+});
+
+test("an event of a known type that `apply` throws on asks for the snapshot again, the events after it applied on it", async () => {
+  // A bug, not an update: the HTTP client already counted the event seen, so it is never sent again.
+  const broken: Event = JSON.parse(JSON.stringify({ type: "rules.changed", at: NOW, seq: 6 }));
+  const s = service(snapshot(5, "first"));
+  const store = new Store(s.api);
+  await settled();
+  s.next(snapshot(6, "fresh"));
+  s.send(broken);
+  // One that arrives while the snapshot is on its way follows it.
+  s.send({ type: "clock", at: NOW + 1000, seq: 7 });
+  expect(store.get()).toMatchObject({ seq: 7, engines: { codex: { name: "first" } } });
+  await settled();
+  expect(s.snapshots()).toBe(2);
+  expect(store.get()).toMatchObject({ seq: 7, now: NOW + 1000, engines: { codex: { name: "fresh" } } });
+});
+
+test("a known event that throws while a snapshot is on its way asks for one more once it comes, and only one (#683)", async () => {
+  const broken = (seq: number): Event => JSON.parse(JSON.stringify({ type: "rules.changed", at: NOW, seq }));
+  // The first snapshot on its way: 6 throws on it, 7 goes on; the snapshot after it holds 6's effects.
+  const first = service(snapshot(5, "first"));
+  const early = new Store(first.api);
+  first.send(broken(6));
+  first.send({ type: "clock", at: NOW + 1000, seq: 7 });
+  first.next(snapshot(7, "fresh"));
+  await settled();
+  await settled();
+  expect(first.snapshots()).toBe(2);
+  expect(early.get()).toMatchObject({ seq: 7, engines: { codex: { name: "fresh" } } });
+
+  // A snapshot asked for again on its way: 7 throws while it is, and it doesn't hold 7.
+  const again = service(snapshot(5, "first"));
+  const late = new Store(again.api);
+  await settled();
+  again.next(snapshot(6, "middle"));
+  again.send(broken(6));
+  again.send(broken(7));
+  again.next(snapshot(7, "fresh"));
+  await settled();
+  await settled();
+  expect(again.snapshots()).toBe(3);
+  expect(late.get()).toMatchObject({ seq: 7, engines: { codex: { name: "fresh" } } });
 });
 
 /** A store on `first` that records the commands it really sends. */

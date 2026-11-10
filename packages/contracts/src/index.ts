@@ -21,7 +21,12 @@
 // repository as written and compared as GitHub does (ignoring case); `reviewResultV1`, the Zod schema of
 // `lookover.review-result/v1`, which parses a result where it enters, and `readResult`, which finds one in
 // a check's text (the agents' helper imports only this package); `enumOf`, a Zod enum tied to the type it
-// parses, so that every package's parser fails the typecheck when the type and the enum differ;
+// parses, so that every package's parser fails the typecheck when the type and the enum differ; `tiedTo`, any Zod
+// schema tied exactly to its type (a field missed, optional ones included, or added fails the typecheck), and
+// `stateSchema`, the state the UI holds as this version writes it, each section tied to its type: what a start
+// must read its replayed log through rather than trust it (ADR 0085), and `readState`, which reads it so over the
+// start's own state: a change with its review, each repository, departed repository and rule alone, every other
+// section the start's own when it doesn't read, check results always the start's, each piece dropped a `Dropped`;
 // `reviewRequest`, `readRequest`, `isReviewRequest` and `requestedCommit`, a review request's text as written and
 // read (ADR 0043, ADR 0052: `full`, and the reply a request asks to have answered);
 // `NOT_CHECKED`, the confirmation of a finding no confirm judged, the default every producer fills (ADR 0044).
@@ -124,8 +129,9 @@
 // missed events or a reload. A port that has an order states it in its file: `HostWriter`'s post order (check in
 // progress → review → replies → status block → check completed), `ProcessRunner.sweepOrphans` once at start before
 // any `start`, an engine run's folder complete once `run` resolves.
-// Error modes: `apply`, `readResult`, `enumOf` and every helper above never throw: an
-// event about a change the snapshot doesn't hold changes nothing, a text without a valid result reads as null.
+// Error modes: `readResult`, `enumOf` and every helper above never throw: an event about a change the snapshot
+// doesn't hold changes nothing, a text without a valid result reads as null. `apply` throws `UnknownEvent`, carrying
+// the type, on an event of a type this version doesn't know (ADR 0085); its callers skip it.
 // An ID constructor throws a plain `Error` on a value that can't be that ID, where it enters. `reviewResultV1`
 // fails with Zod's own errors. A host port's refusal is a `HostError` and nothing else (its `failure` says
 // which); the engines and process ports never throw: their failures are outcomes.
@@ -133,7 +139,7 @@ export type { EngineActivity, RunActivity } from "./activity.ts";
 export type { AgentChange, AgentCheck, AgentHost, AgentThread } from "./agent-host.ts";
 export type { LogMessage, LookoverApi, MintedLink, NoSession } from "./api.ts";
 export { API, SSE } from "./api.ts";
-export { apply, emptyReview } from "./apply.ts";
+export { apply, emptyReview, UnknownEvent } from "./apply.ts";
 export type { Change } from "./change.ts";
 export {
   type CheckExternalId,
@@ -371,6 +377,8 @@ export type {
   ProcessRunner,
   StartedProcess,
 } from "./process.ts";
+export type { Dropped, DroppedWhy } from "./read-state.ts";
+export { readState } from "./read-state.ts";
 export type {
   ActionBy,
   FindingCounts,
@@ -450,5 +458,7 @@ export type {
   SignInTokens,
 } from "./sign-in.ts";
 export type { State } from "./state.ts";
+export { stateSchema } from "./state-schema.ts";
 export { findingPermalink, showsStatus, spliceStatus, statusOf, statusRoom } from "./status-block.ts";
+export { tiedTo } from "./tied-to.ts";
 export { withoutWordmark, wordmark } from "./wordmark.ts";

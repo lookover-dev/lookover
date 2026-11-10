@@ -11,7 +11,6 @@ import {
   type Event,
   emptyReview,
   type Finding,
-  failedTitle,
   findingId,
   GITHUB_WEB,
   type JobFailure,
@@ -27,6 +26,7 @@ import {
   runId,
   type State,
   type Turn,
+  UnknownEvent,
 } from "./index.ts";
 
 const NOW = Date.UTC(2026, 9, 6, 10, 0, 0);
@@ -56,6 +56,8 @@ const CONNECTED: Connection = {
   accounts: [
     { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
   ],
+  listed: true,
+  listingCause: null,
   unreached: [],
   signIn: null,
   person: { id: 7, login: "sam" },
@@ -267,7 +269,7 @@ test("a request joining a waiting job says who asked, once; another request on i
   ]);
 });
 
-test("events stored before ADR 0081 replay: a job with no askedBy and a push by you name no one; a failure, its kind", () => {
+test("events stored before ADR 0081 replay: a job with no askedBy and a push by you name no one; a failure as written", () => {
   const { askedBy: _, ...old } = job("queued");
   // A failure with no `cause` or `limitMs` at all.
   const oldFailure: JobFailure = JSON.parse(
@@ -310,11 +312,6 @@ test("events stored before ADR 0081 replay: a job with no askedBy and a push by 
     { at: NOW + 1_000, sha: commitSha("b2c3d4e"), kind: "pushed", by: null, commits: 1 },
     { at: NOW + 2_000, sha: commitSha("b2c3d4e"), kind: "failed", failure: oldFailure },
   ]);
-  // Worded by its kind, as before causes were.
-  const failed = reviewOf(after).timeline.at(-1);
-  expect(failed?.kind === "failed" ? failedTitle(failed.failure) : null).toBe(
-    "The review failed: the code could not be fetched",
-  );
 });
 
 test("a job deferred while it ran loses its run, and the timeline says why once", () => {
@@ -516,6 +513,51 @@ test("a run's activities go with the run: its round finished, or its job no long
     preview: false,
   });
   expect(reviewOf(finished).run).toBeNull();
+});
+
+test("an event this version doesn't know is thrown on, never applied as a state of nothing (ADR 0085)", () => {
+  // As the stream gives it: parsed, unchecked.
+  const unknown: Event = JSON.parse(JSON.stringify({ type: "review.pinned", at: NOW, seq: 1, changeId: ID }));
+  expect(() => apply(snapshot(), unknown)).toThrow(UnknownEvent);
+  try {
+    apply(snapshot(), unknown);
+  } catch (error) {
+    expect(error).toBeInstanceOf(UnknownEvent);
+    expect(error).toMatchObject({ type: "review.pinned" });
+  }
+  // One the copy already holds changes nothing, whatever its type.
+  expect(apply(snapshot(), { ...unknown, seq: 0 })).toEqual(snapshot());
+});
+
+test("a running job sent with its run, on a review rebuilt at start, shows that run; sent without, keeps the one shown", () => {
+  const publishing: Run = { ...RUN, step: "publishing" };
+  const rebuilt = apply(snapshot({ job: null, run: null }), {
+    type: "job.changed",
+    at: NOW,
+    seq: 1,
+    changeId: ID,
+    job: job("running"),
+    run: publishing,
+  });
+  expect(reviewOf(rebuilt).run).toEqual(publishing);
+  const kept = apply(snapshot({ job: job("running"), run: publishing }), {
+    type: "job.changed",
+    at: NOW,
+    seq: 1,
+    changeId: ID,
+    job: job("running"),
+  });
+  expect(reviewOf(kept).run).toEqual(publishing);
+  // A job that failed shows no run, whatever the event carries.
+  const failed = apply(snapshot({ job: job("running"), run: publishing }), {
+    type: "job.changed",
+    at: NOW,
+    seq: 1,
+    changeId: ID,
+    job: job("failed"),
+    run: RUN,
+  });
+  expect(reviewOf(failed).run).toBeNull();
 });
 
 test("a posting run shows its outbox as the last event says; with no run going it changes nothing (ADR 0055)", () => {
@@ -1177,6 +1219,24 @@ test("a sign-in to the shared App shows its code until it ends, then the connect
   expect(refused.connection.state).toBe("connected");
   expect(refused.connection.cause).toBeNull();
   expect(refused.connection.accounts).toEqual([ON_SAM, { ...ON_ACME, cause: sso }]);
+});
+
+test("a sign-in makes the accounts not listed; a listing that answers makes them listed, the accounts as they were (ADR 0086)", () => {
+  const shared = { ...snapshot(), connection: { ...CONNECTED, accounts: [ON_SAM] } };
+  const looking = apply(shared, {
+    type: "connection.changed",
+    at: NOW,
+    seq: 1,
+    patch: { person: { id: 7, login: "sam" }, listed: false, unreached: [] },
+  });
+  expect(looking.connection).toMatchObject({ listed: false, accounts: [ON_SAM], unreached: [] });
+  const listed = apply(looking, {
+    type: "connection.changed",
+    at: NOW + 1_000,
+    seq: 2,
+    patch: { listed: true },
+  });
+  expect(listed.connection).toEqual({ ...CONNECTED, accounts: [ON_SAM], listed: true });
 });
 
 test("the accounts the shared App doesn't reach follow the service: named, asked, then reached and gone from the list", () => {

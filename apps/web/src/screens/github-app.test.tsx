@@ -1,5 +1,5 @@
 // The accounts list (design-system.md "Accounts list", ADR 0067) as it renders: every row's actions are one place,
-// the fix's, centred on the row's login and detail, with Ask again inside it on a row waiting for an owner, so every
+// the fix's, pinned to the row's top, level with its login, with Ask again inside it on a row waiting for an owner, so every
 // row is as tall whatever its state; each detail leads with its state's mark; an account installed and used says so
 // where its fix would be. The list is rendered to markup on a service that never answers.
 import { expect, test } from "bun:test";
@@ -31,12 +31,21 @@ const list = (state: State) =>
 /** Each row's markup, in the list's order. */
 const rowsOf = (html: string) => html.split('class="account-row"').slice(1);
 
-test("a row's actions are its fix's one place: no second place held under it, so it can sit centred on the row", () => {
+test("a row's actions are its fix's one place: no second place held under it, so it sits level with the login", () => {
   const html = list(accounts());
   expect(rowsOf(html)).toHaveLength(5);
   expect(rowsOf(html).map((row) => row.match(/class="account-action( |")/g)?.length ?? 0)).toEqual([
     1, 1, 1, 1, 1,
   ]);
+});
+
+test("a row's detail says its own line and holds none it doesn't show: no hidden copy, so it is as tall as it says", () => {
+  const html = list(accounts());
+  expect(html).not.toContain("held-detail");
+  // ledger-hq waits: it says its waiting line, never its ask's held beside it.
+  const waiting = rowsOf(html)[3] ?? "";
+  expect(waiting).toContain("Waiting for an owner, asked at");
+  expect(waiting).not.toContain("On GitHub, you ask its owners to install it.");
 });
 
 test("Ask again shows on the row waiting for an owner only, inside its fix's place, beside the fix", () => {

@@ -2,11 +2,12 @@
 // and announced once by the rows' one status line, which holds only that refusal; the rows themselves announce
 // nothing, so a row done or undone is never read out.
 import { expect, spyOn, test } from "bun:test";
-import type { Command, LookoverApi } from "@lookover/contracts";
+import { type Command, changeId, emptyReview, type LookoverApi, type State } from "@lookover/contracts";
 import { Refused } from "../api/http.ts";
 import { Store } from "../store.tsx";
 import { CodingAgent } from "./coding-agent.tsx";
-import { app, screen, world } from "./repositories.test-support.tsx";
+import { app, change, screen, world } from "./repositories.test-support.tsx";
+import { finding } from "./review.test-support.tsx";
 
 /** A store whose service refuses every command with `refused`. */
 function refusing(refused: Refused): Store {
@@ -117,22 +118,19 @@ const windows = () => {
   return { ...s, service: { ...s.service, agent: { ...s.service.agent, path, skills } } };
 };
 
-/** Each agent row's markup, in order, its held copy apart: what is seen, and what only holds room. */
-const agentRows = (html: string) =>
+/** Each agent row's markup, in order, the last one cut where Try it's card starts. */
+const agentRows = (html: string): string[] =>
   html
     .split('<div class="engine substep agent-row')
     .slice(1)
-    .map((row) => {
-      const at = row.indexOf('<div class="agent-held"');
-      return { seen: row.slice(0, at), held: row.slice(at) };
-    });
+    .map((row) => row.split('<div class="card try-it">')[0] ?? "");
 
 test("the three rows share one layout: title, sentence, action, then the value on its line, the PATH row too", () => {
   for (const place of ["setup", "settings"] as const) {
     const rows = agentRows(screen(app(), windows(), () => <CodingAgent place={place} />));
     expect(rows.length).toBe(3);
     for (const [i, value] of ["Lookover\\bin", ".claude\\skills", ".agents\\skills"].entries()) {
-      const { seen } = rows[i] ?? { seen: "" };
+      const seen = rows[i] ?? "";
       // Square, title, sentence, action, line: in that order, each in its own place.
       const order = [
         '<span class="lg',
@@ -153,13 +151,56 @@ test("the three rows share one layout: title, sentence, action, then the value o
   }
 });
 
-test("each row holds every other detail it can show, with its line, in a copy hidden from everyone, no button in it", () => {
-  const rows = agentRows(screen(app(), windows(), () => <CodingAgent place="settings" />));
-  for (const { held } of rows) {
-    expect(held).toStartWith('<div class="agent-held" aria-hidden="true">');
-    expect(held).not.toContain("<button");
-    expect(held.match(/class="agent-held-one"/g)?.length).toBeGreaterThan(0);
+test("the PATH row done keeps its line: lookover on it, where the folder was, and no folder named", () => {
+  const s = windows();
+  const path = { ...s.service.agent.path, reach: "yes" as const };
+  const done = { ...s, service: { ...s.service, agent: { ...s.service.agent, path } } };
+  const [row = ""] = agentRows(screen(app(), done, () => <CodingAgent place="settings" />));
+  const sentence = row.slice(row.indexOf("substep-detail"), row.indexOf('class="agent-act"'));
+  expect(sentence.replace(/<[^>]*>/g, "")).toContain("A terminal runs this Lookover as:");
+  expect(sentence).not.toContain("<code");
+  const line = row.slice(row.indexOf('class="agent-line"'));
+  expect(line).toContain("<code");
+  expect(line.replace(/<[^>]*>/g, "")).toContain("lookover");
+  expect(row).not.toContain("Lookover\\bin");
+});
+
+/** `state()` with one of the user's pull requests holding a finding posted on GitHub, Lookover's command `command`. */
+function withFinding(command: string): State {
+  const s = state();
+  const id = changeId("fernhill/api#7");
+  const review = { ...emptyReview(id, s.now), findings: [finding("F1", "open")] };
+  return {
+    ...s,
+    service: { ...s.service, command },
+    changes: { [id]: change("fernhill/api", 7) },
+    reviews: { [id]: review },
+  };
+}
+
+test("Try it puts Lookover's wait on a line of its own after what happens next, short or long", () => {
+  const off = "& 'C:\\Users\\Your Name\\AppData\\Local\\Lookover\\lookover.exe'";
+  for (const command of ["lookover", off]) {
+    const card = tryItCard(screen(app(), withFinding(command), () => <CodingAgent place="setup" />));
+    const next = card.slice(card.indexOf('class="t-small t-help try-next"'));
+    expect(next).toContain("Your agent fixes and pushes, then asks Lookover for round 2");
+    const said = next.indexOf("with:");
+    const line = next.indexOf('<code class="path line">');
+    expect(said).toBeGreaterThan(0);
+    expect(line).toBeGreaterThan(said);
+    const shown = next
+      .slice(line)
+      .replace(/<[^>]*>/g, "")
+      .replaceAll("&#x27;", "'")
+      .replaceAll("&amp;", "&");
+    expect(shown).toBe(`${command} wait`);
   }
-  // The skill row holds its done sentence with the same folder on its line.
-  expect(rows[1]?.held).toContain("The review loop&#x27;s skill, which calls this Lookover, is in:");
+});
+
+test("a row shows its own detail only: no hidden copy holds room for another (ADR 0086)", () => {
+  const html = screen(app(), windows(), () => <CodingAgent place="settings" />);
+  expect(html).not.toContain("agent-held");
+  expect(html).not.toContain("held-detail");
+  // The skill row says only its to-do sentence, not the done one it may switch to.
+  expect(html).not.toContain("The review loop&#x27;s skill, which calls this Lookover, is in:");
 });

@@ -121,7 +121,7 @@ export const BACKGROUND_TEXT =
 const CHANGE_IT = "Change it any time in Settings, under “Start at login”.";
 
 /**
- * The line under it: what the choice does at the next login. Nothing is registered before the setup is finished
+ * The line under the step's footer, whose button changes it: what the choice does at the next login. Nothing is registered before the setup is finished
  * ("Go to my reviews"), so this says the choice; Settings says the registration from then on. The finish never takes
  * another install's registration (ADR 0068): chosen on, the line says this one won't start, and where to change that.
  */
@@ -146,19 +146,4 @@ export function backgroundLine(
     after: `after you log in. ${CHANGE_IT}`,
     alone: `It won't start at login. ${CHANGE_IT} After you log in, run:`,
   };
-}
-
-/**
- * Every line the last step's button can switch `backgroundLine` to, chosen on then off, each once: the step holds
- * the height of the tallest (`HeldDetail`), so the buttons under it stay under the pointer (rule 5).
- */
-export function backgroundLines(
-  s: Pick<AtLogin, "startAtLogin" | "atLogin" | "loginItem" | "command">,
-  mode: WebMode,
-): (string | WithCommand)[] {
-  const lines = [
-    backgroundLine({ ...s, startAtLogin: true }, mode),
-    backgroundLine({ ...s, startAtLogin: false }, mode),
-  ];
-  return lines.filter((line, i) => lines.findIndex((l) => JSON.stringify(l) === JSON.stringify(line)) === i);
 }

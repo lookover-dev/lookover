@@ -312,13 +312,10 @@ const NEXT: Record<SkipWhy, ReviewResult["loop"]["next_action"]> = {
   fork: "stop",
 };
 
-/**
- * What of a job's failure the host is shown; a job failed with none said is `unexpected`. A cause or a limit an event
- * stored before ADR 0081 lacks is unknown.
- */
+/** What of a job's failure the host is shown; a job failed with none said is `unexpected`. */
 export function shownFailure(failure: JobFailure | null): ShownFailure {
   if (failure === null) return { kind: "unexpected", cause: null, limitMs: null };
-  return { kind: failure.kind, cause: failure.cause ?? null, limitMs: failure.limitMs ?? null };
+  return { kind: failure.kind, cause: failure.cause, limitMs: failure.limitMs };
 }
 
 /**

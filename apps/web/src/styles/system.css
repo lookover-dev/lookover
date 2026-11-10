@@ -19,13 +19,17 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
 }
+/* Reduced motion is none (ADR 0087): nothing starts, every element shows its last frame, nothing scrolls smoothly. */
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
   *,
   *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+  *::after,
+  ::backdrop {
+    animation: none !important;
+    transition: none !important;
   }
 }
 ::selection {
@@ -133,7 +137,7 @@ pre {
     background var(--d-1) var(--e-out),
     border-color var(--d-1) var(--e-out),
     transform var(--d-1) var(--e-out),
-    color var(--d-1);
+    color var(--d-1) var(--e-out);
 }
 .btn:active {
   transform: translateY(1px);
@@ -192,6 +196,14 @@ pre {
   height: var(--h-sm);
   padding: 0 var(--s-3);
   font-size: var(--t-13);
+}
+/* an Icon button at a small button's size (design-system.md "Icon button"): a ghost small link button made square,
+   `--h-sm` on each side, its icon alone, named by its words and said on hover by its tip: Ask again beside an
+   account's fix, First review's Open on GitHub on a phone */
+.btn.btn-square {
+  width: var(--h-sm);
+  padding: 0;
+  justify-content: center;
 }
 .btn-lg {
   height: 44px;
@@ -378,16 +390,6 @@ pre {
   font-size: var(--t-13);
   color: var(--acc-text);
 }
-/* an error in the help's place: both in one cell, the help unseen, so the field keeps the taller one's height */
-.field-note {
-  display: grid;
-}
-.field-note > span {
-  grid-area: 1 / 1;
-}
-.field-note > .help {
-  visibility: hidden;
-}
 .input {
   font: 400 var(--t-14) / 1.3 var(--body);
   color: var(--ink);
@@ -398,8 +400,8 @@ pre {
   padding: 0 var(--s-3);
   width: 100%;
   transition:
-    border-color var(--d-1),
-    box-shadow var(--d-1);
+    border-color var(--d-1) var(--e-out),
+    box-shadow var(--d-1) var(--e-out);
 }
 .input::placeholder {
   color: var(--muted);
@@ -465,8 +467,8 @@ textarea.input {
   cursor: pointer;
   text-align: left;
   transition:
-    border-color var(--d-1),
-    box-shadow var(--d-1);
+    border-color var(--d-1) var(--e-out),
+    box-shadow var(--d-1) var(--e-out);
 }
 .sel > button:hover {
   border-color: var(--faint);
@@ -605,7 +607,7 @@ textarea.input {
   transition:
     background var(--d-2) var(--e-out),
     border-color var(--d-2) var(--e-out),
-    box-shadow var(--d-1);
+    box-shadow var(--d-1) var(--e-out);
 }
 .check:hover input {
   border-color: var(--faint);
@@ -628,7 +630,7 @@ textarea.input {
   opacity: 0;
   transition:
     transform var(--d-2) var(--e-out),
-    opacity var(--d-1);
+    opacity var(--d-1) var(--e-out);
 }
 .check input[type="checkbox"]:checked::after {
   transform: rotate(-45deg) translate(1px, -1px) scale(1);
@@ -702,7 +704,7 @@ textarea.input {
   border-radius: var(--r-pill);
   white-space: nowrap;
   background: var(--tone-soft);
-  border: 1px solid color-mix(in srgb, var(--tone) 55%, var(--tone-soft));
+  border: var(--line-w) solid color-mix(in srgb, var(--tone) 55%, var(--tone-soft));
   color: var(--tone-text);
 }
 .chip::before {
@@ -757,7 +759,7 @@ textarea.input {
   --tone-text: var(--muted);
 }
 .c-run::before {
-  animation: pulse 2s var(--e-io) infinite;
+  animation: pulse var(--loop-pulse) var(--e-io) infinite;
 }
 @keyframes pulse {
   0%,
@@ -825,8 +827,8 @@ textarea.input {
   border-radius: 6px;
   cursor: pointer;
   transition:
-    background var(--d-1),
-    color var(--d-1);
+    background var(--d-1) var(--e-out),
+    color var(--d-1) var(--e-out);
 }
 .seg button[aria-pressed="true"] {
   background: var(--raised);
@@ -905,7 +907,7 @@ textarea.input {
   align-items: center;
   position: relative;
   border-radius: var(--r-1);
-  transition: color var(--d-1);
+  transition: color var(--d-1) var(--e-out);
 }
 .navtop a:hover {
   color: var(--ink);
@@ -949,8 +951,8 @@ textarea.input {
   background: var(--surface);
   cursor: pointer;
   transition:
-    border-color var(--d-1),
-    background var(--d-1);
+    border-color var(--d-1) var(--e-out),
+    background var(--d-1) var(--e-out);
 }
 .pill:hover {
   border-color: var(--faint);
@@ -965,12 +967,12 @@ textarea.input {
 }
 .pill i.warn {
   background: var(--warn);
-  animation: pulse 2s var(--e-io) infinite;
+  animation: pulse var(--loop-pulse) var(--e-io) infinite;
 }
 /* something needs the person: the band's pink (ADR 0070) */
 .pill i.need {
   background: var(--acc);
-  animation: pulse 2s var(--e-io) infinite;
+  animation: pulse var(--loop-pulse) var(--e-io) infinite;
 }
 /* alert band: what needs the person, above every page, never a row. Each line is tinted by its own tone, edge to
    edge, so it reads as an alert, never as a second header bar (round 4: in light, `--raised` is the white of the top
@@ -979,7 +981,27 @@ textarea.input {
 .alerts {
   border-bottom: 1px solid var(--line-2);
   overflow-x: clip;
+}
+/* Behind the first-paint gate: a band there when the page first painted never slides in. */
+.alerts[data-arrived] {
   animation: page-in var(--d-4) var(--e-out);
+}
+/* With its last line (the presence, ADR 0087): its slide in reversed, over --d-2; after the entry's rule, so a band
+   that arrived leaves the same way. A line resolved or dismissed while others stay fades out on its own. */
+.alerts.leaving {
+  opacity: 0;
+  transform: translateY(6px);
+  animation: band-out var(--d-2) var(--e-in);
+}
+@keyframes band-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+}
+.alert.leaving {
+  opacity: 0;
+  animation: fade-out var(--d-2) var(--e-in);
 }
 /* The band's padding is its first and last lines', so their tints reach its edges. */
 .alerts-in {
@@ -1091,6 +1113,32 @@ textarea.input {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+/* Leaving (the presence, ADR 0087): what was closed stays, inert, until its exit ends. A click goes through it to the
+   page. The end state is the class's static style; an exit's keyframes name only where it starts (the open state) and
+   end on that style, with no fill mode. */
+.leaving {
+  pointer-events: none;
+}
+.layer.leaving {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  animation: layer-out var(--d-2) var(--e-in);
+}
+.scrim.leaving {
+  opacity: 0;
+  animation: fade-out var(--d-2) var(--e-in);
+}
+@keyframes layer-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade-out {
+  from {
+    opacity: 1;
   }
 }
 .menu {
@@ -1216,15 +1264,25 @@ textarea.input {
   transform: translate(-50%, 3px) scale(0.98);
   transform-origin: bottom center;
   transition:
-    opacity 160ms var(--e-out),
-    transform 160ms var(--e-out);
-  transition-delay: 0ms;
+    opacity var(--d-1) var(--e-out),
+    transform var(--d-1) var(--e-out);
 }
 .anchor:hover .tip,
 .anchor:focus-within .tip {
   opacity: 1;
   transform: translate(-50%, 0) scale(1);
-  transition-delay: 400ms;
+  transition-delay: var(--delay-tip);
+}
+/* a tip that ends at its anchor's right edge (`Tip`'s `end`), for an anchor near the screen's right edge, so it never
+   runs past it: a repository setting's way back, First review's Open on GitHub on a phone */
+.anchor.tip-end .tip {
+  left: auto;
+  right: 0;
+  transform: translate(0, 3px) scale(0.98);
+  transform-origin: bottom right;
+}
+.anchor.tip-end:is(:hover, :focus-within) .tip {
+  transform: none;
 }
 /* dialog + toast */
 dialog.dlg {
@@ -1235,17 +1293,52 @@ dialog.dlg {
   box-shadow: var(--shadow-dialog);
   padding: var(--s-6);
   width: min(440px, calc(100vw - 32px));
+}
+dialog.dlg[open] {
   animation: dlg-in var(--d-3) var(--e-out);
+}
+dialog.dlg:not([open]) {
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
 }
 dialog.dlg::backdrop {
   background: var(--scrim);
   backdrop-filter: blur(var(--scrim-blur));
+}
+dialog.dlg[open]::backdrop {
   animation: fade var(--d-3) var(--e-out);
+}
+dialog.dlg:not([open])::backdrop {
+  opacity: 0;
+}
+/* closed at once, it fades out (ADR 0087): `display` and `overlay` change at the fade's end, so the closed dialog
+   stays shown and on top while it runs. Only where `overlay` transitions: a browser that transitions `display` alone
+   would keep the closed dialog shown but out of the top layer, without its backdrop, where a dialog sits by default.
+   There it is hidden at once, and the presence finds no fade to wait for */
+@supports (overlay: auto) {
+  dialog.dlg {
+    transition:
+      opacity var(--d-2) var(--e-in),
+      transform var(--d-2) var(--e-in),
+      display var(--d-2) var(--e-in) allow-discrete,
+      overlay var(--d-2) var(--e-in) allow-discrete;
+  }
+  dialog.dlg::backdrop {
+    transition:
+      opacity var(--d-2) var(--e-in),
+      display var(--d-2) var(--e-in) allow-discrete,
+      overlay var(--d-2) var(--e-in) allow-discrete;
+  }
+}
+/* fading, the page under it takes the click */
+dialog.dlg:not([open]),
+dialog.dlg:not([open])::backdrop {
+  pointer-events: none;
 }
 @keyframes dlg-in {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.98);
+    transform: translateY(4px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -1295,7 +1388,7 @@ dialog.dlg::backdrop {
   font-size: var(--t-13);
   min-width: 280px;
   max-width: 380px;
-  animation: toast-in 280ms var(--e-out);
+  animation: toast-in var(--d-3) var(--e-out);
 }
 .toast i {
   flex: none;
@@ -1318,8 +1411,11 @@ dialog.dlg::backdrop {
 .toast .btn {
   margin-left: auto;
 }
-.toast.out {
-  animation: toast-out 200ms var(--e-in) forwards;
+/* It leaves the way it came: back out to the right. */
+.toast.leaving {
+  opacity: 0;
+  transform: translateX(16px);
+  animation: toast-out var(--d-2) var(--e-in);
 }
 @keyframes toast-in {
   from {
@@ -1332,9 +1428,9 @@ dialog.dlg::backdrop {
   }
 }
 @keyframes toast-out {
-  to {
-    opacity: 0;
-    transform: translateY(6px);
+  from {
+    opacity: 1;
+    transform: none;
   }
 }
 /* lists, cards, rows */
@@ -1368,8 +1464,8 @@ dialog.dlg::backdrop {
   border-radius: var(--r-2);
   min-width: 0;
   transition:
-    border-color var(--d-1),
-    background var(--d-1);
+    border-color var(--d-1) var(--e-out),
+    background var(--d-1) var(--e-out);
   cursor: pointer;
 }
 .rowi:hover {
@@ -1401,7 +1497,8 @@ dialog.dlg::backdrop {
 .rowi .ac:empty {
   display: none;
 }
-.rowi.new {
+/* Behind the first-paint gate: a row there when the page first painted never rises in. */
+.rowi.new[data-arrived] {
   animation: row-in var(--d-4) var(--e-out);
 }
 @keyframes row-in {
@@ -1410,6 +1507,18 @@ dialog.dlg::backdrop {
     transform: translateY(-6px);
   }
   to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* A row leaving its section (the presence, ADR 0087): its rise reversed, over --d-2. It holds its room until it ends. */
+.rowi.leaving {
+  opacity: 0;
+  transform: translateY(-6px);
+  animation: row-out var(--d-2) var(--e-in);
+}
+@keyframes row-out {
+  from {
     opacity: 1;
     transform: none;
   }
@@ -1645,10 +1754,28 @@ dialog.dlg::backdrop {
   color: var(--ink);
   font: 700 var(--t-16) var(--display);
 }
+/* a failed panel (ADR 0085, design-system.md "Failed panel"): where a screen, setup or an overlay threw, one line
+   saying what couldn't be shown and Reload, centred in the place it stood; `.whole` alone in the window, its middle,
+   where the page loader drew the eyes. The status pill's is the pill itself (`.pill`, its dot `need`). */
+.failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  padding: var(--s-5);
+  color: var(--ink);
+  font: 500 var(--t-14) / 1.5 var(--body);
+  text-align: center;
+}
+.failed.whole {
+  min-height: 100vh;
+  flex-direction: column;
+}
 .sk {
   background: linear-gradient(90deg, var(--raised) 25%, var(--overlay) 50%, var(--raised) 75%);
   background-size: 200% 100%;
-  animation: sk 1.4s linear infinite;
+  animation: sk var(--loop-shimmer) var(--e-linear) infinite;
   border-radius: var(--r-1);
   height: 12px;
 }
@@ -1759,6 +1886,15 @@ dialog.dlg::backdrop {
   text-transform: uppercase;
   color: var(--muted);
 }
+/* A section of Reviews (ADR 0087): one that comes with its first row fades in as the row rises, behind the first-paint
+   gate; one whose last row went leaves whole, fading out over --d-2. */
+.grp.new[data-arrived] {
+  animation: fade var(--d-4) var(--e-out);
+}
+.grp.leaving {
+  opacity: 0;
+  animation: fade-out var(--d-2) var(--e-in);
+}
 .screen .foot {
   padding: 12px var(--s-5);
   border-top: 1px solid var(--line);
@@ -1808,6 +1944,11 @@ dialog.dlg::backdrop {
   border: 1px solid var(--line);
   color: var(--ink);
   font-size: var(--t-14);
+}
+/* A notice dismissed or gone (the presence, ADR 0087): it fades out over --d-2, holding its room until it ends. */
+.banner.leaving {
+  opacity: 0;
+  animation: fade-out var(--d-2) var(--e-in);
 }
 .banner .eyes {
   color: var(--acc-text);
@@ -2113,13 +2254,12 @@ code.path.line,
 a.btn {
   text-decoration: none;
 }
-/* a refusal said where it was asked, outside a field: pink text, as a field's error; always there, two lines tall,
-   empty until something is refused, so nothing under it moves when it is said or cleared */
+/* a refusal said where it was asked, outside a field: pink text, as a field's error; as tall as it says, no line held
+   (ADR 0086): it sits where its growth moves nothing (setup's footer, `.setup-said`) */
 .refused-line {
   font-size: var(--t-13);
   line-height: 1.45;
   color: var(--acc-text);
-  min-height: calc(2em * 1.45);
   margin: 0;
 }
 /* Your coding agent's installs and Try it (design-system.md "Your coding agent", ADR 0058), one form in setup and
@@ -2152,22 +2292,13 @@ a.btn {
 .agent-rows > .engine ~ .engine {
   border-top: 1px solid var(--line);
 }
-/* each row's detail as tall as the tallest it can show (`HeldDetail`): every one in the same cell, only the row's
-   seen, so a row done or undone keeps its height at any width and the rows under it don't move */
+/* a sub-step's detail, as tall as what it says, no other detail held (ADR 0086): a sub-step done or undone may move
+   what is under it, the list it brings or takes away moving it anyway */
 .substep-detail {
   display: block;
 }
-.held-detail {
-  display: grid;
-}
-.held-detail > span {
-  grid-area: 1 / 1;
-}
-.held-detail > span[aria-hidden="true"] {
-  visibility: hidden;
-}
-/* a detail given as sentences: each a block of its own, in the copy shown and every one held */
-.held-sentence {
+/* a line given as sentences (first review's): each a block of its own, so none breaks mid-phrase */
+.line-sentence {
   display: block;
 }
 .try-it {
@@ -2177,11 +2308,10 @@ a.btn {
 .try-it > * {
   margin: 0;
 }
-/* what happens next, at least two lines tall, holding every line Add to my PATH can switch it to (`tryItLines`): a
-   binary's long command on a line of its own, `lookover` in the sentence, and the card holds its height; its last
-   line never one word alone ("with:" under a full line) */
+/* what happens next, then `wait` on a line of its own, long or short, so Add to my PATH changes its words and never
+   the card's lines; as tall as what it says, no line held (ADR 0086); its last line never one word alone ("with:"
+   under a full line) */
 .try-it .try-next {
-  min-height: 2lh;
   text-wrap: pretty;
 }
 /* a setup sub-step, the GitHub step's two cards and the installs' rows alike (design-system.md "State square", round
@@ -2227,21 +2357,17 @@ a.btn {
 }
 /* Your coding agent's rows, one layout (`rowLine`, round 5): the sub-step's line, then the row's value (a long folder
    or command) on its line right under the sentence, across the text and action columns, so it keeps to one line
-   whatever the action column takes, the same gap above it in every row (the line's own `--s-1`). The row's held
-   copies (every detail it can show, each with its line, hidden) are no boxes of their own: their title, sentence and
-   line sit in the shown ones' tracks, so the sentence's track is as tall as the tallest sentence held and the line's
-   a line tall whenever any detail has one. The square and the button, on the title's line, stay put whichever detail
-   shows (#642) */
+   whatever the action column takes, the same gap above it in every row (the line's own `--s-1`). The row is as tall
+   as the detail it shows, no room held for another (ADR 0086); the square and the button, on the title's line, stay
+   put whichever detail shows (#642) */
 .agent-rows > .agent-row {
   grid-template-rows: auto auto auto;
   row-gap: 0;
 }
-.agent-row > b,
-.agent-held-one > b {
+.agent-row > b {
   grid-area: 1 / 2;
 }
-.agent-row > .substep-detail,
-.agent-held-one > .substep-detail {
+.agent-row > .substep-detail {
   grid-column: 2 / -1;
   grid-row: 2;
 }
@@ -2251,8 +2377,7 @@ a.btn {
   align-self: center;
   display: grid;
 }
-.agent-row > .agent-line,
-.agent-held-one > .agent-line {
+.agent-row > .agent-line {
   grid-column: 2 / -1;
   grid-row: 3;
 }
@@ -2260,15 +2385,8 @@ a.btn {
   display: block;
   min-width: 0;
 }
-.agent-held {
-  display: contents;
-  visibility: hidden;
-}
-.agent-held-one {
-  display: contents;
-}
 /* on a phone a sub-step's action goes under its title and detail, its place still kept: the text keeps the width.
-   An agent row's goes under its line, in a fourth track, the tracks above holding every detail's room */
+   An agent row's goes under its line, in a fourth track */
 @media (max-width: 640px) {
   .substep,
   .agent-rows {
@@ -2302,8 +2420,7 @@ a.btn {
     max-width: 100%;
     margin-top: var(--s-2);
   }
-  .agent-row > .agent-line,
-  .agent-held-one > .agent-line {
+  .agent-row > .agent-line {
     grid-column: 2;
   }
 }
@@ -2327,12 +2444,12 @@ code.device-code {
 }
 /* The accounts list (design-system.md "Accounts list", ADR 0067): one row per account, its login over its detail,
    the detail led by its state's mark, then the fix's one place, as wide as every label its own row can show and no
-   wider, centred on the login and its detail; in it the button as wide as its own label, on the place's right edge,
-   where Installed, every other button and Sign in again end (Ask again beside the fix in it on a row waiting for an
-   owner); a row's detail held at the tallest it can show (`HeldDetail`), two lines at least, on every row, so every
-   row is as tall and as padded, and a row asked, reached or suspended moves nothing. Each row is its own grid, so a
-   row appended moves only what is under it; a hairline between rows, tinted on hover from edge to edge, so a button
-   reads as its account's */
+   wider, pinned to the row's top, level with the login's line, so a detail growing a line moves no button (row 52:
+   centred, it moved half a line under the pointer); in it the button as wide as its own label, on the place's right
+   edge, where Installed, every other button and Sign in again end (Ask again beside the fix in it on a row waiting
+   for an owner); a row's detail as tall as what it says, holding no other (ADR 0086), so a row asked, reached or suspended
+   moves nothing beside its detail. Each row is its own grid, so a row growing or appended moves only what is under
+   it; a hairline between rows, tinted on hover from edge to edge, so a button reads as its account's */
 .accounts-list {
   display: grid;
 }
@@ -2342,11 +2459,11 @@ code.device-code {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   column-gap: var(--s-4);
-  align-items: center;
+  align-items: start;
   margin-inline: calc(-1 * var(--s-2));
   padding: var(--s-2);
   border-radius: var(--r-1);
-  transition: background var(--d-1);
+  transition: background var(--d-1) var(--e-out);
 }
 .account-row + .account-row::before {
   content: "";
@@ -2381,14 +2498,6 @@ code.device-code {
   width: 14px;
   height: 14px;
 }
-.account-name .held-detail {
-  min-height: 2lh;
-}
-/* the list's last row, Another account, can show nothing else: no blank second line held under it, so a card ends
-   under the list as it starts over it (round 6: the held line left a band about twice the card's top, screens 03, 07) */
-.accounts-list > .account-row[data-state="another"] .held-detail {
-  min-height: 0;
-}
 .account-name b {
   color: var(--ink);
   overflow-wrap: anywhere;
@@ -2418,7 +2527,8 @@ code.device-code {
   color: var(--ok-text);
 }
 /* an action's place: as wide as its own row's hidden floor labels (`AccountRow.labels`) and no wider; the link
-   shown adds no width of its own (inline-size containment), so a label naming a long login is cut, never pushing */
+   shown adds no width of its own (inline-size containment), so a label naming a long login is cut, never pushing.
+   The floors hold width, never height (ADR 0086): laid out zero tall, so the place is as tall as what it shows */
 .account-action {
   display: inline-grid;
 }
@@ -2430,6 +2540,7 @@ code.device-code {
 .account-action-floor {
   visibility: hidden;
   gap: var(--s-1);
+  block-size: 0;
 }
 /* a waiting row's fix floor holds Ask again's square beside it, so that fix on a usual login is never cut for it */
 .account-again-floor {
@@ -2450,12 +2561,12 @@ code.device-code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* in a row, the button is as wide as its own label, on the place's right edge; past the place (a login longer than a
-   usual one) it is cut with an ellipsis. Repositories' group heads keep theirs filling the place */
-.account-actions .account-action > * {
+/* in a row and in Repositories' group heads, the button is as wide as its own label, on the place's right edge; past
+   the place (a login longer than a usual one) it is cut with an ellipsis */
+:is(.account-actions, .repos-group-fix) .account-action > * {
   justify-content: flex-end;
 }
-.account-actions .account-action > * > .btn {
+:is(.account-actions, .repos-group-fix) .account-action > * > .btn {
   flex: 0 1 auto;
 }
 /* Ask again, beside the fix in its place: a square ghost icon button, said on hover and named by its words */
@@ -2463,13 +2574,8 @@ code.device-code {
   display: flex;
   flex: none;
 }
-.account-again > .btn {
-  width: var(--h-sm);
-  padding: 0;
-  justify-content: center;
-}
 /* on a phone a row stacks: the login over its detail across the width, then the fix's place beneath, on the left,
-   held on every row so nothing shifts, narrowed to the width left when its widest floor would not fit, its label cut */
+   on every row, narrowed to the width left when its widest floor would not fit, its label cut */
 @media (max-width: 640px) {
   .account-row {
     grid-template-columns: minmax(0, 1fr);
@@ -2483,13 +2589,15 @@ code.device-code {
   .account-actions > .account-action {
     min-width: 0;
   }
+  /* a row showing no action (looking, reading its repositories) has no place under it: stacked, its floors would hold
+     only the row's gap, an empty band (ADR 0086); its action arriving grows the row */
+  .account-row:not(:has(.account-action-link, .account-status)) > .account-actions {
+    display: none;
+  }
   .account-row .account-action-floor {
     overflow: hidden;
   }
-  /* stacked, a row's height is its own: no second line held, Installed and the button at the start of the place */
-  .account-name .held-detail {
-    min-height: 0;
-  }
+  /* stacked, Installed and the button at the start of the place */
   .account-status,
   .account-actions .account-action > * {
     justify-content: start;
@@ -2526,7 +2634,7 @@ code.device-code {
   box-sizing: border-box;
   cursor: pointer;
   border-radius: var(--r-1);
-  transition: color var(--d-1);
+  transition: color var(--d-1) var(--e-out);
 }
 .group-toggle:hover {
   color: var(--ink);
@@ -2540,13 +2648,44 @@ code.device-code {
 .group-toggle[aria-expanded="true"] .ic {
   transform: rotate(90deg);
 }
-/* Repositories' group heads (design-system.md, ADR 0067, 0082): one row in the table's columns on the account's head
-   band, the account with its count beside it (under it on a phone), held at every count it can say in tabular figures,
-   then its cause's line held at every line a cause can say and its fix's place, as wide as every fix the account can
-   have, in the Pull requests column, then the account's switch in the Reviewing column, so a cause or a count changing
-   moves nothing. The header cell starts with the collapse control's chevron, the account beside it in the same
-   control, the count beside the account, centred on its line (`.repos-group-title` is a grid, the control its first
-   two columns on a subgrid), under it on a phone. A hairline in `--line-2` over each head marks where a group starts. */
+/* A group folds by its rows (ADR 0087, `FoldRows`): opening, a row the fold brought (`data-unfolded`) comes in with a
+   fade and a 4 px rise; folding, it leaves through the presence the way it came, and the group closes up once its
+   rows have left. Opacity and a small move only, never a height: Repositories' rows are table rows. A row there when
+   the page showed, or brought by a search or a filter, plays nothing. */
+.fold-row[data-unfolded] {
+  animation: fold-in var(--d-3) var(--e-out);
+}
+.fold-row.leaving {
+  opacity: 0;
+  transform: translateY(4px);
+  animation: fold-out var(--d-2) var(--e-in);
+}
+@keyframes fold-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fold-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* Repositories' group heads (design-system.md, ADR 0067, 0082, 0086): a first row in the table's columns on the
+   account's head band, holding only what every head has: the account with its count beside it (under it on a phone),
+   the Pull requests column empty, the account's switch in the Reviewing column. Then, only while a cause holds it or
+   the filter's line is said, a second row on the band across the table (`.repos-group-more`), wide as on a phone: the
+   cause's line and its fix's place, as wide as every fix the account can have, or the filter's line. A head with no
+   cause holds no room for one, and no head holds a height it doesn't show: only the first row sticks, so every stuck
+   head is as tall and one stuck over another covers it whole (a table cell sticks for the whole table). The header
+   cell starts with the collapse control's chevron, the account beside it in the same control, the count beside the
+   account, centred on its line (`.repos-group-title` is a grid, the control its first two columns on a subgrid), under
+   it on a phone. A hairline in `--line-2` over each head marks where a group starts. */
 .tbl.repos .repos-group > :is(th, td) {
   height: auto;
   padding-block: var(--s-3);
@@ -2576,18 +2715,12 @@ code.device-code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* the count wraps between its words rather than take the account's width: just past a phone's width the first column is
-   narrow, and a count held at its longest copy, kept on one line, left the account none. A folded group under the
-   filter says how many of it the filter shows on a line of its own, under the count (`.repos-group-shows`); an open
-   one holds that line empty, so every head under the filter is as tall and a later one stuck covers an earlier one
-   whole (a table cell sticks for the whole table) */
+/* the count is its own words, ending its line, so a count changing moves nothing; it wraps between its words rather
+   than take the account's width: just past a phone's width the first column is narrow, and a count kept on one line
+   left the account none */
 .repos-group-count {
   grid-column: 3;
   margin-left: var(--s-1);
-  display: grid;
-}
-.repos-group-shows[aria-hidden="true"] {
-  visibility: hidden;
 }
 /* a group's rows sit indented under its head, each repository's name a step (`--s-4`) past the account's edge (past
    the chevron's box and its gap), so the head plainly owns them (round 6: on the account's edge, they read as its
@@ -2631,11 +2764,12 @@ code.device-code {
     --repos-stuck: var(--h-top);
   }
 }
-/* Each head sticks under the column heads while its group scrolls past, opaque, its hairline under it, below the top
-   bar, menus and tooltips: its cells stick, each over the rows, the next group's head over it as it arrives. On the
-   page's own scroll: the table has no sideways scroll wrapper. A collapsed border stays where the table drew it, so the
-   hairline is the cells' own. A table cell sticks for the whole table, so a group scrolled past keeps its head stuck
-   under the later ones: a control of it taking focus scrolls the page back to its group (`uncoverBy`). */
+/* Each head's first row sticks under the column heads while its group scrolls past, opaque, its hairline under it,
+   below the top bar, menus and tooltips: its cells stick, each over the rows, the next group's head over it as it
+   arrives. On the page's own scroll: the table has no sideways scroll wrapper. A collapsed border stays where the table
+   drew it, so the hairline is the cells' own. A table cell sticks for the whole table, so a group scrolled past keeps
+   its head stuck under the later ones: a control of it taking focus scrolls the page back to its group (`uncoverBy`).
+   The second row, when there is one, scrolls with the group. */
 .tbl.repos .repos-group > * {
   background: var(--band);
   border-bottom: 0;
@@ -2643,7 +2777,7 @@ code.device-code {
 }
 /* a line higher than the column heads' bottom: the line a collapsed border keeps above the cell, where nothing of it
    is painted, goes under the column heads' own line, so no row shows through it */
-.tbl.repos .repos-group:not(.repos-group-narrow) > * {
+.tbl.repos .repos-group:not(.repos-group-more) > * {
   /* the hairline over the head, in `--line-2`, where its group starts; stuck, it goes under the column heads' own */
   background:
     linear-gradient(var(--line-2), var(--line-2)) top / 100% var(--line-w) no-repeat,
@@ -2653,45 +2787,53 @@ code.device-code {
   z-index: 10;
   container-type: scroll-state;
 }
-/* a row reached by Tab, a phone's fix row too, is never under a stuck head: what sticks over it, a head's height and a
-   little room */
-.tbl.repos tr:not(.repos-group:not(.repos-group-narrow)) :is(a, button, input) {
+/* a row reached by Tab, a head's second row too, is never under a stuck head: what sticks over it, a head's height
+   and a little room */
+.tbl.repos tr:not(.repos-group:not(.repos-group-more)) :is(a, button, input) {
   scroll-margin-top: calc(var(--repos-stuck) + var(--h-thead) + var(--h-group-head) + var(--s-2));
 }
+/* the second row, at every width, only while it says something: on the band with the first, its words on the
+   account's edge (past the chevron's box and its gap); the first row's hairline is drawn while it is stuck, and under
+   the second row, or under the first whenever there is no second */
+.tbl.repos .repos-group:has(+ .repos-group-more) > * {
+  box-shadow: none;
+}
+.tbl.repos .repos-group-more td {
+  padding-top: 0;
+  padding-left: calc(var(--cell-x) + var(--chevron) + var(--chevron-gap));
+}
+:is(.repos-group-title, .repos-group-line, .repos-group-switch)::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  border-bottom: var(--line-w) solid var(--line);
+  visibility: hidden;
+}
+@container scroll-state(stuck: top) {
+  :is(.repos-group-title, .repos-group-line, .repos-group-switch)::after {
+    visibility: visible;
+  }
+}
+/* the cause and its fix, or, folded under a filter, how many of it the filter shows (`.repos-group-shows`), never
+   under the count, so a head's stuck row is as tall as every other's (Lookover's F5); with a cause too, on a line of
+   its own over it. Wide, the fix on the right of the cause; on a phone, under it */
 .repos-group-fix {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   column-gap: var(--s-3);
+  row-gap: var(--s-1);
   align-items: center;
 }
 .repos-group-fix[data-state="needs-you"] .repos-group-cause {
   color: var(--acc-text);
 }
-.repos-group-narrow {
-  display: none;
+.repos-group-shows {
+  grid-column: 1 / -1;
+  color: var(--ink-2);
 }
-/* on a phone the Pull requests column has no width (app.css): the account, its count and its switch stay in the head's
-   first row, and the cause and the fix's place go in a row of their own under it, the fix under the cause, kept there
-   whether a cause holds or not. Only the first row sticks; its hairline is drawn while it is stuck, and between the
-   two rows only while no cause holds. */
+/* on a phone the Pull requests column has no width (app.css): the count goes under the account, and in the second
+   row the fix under the cause, on the left */
 @media (max-width: 640px) {
-  .repos-group-narrow {
-    display: table-row;
-  }
-  .tbl.repos .repos-group:has(+ .repos-group-narrow) > * {
-    box-shadow: none;
-  }
-  .tbl.repos .repos-group-narrow td {
-    padding-top: 0;
-  }
-  /* no cause: the second row holds the fix's place on the page's own ground, the first row keeps its hairline, so
-     no empty tinted line is left under the head; a cause arriving paints both and moves nothing */
-  .tbl.repos .repos-group-narrow:has(.repos-group-fix[data-state="fine"]) > td {
-    background: var(--bg);
-  }
-  .tbl.repos .repos-group:has(+ .repos-group-narrow .repos-group-fix[data-state="fine"]) > * {
-    box-shadow: inset 0 calc(-1 * var(--line-w)) 0 var(--line);
-  }
   .repos-group-fix {
     grid-template-columns: minmax(0, 1fr);
     row-gap: var(--s-2);
@@ -2711,17 +2853,8 @@ code.device-code {
   .repos-group-fix .account-action {
     justify-self: start;
   }
-  :is(.repos-group-title, .repos-group-switch)::after {
-    content: "";
-    position: absolute;
-    inset: auto 0 0;
-    border-bottom: var(--line-w) solid var(--line);
-    visibility: hidden;
-  }
-  @container scroll-state(stuck: top) {
-    :is(.repos-group-title, .repos-group-switch)::after {
-      visibility: visible;
-    }
+  .repos-group-fix .account-action > * {
+    justify-content: start;
   }
 }
 /* Settings › GitHub's sign-in row, a settings row's shape: who is signed in, or the code, held at the tallest it can
@@ -2756,9 +2889,9 @@ code.device-code {
     justify-content: flex-start;
   }
 }
-/* the card ends as it starts: the list's last row, Another account, holds no blank second line (the accounts list's
-   own rule, setup's too), and under it the row's own band and this make a settings row's padding (round 6: the held
-   blank line left a band there about twice the card's top) */
+/* the card ends as it starts: no row of the list holds a blank line (the accounts list's own rule, setup's too), and
+   under its last row the row's own band and this make a settings row's padding (round 6: a held blank line left a band
+   there about twice the card's top) */
 .setcard-accounts {
   padding: var(--s-3) 0 calc(var(--setrow-y) - var(--s-2));
   border-top: 1px solid var(--line);

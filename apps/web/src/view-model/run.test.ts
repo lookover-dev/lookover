@@ -175,4 +175,8 @@ test("the posting step says how many posts are sent of the round's, and while Gi
   expect(
     postingText({ sent: 1, owed: 5, wait: { until: at + 86_400_000, refusal: "unavailable" } }, late),
   ).toBe("Posted 1 of 5. GitHub didn't answer, trying again tomorrow at 14:05.");
+  // The longest it says, which proof lays out at 1024 px (`review-posting-longest`): two-digit counts, a day named.
+  expect(
+    postingText({ sent: 12, owed: 14, wait: { until: at + 8 * 86_400_000, refusal: "unavailable" } }, now),
+  ).toBe("Posted 12 of 14. GitHub didn't answer, trying again on Wed 14 Oct at 14:05.");
 });

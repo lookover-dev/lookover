@@ -47,7 +47,11 @@ export function saidParts(words: string | WithCommand, max = IN_SENTENCE): SaidP
   if (typeof words === "string") return text(words);
   const kind = words.kind ?? "command";
   const { after, alone } = words;
-  if (alone !== undefined && kind !== "device-code" && codePlace(words.command, max) === "line")
+  if (
+    alone !== undefined &&
+    kind !== "device-code" &&
+    (words.line === true || codePlace(words.command, max) === "line")
+  )
     return [...text(alone), { code: words.command, kind, line: true }, ...under(after, max)];
   const next = typeof after === "string" ? after : after.before;
   const gap = CLOSING.test(next) ? "" : " ";

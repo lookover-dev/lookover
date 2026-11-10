@@ -20,11 +20,18 @@
 //   dropped, `repo.removed`). What each met is told (`reached`): answered, or the cause of its refusal. Whose accounts
 //   they are, and those not reached, are the room's `unreached` (ADR 0067): the installation asks no `gh`.
 // - The install's wait (`waitForInstall`, while the setup waits for it, ADR 0053): the accounts read every 4 s until
-//   they list repositories; one listing none is "nothing granted" (the setup says so, and the wait goes on); one listing
-//   some has every one added (switched on) and the setup done. A refusal is logged once, and once when GitHub answers
-//   again. A check refused signed out (the sign-in lost, or revoked) is the connection's cause at once, the poller
-//   saying nothing before the setup is done; a new sign-in or a check answered clears it. One wait at a time; asked
-//   again while it runs, it reads now.
+//   they list repositories, sent as soon as they are read, before any repository is polled (ADR 0086); one listing
+//   none is "nothing granted" (the setup says so, and the wait goes on); one listing some has every one added
+//   (switched on, each polled once) and only then the setup done. A refusal is logged once, and once when GitHub
+//   answers again. A check whose listing is refused for a cause (signed out, GitHub unreachable) shows it on the
+//   connection at once, the poller saying nothing before the setup is done; a new sign-in or a listing answered clears
+//   it. A repository's first poll refused is never the connection's: its account's, or nobody's until the next check.
+//   One wait at a time; asked again while it runs, it reads now.
+// - Listed (`listed`, ADR 0086): whether a listing answered under the sign-in held now, the start's, discovery's or an
+//   install's check, even one finding nothing new; false again once another sign-in is held, sent with its person
+//   (and the accounts gone, when the person is another: theirs are never the last one's). A listing refused while not
+//   listed keeps its cause (`listingCause`), sent as it moves, whatever the repositories' polls say meanwhile (one
+//   watched answering keeps the connection connected); a listing answered or another sign-in held clears it.
 // - The accounts (`accounts`, ADR 0066): each account reached, its installation and its own cause, sent as
 //   `connection.changed` when they move: the one `accounts()` gives (suspended, SSO asked) or the poller's (`refused`:
 //   an act on one of its repositories refused `uninstalled` or `sso`, the rule by kind), cleared once one of its
@@ -52,6 +59,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   type AccountCause,
   accountOf,
+  type Connection,
   type ConnectionAccount,
   type ConnectionCause,
   type ConnectionId,
@@ -169,6 +177,16 @@ export interface Installation {
   signedIn(signIn: SignIn): Promise<void>;
   /** Each account reached, with its installation and its own cause (ADR 0066), once listed; none before. */
   accounts(): ConnectionAccount[];
+  /**
+   * Whether the installations have been listed under the sign-in held now (ADR 0086): false from the moment one is
+   * held, true once a listing under it answers, the start's included.
+   */
+  listed(): boolean;
+  /**
+   * What refused the last listing while not `listed()` (`Connection.listingCause`), whether or not the repositories
+   * answer their polls; null once a listing answers, at each sign-in held, and while none was refused.
+   */
+  listingCause(): ConnectionCause | null;
   /**
    * Which holding is held now (ADR 0066): a number that moves each time another sign-in is held. What an act read
    * under one (`refused`, `answered`) is that one's.
@@ -298,6 +316,10 @@ export function createInstallation(d: InstallationDeps): Installation {
   let current: HostPorts = SIGNED_OUT_PORTS;
   /** Each account reached as last listed, with its own cause; none before the first listing. */
   let accounts: ConnectionAccount[] = [];
+  /** Whether a listing answered under the sign-in held now (`Connection.listed`, ADR 0086). */
+  let listed = false;
+  /** What refused the last listing while not listed (`Connection.listingCause`); null once one answers. */
+  let listingCause: ConnectionCause | null = null;
   let stopping = false;
   /**
    * Which holding this is: moved each time another sign-in is held (`signedIn`). A listing, or a refusal the poller
@@ -317,10 +339,11 @@ export function createInstallation(d: InstallationDeps): Installation {
   let waiting = false;
   let refused = false;
   /**
-   * Whether the connection shows the person signed out while the install is waited for: the poller says nothing
-   * before the setup is done, so the install's check says it, and a new sign-in clears it.
+   * The cause the connection shows while the install is waited for (signed out, GitHub unreachable), null when none:
+   * the poller says nothing before the setup is done, so the install's check says it, and a check answered or a new
+   * sign-in clears it.
    */
-  let signedOutWaiting = false;
+  let causeWaiting: ConnectionCause | null = null;
   /** GitHub's refusal of what `open` listed, as the connection's cause; null when it listed, or wasn't asked. */
   let refusedAtStart: ConnectionCause | null = null;
 
@@ -398,8 +421,8 @@ export function createInstallation(d: InstallationDeps): Installation {
   };
 
   /** The repositories cut to the allow-list, when there is one. */
-  const allowedOf = (listed: readonly RepositoryRef[]): RepositoryRef[] =>
-    allowed === undefined ? [...listed] : listed.filter((r) => allowed.some((a) => sameRepository(a, r)));
+  const allowedOf = (repos: readonly RepositoryRef[]): RepositoryRef[] =>
+    allowed === undefined ? [...repos] : repos.filter((r) => allowed.some((a) => sameRepository(a, r)));
 
   /**
    * What the installations list now, cut to the allow-list: every account the sign-in reaches, each with its cause,
@@ -409,9 +432,9 @@ export function createInstallation(d: InstallationDeps): Installation {
   const list = async (now: Listable): Promise<Listed | null> => {
     const reached = await now.accounts.accounts();
     if (reached.length === 0) return null;
-    const listed = reached.map(accountOfReached);
-    const kept = d.watched().filter((repo) => (accountOf(listed, repo.owner)?.cause ?? null) !== null);
-    return { accounts: listed, repos: [...allowedOf(reached.flatMap((a) => a.repositories)), ...kept] };
+    const found = reached.map(accountOfReached);
+    const kept = d.watched().filter((repo) => (accountOf(found, repo.owner)?.cause ?? null) !== null);
+    return { accounts: found, repos: [...allowedOf(reached.flatMap((a) => a.repositories)), ...kept] };
   };
 
   /** The shared App installed nowhere the person reaches. */
@@ -420,17 +443,31 @@ export function createInstallation(d: InstallationDeps): Installation {
       connectionCause: { kind: "uninstalled", suspended: false },
     });
 
+  /** Listed now under the sign-in held: what refused an earlier listing is over; the patch that says it. */
+  const listedNow = (): Partial<Connection> => {
+    listed = true;
+    const refusedBefore = listingCause !== null;
+    listingCause = null;
+    return { listed: true, ...(refusedBefore ? { listingCause } : {}) };
+  };
+
   /**
    * The accounts kept, sent when they moved, in every state: uninstalled and installed again while the setup shows
-   * "nothing granted", the new installation is the one its links lead to. Only the first found while the install is
-   * waited for go with the connection the setup makes (`installed`).
+   * "nothing granted", the new installation is the one its links lead to. Sent as soon as they are listed, before
+   * their repositories are polled (ADR 0086). A `listing` that answered makes them listed, said with them, or alone
+   * when they didn't move.
    */
-  const installedAs = (now: ConnectionAccount[]): void => {
-    if (isDeepStrictEqual(accounts, now)) return;
-    const first = accounts.length === 0;
+  const installedAs = (now: ConnectionAccount[], listing = false): void => {
+    const moved = !isDeepStrictEqual(accounts, now);
+    const nowListed = listing && !listed;
+    if (!(moved || nowListed)) return;
     const was = accounts;
     accounts = now;
-    if (!(waiting && first)) d.emit({ type: "connection.changed", at: d.now(), patch: { accounts } });
+    d.emit({
+      type: "connection.changed",
+      at: d.now(),
+      patch: { ...(moved ? { accounts } : {}), ...(nowListed ? listedNow() : {}) },
+    });
     const back = now.some(
       (a) => a.cause === null && (accountOf(was, a.account.login)?.cause ?? null) !== null,
     );
@@ -467,22 +504,12 @@ export function createInstallation(d: InstallationDeps): Installation {
     timer = stopping ? null : d.timers.after(ms, fire);
   };
 
-  /**
-   * The next discovery, `ms` on (5 minutes unless said): what it throws is logged, and the one after comes a minute on
-   * while GitHub refuses it, so a service that started while GitHub didn't answer comes back by itself within a minute
-   * of its answering (ADR 0070).
-   */
+  /** The next discovery, `ms` on (5 minutes unless said): what it throws is logged; `discover` arms the one after. */
   const armDiscovery = (ms = DISCOVERY_MS): void =>
     arm(ms, () => {
       timer = null;
-      discover().then(
-        () => {
-          if (!waiting) armDiscovery();
-        },
-        (error: unknown) => {
-          d.log(`the installation's repositories could not be listed: ${said(error)}`);
-          if (!waiting) armDiscovery(DISCOVERY_RETRY_MS);
-        },
+      discover().catch((error: unknown) =>
+        d.log(`the installation's repositories could not be listed: ${said(error)}`),
       );
     });
 
@@ -491,33 +518,60 @@ export function createInstallation(d: InstallationDeps): Installation {
     if (held.state !== "signed-in") return false;
     const now = held;
     // Another sign-in held meanwhile: what this one reached is not theirs (ADR 0066), and the work ends here.
-    const listed = await settled(at, () => list(now));
-    if (listed === null) {
+    const found = await settled(at, () => list(now));
+    if (found === null) {
       // No account reached any more departs every one, as one gone departs (ADR 0066); then refused.
-      installedAs([]);
+      installedAs([], true);
       await follow([], at);
       still(at);
       throw uninstalled(now);
     }
-    installedAs(listed.accounts);
-    await follow(listed.repos, at);
+    installedAs(found.accounts, true);
+    await follow(found.repos, at);
     still(at);
     return true;
   };
 
-  /** A listing refused for a cause the connection shows: the room is told. */
+  /**
+   * A listing refused while not listed: its cause kept and sent when it moved (`Connection.listingCause`), whatever
+   * the repositories' polls say. Once listed, a refusal (a repository's, past the listing) is not the listing's.
+   */
+  const listingRefused = (cause: ConnectionCause | null): void => {
+    if (listed || cause === null || stopping || isDeepStrictEqual(cause, listingCause)) return;
+    listingCause = cause;
+    d.emit({ type: "connection.changed", at: d.now(), patch: { listingCause } });
+  };
+
+  /** A listing refused for a cause the connection shows: the room is told, and the listing's cause kept. */
   const refusedFor = (error: unknown): void => {
     const cause = error instanceof HostError ? connectionCauseOf(error) : null;
+    listingRefused(cause);
     if (cause !== null && !stopping) d.reached(cause);
   };
 
+  /**
+   * The installations listed again, whoever asks (the timer, "Reconnect", a repository refused or regained), and the
+   * next one armed after it: a minute on while GitHub refuses it, so a refused listing (at start, after Sign in again)
+   * is tried again within the minute its cause promises (ADR 0070). The setup's install check keeps its own timer.
+   */
   async function discover(): Promise<void> {
+    try {
+      await listedOnce();
+    } catch (error) {
+      if (!waiting) armDiscovery(DISCOVERY_RETRY_MS);
+      throw error;
+    }
+    if (!waiting) armDiscovery();
+  }
+
+  /** One listing of the installations, in the turn: the room told what it reached, or the cause that refused it. */
+  async function listedOnce(): Promise<void> {
     await serially(
       (at) =>
         listedAgain(at).then(
-          (listed) => {
+          (followedAll) => {
             still(at);
-            if (listed) d.reached(null);
+            if (followedAll) d.reached(null);
           },
           (error: unknown) => {
             still(at);
@@ -535,45 +589,60 @@ export function createInstallation(d: InstallationDeps): Installation {
    * few seconds while it keeps refusing, and once when it answers again).
    */
   const followed = async (now: Listable, at: number): Promise<Listed | null | "refused"> => {
+    let found: Listed | null;
     try {
-      const listed = await settled(at, () => list(now));
-      return await checkAnswered(listed, at);
+      found = await settled(at, () => list(now));
     } catch (error) {
       if (error instanceof Superseded) throw error;
+      // The listing itself refused: its cause is the connection's, and the listing's.
+      causeAt(error);
+      listingRefused(error instanceof HostError ? connectionCauseOf(error) : null);
+      return checkRefused(error);
+    }
+    try {
+      return await checkAnswered(found, at);
+    } catch (error) {
+      if (error instanceof Superseded) throw error;
+      // A repository's first poll refused: its account's, or the poller's to say once the setup's done, never the
+      // whole connection's (one organisation's SSO or uninstall is not every account's).
       return checkRefused(error);
     }
   };
   /** An install's check GitHub answered under the holding `at`: what it lists followed, a refusal before it over. */
-  const checkAnswered = async (listed: Listed | null, at: number): Promise<Listed | null> => {
-    if (listed !== null) {
-      installedAs(listed.accounts);
-      await follow(listed.repos, at);
+  const checkAnswered = async (found: Listed | null, at: number): Promise<Listed | null> => {
+    // Answered: the accounts sent now, before their repositories' first poll; installed nowhere, listed all the same,
+    // and every account an earlier check sent gone (uninstalled since, its first poll refused meanwhile).
+    installedAs(found === null ? [] : found.accounts, true);
+    if (causeWaiting !== null) d.emit(causeCleared());
+    if (found !== null) {
+      await follow(found.repos, at);
       still(at);
     }
     if (refused) d.log("the pull requests are listed again");
     refused = false;
-    if (signedOutWaiting) d.emit(signedInAgain());
-    return listed;
+    return found;
   };
-  /** An install's check refused: logged once while it keeps refusing; signed out, the connection's cause. */
+  /** An install's check refused: logged once while it keeps refusing. */
   const checkRefused = (error: unknown): "refused" => {
     if (!refused) d.log(`the pull requests could not be listed: ${said(error)}`);
     refused = true;
-    signedOutAt(error);
     return "refused";
   };
 
-  /** A check refused signed out: the connection's cause from now on, the poller saying nothing before setup's done. */
-  const signedOutAt = (error: unknown): void => {
+  /**
+   * The installations' listing refused for a cause (signed out, GitHub unreachable): the connection's from now on,
+   * rather than looking on (ADR 0086), the poller saying nothing before setup's done.
+   */
+  const causeAt = (error: unknown): void => {
     const cause = error instanceof HostError ? connectionCauseOf(error) : null;
-    if (cause?.kind !== "signed-out" || signedOutWaiting || stopping) return;
-    signedOutWaiting = true;
+    if (cause === null || isDeepStrictEqual(cause, causeWaiting) || stopping) return;
+    causeWaiting = cause;
     d.emit({ type: "connection.changed", at: d.now(), patch: { cause } });
   };
 
-  /** The signed-out cause the install's check showed, cleared: the person signed in again. */
-  const signedInAgain = (): EventBody => {
-    signedOutWaiting = false;
+  /** The cause the install's check showed, cleared: a check answered, or the person signed in again. */
+  const causeCleared = (): EventBody => {
+    causeWaiting = null;
     return { type: "connection.changed", at: d.now(), patch: { cause: null } };
   };
 
@@ -581,12 +650,12 @@ export function createInstallation(d: InstallationDeps): Installation {
   const check = (): Promise<void> =>
     serially(async (at) => {
       if (stopping || held.state !== "signed-in") return;
-      const listed = await followed(held, at);
+      const found = await followed(held, at);
       // Still the holding it began under: the install found is that person's.
       still(at);
-      if (listed === null || listed === "refused") return;
-      d.installed(listed.repos.length > 0);
-      if (listed.repos.length > 0) waiting = false;
+      if (found === null || found === "refused") return;
+      d.installed(found.repos.length > 0);
+      if (found.repos.length > 0) waiting = false;
     }, undefined).finally(() => {
       if (stopping || held.state === "none") return;
       if (waiting) arm(INSTALL_CHECK_MS, () => void check());
@@ -597,16 +666,19 @@ export function createInstallation(d: InstallationDeps): Installation {
   const listedAtStart = async (now: Listable): Promise<RepositoryRef[] | null> => {
     const at = holding;
     try {
-      const listed = await list(now);
+      const found = await list(now);
       // Nothing is held before the start is done; were another held meanwhile, what was read is not theirs.
       if (at !== holding) return null;
-      if (listed === null) throw uninstalled(now);
-      accounts = listed.accounts;
-      return listed.repos;
+      listed = true;
+      if (found === null) throw uninstalled(now);
+      accounts = found.accounts;
+      return found.repos;
     } catch (error) {
       if (!(error instanceof HostError)) throw error;
       d.log(`the installation's repositories could not be listed: ${said(error)}`);
       refusedAtStart = connectionCauseOf(error);
+      // Nothing is sent before the start is done: the snapshot's facts carry it.
+      if (!listed) listingCause = refusedAtStart;
       return null;
     }
   };
@@ -642,13 +714,32 @@ export function createInstallation(d: InstallationDeps): Installation {
       moveHolding();
       await inTurn(async () => {
         await shared.signIns.write(signIn);
+        // Another person's accounts are never theirs (ADR 0066): sent as listed, they go until theirs are listed.
+        const another = personHeld()?.id !== signIn.person.id && accounts.length > 0;
         hold(signIn.person);
         moveHolding();
-        d.emit({ type: "connection.changed", at: d.now(), patch: { person: { ...signIn.person } } });
-        if (signedOutWaiting) d.emit(signedInAgain());
+        // Not listed under this sign-in yet: still looking (ADR 0086).
+        listed = false;
+        // What refused the last one's listing is not this one's.
+        const refusedBefore = listingCause !== null;
+        listingCause = null;
+        if (another) accounts = [];
+        d.emit({
+          type: "connection.changed",
+          at: d.now(),
+          patch: {
+            person: { ...signIn.person },
+            listed: false,
+            ...(refusedBefore ? { listingCause } : {}),
+            ...(another ? { accounts } : {}),
+          },
+        });
+        if (causeWaiting !== null) d.emit(causeCleared());
       });
     },
     accounts: () => accounts,
+    listed: () => listed,
+    listingCause: () => listingCause,
     holding: () => holding,
     refused: (repo, cause, at) => at !== holding || accountHolds(repo, cause),
     answered: (repo, at) =>

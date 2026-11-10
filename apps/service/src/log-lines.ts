@@ -10,6 +10,7 @@ import {
   type Change,
   cancelPhrase,
   confirmFailureText,
+  type Dropped,
   deferralText,
   type EngineId,
   type EventBody,
@@ -55,10 +56,9 @@ const ASKED_FOR: Record<AskedBy, string> = {
   person: "asked for on GitHub",
 };
 
-/** What asked for a new job: its trigger, and for a request comment, who wrote it (none named on an old job). */
+/** What asked for a new job: its trigger, and for a request comment, who wrote it (when one is known). */
 function askedText(job: ReviewJob): string {
-  const by = job.askedBy ?? null;
-  return job.trigger === "comment" && by !== null ? ASKED[by] : TRIGGER[job.trigger];
+  return job.trigger === "comment" && job.askedBy !== null ? ASKED[job.askedBy] : TRIGGER[job.trigger];
 }
 
 /** `until` in local time: "11:00" on the day of `at`, "2026-10-12 09:00" on another. */
@@ -177,8 +177,9 @@ function postingLine(posting: RunPosting, was: Review | undefined, at: number): 
 
 /** The service's pause as it now is, given the one before: paused until when, resumed, or nothing moved. */
 function pauseLine(paused: Service["paused"] | undefined, was: Service["paused"], at: number): string | null {
-  if (paused === undefined) return null;
-  if (paused === null) return was === null ? null : "reviews resumed";
+  // The same pause stated again (a start's own facts, ADR 0085) moved nothing.
+  if (paused === undefined || (paused?.since === was?.since && paused?.until === was?.until)) return null;
+  if (paused === null) return "reviews resumed";
   return `reviews paused until ${paused.until === null ? "resumed" : timeOf(paused.until, at)}`;
 }
 
@@ -222,6 +223,55 @@ export const signInLines = {
   /** The sign-in was made and not kept, saying `why`. */
   notKept: (why: string) => `the GitHub sign-in was not kept: ${why}`,
 } as const;
+
+/** A piece of the replayed state a start dropped (ADR 0085): "dropped repos sasensi/ledger-api: enabled: …". */
+export function droppedLine({ section, key, why }: Dropped): string {
+  return `dropped ${section}${key === null ? "" : ` ${key}`}: ${droppedWords(section, why)}`;
+}
+
+/** Why the piece in `section` was dropped, in the log's words: "not a list: object", "its review was dropped". */
+function droppedWords(section: Dropped["section"], why: Dropped["why"]): string {
+  switch (why.kind) {
+    case "not-object":
+    case "not-list":
+    case "not-record":
+      return `not ${NOT_WORDS[why.kind]}: ${why.found === "list" ? "a list" : why.found}`;
+    case "partner-dropped":
+      return section === "changes" ? "its review was dropped" : "its change was dropped";
+    case "unreadable":
+      return `${why.path === "" ? "" : `${why.path}: `}${why.message === "" ? "unreadable" : why.message}`;
+  }
+}
+
+const NOT_WORDS = { "not-object": "an object", "not-list": "a list", "not-record": "a record" } as const;
+
+/**
+ * An event the replay couldn't apply (ADR 0085): its number, its type as written, and why: a type this version
+ * doesn't know (`apply`'s `UnknownEvent`), or what `apply` threw on a known one.
+ */
+export interface Skipped {
+  seq: number;
+  type: string;
+  why: { kind: "unknown" } | { kind: "threw"; message: string };
+}
+
+/**
+ * An event the start's replay skipped (ADR 0085): "skipped event 12 (run.step): …", or "skipped event 13
+ * (review.pinned): this version doesn't know this event".
+ */
+export function skippedLine({ seq, type, why }: Skipped): string {
+  const said = why.kind === "unknown" ? "this version doesn't know this event" : why.message;
+  return `skipped event ${seq} (${type}): ${said}`;
+}
+
+/**
+ * The state a start read differs from its replay with nothing dropped (ADR 0085), first at `path`: a key the schema
+ * strips. Sent and served as read. "the state read differs from the replay at repos.0.extra with nothing dropped: …".
+ */
+export function differsLine(path: string): string {
+  const where = path === "" ? "the whole state" : path;
+  return `the state read differs from the replay at ${where} with nothing dropped: sent as read`;
+}
 
 /**
  * The log file's line for `event`, given the state before it (ADR 0055): what happened to a change, its review, the

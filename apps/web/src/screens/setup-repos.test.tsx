@@ -6,7 +6,17 @@ import { expect, test } from "bun:test";
 import { type Command, changeId } from "@lookover/contracts";
 import type { ReactNode } from "react";
 import { Button, Check, Search } from "../ui/basics.tsx";
-import { app, change, elements, repo, screen, world } from "./repositories.test-support.tsx";
+import { withDom } from "../ui/dom.test-support.tsx";
+import {
+  app,
+  change,
+  elements,
+  foldNames,
+  Providers,
+  repo,
+  screen,
+  world,
+} from "./repositories.test-support.tsx";
 import { type SetupReposVisit, StepReposOn, setupReposVisit } from "./setup.tsx";
 
 /** Eleven: sasensi's two, fernhill's nine, fernhill/web off. */
@@ -148,8 +158,63 @@ test("past ten, an account's box is described by its count, so a screen reader h
   const box = html.match(/<input[^>]*aria-label="Review every repository in fernhill"[^>]*>/)?.[0] ?? "";
   const id = box.match(/aria-describedby="([^"]+)"/)?.[1];
   expect(id).toBeDefined();
-  // The count it names holds every line it may say, the one shown alone not hidden from the screen reader.
+  // The count it names keeps the width of every line it may say (width, never height: ADR 0086), the one shown alone
+  // not hidden from the screen reader.
   const count = html.slice(html.indexOf(`id="${id}"`));
-  expect(count).toMatch(/^id="[^"]+"[^>]*><span class="held-detail">/);
-  expect(count).toContain("<span>10 of 11 to review</span>");
+  expect(count).toMatch(/^id="[^"]+"[^>]*><span class="same-width">/);
+  expect(count).toContain('<span class="same-width-slot">10 of 11 to review</span>');
+  expect(count).toContain('<span class="same-width-slot" aria-hidden="true">None of 11 to review</span>');
+});
+
+// A group folds by its rows (ADR 0087), as on Repositories, on a page to click in: folding, its rows leave through the
+// presence, then go; opening, they come in by the fold; the search takes and brings rows still.
+const dom = withDom();
+const exiting = (el: Element) => dom.exiting(el);
+
+/** `account`'s rows on the step. */
+const rowsOf = (account: string) =>
+  [...dom.host().querySelectorAll<HTMLElement>(".checklist-group > label.check")].filter((label) =>
+    label.querySelector("input")?.getAttribute("aria-label")?.startsWith(`${account}/`),
+  );
+/** fernhill's rows on the step, by name: `~` leaving (inert, hidden), `+` come in by the fold. */
+const fernhill = () => foldNames(rowsOf("fernhill"));
+const NINE = ["api", "web", "cli", "site", "infra", "docs", "mobile", "design", "data"];
+
+/** The step on a fresh visit, eleven repositories, past ten. */
+async function stepPage() {
+  const state = world(ELEVEN);
+  const store = app();
+  store.repositoriesBar.see(state);
+  const visit = setupReposVisit();
+  await dom.render(
+    <Providers store={store} state={state}>
+      <StepReposOn visit={visit} />
+    </Providers>,
+  );
+  const chevron = dom.host().querySelector<HTMLButtonElement>(`button[aria-label="fernhill's repositories"]`);
+  if (chevron === null) throw new Error("no chevron for fernhill");
+  return { state, visit, chevron };
+}
+
+test("folding a group of the step, its rows leave, inert and hidden, then go; opening it, they come in", async () => {
+  const { chevron } = await stepPage();
+  expect(fernhill()).toEqual(NINE);
+  const exits = rowsOf("fernhill").map(exiting);
+  await dom.act(() => chevron.click());
+  expect(fernhill()).toEqual(NINE.map((name) => `${name}~`));
+  for (const exit of exits) await dom.act(() => exit.finish());
+  expect(fernhill()).toEqual([]);
+  await dom.act(() => chevron.click());
+  expect(fernhill()).toEqual(NINE.map((name) => `${name}+`));
+  await dom.unmount();
+});
+
+test("the step's search takes rows at once and brings them still: no row leaves, none comes in", async () => {
+  const { state, visit } = await stepPage();
+  rowsOf("fernhill").map(exiting);
+  await dom.act(() => visit.choice.search(state, "api"));
+  expect(fernhill()).toEqual(["api"]);
+  await dom.act(() => visit.choice.search(state, ""));
+  expect(fernhill()).toEqual(NINE);
+  await dom.unmount();
 });

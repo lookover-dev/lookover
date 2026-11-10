@@ -16,7 +16,9 @@ import type { LogRun } from "../view-model/logs.ts";
 import { IN_DISPLAY, saidParts } from "../view-model/said.ts";
 import type { SaveShown } from "../view-model/save.ts";
 import { ICON_TILE, LOADER, MARK } from "./eyes.generated.ts";
+import { type Fold, foldMarks } from "./fold.tsx";
 import { CodePath } from "./path.tsx";
+import { arrivedProps, leavingProps, type Shown, useEntry } from "./presence.tsx";
 
 const ICONS = {
   search: (
@@ -223,7 +225,7 @@ export function BusyStatus({ tone, children }: { tone: "run" | "wait"; children:
  * One place for a button whose label changes with the state (design-system.md, Button: "keeps the width"): every
  * label it can take is laid out in the same cell, each under the state it stands for, and only the `shown` state's is
  * seen, so the place is as wide as the widest and nothing after it moves. The others are hidden, never focused nor
- * clicked.
+ * clicked, and hold width, never height (ADR 0086): laid out zero tall, so the place is as tall as the label it shows.
  */
 export function SameWidth<K extends string>({ shown, labels }: { shown: K; labels: Record<K, ReactNode> }) {
   return (
@@ -249,6 +251,7 @@ export function LinkButton({
   onClick,
   kbd,
   title,
+  label,
   children,
 }: {
   href: string;
@@ -260,6 +263,8 @@ export function LinkButton({
   kbd?: string;
   /** Said on hover: a label that may be cut, said whole. */
   title?: string;
+  /** Its accessible name, when its words may be hidden (an icon alone on a phone). */
+  label?: string;
   children: ReactNode;
 }) {
   const sizeClass = size === "sm" ? "btn-sm" : size === "lg" ? "btn-lg" : "";
@@ -267,6 +272,7 @@ export function LinkButton({
     <a
       className={`btn btn-${variant} ${sizeClass} ${className}`}
       title={title}
+      aria-label={label}
       href={href}
       target="_blank"
       rel="noopener noreferrer"
@@ -383,6 +389,7 @@ export function Check({
   mixed = false,
   label,
   describedBy,
+  fold,
 }: {
   checked: boolean;
   onChange: (on: boolean) => void;
@@ -392,6 +399,8 @@ export function Check({
   label?: string;
   /** The id of what describes the box beyond its label: setup's account count, "29 of 30 to review". */
   describedBy?: string;
+  /** A row of a group that folds (`FoldRows`): setup's grouped checklist. */
+  fold?: Fold;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   // The browser clears `indeterminate` on a click; it is set again from `mixed` after every render.
@@ -399,7 +408,10 @@ export function Check({
     if (ref.current) ref.current.indeterminate = mixed;
   });
   return (
-    <label className="check">
+    <label
+      className={fold === undefined ? "check" : fold.leaving ? "check fold-row leaving" : "check fold-row"}
+      {...foldMarks(fold)}
+    >
       <input
         ref={ref}
         type="checkbox"
@@ -500,8 +512,24 @@ export function Tabs<T extends string>({
   );
 }
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`card ${className}`}>{children}</div>;
+/**
+ * A surface card. `arrived`: it came after its gate's first commit (`useArrived`), so its CSS entry may play
+ * (`data-arrived`, ADR 0087); the caller says whether, the card never decides.
+ */
+export function Card({
+  children,
+  className = "",
+  arrived = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  arrived?: boolean;
+}) {
+  return (
+    <div className={`card ${className}`} {...arrivedProps(arrived)}>
+      {children}
+    </div>
+  );
 }
 
 /** One pull request: chip, title, one meta line, at most one action. The whole row is clickable. */
@@ -514,20 +542,30 @@ export function Row({
   fresh,
   status,
   selected,
+  shown,
 }: {
   lead: ReactNode;
   title: ReactNode;
   meta: ReactNode;
   action?: ReactNode;
   onOpen?: () => void;
+  /** It arrived in its list by a change of the world, not by a search or a filter: read once, as it mounts. */
   fresh?: boolean;
   /** The lead is a status chip: it gets a fixed column so titles line up down the list. */
   status?: boolean;
   selected?: boolean;
+  /** In a list that keeps what leaves (`PresenceList`): whether it is leaving, and its mark. */
+  shown?: Shown;
 }) {
+  // A fresh row rises in only if it arrived after the first paint (the first-paint gate), and only once: its entry
+  // over, it keeps none for a later move in the list to replay. Leaving, it plays its exit instead; back while
+  // leaving, it rises in again (`useEntry`).
+  const { leaving, enters: rises, props } = useEntry(fresh, shown);
+  const motion = leaving ? "leaving" : rises ? "new" : "";
   return (
     <div
-      className={`rowi ${status ? "status" : ""} ${lead == null ? "nolead" : ""} ${fresh ? "new" : ""} ${onOpen ? "" : "static"}`}
+      className={`rowi ${status ? "status" : ""} ${lead == null ? "nolead" : ""} ${motion} ${onOpen ? "" : "static"}`}
+      {...props}
       tabIndex={onOpen ? 0 : undefined}
       role={onOpen ? "link" : undefined}
       data-row={onOpen ? "" : undefined}
@@ -566,6 +604,7 @@ export function Notice({
   action,
   below,
   busy,
+  shown,
 }: {
   label?: string;
   tone?: NoticeTone;
@@ -574,9 +613,12 @@ export function Notice({
   /** What opens under the notice, from the text column to the action edge: Left's list. */
   below?: ReactNode;
   busy?: boolean;
+  /** In a list that keeps what leaves (`PresenceList`): whether it is leaving, and its mark. */
+  shown?: Shown;
 }) {
+  const base = tone === "need" ? "banner" : `banner ${tone}`;
   return (
-    <div className={tone === "need" ? "banner" : `banner ${tone}`}>
+    <div {...leavingProps(base, shown)}>
       <Eyes still={!busy} />
       <span>
         <span className="lb">{label}</span>
@@ -601,9 +643,12 @@ export function NoticeDisclosure({
   dismiss,
   below,
   children,
+  shown,
 }: {
   label: string;
   tone?: NoticeTone;
+  /** In a list that keeps what leaves (`PresenceList`): whether it is leaving, and its mark. */
+  shown?: Shown;
   /** The toggle's words, and its accessible names, which say what it opens. */
   toggle: { show: string; hide: string; showName: string; hideName: string };
   /** The × beside the toggle: its name and tooltip, and what it does. */
@@ -617,6 +662,7 @@ export function NoticeDisclosure({
     <Notice
       label={label}
       {...(tone === undefined ? {} : { tone })}
+      {...(shown === undefined ? {} : { shown })}
       action={
         <span className="banner-acts">
           <Button
@@ -867,13 +913,21 @@ export function Group({
   title,
   children,
   landing = false,
+  fresh,
+  shown,
 }: {
   title: string;
   children: ReactNode;
   landing?: boolean;
+  /** It came to the page by a change of the world (a section of Reviews with its first row): read once, as it mounts. */
+  fresh?: boolean;
+  /** In a list that keeps what leaves (`PresenceList`): whether it is leaving, and its mark. */
+  shown?: Shown;
 }) {
+  const { leaving, enters: fades, props } = useEntry(fresh, shown);
+  const motion = leaving ? " leaving" : fades ? " new" : "";
   return (
-    <section className="grp" data-landing={landing || undefined}>
+    <section className={`grp${motion}`} data-landing={landing || undefined} {...props}>
       <h4>{title}</h4>
       {children}
     </section>
@@ -954,9 +1008,20 @@ export function Disclosure({
 }
 
 /** An icon alone, for one well-known action next to the thing it acts on. Always with a tooltip that says it in words. */
-export function IconButton({ icon, label, onClick }: { icon: IconName; label: string; onClick: () => void }) {
+export function IconButton({
+  icon,
+  label,
+  onClick,
+  end = false,
+}: {
+  icon: IconName;
+  label: string;
+  onClick: () => void;
+  /** Its tooltip ends at its right edge (`Tip`'s `end`): for one near the screen's right edge. */
+  end?: boolean;
+}) {
   return (
-    <span className="anchor">
+    <span className={end ? "anchor tip-end" : "anchor"}>
       <button type="button" className="icon-btn" aria-label={label} onClick={onClick}>
         <Icon name={icon} />
       </button>

@@ -14,6 +14,19 @@ import { type Run, stepsDone } from "./run.ts";
 import { furthestReached } from "./setup.ts";
 import type { State } from "./state.ts";
 
+/**
+ * What `apply` throws on an event of a type this version doesn't know (ADR 0085): one a newer version wrote or sends.
+ * It carries the type as it came, so a caller tells it from a throw on a known type; the words are the caller's.
+ */
+export class UnknownEvent extends Error {
+  readonly type: string;
+  constructor(type: string) {
+    super(type);
+    this.name = "UnknownEvent";
+    this.type = type;
+  }
+}
+
 export function emptyReview(changeId: ChangeId, at: number): Review {
   return {
     changeId,
@@ -70,7 +83,7 @@ function jobChanged(s: State, event: Of<"job.changed">): State {
   return withReview(s, event.changeId, event.at, (r) => ({
     ...r,
     job: event.job,
-    run: event.job.state === "running" ? r.run : null,
+    run: event.job.state === "running" ? (event.run ?? r.run) : null,
     timeline: [...r.timeline, ...jobEntries(r.job, event.job, event.at)],
   }));
 }
@@ -309,5 +322,11 @@ export function apply(state: State, event: Event): State {
       return roundFinished(s, event);
     case "finding.dismissed":
       return findingDismissed(s, event);
+    default: {
+      // One this version doesn't know (a log a newer version wrote, ADR 0085): never a state of nothing. Its caller
+      // skips it as one it threw on, keeping the state it had.
+      const unknown: { type: unknown } = event satisfies never;
+      throw new UnknownEvent(String(unknown.type));
+    }
   }
 }

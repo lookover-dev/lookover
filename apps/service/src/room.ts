@@ -73,7 +73,7 @@ import {
   type GitHubSide,
   type Installation,
 } from "./installation.ts";
-import { logLineOf } from "./log-lines.ts";
+import { differsLine, droppedLine, logLineOf, skippedLine } from "./log-lines.ts";
 import { secretShapesRemoved } from "./log-sink.ts";
 import { type LoginItem, nowhereLoginItem } from "./login-item.ts";
 import { createPoller, type Poller } from "./poller.ts";
@@ -99,15 +99,16 @@ import {
   appInstalled,
   changeFactsOf,
   numberOf,
-  ownerNamedLeft,
   ownershipMoved,
   repoIdOf,
   repositoryOf,
+  reposLeft,
   rulesOf,
   SET_UP,
+  type Started,
   settingsOf,
   signedInAtSetup,
-  snapshotOf,
+  startOf,
 } from "./snapshot.ts";
 import { atLoginLeft, createStartAtLogin, matchedAtStart } from "./start-at-login.ts";
 import { statusNow } from "./status-block.ts";
@@ -537,10 +538,11 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   /**
    * The UI's state, as a UI that followed every event holds it: the log replayed once, here, then each event
    * applied as it is sent (AGENTS.md rule 3). Nothing decides from it: it is what the snapshot shows, and
-   * what tells whether the UI's rules are behind the store's.
+   * what tells whether the UI's rules are behind the store's. Read, not trusted (ADR 0085): what the replay can't
+   * apply or this version can't read is gone, and the start's own facts are on it, before anything reads it.
    */
   const setupAtStart = store.setup.read();
-  let shown = snapshotOf(
+  const started = startOf(
     {
       now: startedAt,
       startedAt,
@@ -550,6 +552,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       connectionId: github.connectionId(),
       person: github.person(),
       accounts: github.accounts(),
+      listed: github.listed(),
+      listingCause: github.listingCause(),
       web: webOf(o),
       engines,
       setup: setupAtStart,
@@ -557,10 +561,13 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       atLogin: heldAtStart,
       loginItem: loginItem.kind,
       platform: o.platform,
+      paused: store.pause.current(),
       ...(o.remote === undefined ? {} : { remote: o.remote }),
     },
     store.events.all(),
   );
+  let shown = started.state;
+  saidAtStart(started, logLine);
   /** The coding agents Lookover found, by the engines the UI shows. */
   const found = () => foundOf({ claude: shown.engines.claude.state, codex: shown.engines.codex.state });
   const codingAgent = createCodingAgent({
@@ -646,19 +653,18 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   // engines' health taken at start is still only in the snapshot's base, not in an event: a tab that reloads
   // sees it, one that replays would not, which is the other reason the stale tab reloads. The health check
   // that emits `engine.changed` is the queue's.
-  // Lookover's command and your coding agent with it, where the replayed log says an earlier start's (another
-  // executable, another PATH, a skill changed while stopped).
-  emit({
-    type: "service.changed",
-    at: startedAt,
-    patch: { state: "running", since: startedAt, command: commandAtStart, agent: agentAtStart },
-  });
+  // The service's own facts (its version, its command and your coding agent with it, its login item), where the
+  // replayed log says an earlier start's (another version, another executable, another PATH, a skill changed while
+  // stopped); or, when the start dropped or renamed anything of the replay (ADR 0085, ADR 0066), the whole state it
+  // read, as one `state.replaced`, before the events below compare against it and before anything is served.
+  emit(started.first);
+  // A watched repository with its switch, the store's (ADR 0047), and its settings, the files' as last read (ADR 0049).
+  const repository = (repo: RepositoryRef) =>
+    repositoryOf(repo, store.repos.enabled(repo), settingsNow(repoIdOf(repo)).settings);
+  const listedBefore = store.repos.listed();
   // What a stop left behind is sent now: the sign-ins it left pending, and a start at login or rules the store kept
   // but the stop kept from the UI (between the write and its event), where the replayed log says the older ones.
   const left = [
-    // A data folder from before ADR 0066: its events name changes `<name>#<n>` where the store, migrated, names them
-    // `<owner>/<name>#<n>`. The UI's state is sent again in the store's ids, its history kept.
-    ...ownerNamedLeft(shown, startedAt),
     // The setup as the store keeps it, where the replayed log says the one before this start's (`setUp`, `opened`).
     ...setupLeft(shown, store.setup.read(), startedAt),
     ...signInsLeft(shown, startedAt),
@@ -678,6 +684,15 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       ),
       startedAt,
     ),
+    // What the store watches and the state lacks (ADR 0085): a repository an older version wrote, dropped. The open
+    // changes come back with the start's listing (`changesLeft`): the store keeps no title.
+    ...reposLeft(
+      shown,
+      watched.all
+        .filter((repo) => listedBefore.some((listed) => sameRepository(listed, repo)))
+        .map((repo) => ({ ...repository(repo), noise: noise(repo) })),
+      startedAt,
+    ),
     // The settings files are their truth (ADR 0049), and a hand edit while stopped counts from now.
     ...settingsMoved(shown, kept.now(), startedAt),
   ];
@@ -691,8 +706,6 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   const ids = o.ids ?? { next: () => randomUUID() };
   // The decisions' reads: the store's, never the snapshot (#64). The switch is the store's (ADR 0047); the settings
   // are the files', as last read (ADR 0049).
-  const repository = (repo: RepositoryRef) =>
-    repositoryOf(repo, store.repos.enabled(repo), settingsNow(repoIdOf(repo)).settings);
   const settings = (repoId: RepositoryId) => settingsOf(repository(watched.byId(repoId)));
   const openChanges = () =>
     changeFactsOf(
@@ -835,6 +848,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     },
     emit,
     connection: () => shown.connection,
+    shown: () => shown,
+    rebuilt: (changeId) => queue.rebuilt(changeId),
     opened: (changeId) => queue.opened(changeId),
     pushed: (changeId, sha) => queue.pushed(changeId, sha),
     requested: (changeId, request, full) => queue.requested(changeId, request, full),
@@ -1343,6 +1358,16 @@ function repositoryMoves(d: MovesDeps) {
 }
 
 /**
+ * What the start skipped of its replay and dropped of the state it read, one line each, in the log (ADR 0085), and
+ * where the state read differs from the replay when nothing was dropped.
+ */
+function saidAtStart({ skipped, dropped, differs }: Started, logLine: (line: string) => void): void {
+  for (const event of skipped) logLine(skippedLine(event));
+  for (const piece of dropped) logLine(droppedLine(piece));
+  if (differs !== null) logLine(differsLine(differs));
+}
+
+/**
  * What changed while the service was stopped (ADR 0053), sent before anything is listed: each repository the store
  * listed and the installation no longer lists leaves; a key that no longer opens, or GitHub refusing the App, its
  * installation or its repositories, is shown at once as the connection's cause.
@@ -1505,6 +1530,11 @@ function identityLeft(shown: State, github: Installation, at: number): EventBody
     ...(another ? { person } : {}),
     ...((another || (was.id !== null && id !== null)) && id !== was.id ? { id } : {}),
     ...((another || accounts.length > 0) && !sameReach(accounts, was.accounts) ? { accounts } : {}),
+    // Listed or not as this start's listing says (ADR 0086), whatever the log said of an earlier one.
+    ...(github.listed() === was.listed ? {} : { listed: github.listed() }),
+    ...(isDeepStrictEqual(github.listingCause(), was.listingCause)
+      ? {}
+      : { listingCause: github.listingCause() }),
   };
   return Object.keys(patch).length === 0 ? [] : [{ type: "connection.changed", at, patch }];
 }

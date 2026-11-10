@@ -23,8 +23,11 @@ import {
 } from "./store.tsx";
 import { type ClockPace, REAL_PACE, TickingProvider } from "./ticking.tsx";
 import { Button, PageLoading, Session } from "./ui/basics.tsx";
+import { Boundary } from "./ui/boundary.tsx";
 import { Dialog, ToastProvider, useToast } from "./ui/layers.tsx";
+import { FirstPaint } from "./ui/presence.tsx";
 import { type Refusal, refusalToast, sessionLost } from "./view-model/refusal.ts";
+import type { PaletteMode } from "./view-model/select.ts";
 
 /**
  * The app's screens. A route added or removed here is one in `ROUTES` of scripts/proof-shots.ts too (the screen
@@ -37,19 +40,24 @@ function Main() {
   return (
     <div className="app">
       <TopBar />
-      <Alerts />
+      <Boundary what="alerts">
+        <Alerts />
+      </Boundary>
+      {/* Keyed by the path: leaving a page that failed shows the next one afresh. */}
       <div className="route" key={pathname}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/reviews" element={<AllReviews />} />
-          <Route path="/reviews/:owner/:name/:number" element={<Review />} />
-          <Route path="/repositories" element={<Repositories />} />
-          <Route path="/repositories/:owner/:name" element={<RepositoryPage />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/settings/:section" element={<SettingsSection />} />
-          <Route path="/logs" element={<Logs />} />
-          <Route path="*" element={<Home />} />
-        </Routes>
+        <Boundary what="page">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/reviews" element={<AllReviews />} />
+            <Route path="/reviews/:owner/:name/:number" element={<Review />} />
+            <Route path="/repositories" element={<Repositories />} />
+            <Route path="/repositories/:owner/:name" element={<RepositoryPage />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings/:section" element={<SettingsSection />} />
+            <Route path="/logs" element={<Logs />} />
+            <Route path="*" element={<Home />} />
+          </Routes>
+        </Boundary>
       </div>
       <TabBar />
     </div>
@@ -95,7 +103,13 @@ export function App({
 }) {
   const state = useStoreState(store);
   const { session, refusal } = useStoreStatus(store);
-  const [palette, setPalette] = useState<"all" | "review" | null>(null);
+  // The palette's mode, and how many times it opened: its boundary is keyed by the opening, so a palette that failed
+  // tries again on the next one, and a close stays a close (the dialog's own, which gives the focus back).
+  const [palette, setPalette] = useState<{ mode: PaletteMode | null; opening: number }>({
+    mode: null,
+    opening: 0,
+  });
+  const closePalette = useCallback(() => setPalette((p) => ({ ...p, mode: null })), []);
   const [shortcuts, setShortcuts] = useState(false);
   const [locked, setLocked] = useState<Held | null>(null);
 
@@ -110,7 +124,11 @@ export function App({
     cancelHeld(locked);
     setLocked(null);
   };
-  const openPalette = useCallback((mode: "all" | "review" = "all") => setPalette(mode), []);
+  const openPalette = useCallback(
+    (mode: PaletteMode = "all") =>
+      setPalette((p) => ({ mode, opening: p.mode === null ? p.opening + 1 : p.opening })),
+    [],
+  );
   const openShortcuts = useCallback(() => setShortcuts(true), []);
   const app = useMemo<AppServices>(
     () => ({ store, send, embedded, mode, openPalette, openShortcuts }),
@@ -121,48 +139,76 @@ export function App({
   if (session !== "open") return <Session words={sessionLost(mode, session.open)} />;
   if (!state) return <PageLoading />;
   return (
-    <AppContext.Provider value={app}>
-      <StateProvider value={state}>
-        <ToastProvider>
-          <RefusalToast refusal={refusal} setup={!state.setup.done} />
-          <TickingProvider state={state} pace={dev?.pace ?? REAL_PACE}>
-            <Routes>
-              <Route path="/github/:owner/:name/:number" element={<GitHubMock />} />
-              {dev?.routes}
-              <Route path="*" element={state.setup.done ? <Main /> : <Setup />} />
-            </Routes>
-          </TickingProvider>
-          {state.setup.done ? <Palette mode={palette} onClose={() => setPalette(null)} /> : null}
-          <Shortcuts open={shortcuts} onClose={() => setShortcuts(false)} />
-          <Dialog
-            open={locked !== null}
-            onClose={cancel}
-            title="Unlock to make changes?"
-            actions={
-              <>
-                <Button variant="ghost" onClick={cancel}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    if (locked) unlockAndSend(store, locked);
-                    setLocked(null);
-                  }}
-                >
-                  Unlock with passkey
-                </Button>
-              </>
-            }
-          >
-            <p>
-              This Lookover runs on a server. Looking is free; changing something asks for your passkey once
-              per session.
-            </p>
-          </Dialog>
-          {dev && !embedded ? dev.drawer : null}
-        </ToastProvider>
-      </StateProvider>
-    </AppContext.Provider>
+    // The first-paint gate starts with the state: what the first screen shows was there, nothing enters on load.
+    <FirstPaint>
+      <AppContext.Provider value={app}>
+        <StateProvider value={state}>
+          <ToastProvider>
+            <RefusalToast refusal={refusal} setup={!state.setup.done} />
+            <TickingProvider state={state} pace={dev?.pace ?? REAL_PACE}>
+              <Routes>
+                <Route path="/github/:owner/:name/:number" element={<GitHubMock />} />
+                {dev?.routes}
+                <Route
+                  path="*"
+                  element={
+                    state.setup.done ? (
+                      <Main />
+                    ) : (
+                      <Boundary what="setup" look="whole">
+                        <Setup />
+                      </Boundary>
+                    )
+                  }
+                />
+              </Routes>
+            </TickingProvider>
+            {state.setup.done ? (
+              // Mounted again on each opening, so a palette that failed tries again; its line said in a dialog of its own,
+              // where the palette would have opened.
+              <Boundary
+                key={palette.opening}
+                what="palette"
+                frame={(failed) => (
+                  <Dialog open={palette.mode !== null} onClose={closePalette}>
+                    {failed}
+                  </Dialog>
+                )}
+              >
+                <Palette mode={palette.mode} onClose={closePalette} />
+              </Boundary>
+            ) : null}
+            <Shortcuts open={shortcuts} onClose={() => setShortcuts(false)} />
+            <Dialog
+              open={locked !== null}
+              onClose={cancel}
+              title="Unlock to make changes?"
+              actions={
+                <>
+                  <Button variant="ghost" onClick={cancel}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      if (locked) unlockAndSend(store, locked);
+                      setLocked(null);
+                    }}
+                  >
+                    Unlock with passkey
+                  </Button>
+                </>
+              }
+            >
+              <p>
+                This Lookover runs on a server. Looking is free; changing something asks for your passkey once
+                per session.
+              </p>
+            </Dialog>
+            {dev && !embedded ? dev.drawer : null}
+          </ToastProvider>
+        </StateProvider>
+      </AppContext.Provider>
+    </FirstPaint>
   );
 }

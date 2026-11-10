@@ -40,6 +40,9 @@ function fontLicenceFiles(): Plugin {
 
 export default defineConfig({
   plugins: [react(), programMarker(), fontLicenceFiles()],
+  // Nothing inlined: the service's CSP allows fonts only as files (`font-src 'self'`), and Vite would otherwise put
+  // any asset under 4 KB in the CSS as a `data:` URI, as it did with a Hanken Grotesk subset (#674, ADR 0085).
+  build: { assetsInlineLimit: 0 },
   server: {
     host: "127.0.0.1",
     port: Number(process.env.LOOKOVER_UI_PORT ?? 5173),

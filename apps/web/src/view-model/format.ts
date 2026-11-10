@@ -153,9 +153,6 @@ export function onDayAt(now: number, at: number, timeZone?: string): string {
   return `on ${dayText(new Date(then.day * DAY_MS))} at ${then.time}`;
 }
 
-/** "on Wed 14 Oct at 10:11" whatever the day: how `onDayAt` says `at` once its day has passed, for a line held. */
-export const onDay = (at: number, timeZone?: string): string => onDayAt(at + 2 * DAY_MS, at, timeZone);
-
 /**
  * When a log line happened (ADR 0081): "16:02" on `now`'s day, "Sun 4 Oct 16:02" on another, in the browser's zone,
  * which is the service's machine's by default.
@@ -190,4 +187,9 @@ export interface WithCommand {
    * fold it in here, or it is lost. An `after` with a command of its own still follows, under the line.
    */
   alone?: string;
+  /**
+   * The command goes on its own line (after `alone`) however short it is: where another form of the same sentence
+   * has a value on that line, so the two hold the same lines (ADR 0086).
+   */
+  line?: true;
 }

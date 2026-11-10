@@ -4,7 +4,7 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { carriedWebFiles, diskWebFiles } from "./index.ts";
+import { CSP, carriedWebFiles, diskWebFiles } from "./index.ts";
 import { api, home, openApp, start, stopAll, TEST_LIMIT_MS } from "./service.test-support.ts";
 
 setDefaultTimeout(TEST_LIMIT_MS);
@@ -27,9 +27,9 @@ function builtApp(): string {
 
 const startServing = () => start({ webFiles: diskWebFiles(builtApp()) });
 
-/** The security headers every answer carries (api.ts). */
+/** The security headers every answer carries (api.ts): the policy the build test and `proof` read too. */
 function expectGuarded(res: Response): void {
-  expect(res.headers.get("content-security-policy")).toContain("default-src 'self'");
+  expect(res.headers.get("content-security-policy")).toBe(CSP);
   expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   expect(res.headers.get("referrer-policy")).toBe("no-referrer");
 }

@@ -52,6 +52,21 @@ test("a long value with no sentence to say it alone stays in its sentence", () =
   });
 });
 
+test("a value marked for its own line goes there however short, under the sentence said without it", () => {
+  expect(
+    saidParts({
+      before: "A terminal's",
+      command: "lookover",
+      after: "runs this Lookover.",
+      alone: "A terminal runs this Lookover as:",
+      line: true,
+    }),
+  ).toEqual([
+    { text: "A terminal runs this Lookover as:" },
+    { code: "lookover", kind: "command", line: true },
+  ]);
+});
+
 test("a second value after a long one carries on under it, the punctuation that closed the first sentence dropped", () => {
   const start = "C:\\Users\\Your Name\\AppData\\Local\\Lookover\\lookover.exe start";
   expect(

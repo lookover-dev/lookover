@@ -39,14 +39,6 @@ const NOW = Date.UTC(2026, 9, 30, 10, 0, 0);
 const MIN = 60_000;
 const UTC = "UTC";
 const INSTALL = "https://github.com/apps/lookover-dev/installations/new";
-/** What a reached row's detail holds besides its own: no repository, then every cause. */
-const REACHED_HELD = [
-  "No repository yet.",
-  "Asks you to sign in with SSO.",
-  "Suspended.",
-  "No longer installed.",
-];
-
 const DEFAULTS: ResolvedSettings = {
   strictness: { value: "recommended", origin: "lookover-default", overrode: null },
   reviewers: { value: "both", origin: "lookover-default", overrode: null },
@@ -98,6 +90,8 @@ function signedIn(connection: Partial<Connection> = {}, repos: Repository[] = []
       signIn: null,
       person: { id: 1, login: "sasensi" },
       accounts: [],
+      listed: true,
+      listingCause: null,
       unreached: [],
       web: GITHUB_WEB,
       since: NOW,
@@ -187,7 +181,6 @@ test("Install on another account is always last, to GitHub's own page, even with
       name: "Another account",
       state: "another",
       detail: "GitHub's page lists every account you belong to.",
-      details: ["GitHub's page lists every account you belong to."],
       fix: { label: "Install on another account", href: INSTALL },
       labels: ["Install on another account"],
       againLabels: [],
@@ -206,6 +199,22 @@ test("no list before a sign-in, once signed out, or with nobody signed in", () =
   expect(rows(signedIn({ person: null, accounts: [{ ...own, owner: null }] }))).toEqual([]);
 });
 
+test("not listed yet under a new sign-in, the connection's cause left from before it: your own row looking, nothing said missing (ADR 0086)", () => {
+  // Sign in again while the poller held `uninstalled`: only this sign-in's listing says what refused it.
+  const list = accountRows(
+    signedIn({
+      state: "disconnected",
+      cause: { kind: "uninstalled", suspended: false },
+      accounts: [],
+      listed: false,
+      listingCause: null,
+    }),
+  );
+  expect(list.rows.map((r) => [r.name, r.state, r.detail, r.fix, r.labels])).toEqual([
+    ["sasensi", "looking", "Looking…", null, []],
+  ]);
+});
+
 // ---- reached ----
 
 test("an account reached says how many of the repositories are its", () => {
@@ -220,7 +229,6 @@ test("an account reached says how many of the repositories are its", () => {
     name: "sasensi",
     state: "installed",
     detail: "2 repositories.",
-    details: ["2 repositories.", ...REACHED_HELD],
     fix: null,
     labels: ["Choose repositories", "Sign in with SSO", "Unsuspend it on GitHub", "Install on sasensi"],
     againLabels: [],
@@ -291,7 +299,6 @@ test("an account installed with no repository yet: Choose repositories, its inst
     name: "sasensi",
     state: "installed",
     detail: "No repository yet.",
-    details: REACHED_HELD,
     fix: { label: "Choose repositories", href: "https://github.com/settings/installations/11" },
     labels: ["Choose repositories", "Sign in with SSO", "Unsuspend it on GitHub", "Install on sasensi"],
     againLabels: [],
@@ -315,8 +322,6 @@ test("an account asking for SSO: its SSO page, GitHub's own when the 403 gave on
     name: "ledger-dev",
     state: "needs-you",
     detail: "Asks you to sign in with SSO.",
-    // Its own line first, then the others a reached row holds.
-    details: ["Asks you to sign in with SSO.", "No repository yet.", "Suspended.", "No longer installed."],
     fix: { label: "Sign in with SSO", href: "https://github.com/orgs/ledger-dev/sso" },
     labels: ["Choose repositories", "Sign in with SSO", "Ask an owner of ledger-dev"],
     againLabels: [],
@@ -396,7 +401,6 @@ test("the person's own account not reached: Install on it", () => {
     name: "sasensi",
     state: "not-installed",
     detail: "Not installed.",
-    details: ["Not installed."],
     fix: { label: "Install on sasensi", href: INSTALL },
     labels: ["Install on sasensi"],
     againLabels: [],
@@ -422,11 +426,6 @@ test("an organisation the person owns: Install on it; one they're a member of, o
       name: login,
       state: "not-installed",
       detail: "Not installed. On GitHub, you ask its owners to install it.",
-      details: [
-        "Not installed. On GitHub, you ask its owners to install it.",
-        `Waiting for an owner, asked at 10:00. If you sent the request, GitHub emailed its owners.`,
-        `Waiting for an owner, asked on Fri 30 Oct at 10:00. If you sent the request, GitHub emailed its owners.`,
-      ],
       fix: {
         label: `Ask to install on ${login}`,
         href: INSTALL,
@@ -447,13 +446,6 @@ test("asked: waiting for an owner, since when, hedged; ask an owner, and GitHub'
     name: "ledger-labs",
     state: "waiting",
     detail: "Waiting for an owner, asked at 09:35. If you sent the request, GitHub emailed its owners.",
-    details: [
-      "Waiting for an owner, asked at 09:35. If you sent the request, GitHub emailed its owners.",
-      "Waiting for an owner, asked on Fri 30 Oct at 09:35. If you sent the request, GitHub emailed its owners.",
-      "Not installed. On GitHub, you ask its owners to install it.",
-      "Waiting for an owner, asked at 10:00. If you sent the request, GitHub emailed its owners.",
-      "Waiting for an owner, asked on Fri 30 Oct at 10:00. If you sent the request, GitHub emailed its owners.",
-    ],
     fix: {
       label: "Ask an owner of ledger-labs",
       href: "https://github.com/orgs/ledger-labs/people?query=role%3Aowner",
@@ -514,57 +506,27 @@ test("a login longer than a usual one is held at 16 characters: its fix's label 
   expect(r?.labels).toEqual(["Install on ledger-holdings-"]);
 });
 
-test("every detail a row can show, so a state changing in place moves nothing", () => {
-  const list = accountRows(signedIn({ accounts: [own], unreached: [unreached("ledger-labs", false)] }), {
-    timeZone: UTC,
-  });
-  for (const r of list.rows) expect(r.details).toContain(r.detail);
-  expect(list.rows.find((r) => r.key === "ledger-labs")?.details).toContain(
-    "Waiting for an owner, asked at 10:00. If you sent the request, GitHub emailed its owners.",
-  );
-});
-
-test("a waiting row holds the line it says once the day it was asked has passed, so a day passing moves nothing", () => {
-  const asked = NOW - 25 * MIN;
-  const today = row(signedIn({ unreached: [unreached("ledger-labs", false, asked)] }), "ledger-labs");
-  const later = {
-    ...signedIn({ unreached: [unreached("ledger-labs", false, asked)] }),
-    now: NOW + 3 * 24 * 60 * MIN,
-  };
-  const then = row(later, "ledger-labs");
-  expect(then?.detail).toBe(
-    "Waiting for an owner, asked on Fri 30 Oct at 09:35. If you sent the request, GitHub emailed its owners.",
-  );
-  expect(today?.details).toContain(then?.detail);
-});
-
-test("a waiting row's longest line names no login, so it fits two lines in setup's column whatever the account", () => {
-  // The login heads the row. 103 characters: the older day's form, two lines beside the fix's place in setup.
-  const login = "x".repeat(39);
-  const longest = (r: ReturnType<typeof row>) => Math.max(...(r?.details ?? []).map((d) => d.length));
-  const waiting = row(signedIn({ unreached: [unreached(login, false, NOW - 20 * 60 * MIN)] }), login);
-  for (const line of waiting?.details ?? []) expect(line).not.toContain(login);
-  expect(longest(waiting)).toBeLessThanOrEqual(103);
-});
-
-test("a row holds only what its own place in the list can say: a reached row never holds a waiting line", () => {
+test("a row holds no detail it doesn't show: as tall as its own line, whatever it could say (ADR 0086)", () => {
   const list = accountRows(
-    signedIn({ accounts: [own], unreached: [unreached("ledger-labs", false), unreached("ledger-hq", true)] }),
+    signedIn({
+      accounts: [own],
+      unreached: [
+        unreached("ledger-labs", false),
+        unreached("ledger-hq", true),
+        unreached("ledger-ops", false, NOW),
+      ],
+    }),
     { timeZone: UTC },
   );
-  // Reached, listed first: its repositories or its cause, never a line of an account not reached (which an account
-  // reached only becomes by moving to the list's other part).
-  const details = (key: string) => list.rows.find((r) => r.key === key)?.details;
-  for (const line of details("sasensi") ?? []) expect(line).not.toMatch(/^Not installed|^Waiting/);
-  expect(details("sasensi")).toContain("Asks you to sign in with SSO.");
-  // Not reached, a member's: asked or waiting; never a reached account's cause.
-  expect(details("ledger-labs")).toEqual([
-    "Not installed. On GitHub, you ask its owners to install it.",
-    "Waiting for an owner, asked at 10:00. If you sent the request, GitHub emailed its owners.",
-    "Waiting for an owner, asked on Fri 30 Oct at 10:00. If you sent the request, GitHub emailed its owners.",
-  ]);
-  // Not reached, theirs: Install on it is all it offers, so it never waits for an owner.
-  expect(details("ledger-hq")).toEqual(["Not installed."]);
+  for (const r of list.rows) expect(r).not.toHaveProperty("details");
+});
+
+test("a waiting row's line names no login: the login heads the row, so it fits two lines in setup's column whatever the account", () => {
+  // 103 characters: the older day's form, two lines beside the fix's place in setup.
+  const login = "x".repeat(39);
+  const waiting = row(signedIn({ unreached: [unreached(login, false, NOW - 20 * 60 * MIN)] }), login);
+  expect(waiting?.detail).not.toContain(login);
+  expect(waiting?.detail.length).toBeLessThanOrEqual(103);
 });
 
 test("only a row waiting for an owner has Ask again: every row keeps its place, the screen's (github-app.test.tsx)", () => {
@@ -618,7 +580,7 @@ test("on the shared App, Repositories groups its rows by account, in the account
   ]);
 });
 
-test("a group head with no cause says nothing more, and keeps every cause line's place and every fix's", () => {
+test("a group head with no cause says nothing more and holds no cause; its fix's place, every fix its account can have", () => {
   const [head] = repositoryGroups(signedIn({ accounts: [own] }, [repo("sasensi", "ledger-api")])).map(
     (g) => g.head,
   );
@@ -626,14 +588,30 @@ test("a group head with no cause says nothing more, and keeps every cause line's
     account: "sasensi",
     toggleLabel: "sasensi's repositories",
     state: "fine",
-    cause: "",
-    held: ["", "Asks you to sign in with SSO.", "Suspended.", "No longer installed."],
+    cause: null,
     fix: null,
-    labels: ["Sign in with SSO", "Unsuspend it on GitHub", "Install on sasensi", "Ask an owner of sasensi"],
+    // The person's own: SSO, suspended, gone; never an owner asked.
+    labels: ["Sign in with SSO", "Unsuspend it on GitHub", "Install on sasensi"],
     count: "1 repository, reviewed",
-    counts: ["1 repository, not reviewed", "1 repository, reviewed"],
     shows: null,
   });
+});
+
+test("a head's fix place holds a member's fixes on a member's account, and a long login at 16 characters", () => {
+  const login = "northwind-platform-infrastructure-group";
+  const state = signedIn(
+    {
+      accounts: [
+        org("ledger-dev", null, false),
+        org(login, { kind: "sso", organisation: login, url: null }, true, 33),
+      ],
+    },
+    [repo("ledger-dev", "billing"), repo(login, "api-gateway")],
+  );
+  const [member, long] = repositoryGroups(state).map((g) => g.head);
+  expect(member?.labels).toEqual(["Sign in with SSO", "Ask an owner of ledger-dev"]);
+  // The label said is whole, cut with an ellipsis on the screen; its place holds the accounts list's 16 characters.
+  expect(long?.labels).toEqual(["Sign in with SSO", "Unsuspend it on GitHub", "Install on northwind-platfo"]);
 });
 
 test("a group head says its account's cause and its one fix, the accounts list's", () => {
@@ -664,14 +642,8 @@ test("a group head says its account's cause and its one fix, the accounts list's
       href: "https://github.com/orgs/ledger-ops/people?query=role%3Aowner",
     },
   });
-  // The line said is held with the others: a cause coming or going moves nothing.
-  expect(suspended?.held).toEqual([
-    "",
-    "Asks you to sign in with SSO.",
-    "Suspended.",
-    "No longer installed.",
-    "Suspended by mira.",
-  ]);
+  // Only the line said: a head holds no other cause's.
+  expect(suspended).not.toHaveProperty("held");
 });
 
 test("an account with no repository has no group; a repository on no account reached is grouped under its owner", () => {
@@ -680,9 +652,11 @@ test("an account with no repository has no group; a repository on no account rea
     repo("ledger-dev", "billing"),
   ]);
   expect(groups(state).map((g) => [g.key, g.head.cause, g.head.fix, g.repos])).toEqual([
-    ["ledger-dev", "", null, ["ledger-dev/billing"]],
-    ["acme", "", null, ["acme/site"]],
+    ["ledger-dev", null, null, ["ledger-dev/billing"]],
+    ["acme", null, null, ["acme/site"]],
   ]);
+  // Under its owner, no account reached: no fix can show, so its place holds none.
+  expect(groups(state)[1]?.head.labels).toEqual([]);
 });
 
 // ---- The account's switch and count (ADR 0082) ----
@@ -723,18 +697,13 @@ test("an account with none reviewed says so, and its switch is off", () => {
   expect(fernhill?.head.count).toBe("None of 2 reviewed");
 });
 
-test("a group's count holds the place of every count its total can say", () => {
+test("a group's count is its own words, never held at every count its total can say (ADR 0086)", () => {
   const state = signedIn({ accounts: [org("fernhill", null, false)] }, [
     repo("fernhill", "api"),
     off("fernhill", "web"),
     repo("fernhill", "cli"),
   ]);
-  expect(repositoryGroups(state)[0]?.head.counts).toEqual([
-    "None of 3 reviewed",
-    "1 of 3 reviewed",
-    "2 of 3 reviewed",
-    "All 3 reviewed",
-  ]);
+  expect(repositoryGroups(state)[0]?.head).not.toHaveProperty("counts");
 });
 
 test("a group of one has its count and the account's switch on its head, as every group (ADR 0083, round 4)", () => {
@@ -748,7 +717,6 @@ test("a group of one has its count and the account's switch on its head, as ever
     command: { type: "repos.setEnabled", repoIds: [repositoryId("sasensi/ledger-api")] },
   });
   expect(mine?.head.count).toBe("1 repository, not reviewed");
-  expect(mine?.head.counts).toEqual(["1 repository, not reviewed", "1 repository, reviewed"]);
 });
 
 test("the count and the switch are of the whole account, whatever the rows shown", () => {

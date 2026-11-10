@@ -3,11 +3,37 @@
 // login" and "Review this pull request" as ghosts read as text links between Back and the primary).
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { emptyReview, type State } from "@lookover/contracts";
-import { renderToStaticMarkup } from "react-dom/server";
-import { HeldDetail } from "./common.tsx";
+import { type Change, emptyReview, type Review, type State } from "@lookover/contracts";
 import { app, change, screen, world } from "./repositories.test-support.tsx";
+import { job } from "./review.test-support.tsx";
 import { AgentActs, StepFirstReview } from "./setup.tsx";
+
+/** Reviewed by itself on its head: a round posted there, clean, its job done. */
+const postedClean = (c: Change): Review => ({
+  ...emptyReview(c.id, c.openedAt),
+  job: job("done", { sha: c.headSha }),
+  loop: "settled",
+  rounds: [
+    {
+      n: 1,
+      sha: c.headSha,
+      base: null,
+      reviewer: "claude",
+      secondFind: null,
+      confirmer: null,
+      confirmFallback: null,
+      confirmFailure: null,
+      ruledOut: [],
+      startedAt: c.openedAt,
+      endedAt: c.openedAt + 60_000,
+      raised: 0,
+      verifiedFixed: 0,
+      open: 0,
+      steps: [],
+      sessions: [],
+    },
+  ],
+});
 
 /** Each button's variant and label in `html`, in order: ["ghost", "Back"]. */
 const buttons = (html: string) =>
@@ -41,19 +67,36 @@ test("first review's footer: Back a ghost, the preview a secondary, Review this 
   expect(shown.filter(([variant]) => variant === "ghost")).toEqual([["ghost", "Back"]]);
 });
 
-test("first review's line under the list never leaves one word alone: each sentence its own block, balanced (round 6)", () => {
+test("first review's line is under the bar, the step's end, as tall as it says: each sentence its own block, balanced (round 6, ADR 0086)", () => {
   const css = readFileSync(new URL("../styles/app.css", import.meta.url), "utf8");
   expect(css).toMatch(/\n\.first-reviewed-line\s*\{[^}]*text-wrap:\s*balance;/);
-  // No break in the words: the sentences are parts, each drawn as a block of its own, in every copy held.
+  // No break in the words: the sentences are parts, each drawn as a block of its own.
   expect(css).not.toMatch(/pre-line/);
-  const html = renderToStaticMarkup(
-    <HeldDetail shown={["One by itself.", "Go on."]} details={[[], ["One by itself.", "Go on."]]} />,
-  );
-  expect(html).toContain(
-    '<span><span class="held-sentence">One by itself.</span><span class="held-sentence">Go on.</span></span>',
-  );
   const system = readFileSync(new URL("../styles/system.css", import.meta.url), "utf8");
-  expect(system).toMatch(/\n\.held-sentence\s*\{[^}]*display:\s*block;/);
+  expect(system).toMatch(/\n\.line-sentence\s*\{[^}]*display:\s*block;/);
+  const [reviewed, left] = [change("sasensi/ledger-api", 152), change("sasensi/ledger-api", 148)];
+  const state: State = {
+    ...world(),
+    changes: { [reviewed.id]: reviewed, [left.id]: left },
+    reviews: {
+      [reviewed.id]: postedClean(reviewed),
+      [left.id]: emptyReview(left.id, left.openedAt),
+    },
+  };
+  const html = screen(app(), state, StepFirstReview);
+  const [, under] = html.split('<div class="setup-acts first-review-acts">');
+  // Under the bar, after Continue, holding no copy of another line.
+  expect(under?.split("Continue")[1]).toContain(
+    '<p class="t-small first-reviewed-line"><span class="line-sentence">Lookover already reviewed sasensi/ledger-api #152 by itself: Clean.</span><span class="line-sentence">Go on, or review sasensi/ledger-api #148 too.</span></p>',
+  );
+  expect(html).not.toContain("held-detail");
+  // Nothing reviewed: no line at all.
+  const fresh: State = {
+    ...world(),
+    changes: { [left.id]: left },
+    reviews: { [left.id]: emptyReview(left.id, left.openedAt) },
+  };
+  expect(screen(app(), fresh, StepFirstReview)).not.toContain("first-reviewed-line");
 });
 
 test("a reviewed row's chip ends its small line, and Open on GitHub stands alone at its right, centred on both lines", () => {
@@ -77,10 +120,33 @@ test("a reviewed row's chip ends its small line, and Open on GitHub stands alone
   };
   const html = screen(app(), state, StepFirstReview);
   // Held, hidden, at the title's end on a row that can be picked, so a review landing wraps nothing anew; the small
-  // line keeps its whole column (at its end the chip wrapped onto a third line: "· 6 min ago" leaves no room).
-  expect(html).toMatch(/<b>[^<]+<span class="first-row-chip" aria-hidden="true">/);
-  expect(html).toMatch(/<span class="t-small">[^<]+<\/span>/);
+  // line keeps its whole column (at its end the chip wrapped onto a third line: "· 6 min ago" leaves no room). The
+  // place wraps with the title's last character (its last word with it), never onto a line of its own (row 52: an
+  // empty line under the title); the rest keeps every break, so a title with no space wraps in its column.
   expect(html).toMatch(
-    /<span class="first-row-reviewed" aria-hidden="true"><a [^>]*>.*?Open on GitHub<\/a><\/span>/,
+    /<b>Change 14<span class="first-row-title-end">8<span class="first-row-chip" aria-hidden="true">/,
   );
+  expect(block(".first-row-title-end")).toMatch(/white-space:\s*nowrap;/);
+  // A word wider than the column (a long name, a path) breaks inside rather than run past it.
+  expect(block(".first-row > .check > span > b")).toMatch(/overflow-wrap:\s*anywhere;/);
+  // Balanced when it wraps: its last character, with no space to break at, never alone under a full line.
+  expect(block(".first-row > .check > span > b")).toMatch(/text-wrap:\s*balance;/);
+  expect(html).toMatch(/<span class="t-small">[^<]+<\/span>/);
+  // Its words at the desktop width; on a phone the Icon button, a small square named by its words and said on hover by
+  // its tip, ending at its right edge (design-system.md "Icon button"): one of the two laid out at a time.
+  expect(html).toMatch(
+    /<span class="first-row-reviewed" aria-hidden="true"><span class="first-row-link-words"><a [^>]*>.*?Open on GitHub<\/a><\/span><span class="first-row-link-icon"><span class="anchor tip-end"><a class="btn btn-ghost btn-sm btn-square" aria-label="Open on GitHub"[^>]*>.*?<\/a><span class="tip" role="tooltip">Open on GitHub<\/span><\/span><\/span><\/span>/,
+  );
+  // On a phone the link keeps its column: no rule moves it under the small line, where it held a button's height.
+  expect(css).not.toMatch(/\.first-row-reviewed\s*\{[^}]*grid-area:\s*3 \/ 2;/);
+  expect(block(".first-row-link-icon")).toMatch(/display:\s*none;/);
+  const phone =
+    css.match(/@media \(max-width: 640px\) \{\n {2}\.first-row-link-words[\s\S]*?\n\}\n/)?.[0] ?? "";
+  expect(phone).toMatch(/\.first-row-link-words\s*\{\s*display:\s*none;/);
+  expect(phone).toMatch(/\.first-row-link-icon\s*\{\s*display:\s*flex;/);
+  // The square and the tip at the right are system.css's, not copies here.
+  expect(css).not.toMatch(/width:\s*var\(--h-sm\);\s*padding:\s*0;/);
+  expect(css).not.toMatch(/transform-origin:\s*bottom right;/);
+  // No copy of system.css's visually hidden rule.
+  expect(css).not.toMatch(/clip-path:\s*inset\(50%\)/);
 });

@@ -96,9 +96,22 @@ export interface Connection {
    */
   accounts: ConnectionAccount[];
   /**
-   * The person's accounts the shared App doesn't reach (ADR 0067), always empty before a sign-in: their own account
-   * first when the App isn't installed there, then the organisations their own `gh` names, in `gh`'s order. None of
-   * them is in `accounts`; one reached leaves this list.
+   * Whether the person's installations have been listed under the current sign-in (ADR 0086): false from the moment a
+   * sign-in is kept (and at each start) until a listing under it answers (the setup's install check, discovery, a
+   * Reconnect, the start's own), true from then on, even when it found nothing new. Always false before a sign-in.
+   * While false, Lookover is still looking: no account is said to be not reached.
+   */
+  listed: boolean;
+  /**
+   * What refused the last listing of the person's installations while not `listed` (ADR 0086), whatever the
+   * repositories' polls say meanwhile: the app says it in place of looking. Null once a listing answers, at each new
+   * sign-in, and while no listing was refused.
+   */
+  listingCause: ConnectionCause | null;
+  /**
+   * The person's accounts the shared App doesn't reach (ADR 0067), always empty before a sign-in and until `listed`:
+   * their own account first when the App isn't installed there, then the organisations their own `gh` names, in
+   * `gh`'s order. None of them is in `accounts`; one reached leaves this list.
    */
   unreached: UnreachedAccount[];
   /**

@@ -21,7 +21,10 @@ const row = z.object({ seq: z.int(), body: z.string() });
 const rows = z.array(row);
 const lastRow = z.object({ last: z.int() });
 
-/** Written by `append` below from a typed body: reading it back is reading our own JSON. */
+/**
+ * Written by `append` below from a typed body, read back as written: an older version may have written it in another
+ * shape, which the service's start reads through the state's schema rather than trust (ADR 0085).
+ */
 function parse(r: z.infer<typeof row>): Event {
   const body: EventBody = JSON.parse(r.body);
   return { ...body, seq: r.seq };

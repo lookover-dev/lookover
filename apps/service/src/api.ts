@@ -34,6 +34,7 @@ import { streamSSE } from "hono/streaming";
 import type { z } from "zod";
 import type { AgentOutcome } from "./coding-agent.ts";
 import { request } from "./commands.ts";
+import { CSP } from "./csp.ts";
 import type { DemoRoom, InjectRefusal } from "./demo/driver.ts";
 
 import type { LogReader } from "./log-sink.ts";
@@ -41,19 +42,6 @@ import type { Room, SettingsAnswer } from "./room.ts";
 import { described } from "./said.ts";
 import type { Timers } from "./timers.ts";
 import { serveWebFiles, type WebFiles } from "./web-files.ts";
-
-const CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "frame-ancestors 'self'",
-  "form-action 'self'",
-].join("; ");
 
 /** `Sec-Fetch-Site` values a browser sends for the app's own requests and for a typed URL. */
 const OWN_SITE = new Set(["same-origin", "none"]);

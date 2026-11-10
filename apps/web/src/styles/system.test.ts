@@ -2,7 +2,7 @@
 // written into a data-URI's SVG (`stroke='%23ACA69B'`) is one theme's grey in the other (row 47's review). The files
 // are read once, and every rule is found by one helper, by its selector list and the at-rule it sits in.
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 type File = "system.css" | "app.css" | "tokens.css";
 
@@ -23,9 +23,9 @@ interface Rule {
 
 const selectorList = (prelude: string) => prelude.split(",").map((s) => s.trim().replace(/\s+/g, " "));
 
-/** Every rule of a file, in its order, its comments taken out; an at-rule's own block is no rule. */
-function parse(file: File): Rule[] {
-  const css = CSS[file].replace(/\/\*[\s\S]*?\*\//g, "");
+/** Every rule of a file (or of `text`, a part of it), in its order, its comments taken out; an at-rule's own block is no rule. */
+function parse(file: File, text: string = CSS[file]): Rule[] {
+  const css = text.replace(/\/\*[\s\S]*?\*\//g, "");
   const rules: Rule[] = [];
   const open: string[] = [];
   let start = 0;
@@ -48,7 +48,7 @@ function parse(file: File): Rule[] {
   return rules;
 }
 
-const RULES: Rule[] = (["system.css", "app.css"] as const).flatMap(parse);
+const RULES: Rule[] = (["system.css", "app.css"] as const).flatMap((file) => parse(file));
 
 /**
  * The declarations of the first rule whose selector list is exactly `selector` (system.css unless `file` says), outside
@@ -77,6 +77,243 @@ test("no data-URI in the app's CSS carries a colour of its own", () => {
     ).toEqual([]);
 });
 
+// Motion is on tokens (ADR 0087): every duration a `--d-*`, a loop's `--loop-*` or the tooltip's `--delay-tip`, every
+// easing an `--e-*`. Two places are not the app's to time: the eyes' region, written by `bun run brand` from
+// @lookover/brand (ADR 0063), and the reduced-motion rule, which turns motion off whatever it is: only a rule inside
+// `prefers-reduced-motion: reduce`, never one that asks for motion (`no-preference`).
+const BRAND_REGION = /\/\* Written by `bun run brand`[\s\S]*?\/\* End of what `bun run brand` writes\. \*\//;
+const REDUCED = /prefers-reduced-motion:\s*reduce\b/;
+const reduced = (r: Rule) => r.at !== null && REDUCED.test(r.at);
+const MOTION_RULES = (["system.css", "app.css"] as const)
+  .flatMap((file) => parse(file, CSS[file].replace(BRAND_REGION, "")))
+  .filter((r) => !reduced(r));
+
+/** Each `property: value` of a rule's body. */
+const declarations = (body: string) =>
+  body
+    .split(";")
+    .map((d) => d.trim())
+    .filter((d) => d.includes(":"))
+    .map((d) => {
+      const colon = d.indexOf(":");
+      return {
+        property: d.slice(0, colon).trim(),
+        value: d
+          .slice(colon + 1)
+          .trim()
+          .replace(/\s*!important$/, ""),
+      };
+    });
+
+/** A value's comma-separated layers, a comma inside parentheses kept with its layer. */
+function layers(value: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === "(") depth++;
+    else if (value[i] === ")") depth--;
+    else if (value[i] === "," && depth === 0) {
+      out.push(value.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  out.push(value.slice(start).trim());
+  return out;
+}
+
+/** What each motion property's every layer must be; a shorthand names a duration and an easing among its words. */
+const ON_TOKENS: Record<string, (layer: string) => boolean> = {
+  "": (layer) => /var\(--(d|loop)-[\w-]+\)/.test(layer) && /var\(--e-[\w-]+\)/.test(layer),
+  "-duration": (layer) => /^var\(--(d|loop)-[\w-]+\)$/.test(layer),
+  "-delay": (layer) => /^var\(--(d|delay)-[\w-]+\)$/.test(layer),
+  "-timing-function": (layer) => /^var\(--e-[\w-]+\)$/.test(layer),
+};
+
+test("every transition and animation in the app's CSS names a duration token and an easing token (ADR 0087)", () => {
+  const found = MOTION_RULES.flatMap(({ file, selectors, body }) =>
+    declarations(body)
+      .filter(
+        ({ property, value }) => /^(transition|animation)(-[a-z-]+)?$/.test(property) && value !== "none",
+      )
+      .filter(({ property, value }) => {
+        const onTokens = ON_TOKENS[property.replace(/^(transition|animation)/, "")];
+        return onTokens !== undefined && !layers(value).every(onTokens);
+      })
+      .map(({ property, value }) => `${file} ${selectors.join(", ")}: ${property}: ${value}`),
+  );
+  expect(found).toEqual([]);
+  // The test reads the motion it checks: the menus' entry is among its declarations.
+  expect(
+    MOTION_RULES.some((r) => r.selectors.includes(".layer") && /animation:\s*layer-in/.test(r.body)),
+  ).toBe(true);
+});
+
+test("the motion check sets aside the reduced-motion rule and nothing else (ADR 0087)", () => {
+  // The cut is there: the rule that turns motion off is in system.css, and only it is set aside.
+  const cut = RULES.filter(reduced);
+  expect(cut.length).toBeGreaterThan(0);
+  expect(
+    cut.every((r) =>
+      r.selectors.every((s) => ["html", "*", "*::before", "*::after", "::backdrop"].includes(s)),
+    ),
+  ).toBe(true);
+  // A rule that asks for motion is checked like any other.
+  const asks = parse(
+    "system.css",
+    "@media (prefers-reduced-motion: no-preference) { .x { transition: opacity 1s; } }",
+  );
+  expect(asks.filter(reduced)).toEqual([]);
+});
+
+test("no raw duration or cubic-bezier in the app's CSS: they are tokens.css's (ADR 0087)", () => {
+  const raw = /(?<![\w.-])\d*\.?\d+m?s\b|cubic-bezier/;
+  const found = MOTION_RULES.flatMap(({ file, selectors, body }) =>
+    declarations(body)
+      .filter(({ value }) => raw.test(value))
+      .map(({ property, value }) => `${file} ${selectors.join(", ")}: ${property}: ${value}`),
+  );
+  expect(found).toEqual([]);
+  // The loops and the tooltip's delay are tokens; the eyes' 1.8 s stays in the region `bun run brand` writes.
+  for (const token of ["--loop-pulse", "--loop-shimmer", "--loop-highlight", "--delay-tip", "--e-linear"])
+    expect(CSS["tokens.css"]).toMatch(new RegExp(`${token}:\\s*[^;]+;`));
+  expect(CSS["system.css"].match(BRAND_REGION)?.[0]).toContain("1.8s");
+});
+
+/**
+ * A motion timed in code: a style's `transition`/`animationX` key, `.style.transition`, `setProperty("transition", …)`,
+ * or a Web Animation whose duration is a number written there (`.animate(kf, { duration: 200 })`, `.animate(kf, 200)`);
+ * a Web Animation reads its duration from a token, through `getComputedStyle`.
+ */
+const INLINE_MOTION = new RegExp(
+  [
+    /\b(transition|animation)([A-Z][A-Za-z]*)?\s*:/,
+    /\.style\.(transition|animation)/,
+    /\.setProperty\(\s*["'`](transition|animation)/,
+    /\.animate\([^;]*?(\bduration\s*:\s*[\d.]|,\s*[\d.]+\s*\))/,
+  ]
+    .map((r) => r.source)
+    .join("|"),
+  "g",
+);
+
+test("the inline-motion scan catches each way code can time a motion", () => {
+  for (const bad of [
+    "<div style={{ transition: 'opacity 1s' }} />",
+    "el.style.animation = 'x 1s';",
+    'el.style.setProperty("transition", "opacity 1s");',
+    "el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: 'ease-in' });",
+    "el.animate({ opacity: [0, 1] }, 180);",
+  ])
+    expect([...bad.matchAll(INLINE_MOTION)].length).toBe(1);
+  // A duration read from a token is not caught.
+  expect("el.animate(frames, { duration: ms(getComputedStyle(el).getPropertyValue('--d-2')) });").not.toMatch(
+    INLINE_MOTION,
+  );
+});
+
+test("no component of the app times a motion inline: transitions and animations are the CSS's (ADR 0087)", () => {
+  const src = new URL("../", import.meta.url);
+  const files = readdirSync(src, { recursive: true, encoding: "utf8" }).filter(
+    // Test code (a test, its support: `dom.test-support.tsx` runs an exit by hand on happy-dom) is no component.
+    (f) => /\.tsx?$/.test(f) && !/\.test(-support)?\.tsx?$/.test(f) && !f.endsWith(".d.ts"),
+  );
+  expect(files.filter((f) => f.endsWith(".tsx")).length).toBeGreaterThan(20);
+  expect(files.filter((f) => f.endsWith(".ts")).length).toBeGreaterThan(20);
+  const inline = INLINE_MOTION;
+  const found = files.flatMap((f) =>
+    [...readFileSync(new URL(f.replaceAll("\\", "/"), src), "utf8").matchAll(inline)].map(
+      (m) => `${f}: ${m[0]}`,
+    ),
+  );
+  expect(found).toEqual([]);
+});
+
+test("no timer in the design system times a motion: the presence waits on the animations themselves (ADR 0087)", () => {
+  const ui = new URL("../ui/", import.meta.url);
+  // Sorted: readdirSync's order is the file system's, not the same on Linux as on Windows.
+  const files = readdirSync(ui)
+    .filter((f) => /\.tsx?$/.test(f) && !/\.test(-support)?\.tsx?$/.test(f))
+    .sort();
+  expect(files).toContain("presence.tsx");
+  const timers = files.flatMap((f) =>
+    [...readFileSync(new URL(f, ui), "utf8").matchAll(/\bset(Timeout|Interval)\([^;]*/g)].map(
+      (m) => `${f}: ${m[0]}`,
+    ),
+  );
+  // A toast's own life, 5 s on screen, is no motion: its exit is the presence's. The presence's one safety bound, read
+  // from the longest motion token, times no motion either: it ends a leave a paused animation would hold forever.
+  expect(timers).toEqual([
+    "layers.tsx: setTimeout(() => dismiss(id), 5000)",
+    "presence.tsx: setTimeout(check, left)",
+    "presence.tsx: setTimeout(check, limit)",
+  ]);
+  // That bound is the longest duration token's.
+  const tokens = CSS["tokens.css"];
+  const durations = [...tokens.matchAll(/(--d-\d+):\s*(\d+)ms;/g)].map((m) => [m[1], Number(m[2])] as const);
+  const longest = durations.reduce((a, b) => (b[1] > a[1] ? b : a));
+  expect(readFileSync(new URL("presence.tsx", ui), "utf8")).toContain(`const LONGEST = "${longest[0]}";`);
+});
+
+test("what leaves ends on its leaving class: fade out over --d-2, easing in, no fill mode holding the last frame", () => {
+  expect(rule(".leaving")).toMatch(/pointer-events:\s*none;/);
+  for (const [selector, name] of [
+    [".layer.leaving", "layer-out"],
+    [".scrim.leaving", "fade-out"],
+    [".toast.leaving", "toast-out"],
+  ] as const) {
+    expect(rule(selector)).toContain(`animation: ${name} var(--d-2) var(--e-in);`);
+    expect(rule(selector)).toMatch(/opacity:\s*0;/);
+  }
+  // The toast leaves the way it came in: back out to the right.
+  expect(rule(".toast.leaving")).toMatch(/transform:\s*translateX\(16px\);/);
+  expect(`${CSS["system.css"]}${CSS["app.css"]}`).not.toMatch(/\bforwards\b/);
+  // Nothing in the app's CSS still keys an exit on the toast's old class.
+  expect(rulesWhere((s) => s.includes(".toast.out"))).toEqual([]);
+});
+
+test("a row and its section, a notice, the band and its lines leave over --d-2, easing in, on their leaving class", () => {
+  for (const [selector, name, file] of [
+    [".rowi.leaving", "row-out", "system.css"],
+    [".grp.leaving", "fade-out", "system.css"],
+    [".banner.leaving", "fade-out", "system.css"],
+    [".alerts.leaving", "band-out", "system.css"],
+    [".alert.leaving", "fade-out", "system.css"],
+    [".departed.leaving", "fade-out", "app.css"],
+    [".departed-list li.leaving", "fade-out", "app.css"],
+  ] as const) {
+    expect(rule(selector, { file })).toContain(`animation: ${name} var(--d-2) var(--e-in);`);
+    expect(rule(selector, { file })).toMatch(/opacity:\s*0;/);
+  }
+  // Each leaves the way it came: a row back up the 6 px it rose, the band back down the 6 px it slid up.
+  expect(rule(".rowi.leaving")).toMatch(/transform:\s*translateY\(-6px\);/);
+  expect(rule(".alerts.leaving")).toMatch(/transform:\s*translateY\(6px\);/);
+  // The band's exit comes after its entry's rule of the same weight, so a band that slid in leaves the same way.
+  const system = CSS["system.css"];
+  expect(system.indexOf("\n.alerts.leaving {")).toBeGreaterThan(system.indexOf("\n.alerts[data-arrived] {"));
+  // A section that comes with its first row fades in, behind the gate.
+  expect(rule(".grp.new[data-arrived]")).toContain("animation: fade var(--d-4) var(--e-out);");
+});
+
+test("a fresh row rises in only behind the first-paint gate, never on the page's first paint", () => {
+  expect(rule(".rowi.new[data-arrived]")).toMatch(/animation:\s*row-in /);
+  expect(rulesWhere((s) => s === ".rowi.new")).toEqual([]);
+});
+
+test("the alert band slides in only behind the first-paint gate, never on the page's first paint", () => {
+  expect(rule(".alerts[data-arrived]")).toMatch(/animation:\s*page-in /);
+  expect(rulesWhere((s) => s === ".alerts").filter((r) => /animation/.test(r.body))).toEqual([]);
+});
+
+test("a group's rows come in only by its fold, rising 4 px, and leave the way they came, never by height", () => {
+  expect(rule(".fold-row[data-unfolded]")).toContain("animation: fold-in var(--d-3) var(--e-out);");
+  expect(rulesWhere((s) => s === ".fold-row").filter((r) => /animation/.test(r.body))).toEqual([]);
+  expect(rule(".fold-row.leaving")).toContain("animation: fold-out var(--d-2) var(--e-in);");
+  expect(rule(".fold-row.leaving")).toMatch(/opacity:\s*0;/);
+  expect(rule(".fold-row.leaving")).toMatch(/transform:\s*translateY\(4px\);/);
+  expect(rulesWhere((s) => s.includes(".fold-row")).filter((r) => /height/.test(r.body))).toEqual([]);
+});
+
 test("a state square draws no tile in any state: each state is its icon in its colour (round 5)", () => {
   // The square itself: no tile, so a done Claude and a Codex to do read as one pair.
   expect(rule(".engine .lg")).toMatch(/background:\s*none;/);
@@ -99,28 +336,50 @@ test("Your coding agent's rows share their columns, so each row's text is as wid
   expect(rule(".agent-rows > .engine")).toMatch(/grid-template-columns:\s*subgrid;/);
 });
 
-test("an agent row's held copies sit in its own title, sentence and line tracks, so nothing moves (#642)", () => {
-  // Three tracks, each as tall as the tallest piece any detail puts in it; no flexible track taking the room held.
+test("an agent row lays its title, sentence and line in tracks of their own, no room held for another detail", () => {
+  // Three tracks, each as tall as the piece it shows; no flexible track taking room.
   expect(rule(".agent-rows > .agent-row")).toMatch(/grid-template-rows:\s*auto auto auto;/);
   expect(rule(".agent-rows > .agent-row")).toMatch(/row-gap:\s*0;/);
-  // The held copies are no boxes of their own: their pieces are the row's grid items, hidden.
-  expect(rule(".agent-held")).toMatch(/display:\s*contents;[^}]*visibility:\s*hidden;/);
-  expect(rule(".agent-held-one")).toMatch(/display:\s*contents;/);
-  // Each piece, shown or held, in its track: the title, then the sentence and the line across the text and action
-  // columns.
-  expect(rule(".agent-row > b, .agent-held-one > b")).toMatch(/grid-area:\s*1 \/ 2;/);
-  expect(rule(".agent-row > .substep-detail, .agent-held-one > .substep-detail")).toMatch(
-    /grid-column:\s*2 \/ -1;[^}]*grid-row:\s*2;/,
-  );
-  expect(rule(".agent-row > .agent-line, .agent-held-one > .agent-line")).toMatch(
-    /grid-column:\s*2 \/ -1;[^}]*grid-row:\s*3;/,
-  );
-  // On a phone the action under the line, in a fourth track: no room held for it any more.
+  // The title, then the sentence and the line across the text and action columns.
+  expect(rule(".agent-row > b")).toMatch(/grid-area:\s*1 \/ 2;/);
+  expect(rule(".agent-row > .substep-detail")).toMatch(/grid-column:\s*2 \/ -1;[^}]*grid-row:\s*2;/);
+  expect(rule(".agent-row > .agent-line")).toMatch(/grid-column:\s*2 \/ -1;[^}]*grid-row:\s*3;/);
+  // No hidden copy of another detail (ADR 0086).
+  expect(CSS["system.css"]).not.toContain(".agent-held");
+  // On a phone the action under the line, in a fourth track.
   const phone = rule(".agent-rows > .agent-row", { at: PHONE });
   expect(phone).toMatch(/grid-template-rows:\s*auto auto auto auto;/);
   expect(phone).not.toContain("1fr");
   expect(rule(".agent-row > .agent-act", { at: PHONE })).toMatch(/grid-row:\s*4;/);
-  for (const { body } of rulesWhere((s) => s === ".agent-held")) expect(body).not.toContain("padding-bottom");
+});
+
+test("Try it, the posting step, a held rule's why and a field's help hold no line they may not fill (ADR 0086)", () => {
+  // Their text takes the lines it says; the layout pass in `proof` measures that nothing ends on held room.
+  for (const selector of [
+    ".try-it .try-next",
+    ".steplist .two-lines",
+    ".rule-held",
+    ".field .help",
+    ".field .err",
+  ])
+    for (const file of ["system.css", "app.css"] as const)
+      for (const { body } of rulesWhere((s) => s === selector, file))
+        expect(body).not.toMatch(/(min-)?height:[^;]*lh/);
+  expect(rule(".steplist li:has(> .two-lines)", { file: "app.css" })).not.toMatch(/1lh\s+1lh/);
+  // No hidden copy holds their room.
+  expect(CSS["system.css"]).not.toContain(".field-note");
+  expect(CSS["app.css"]).not.toContain(".rule-held.room");
+});
+
+test("setup's footer line, its refusal and First review's line hold no line, and no hidden copy holds setup's room (ADR 0086)", () => {
+  for (const file of ["system.css", "app.css"] as const)
+    for (const { selectors, body } of rulesWhere(
+      (s) => /\.(setup-said|refused-line|first-reviewed-line|at-login-line|substep-detail)\b/.test(s),
+      file,
+    ))
+      expect(`${selectors.join(", ")}: ${body}`).not.toMatch(/(min-)?height:\s*(calc\([^;]*em|[^;]*lh)/);
+  for (const gone of [".held-detail", ".held-room", ".background-hold", ".setup-said.held"])
+    for (const file of ["system.css", "app.css"] as const) expect(CSS[file]).not.toContain(gone);
 });
 
 test("the installs are rows of one card: square, title and action on one line, a hairline between rows (round 6)", () => {
@@ -143,12 +402,16 @@ test("a setup sub-step: square, title and action on one line, its detail and lis
   expect(rule(".substep-below")).toMatch(/grid-column:\s*2 \/ -1;/);
 });
 
-test("setup's accounts card ends as it starts: Another account holds no blank line, the list's band trimmed (round 6)", () => {
-  // Round 5: the last row's held second line and its band's padding left the card about twice as deep under the list
-  // as over "Your accounts" (screen 07).
-  expect(rule('.accounts-list > .account-row[data-state="another"] .held-detail')).toMatch(
-    /min-height:\s*0;/,
+/** Whether any rule of the accounts list holds a line count: no row holds a line it doesn't show (ADR 0086). */
+const accountsHoldLines = () =>
+  rulesWhere((sel) => /\.account-|\.accounts-list/.test(sel)).some(({ body }) =>
+    /min-height:\s*[\d.]+lh/.test(body),
   );
+
+test("setup's accounts card ends as it starts: no row holds a blank line, the list's band trimmed (round 6)", () => {
+  // Round 5: the last row's held second line and its band's padding left the card about twice as deep under the list
+  // as over "Your accounts" (screen 07). Row 52: every row's held second line went too; proof's layout pass measures it.
+  expect(accountsHoldLines()).toBe(false);
   // The sum its comment names: the last band's `--s-2` and `--s-1` of the card's step.
   expect(rule(".substep-below > .accounts-list")).toMatch(
     /margin-bottom:\s*calc\(-1 \* \(var\(--s-2\) \+ var\(--s-1\)\)\);/,
@@ -211,6 +474,24 @@ test("a review's page: pending steps and a finding's meta in --ink-2, the meta a
   expect(rule(".finding-meta")).toMatch(/gap:\s*var\(--s-1\);/);
 });
 
+test("a step's new mark and the verdict come in only behind the first-paint gate, never on the page's first paint", () => {
+  expect(rule(".steplist .step-mark[data-arrived]", { file: "app.css" })).toMatch(
+    /animation:\s*step-mark-in var\(--d-2\) var\(--e-out\);/,
+  );
+  expect(CSS["app.css"]).toMatch(
+    /@keyframes step-mark-in \{\s*from \{\s*opacity: 0;\s*transform: scale\(0\.9\);/,
+  );
+  expect(rule(".verdict[data-arrived]", { file: "app.css" })).toMatch(
+    /animation:\s*page-in var\(--d-4\) var\(--e-out\);/,
+  );
+  // The mark's wrapper moves, never the eyes' own reading, and nothing moves without the gate's mark.
+  expect(
+    rulesWhere((s) => s === ".steplist .step-mark" || s === ".verdict").filter((r) =>
+      /animation/.test(r.body),
+    ),
+  ).toEqual([]);
+});
+
 test("a needs-you finding among others is marked by its edge in the needs tone, never a chip (round 6)", () => {
   expect(rule(".finding.need")).toMatch(/^\s*border-color:\s*var\(--acc\);\s*$/);
 });
@@ -230,17 +511,31 @@ test("Repositories' column heads stick under its bar, and its group heads under 
   expect(rule(".repos-bar")).toMatch(/position:\s*sticky;\s*top:\s*var\(--h-top\)/);
   expect(rule(".repos-bar + .tbl.repos")).toContain("--repos-stuck: calc(var(--h-top) + var(--h-repos-bar))");
   expect(rule(".tbl.repos thead th")).toMatch(/position:\s*sticky;\s*top:\s*var\(--repos-stuck\)/);
-  expect(rule(".tbl.repos .repos-group:not(.repos-group-narrow) > *")).toContain(
+  expect(rule(".tbl.repos .repos-group:not(.repos-group-more) > *")).toContain(
     "top: calc(var(--repos-stuck) + var(--h-thead) - var(--line-w))",
   );
 });
 
-test("a group head's count wraps rather than take the account's width, what the filter shows on a line of its own", () => {
+test("a group head's second row scrolls with its group at every width, and no head holds a height it doesn't show", () => {
+  // Row 52: every wide head held at 52 px kept a button's row on heads showing none, and a cause wrapping to two lines
+  // still showed from under a later head. Only the first row sticks; the cause, its fix and the filter's line scroll.
+  const second = rulesWhere((s) => /(?<!:not\()\.repos-group-more/.test(s));
+  expect(second.some(({ body }) => /sticky|display:\s*none/.test(body))).toBe(false);
+  expect(
+    rulesWhere((s) => s.includes(".repos-group")).some(({ body }) => /(^|[^-])height:\s*calc/.test(body)),
+  ).toBe(false);
+});
+
+test("an account row's action place is pinned to its top, so a detail growing a line moves no button", () => {
+  // Row 52: centred on the login and its detail, a button moved half a line under the pointer when its detail grew.
+  expect(rule(".account-row")).toMatch(/align-items:\s*start;/);
+});
+
+test("a group head's count wraps rather than take the account's width", () => {
   // Just past a phone's width the first column is narrow: a count held at its longest on one line left the account
   // none (Lookover's F4 on round 5).
   for (const { body } of rulesWhere((s) => s.startsWith(".repos-group-count")))
     expect(body).not.toContain("nowrap");
-  expect(rule(".repos-group-count")).toMatch(/display:\s*grid;/);
   expect(rule(".repos-group-title")).toMatch(
     /grid-template-columns:\s*var\(--chevron\) minmax\(0, max-content\) auto;/,
   );
@@ -296,14 +591,12 @@ test("a group opened by link lands its label under the top bar, the card above i
   expect(rule(".page", { file: "app.css" })).toMatch(/gap:\s*var\(--s-5\);/);
 });
 
-test("Settings' GitHub card ends as it starts: Another account holds no blank line, the list's end a settings row's", () => {
+test("Settings' GitHub card ends as it starts: no row holds a blank line, the list's end a settings row's", () => {
   // Round 5: every row's held second line left a band under Another account, the list's last row, which can show
   // nothing else, about twice the card's top padding (screens 03, 06, 22).
-  // One rule, the accounts list's own, in setup and Settings alike: Another account holds no blank line, so no
-  // Settings-only copy of it (design-system.md "Accounts list").
-  expect(rule('.accounts-list > .account-row[data-state="another"] .held-detail')).toMatch(
-    /min-height:\s*0;/,
-  );
+  // One rule, the accounts list's own, in setup and Settings alike: no row holds a blank line, so no Settings-only
+  // copy of it (design-system.md "Accounts list").
+  expect(accountsHoldLines()).toBe(false);
   expect(CSS["system.css"]).not.toContain(".setcard-accounts .account-row:last-child .held-detail");
   // One shorthand: the card's top, the sides none, the bottom a settings row's under the last row's band.
   expect(rule(".setcard-accounts")).toMatch(
@@ -365,7 +658,9 @@ test("every state chip is one construction: its tone's soft fill, its tone's edg
   const chip = rule(".chip");
   expect(chip).toMatch(/background:\s*var\(--tone-soft\);/);
   // the edge is the tone, half over its own fill: at full strength on dark it drew an outline button
-  expect(chip).toMatch(/border:\s*1px solid color-mix\(in srgb, var\(--tone\) 55%, var\(--tone-soft\)\);/);
+  expect(chip).toMatch(
+    /border:\s*var\(--line-w\) solid color-mix\(in srgb, var\(--tone\) 55%, var\(--tone-soft\)\);/,
+  );
   expect(chip).toMatch(/color:\s*var\(--tone-text\);/);
   const tones = rulesWhere((s) => /^\.c-[a-z]+$/.test(s));
   expect(tones.map((r) => r.selectors.join(","))).toEqual([
@@ -460,6 +755,39 @@ test("what is under a dialog or the status menu is dimmed and out of focus", () 
   }
 });
 
+test("a closed dialog and its backdrop fade out over --d-2, easing in, displayed and on top until the fade ends", () => {
+  const OVERLAY = "@supports (overlay: auto)";
+  // Closed, they hold the end of the fade, the dialog where it came in from, and take no click: the page is live.
+  expect(rule("dialog.dlg:not([open])")).toMatch(
+    /opacity:\s*0;[\s\S]*transform:\s*translateY\(4px\) scale\(0\.98\);/,
+  );
+  expect(rule("dialog.dlg:not([open])::backdrop")).toMatch(/opacity:\s*0;/);
+  expect(rule("dialog.dlg:not([open]), dialog.dlg:not([open])::backdrop")).toMatch(/pointer-events:\s*none;/);
+  for (const [selector, moved] of [
+    ["dialog.dlg", ["opacity", "transform"]],
+    ["dialog.dlg::backdrop", ["opacity"]],
+  ] as const) {
+    // Only where `overlay` transitions: elsewhere a closed dialog still shown would be out of the top layer, without
+    // its backdrop, so there it has no transition and is hidden at once.
+    expect(rule(selector)).not.toMatch(/transition:/);
+    const transition = /transition:([^;]*);/.exec(rule(selector, { at: OVERLAY }))?.[1] ?? "";
+    for (const property of moved) expect(transition).toContain(`${property} var(--d-2) var(--e-in)`);
+    // `display` and `overlay` change at the fade's end: the closed dialog stays shown, and over the page, until then.
+    for (const property of ["display", "overlay"])
+      expect(transition).toContain(`${property} var(--d-2) var(--e-in) allow-discrete`);
+  }
+  // That block holds the dialog's fade and nothing else.
+  expect(RULES.filter((r) => r.at === OVERLAY).map((r) => r.selectors.join(", "))).toEqual([
+    "dialog.dlg",
+    "dialog.dlg::backdrop",
+  ]);
+  // Their entries play only as they open, so a closed dialog's fade is the transition's alone.
+  expect(rule("dialog.dlg[open]")).toContain("animation: dlg-in var(--d-3) var(--e-out);");
+  expect(rule("dialog.dlg[open]::backdrop")).toContain("animation: fade var(--d-3) var(--e-out);");
+  expect(rule("dialog.dlg")).not.toMatch(/animation:/);
+  expect(rule("dialog.dlg::backdrop")).not.toMatch(/animation:/);
+});
+
 test("the alert band is the design system's block, after the pill whose colours it shares, none of it in app.css", () => {
   const system = CSS["system.css"];
   expect(CSS["app.css"]).not.toMatch(/\.alerts?\b/);
@@ -536,4 +864,18 @@ test("a quiet button is an action said in words with its edge: no fill, a contro
   expect(quiet).toMatch(/background:\s*transparent;/);
   expect(quiet).toMatch(/border-color:\s*var\(--line-2\);/);
   expect(quiet).toMatch(/color:\s*var\(--ink-2\);/);
+});
+
+test("under reduced motion nothing moves: no animation, no transition, no smooth scroll (ADR 0087)", () => {
+  const REDUCED = "@media (prefers-reduced-motion: reduce)";
+  // One rule, on everything a page draws: an element, its generated boxes, a dialog's backdrop.
+  const all = rule("*, *::before, *::after, ::backdrop", { at: REDUCED });
+  expect(all).toMatch(/(^|;)\s*animation:\s*none !important;/);
+  expect(all).toMatch(/(^|;)\s*transition:\s*none !important;/);
+  // Cut to nothing, never to 0.01 ms: a transition that still runs still fires its events.
+  expect(all).not.toMatch(/duration|iteration-count/);
+  expect(rule("html", { at: REDUCED })).toMatch(/scroll-behavior:\s*auto;/);
+  // Nothing else in the app's CSS asks for reduced motion: this block is the whole of it.
+  expect(CSS["system.css"].match(/prefers-reduced-motion/g)).toHaveLength(1);
+  expect(CSS["app.css"]).not.toContain("prefers-reduced-motion");
 });

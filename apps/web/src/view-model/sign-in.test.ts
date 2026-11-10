@@ -91,6 +91,8 @@ function at(github: SetupGitHub, connection: Partial<Connection> = {}, repos: Re
       signIn: null,
       person: null,
       accounts: [],
+      listed: true,
+      listingCause: null,
       unreached: [],
       web: GITHUB_WEB,
       since: NOW,
@@ -167,23 +169,6 @@ test("a code still shown past its expiry is being finished, not expired: GitHub 
   expect(view.refused).toBeNull();
 });
 
-test("every text the sign-in row can show is held, the code's with a code as long, so nothing moves when it comes", () => {
-  const start = step(at("start"));
-  const waiting = step(at("start", { signIn: CODE }));
-  // The same texts, the code given added: as long as the one held for it.
-  expect(waiting.signIn.held).toEqual([...start.signIn.held, waiting.signIn.text]);
-  for (const view of [start, waiting]) {
-    expect(view.signIn.held).toContainEqual(view.signIn.text);
-    expect(view.accounts.held).toContainEqual(view.accounts.text);
-  }
-  expect(start.signIn.held).toContainEqual({
-    before: "Enter",
-    command: "XXXX-XXXX",
-    kind: "device-code",
-    after: "on GitHub. It works until 10:15.",
-  });
-});
-
 // ---- how a sign-in ended ----
 
 test("the code gone without a sign-in: ran out at its expiry, else GitHub didn't sign in; cancelled here, nothing said", () => {
@@ -214,18 +199,112 @@ test("a start refused says why on the refusal line", () => {
 
 // ---- signed in ----
 
-test("signed in, the accounts looked for: who you are already, the list offering the installs; nothing else to choose", () => {
-  const view = step(at("waiting-for-install", { person: SASENSI }));
+test("signed in, the accounts not listed yet: your own row looking, no action, no other account; Continue waits", () => {
+  const view = step(at("waiting-for-install", { person: SASENSI, listed: false }));
   expect(view.signIn).toMatchObject({ state: "done", text: "Signed in as sasensi.", code: null });
   expect(view.accounts).toMatchObject({
     state: "busy",
-    text: "Looking for your accounts with Lookover's App.",
+    text: "Looking for your accounts on GitHub.",
   });
-  expect(view.accounts.list.rows.at(-1)?.fix).toEqual({
-    label: "Install on another account",
-    href: "https://github.com/apps/lookover-dev/installations/new",
-  });
+  expect(view.accounts.list.rows.map((r) => [r.name, r.state, r.detail, r.fix, r.status])).toEqual([
+    ["sasensi", "looking", "Looking…", null, null],
+  ]);
+  expect(JSON.stringify(view)).not.toContain("Not installed");
   expect(view.primary).toEqual({ label: "Continue", enabled: false, starts: false });
+});
+
+test("signed in, the listing refused: your own row says the cause and its fix instead of looking (ADR 0086)", () => {
+  // The install check's refusal is the connection's and the listing's: the service sends both.
+  const row = (cause: Connection["cause"]) => {
+    const [only, ...rest] = step(
+      at("waiting-for-install", { person: SASENSI, listed: false, cause, listingCause: cause }),
+    ).accounts.list.rows;
+    expect(rest).toEqual([]);
+    return [only?.name, only?.state, only?.detail, only?.fix, only?.labels];
+  };
+  expect(row({ kind: "unreachable" })).toEqual([
+    "sasensi",
+    "needs-you",
+    "GitHub can't be reached. Lookover tries again every minute.",
+    null,
+    [],
+  ]);
+  const sso = { label: "Sign in with SSO", href: "https://github.com/orgs/ledger-co/sso" };
+  expect(row({ kind: "sso", organisation: "ledger-co", url: sso.href })).toEqual([
+    "sasensi",
+    "needs-you",
+    "ledger-co asks you to sign in with SSO.",
+    sso,
+    [sso.label],
+  ]);
+  const install = {
+    label: "Install on sasensi",
+    href: "https://github.com/apps/lookover-dev/installations/new",
+  };
+  // `uninstalled`: the App was installed and no longer is, said as on any account it left.
+  expect(row({ kind: "uninstalled", suspended: false })).toEqual([
+    "sasensi",
+    "needs-you",
+    "No longer installed.",
+    install,
+    [install.label],
+  ]);
+  const [, , suspended, unsuspend] = row({ kind: "uninstalled", suspended: true, suspendedBy: "octo" });
+  expect([suspended, unsuspend]).toEqual([
+    "Suspended by octo.",
+    { label: "Unsuspend it on GitHub", href: install.href },
+  ]);
+});
+
+test("signed in, listed, installed nowhere: your own account not installed with Install on it, as before", () => {
+  const view = step(
+    at("waiting-for-install", {
+      person: SASENSI,
+      listed: true,
+      listingCause: null,
+      unreached: [{ account: SASENSI, kind: "user", owner: true, askedAt: null }],
+    }),
+  );
+  expect(view.accounts.text).toBe("Looking for your accounts on GitHub.");
+  expect(view.accounts.list.rows.map((r) => [r.name, r.detail, r.fix?.label])).toEqual([
+    ["sasensi", "Not installed.", "Install on sasensi"],
+    ["Another account", "GitHub's page lists every account you belong to.", "Install on another account"],
+  ]);
+});
+
+test("listed, the step still waiting on the repositories' first read: said, and an account with none yet is being read, not empty", () => {
+  const accounts = [
+    { account: { ...SASENSI, type: "User" as const }, installationId: 1, cause: null, owner: true },
+    {
+      account: { id: 4242, login: "ledger-co", type: "Organization" as const },
+      installationId: 2,
+      cause: null,
+      owner: false,
+    },
+  ];
+  const reading = step(
+    at("waiting-for-install", { person: SASENSI, accounts }, [repo("sasensi", "ledger-api")]),
+  );
+  expect(reading.accounts).toMatchObject({ state: "busy", text: "Reading your accounts' repositories…" });
+  expect(reading.accounts.list.rows.map((r) => [r.name, r.state, r.detail, r.fix?.label ?? null])).toEqual([
+    ["sasensi", "installed", "1 repository.", null],
+    ["ledger-co", "reading", "Reading its repositories…", null],
+    [
+      "Another account",
+      "another",
+      "GitHub's page lists every account you belong to.",
+      "Install on another account",
+    ],
+  ]);
+  const shown = reading.accounts.list.rows.flatMap((r) => [r.detail, r.fix?.label]);
+  expect(shown).not.toContain("No repository yet.");
+  expect(shown).not.toContain("Choose repositories");
+  // The read done with none there: said as before, with its one fix.
+  const done = step(at("done", { person: SASENSI, accounts }, [repo("sasensi", "ledger-api")]));
+  expect(done.accounts.list.rows[1]).toMatchObject({
+    detail: "No repository yet.",
+    fix: { label: "Choose repositories" },
+  });
 });
 
 test("the lead says what teammates see of a review posted as you", () => {
@@ -325,7 +404,7 @@ test("signed in and installed: who you are, then the list, each account reached 
   // ledger-dev still asks for SSO: the step is done, and says the rest can wait, not that every account is.
   expect(view.accounts).toMatchObject({
     state: "done",
-    text: "Enough to go on. Set up the other accounts below now, or later in Settings.",
+    text: "Enough to go on. The rest can wait.",
   });
   expect(view.accounts.list.rows.map((r) => [r.account, r.detail])).toEqual([
     ["sasensi", "2 repositories."],
@@ -356,18 +435,15 @@ test("done with every account installed and used: more accounts any time; one st
   const some = step(at("done", { ...person, accounts: [own], unreached }, used));
   expect(some.accounts).toMatchObject({
     state: "done",
-    text: "Enough to go on. Set up the other accounts below now, or later in Settings.",
+    text: "Enough to go on. The rest can wait.",
   });
-  // Every line the row can say is held, so an account installed later moves nothing under it.
-  expect(some.accounts.held).toContain(all.accounts.text);
-  expect(all.accounts.held).toContain(some.accounts.text);
 });
 
 test("installed with no repository: said, GitHub's page in the list", () => {
   const view = step(at("nothing-granted", { person: SASENSI, id: connectionId("github:sasensi") }));
   expect(view.accounts).toMatchObject({
     state: "current",
-    text: "Installed, with no repository. On GitHub, pick the ones it may see.",
+    text: "Installed, with no repository chosen.",
   });
   expect(view.accounts.list.rows.at(-1)?.fix?.href).toBe(
     "https://github.com/apps/lookover-dev/installations/new",
@@ -413,14 +489,24 @@ test("Sign in again while connected: the code in place, the accounts still liste
   // Past its expiry and still shown, GitHub took it: the service asks who signed in.
   const finishing = settings({ ...connected({ signIn: CODE }), now: CODE.expiresAt + MIN });
   expect(finishing.signIn.text).toBe("Finishing the sign-in with GitHub…");
-  // Cancel clears the code only: the sign-in kept is said again, and every text was held, so nothing moved.
+  // Cancel clears the code only: the sign-in kept is said again.
   const cancelled = settings(connected());
   expect(cancelled.signIn.text).toBe("Signed in as sasensi.");
-  for (const view of [waiting, finishing, cancelled]) {
-    expect(view.signIn.held).toContainEqual(view.signIn.text);
-    expect(view.signIn.held).toContainEqual("Signed in as sasensi.");
-    expect(view.signIn.held).toContainEqual("You're signed out of GitHub.");
-  }
+});
+
+test("Settings › GitHub signed in again, the accounts not listed yet: your own row looking, nothing said missing", () => {
+  const view = settings(connected({ accounts: [], listed: false }));
+  expect(view.signIn.text).toBe("Signed in as sasensi.");
+  expect(view.list.rows.map((r) => [r.name, r.detail, r.fix])).toEqual([["sasensi", "Looking…", null]]);
+});
+
+test("Settings › GitHub signed in again, the accounts' listing refused while the repositories answer: the listing's cause, not looking", () => {
+  const view = settings(
+    connected({ accounts: [], listed: false, cause: null, listingCause: { kind: "unreachable" } }),
+  );
+  expect(view.list.rows.map((r) => [r.name, r.state, r.detail, r.fix])).toEqual([
+    ["sasensi", "needs-you", "GitHub can't be reached. Lookover tries again every minute.", null],
+  ]);
 });
 
 test("Settings › GitHub signed out: said, Sign in again offered, no list", () => {

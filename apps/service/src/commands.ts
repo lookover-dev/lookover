@@ -110,6 +110,7 @@ const demoInject = z.object({
     "engines-missing",
     "sign-in-entered",
     "sign-in-denied",
+    "accounts-slow",
     "github-signed-out",
     "sso-asked",
     "organisation-suspended",

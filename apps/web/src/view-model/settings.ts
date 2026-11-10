@@ -105,7 +105,7 @@ export function ruleSwitch(rule: Pick<Rule, "enabled" | "parentOff">): {
 }
 
 /** Why a rule's switch is held: a rule it sits in is off. */
-export const HELD_WHY = "Off with the rule it sits in.";
+const HELD_WHY = "Off with the rule it sits in.";
 
 /** The rules page's one description, over its table: what the rules are and where they are read from. */
 export const RULES_INTRO =

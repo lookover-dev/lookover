@@ -1,19 +1,23 @@
 // The snapshot the UI shows: the facts at start (the setup as the store keeps it and the connection it leads to,
 // running, the engines' health taken at start) with the events kept in the store applied on top with `apply`,
 // exactly as the UI applies them (all of them once at start, then each as the service sends it), so a tab that
-// followed the events and one that loaded the snapshot see the same thing (AGENTS.md rule 3). Also the facts the
-// service turns the host's into: the UI's `Repository` and `Change`, and what the queue and the run read of an open
-// change and a repository's settings.
+// followed the events and one that loaded the snapshot see the same thing (AGENTS.md rule 3). The replay is read, not
+// trusted (ADR 0085): an event `apply` throws on is skipped, what the state's schema can't read is dropped, and the
+// start states its own facts over the rest (`startOf`). Also the facts the service turns the host's into: the UI's
+// `Repository` and `Change`, and what the queue and the run read of an open change and a repository's settings.
+import { isDeepStrictEqual } from "node:util";
 import {
   apply,
   type Change,
   type ChangeId,
   type CodingAgent,
   type ConnectionAccount,
+  type ConnectionCause,
   type ConnectionId,
   changeIdOf,
   changeNameParts,
   connectionId,
+  type Dropped,
   type Engine,
   type EngineHealth,
   type EngineId,
@@ -30,15 +34,20 @@ import {
   type RepositoryRef,
   type ResolvedSettings,
   type Rule,
+  readState,
   repositoryId,
   repositoryName,
   repositoryRefOf,
+  type Service,
   type SettingValues,
   type Setup,
   type State,
+  UnknownEvent,
 } from "@lookover/contracts";
 import { resolve, settingValues } from "@lookover/settings";
 import type { InboxEntry, OpenChange, Store } from "@lookover/store";
+import type { Skipped } from "./log-lines.ts";
+import { said } from "./said.ts";
 
 export interface Facts {
   now: number;
@@ -55,6 +64,13 @@ export interface Facts {
   person: HostLogin | null;
   /** Each account reached, with its installation and its own cause (ADR 0066), once listed; none before. */
   accounts: ConnectionAccount[];
+  /**
+   * Whether the start's listing of the installations answered under the sign-in held at start (ADR 0086): false when
+   * it wasn't asked or was refused.
+   */
+  listed: boolean;
+  /** What refused the start's listing, when it was asked and refused (`Connection.listingCause`); else null. */
+  listingCause: ConnectionCause | null;
   /** GitHub's web address the app's links are built on (ADR 0053): GitHub's own in live mode, its fake in demo mode. */
   web: string;
   /** Each engine's health at start, and the state it shows: its health's, once its self-test had its say. */
@@ -69,6 +85,8 @@ export interface Facts {
   loginItem: LoginItemKind;
   /** The machine the commands the app gives are for (an AI's install, ADR 0070), as Node names it. */
   platform: NodeJS.Platform;
+  /** The pause the store keeps (ADR 0040): until when reviews hold; null when none is set. */
+  paused: Service["paused"];
   /**
    * Whether the UI reaches this service from another device, so a session starts view-only until unlocked. Only a
    * demo scenario's world says so (S11): no service is reached from elsewhere until a server mode exists.
@@ -259,6 +277,8 @@ function connectionOf(f: Facts): State["connection"] {
     signIn: null,
     person: f.person,
     accounts: installed ? f.accounts : [],
+    listed: f.listed,
+    listingCause: f.listingCause,
     unreached: [],
     web: f.web,
     since: f.startedAt,
@@ -286,7 +306,7 @@ function base(f: Facts): State {
       startAtLogin: f.startAtLogin,
       atLogin: f.atLogin,
       loginItem: f.loginItem,
-      paused: null,
+      paused: f.paused,
       remote: f.remote ?? false,
       unlocked: false,
       checks: null,
@@ -300,10 +320,108 @@ function base(f: Facts): State {
   };
 }
 
-/** The snapshot: the base with every event applied, current up to the last one. */
-export function snapshotOf(f: Facts, events: Event[]): State {
-  return events.reduce(apply, base(f));
+/**
+ * The snapshot: the base with every event applied, current up to the last one, and each event skipped because
+ * `apply` threw on it (one an older version wrote, or of a type a newer one wrote, ADR 0085), in order: the state
+ * stays the last one applied.
+ */
+function snapshotOf(f: Facts, events: Event[]): { state: State; skipped: Skipped[] } {
+  const skipped: Skipped[] = [];
+  let state = base(f);
+  for (const event of events) {
+    try {
+      state = apply(state, event);
+    } catch (error) {
+      const why: Skipped["why"] =
+        error instanceof UnknownEvent ? { kind: "unknown" } : { kind: "threw", message: said(error) };
+      skipped.push({ seq: event.seq, type: String(event.type), why });
+    }
+  }
+  return { state, skipped };
 }
+
+/** What a start serves (ADR 0085): the state it sends first, that first event, and what it dropped and skipped. */
+export interface Started {
+  /** The UI's state as this start states it: what it read of the replay, its own facts on it, renamed (ADR 0066). */
+  state: State;
+  /**
+   * The start's first event: the state as one `state.replaced` when it differs from the replay (a piece dropped, an
+   * id renamed), else the service's own facts as `service.changed`.
+   */
+  first: EventBody;
+  dropped: Dropped[];
+  skipped: Skipped[];
+  /**
+   * Where the state read first differs from the replay when nothing was dropped (a key the schema strips that a
+   * replayed object carried beyond its type), its fields joined by dots; null when they agree or a drop explains it.
+   * The state read is still the one sent and served.
+   */
+  differs: string | null;
+}
+
+/**
+ * The start's state (ADR 0085): the log replayed, read through the state's schema against the base (what can't be
+ * read is dropped; a section that can't, the start's own), the service's own facts set on it, and the ids named
+ * before ADR 0066 renamed. The start at login and who holds it stay as replayed: `startAtLoginLeft` and
+ * `atLoginLeft` compare them with the store and the machine.
+ */
+export function startOf(f: Facts, events: Event[]): Started {
+  const own = base(f);
+  const { state: replayed, skipped } = snapshotOf(f, events);
+  const { state: read, dropped } = readState(replayed, own);
+  const stated = withOwnFacts(read, f);
+  const state = ownerNamed(stated) ?? stated;
+  const asReplayed = withOwnFacts(replayed, f);
+  const first: EventBody = isDeepStrictEqual(state, asReplayed)
+    ? { type: "service.changed", at: f.startedAt, patch: ownFactsOf(f) }
+    : { type: "state.replaced", at: f.startedAt, state };
+  const differs = dropped.length === 0 ? firstDifference(asReplayed, stated) : null;
+  return { state, first, dropped, skipped, differs };
+}
+
+/** The first path, fields joined by dots, where `a` and `b` differ; null when they are deeply equal. */
+function firstDifference(a: unknown, b: unknown, path = ""): string | null {
+  if (isDeepStrictEqual(a, b)) return null;
+  if (!isObject(a) || !isObject(b) || Array.isArray(a) !== Array.isArray(b)) return path;
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const at = path === "" ? key : `${path}.${key}`;
+    if (!(key in a) || !(key in b)) return at;
+    const inner = firstDifference(a[key], b[key], at);
+    if (inner !== null) return inner;
+  }
+  return path;
+}
+
+/** An object or a list: the walk steps into a list by its indexes, so this isn't `readState`'s record test. */
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+/**
+ * The service's facts a start states over whatever the log replayed: running since now, this version, its command,
+ * its agent, its login item, the pause the store keeps, no check results (they read the process that ran them) and
+ * locked; remote only when the start was told.
+ */
+function ownFactsOf(f: Facts): Partial<Service> {
+  return {
+    state: "running",
+    since: f.startedAt,
+    version: f.version,
+    command: f.command,
+    agent: f.agent,
+    loginItem: f.loginItem,
+    ...(f.remote === undefined ? {} : { remote: f.remote }),
+    paused: f.paused,
+    unlocked: false,
+    checks: null,
+  };
+}
+
+/** `state` with the start's own facts on its service, at the start's time at least. */
+const withOwnFacts = (state: State, f: Facts): State => ({
+  ...state,
+  now: Math.max(state.now, f.now),
+  service: { ...state.service, ...ownFactsOf(f) },
+});
 
 /** A change's id as named before ADR 0066, by its repository's name alone (`<name>#<n>`), read; null for another. */
 function oldName(id: ChangeId): { repository: string; number: number } | null {
@@ -358,10 +476,28 @@ function ownerNamed(state: State): State | null {
 }
 
 /**
- * What a start sends when the events kept name changes as before ADR 0066 (`ownerNamed`): the UI's state in the
- * store's ids, as `state.replaced`, so a UI follows it by `apply` like any event (AGENTS.md rule 3); else nothing.
+ * Each watched repository the store has listed and the state lacks (`watched`, as the UI is told of it), sent again
+ * (ADR 0085): what an older version wrote of it was dropped at start.
  */
-export function ownerNamedLeft(shown: State, at: number): EventBody[] {
-  const named = ownerNamed(shown);
-  return named === null ? [] : [{ type: "state.replaced", at, state: named }];
+export function reposLeft(shown: State, watched: Repository[], at: number): EventBody[] {
+  const known = new Set(shown.repos.map((repo) => repo.id));
+  return watched
+    .filter((repo) => !known.has(repo.id))
+    .map((repo): EventBody => ({ type: "repo.added", at, repo }));
+}
+
+/**
+ * Each open change a listing holds and the state lacks, sent again (ADR 0085): what an older version wrote of it was
+ * dropped at start, and the store, which keeps no title, has only the listing to send it from.
+ */
+export function changesLeft(
+  shown: Pick<State, "changes">,
+  listed: InboxEntry[],
+  owner: { id: number },
+  at: number,
+): EventBody[] {
+  return listed
+    .map((entry) => changeOf(entry, owner))
+    .filter((change) => shown.changes[change.id] === undefined)
+    .map((change): EventBody => ({ type: "change.opened", at, change }));
 }

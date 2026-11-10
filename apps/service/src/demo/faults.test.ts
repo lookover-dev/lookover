@@ -690,6 +690,29 @@ test("sign-in-denied: the person cancels on GitHub, the code goes and nothing is
   expect(signedIn.connection).toMatchObject({ signIn: null });
 });
 
+test("accounts-slow: signed in, the accounts not listed for 30 s; nothing said missing until GitHub lists them", async () => {
+  const door = await startScenario(scenarioOf("S1"));
+  expect((await send(door, { type: "setup.goto", step: "github" })).status).toBe(200);
+  expect((await send(door, { type: "connection.signIn" })).status).toBe(200);
+  expect(await inject(door, "accounts-slow")).toBe(200);
+  expect(await inject(door, "sign-in-entered")).toBe(200);
+  await advance(door, 5_000);
+  const looking = await eventually(
+    () => snapshotOf(door),
+    (s) => s.connection.person !== null,
+  );
+  expect(looking.connection).toMatchObject({ listed: false, accounts: [], unreached: [] });
+  await advance(door, 20_000);
+  expect((await snapshotOf(door)).connection.listed).toBe(false);
+  await advance(door, 10_000);
+  const listed = await eventually(
+    () => snapshotOf(door),
+    (s) => s.setup.github === "done",
+  );
+  expect(listed.connection.listed).toBe(true);
+  expect(listed.connection.accounts.map((a) => a.account.login)).toEqual(["sasensi"]);
+});
+
 test("a fault that isn't one is refused at the door", async () => {
   const door = await morning();
   expect((await send(door, { type: "demo.inject", fault: "service-stopped" })).status).toBe(400);

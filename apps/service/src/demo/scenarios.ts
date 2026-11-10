@@ -1,4 +1,4 @@
-// Every scenario the demo plays (ADR 0046), in the order the developer drawer lists them, S1 to S19 (S15, an
+// Every scenario the demo plays (ADR 0046), in the order the developer drawer lists them, S1 to S21 (S15, an
 // organisation's own App, retired with the own App, ADR 0073: its number not reused). One module per scenario; S10 "A quiet day" is the one the demo opens on. A scenario's id is what `--scenario=<id>`,
 // `?scenario=<id>` and `demo.load` name.
 
@@ -21,6 +21,8 @@ import { S16 } from "./scenarios/s16-two-accounts.ts";
 import { S17 } from "./scenarios/s17-every-account.ts";
 import { S18 } from "./scenarios/s18-large-organisation.ts";
 import { S19 } from "./scenarios/s19-large-organisation-setup.ts";
+import { S20 } from "./scenarios/s20-real-names.ts";
+import { S21 } from "./scenarios/s21-real-names-setup.ts";
 
 export const SCENARIOS: Scenario[] = [
   S1,
@@ -41,6 +43,8 @@ export const SCENARIOS: Scenario[] = [
   S17,
   S18,
   S19,
+  S20,
+  S21,
 ];
 
 /** The scenario with this id. Throws, naming every id, for one that isn't. */

@@ -116,6 +116,20 @@ function addsWhat(folder: string): WithCommand {
 }
 
 /**
+ * The PATH row done: a terminal's `command` runs this Lookover, the command on a line of its own however short, where
+ * the to-do row has its folder, so the click moves nothing under the row (ADR 0086). It names no folder: the PATH may
+ * reach this Lookover with nothing of Lookover's in `path.folder` (lookover.exe's own folder on the PATH, a `lookover`
+ * elsewhere that resolves to it).
+ */
+const runsThis = (command: string): WithCommand => ({
+  before: "A terminal's",
+  command,
+  after: "runs this Lookover.",
+  alone: "A terminal runs this Lookover as:",
+  line: true,
+});
+
+/**
  * The `lookover` in your terminal row. `command` is Lookover's (`Service.command`): once the PATH reaches this
  * Lookover, the one a terminal runs, `--home` and all.
  */
@@ -169,16 +183,7 @@ export function pathRow(agent: CodingAgent, command: string): AgentRow {
       alone: `${OFF_PATH_ALONE} npm put it in:`,
     });
   if (path.reach === "yes")
-    return row(
-      "done",
-      {
-        before: "A terminal's",
-        command,
-        after: "runs this Lookover.",
-        alone: "A terminal runs this Lookover as:",
-      },
-      offer === "binary" ? { undo: REMOVE_PATH } : {},
-    );
+    return row("done", runsThis(command), offer === "binary" ? { undo: REMOVE_PATH } : {});
   switch (path.reach) {
     case "no":
       return row("todo", addsWhat(path.folder), { action: ADD_PATH });
@@ -294,35 +299,6 @@ export const skillRows = (agent: CodingAgent): AgentRow[] => agent.skills.map(sk
 
 type Detail = AgentRow["detail"];
 
-/** The details in that order, each once. */
-const distinct = (details: Detail[]): Detail[] => {
-  const seen = new Set<string>();
-  return details.filter((d) => {
-    const key = JSON.stringify(d);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
-
-/**
- * Every detail that row can show after a click there (done, not done, and the one it shows now), so the screen lays
- * them in one cell and the row keeps the tallest one's height at any width (design-system.md "Your coding agent").
- */
-export function rowDetails(agent: CodingAgent, command: string, id: AgentRowId): Detail[] {
-  if (id === "path") {
-    const { folder } = agent.path;
-    const shown = pathRow(agent, command).detail;
-    if (agent.offer === "clone") return [shown];
-    const at = (reach: "yes" | "no") => pathRow({ ...agent, path: { reach, folder } }, command).detail;
-    return distinct([at("yes"), at("no"), shown]);
-  }
-  const skill = agent.skills.find((s) => s.agent === id);
-  if (skill === undefined) return [];
-  const at = (state: AgentSkill["state"]) => skillRow({ ...skill, state }).detail;
-  return distinct([at("ours"), at("none"), skillRow(skill).detail]);
-}
-
 /** What Your coding agent opens with, in setup and in Settings. */
 export const AGENT_INTRO =
   "After each push, your agent can ask Lookover for a review, fix what it found and push again.";
@@ -334,26 +310,34 @@ export const AGENT_INTRO =
  */
 export interface TryIt {
   sentence: string | null;
-  /** Without a sentence, why and what to do; with one, what happens once the agent has it. */
+  /** Without a sentence, why and what to do; with one, what happens once the agent has it (`thenWait`). */
   line: string | WithCommand;
 }
 
-/** What happens once the agent has the sentence, naming `wait` by Lookover's command (`Service.command`). */
-const next = (command: string): WithCommand => ({
-  before: "Your agent fixes and pushes, then",
+/**
+ * What happens once the agent has the sentence: `said`, then `wait` by Lookover's command (`Service.command`) on a
+ * line of its own under it (`line`), long or short, so Add to my PATH changes the command's words and never the card's
+ * lines (ADR 0086: no line is held for the other form).
+ */
+const thenWait = (said: string, command: string): WithCommand => ({
+  before: said,
   command: `${command} wait`,
-  after: "asks Lookover for round 2. Each finding it fixed has its thread resolved.",
-  alone:
+  after: "",
+  alone: said,
+  line: true,
+});
+
+const next = (command: string) =>
+  thenWait(
     "Your agent fixes and pushes, then asks Lookover for round 2, which resolves each fixed finding's thread, with:",
-});
+    command,
+  );
 /** What happens once the agent has a pull request whose posted review found nothing to fix. */
-const clean = (command: string): WithCommand => ({
-  before: "Lookover found nothing to fix there, so",
-  command: `${command} wait`,
-  after: "reports a pass. After your agent's next push, it asks for round 2.",
-  alone:
+const clean = (command: string) =>
+  thenWait(
     "Lookover found nothing to fix there, so this reports a pass, and after your agent's next push asks for round 2:",
-});
+    command,
+  );
 const PREVIEW_ONLY =
   "Your first review was a preview, so nothing is on GitHub for your agent to read. Post a review on one of your pull requests first.";
 const NONE = "None of your pull requests has a finding on GitHub yet. Post a review on one first.";
@@ -391,30 +375,6 @@ export function tryIt(state: State): TryIt {
   return { sentence: null, line: posted ? NOTHING_LEFT : NONE };
 }
 
-/** A command off the PATH, too long to sit in a sentence: this Lookover's own stand-in while the PATH reaches it. */
-const OFF_PATH_STAND_IN = "& 'C:\\Users\\Your Name\\AppData\\Local\\Programs\\Lookover\\lookover.exe'";
-
-/** Where Lookover's command names its data folder (`--home=`, quoted or not), so both its forms keep it. */
-const HOME = /\s(?=['"]?--home=)/;
-
-/**
- * Every line Try it can switch to on this page, each once: its own, and, where "Add to my PATH" and "Remove from my
- * PATH" switch Lookover's command, the line with `lookover` and the line with a command off the PATH (this one's
- * when it is off, a stand-in as long when it is on), each with this command's `--home`. The card holds the tallest
- * (`HeldDetail`): a long command goes on a line of its own, a short one sits in the sentence, and the card under it
- * never moves (rule 5).
- */
-export function tryItLines(state: State): TryIt["line"][] {
-  const { command, agent } = state.service;
-  const lineWith = (c: string) => tryIt({ ...state, service: { ...state.service, command: c } }).line;
-  if (agent.offer !== "binary") return [lineWith(command)];
-  const at = command.search(HOME);
-  const home = at === -1 ? "" : command.slice(at);
-  const onPath = `lookover${home}`;
-  const lines = [command, onPath, command === onPath ? `${OFF_PATH_STAND_IN}${home}` : command].map(lineWith);
-  return lines.filter((line, i) => lines.findIndex((l) => JSON.stringify(l) === JSON.stringify(line)) === i);
-}
-
 /** A write the machine refused (500): what didn't change. */
 const MACHINE: Record<"agent.path" | "agent.skill", string> = {
   "agent.path": "This computer refused to change your PATH. Try again.",
@@ -441,47 +401,26 @@ function refusedRow(refusal: Refusal | null): AgentRowId | null {
 }
 
 /**
- * Every refusal a click on a row of that kind can bring, by the service's reason or the machine's (500). Never
- * `not_offered`: it answers a PATH click where the row offers none, so no click there brings it.
- */
-const REFUSALS: Record<"path" | "skill", Detail[]> = {
-  path: [MACHINE["agent.path"]],
-  skill: [MACHINE["agent.skill"], AGENT_REFUSED.no_such_agent, AGENT_REFUSED.not_ours],
-};
-
-/**
  * A row's mark, its state square (design-system.md "State square"): its state, `install` while still to do (a PATH
  * entry or a skill, each a thing put in place), or `refused` once a write was.
  */
 type RowMark = Exclude<AgentRow["state"], "todo"> | "install" | "refused";
 
-/** What a row shows: its mark, its detail (the refusal, while its write is refused), and every one it can show. */
+/** What a row shows: its mark and its detail (the refusal, while its write is refused). */
 export interface RowView {
   mark: RowMark;
   detail: Detail;
-  /** Every detail a click there can bring and every refusal it can be told, so the row holds the tallest's height. */
-  details: Detail[];
 }
 
 /**
  * A row as `refusal` leaves it: a refused write marks its own row and is said there, in place of its detail, so no
  * line under the rows waits for one (design-system.md "Your coding agent").
  */
-export function rowView(
-  agent: CodingAgent,
-  command: string,
-  row: AgentRow,
-  refusal: Refusal | null,
-): RowView {
+export function rowView(row: AgentRow, refusal: Refusal | null): RowView {
   const told = refusedRow(refusal) === row.id ? agentRefusal(refusal) : null;
-  const details = distinct([
-    ...rowDetails(agent, command, row.id),
-    ...REFUSALS[row.id === "path" ? "path" : "skill"],
-    ...(told === null ? [] : [told]),
-  ]);
   return told === null
-    ? { mark: row.state === "todo" ? "install" : row.state, detail: row.detail, details }
-    : { mark: "refused", detail: told, details };
+    ? { mark: row.state === "todo" ? "install" : row.state, detail: row.detail }
+    : { mark: "refused", detail: told };
 }
 
 /** A value on a line of its own under a row's sentence: a folder, or a command. */
@@ -496,39 +435,47 @@ interface DetailLine {
   line: RowValueLine | null;
 }
 
-/** A row's details as it lays them (`rowLine`): its mark, the one it shows, every other one it holds the room of. */
+/** A row's detail as it lays it (`rowLine`): its mark and the detail, with its line. */
 export interface RowLineView {
   mark: RowMark;
   shown: DetailLine;
-  held: DetailLine[];
 }
 
+/** A value too long for its sentence, or marked for its own line: its kind, for the line it goes on. */
+const lineOf = (value: WithCommand): RowValueLine | null =>
+  value.alone !== undefined &&
+  value.kind !== "device-code" &&
+  (value.line === true || codePlace(value.command) === "line")
+    ? { value: value.command, kind: value.kind ?? "command" }
+    : null;
+
 /**
- * A detail whose one value is too long for its sentence: the sentence said alone, the value on its line; any other (a
- * refusal, a short value, a sentence naming two values) as it is, no line.
+ * A detail whose value is too long for its sentence (or marked for its line): the sentence said alone, the value on
+ * its line. Of two values, the first short enough stays in the sentence and the second, too long, goes on the line
+ * ("A terminal runs another `lookover` first. … It is at:"). Any other (a refusal, short values) as it is, no line.
  */
 function detailLine(detail: Detail): DetailLine {
-  if (typeof detail === "string" || detail.alone === undefined || detail.kind === "device-code")
-    return { sentence: detail, line: null };
-  if (typeof detail.after !== "string" || codePlace(detail.command) !== "line")
-    return { sentence: detail, line: null };
-  return { sentence: detail.alone, line: { value: detail.command, kind: detail.kind ?? "command" } };
+  if (typeof detail === "string") return { sentence: detail, line: null };
+  const { after } = detail;
+  if (typeof after === "string") {
+    const line = lineOf(detail);
+    return line === null || detail.alone === undefined
+      ? { sentence: detail, line: null }
+      : { sentence: detail.alone, line };
+  }
+  const second =
+    typeof after.after === "string" && codePlace(detail.command) === "inline" ? lineOf(after) : null;
+  return second === null || after.alone === undefined
+    ? { sentence: detail, line: null }
+    : { sentence: { ...detail, after: after.alone }, line: second };
 }
 
 /**
- * Every row lays its details one way (design-system.md "Your coding agent", round 5): the sentence, then its value on
+ * Every row lays its detail one way (design-system.md "Your coding agent", round 5): the sentence, then its value on
  * a line of its own right under it, across the row's text and action columns, so a long folder or command keeps to
- * one line whatever the action column takes, the same gap above it in every row, the PATH's too. The row holds every
- * other detail it can show, each with its line, so it is as tall as the tallest and nothing under it moves; the room
- * held goes under the line shown, never between the sentence and its line.
+ * one line whatever the action column takes, the same gap above it in every row, the PATH's too. The row holds no
+ * room for another detail (ADR 0086): it is as tall as the one it shows.
  */
 export function rowLine(view: RowView): RowLineView {
-  const shown = detailLine(view.detail);
-  const key = (d: DetailLine) => JSON.stringify(d);
-  const held = view.details.map(detailLine).filter((d) => key(d) !== key(shown));
-  return {
-    mark: view.mark,
-    shown,
-    held: held.filter((d, i) => held.findIndex((e) => key(e) === key(d)) === i),
-  };
+  return { mark: view.mark, shown: detailLine(view.detail) };
 }

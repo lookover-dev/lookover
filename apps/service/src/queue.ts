@@ -258,6 +258,12 @@ export interface Queue {
    * asked `/lookover review full` (ADR 0052), which sticks to the job the request leads to.
    */
   requested(changeId: ChangeId, request: RequestComment, full: boolean): void;
+  /**
+   * The UI's review of the change was made anew (an older version's, dropped at start, ADR 0085): the change's job
+   * running, else its latest one waiting (queued or deferred), is sent again as the record holds it. Its change, if
+   * any, is what the record said before: no take reports a deferral it leaves unchanged.
+   */
+  rebuilt(changeId: ChangeId): void;
   /** Runs the take (after a poll that saw something). */
   take(): void;
   /**
@@ -328,6 +334,9 @@ const ENGINES = Object.values({ claude: "claude", codex: "codex" } as const sati
   EngineId,
   EngineId
 >);
+
+/** A job's states while it is live: waiting its turn, or running. */
+const LIVE: ReadonlySet<ReviewJob["state"]> = new Set(["queued", "deferred", "running"]);
 
 /** The engine a decision names: the one it starts with, or the one its deferral waits for. */
 function engineNamed(decision: TakeDecision): EngineId | null {
@@ -416,12 +425,21 @@ export function createQueue(d: QueueDeps): Queue {
     shown(stored);
   };
 
-  /** The UI hears of the job as the record holds it, unless another job of its change runs (`changed`). */
-  const shown = (stored: StoredJob): void => {
+  /**
+   * The UI hears of the job as the record holds it, with `run` when given, unless another job of its change runs
+   * (`changed`).
+   */
+  const shown = (stored: StoredJob, run?: Run): void => {
     const { changeId, job } = stored;
     const runningJob = runningOn.get(changeId);
     if (runningJob !== undefined && runningJob !== job.id) return;
-    d.emit({ type: "job.changed", at: now(), changeId, job: withStepIn(stored).job });
+    const at = now();
+    const shownJob = withStepIn(stored).job;
+    d.emit(
+      run === undefined
+        ? { type: "job.changed", at, changeId, job: shownJob }
+        : { type: "job.changed", at, changeId, job: shownJob, run },
+    );
   };
 
   /** Each engine's state as the UI shows it now. */
@@ -1003,6 +1021,18 @@ export function createQueue(d: QueueDeps): Queue {
     requested(changeId, request, full) {
       if (stopping) return;
       intakeOf(changeId, "comment", { request, full });
+    },
+    rebuilt(changeId) {
+      if (stopping) return;
+      // The UI's review shows one job: the running one, with its run as recorded (no `run.started` says it again,
+      // and a resumed run's posts move it on), over a follow-up waiting behind it.
+      const left = d.store.jobs.leftRunning().find((l) => l.changeId === changeId);
+      if (left !== undefined) {
+        shown(left, d.store.jobs.runOf(left.runId));
+        return;
+      }
+      const job = d.store.jobs.latest(changeId);
+      if (job !== null && LIVE.has(job.job.state)) shown(job);
     },
     take,
     reroute(from) {

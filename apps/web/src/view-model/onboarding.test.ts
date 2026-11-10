@@ -78,6 +78,8 @@ function connection(patch: Partial<Connection> = {}): Connection {
     state: "not-connected",
     cause: null,
     accounts: [],
+    listed: true,
+    listingCause: null,
     unreached: [],
     signIn: null,
     person: null,

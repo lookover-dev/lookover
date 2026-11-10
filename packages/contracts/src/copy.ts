@@ -458,15 +458,13 @@ export interface FailureWords {
 
 /**
  * A failure's words by its cause, naming the engine that was reviewing and the limit that ran out (a limit of zero or
- * less is not known); with no cause (none known, or an event stored before causes were, which has no `cause` or
- * `limitMs` at all), by its kind, as `failureText` and `stoppedText` say it. Null: a job that failed before anyone said
- * why.
+ * less is not known); with no cause known, by its kind, as `failureText` and `stoppedText` say it. Null: a job that
+ * failed before anyone said why. A failure stored before causes were never reaches it: a start drops it (ADR 0085).
  */
 export function failureWords(
   failure: Pick<JobFailure, "kind" | "engine" | "cause" | "limitMs"> | null,
 ): FailureWords {
-  const cause = failure?.cause ?? null;
-  if (failure === null || cause === null) {
+  if (failure === null || failure.cause === null) {
     return {
       phrase: failureText(failure),
       sentence: stoppedText(failure?.kind ?? "unexpected", failure?.engine ?? null),
@@ -475,8 +473,8 @@ export function failureWords(
     };
   }
   const reviewer = failure.engine === null ? "the reviewer" : ENGINE[failure.engine];
-  const limitMs = failure.limitMs ?? null;
-  const words = CAUSED[cause](reviewer, limitMs !== null && limitMs > 0 ? limitMs : null);
+  const { limitMs } = failure;
+  const words = CAUSED[failure.cause](reviewer, limitMs !== null && limitMs > 0 ? limitMs : null);
   return {
     phrase: words.phrase,
     sentence: words.sentence,

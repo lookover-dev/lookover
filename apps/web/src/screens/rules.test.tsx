@@ -32,10 +32,10 @@ test("a rule held off with the rule it sits in: why, in words under it, and a he
   expect(html).not.toContain("tooltip");
 });
 
-test("a nested rule keeps the room of why under its words while its parent is on, so no row moves as the parent toggles", () => {
+test("a nested rule whose parent is on says its words alone, no room kept for why (ADR 0086)", () => {
   const nested = { ...rule, nestedIn: true };
   expect(renderToStaticMarkup(<RuleTitle rule={nested} />)).toBe(
-    '<b>A total is rounded once, at the end.</b><span class="rule-held room" aria-hidden="true">Off with the rule it sits in.</span>',
+    "<b>A total is rounded once, at the end.</b>",
   );
 });
 

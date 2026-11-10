@@ -545,11 +545,14 @@ export function reviewList(items: readonly ChangeReview[]): ChangeReview[] {
   return [...free.filter(isMine), ...free.filter((i) => neverAsked(i) && askable(i))];
 }
 
+/** What the palette opens on: every command (`all`), or "Review a pull request…" (`review`). */
+export type PaletteMode = "all" | "review";
+
 /**
  * The palette's pull requests, of Reviews' list (`listedReviews`: none in a repository that is off, the person's own
  * included, ADR 0084): in "Review a pull request…" (`review`) those `reviewList` keeps, else every one.
  */
-export function paletteReviews(state: State, mode: "all" | "review" | null): ChangeReview[] {
+export function paletteReviews(state: State, mode: PaletteMode | null): ChangeReview[] {
   const listed = listedReviews(state);
   return mode === "review" ? reviewList(listed) : listed;
 }

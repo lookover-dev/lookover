@@ -6,16 +6,40 @@
 // The UI talks to it through its own Vite server. The shots are listed in scripts/proof-shots.ts: each names a
 // scenario, how far its clock moves on and the faults made to happen; proof loads it (`demo.load`), moves it
 // (`demo.advance`, `demo.inject`), then opens the page with the session, acts and shoots. A shot that lands on
-// any screen but its own (the session screen, the setup) fails.
+// any screen but its own (the session screen, the setup) fails, and so does one whose page logs a console error or
+// throws an uncaught error (React's development warnings included, ADR 0085), but for the errors a shot is made to
+// log (`Shot.console`: a refusal its fault causes, a tab without the session), which it must then log. Before the
+// shots, proof proves both listeners bite on a page of its own, served under the service's CSP (`CSP`, never a
+// copy): a `data:` font the policy blocks must log a console error, a throw in a timer a page error; if either is
+// missed, proof fails. A diff's base is shot as a picture to compare with: its console is not judged.
+// After the shots, the layout pass (ADR 0086, scripts/proof-layout.ts) lays the main screens out at 1024 and 1440 px
+// (390 px where a screen has a phone layout) and fails any cell a hidden copy makes taller than what it shows, and any
+// row or card ending on empty room. Its self-test first: pages of its own under the app's CSS must fail today's cases
+// and pass a correct page, or proof fails and no screen is judged. A failure a later ticket fixes is allowed, named
+// with its ticket; a whole run (no words) that judged every screen fails on an allowance nothing needed any more.
+// Motion (ADR 0087, scripts/proof-motion.ts): shots run with motion on (`reducedMotion: "no-preference"`), only the
+// loops kept still from before the first paint (the eyes, the pulse, the shimmer, a setting's highlight: a loop
+// stopped after it ran left Chrome painting a stale frame). Before each act, screenshot and layout measure the page is
+// settled: finite animations finished, then nothing left leaving (`[data-leaving]`), no scroll moving, two animation
+// frames on; a page that doesn't settle in 5 s fails its shot. A frames shot (`Shot.frames`) stands the page's
+// timeline still before its act, pauses the motion the act started, seeks it with `currentTime` to fixed times from 0
+// to its end, finishes it and settles the page, shooting each, and lays the frames side by side into one strip per
+// theme, .proof/frames/<name>-<theme>.png, shot by the browser from a page of the frames (site:strip's way): listed in
+// the index, never compared by `--diff`, never shot on a diff's base. Then the reduced-motion pass replays every frames
+// shot's act under `reducedMotion: "reduce"` and fails on any `animationstart`, `transitionrun`, script animation
+// started (`animate`, `play`) or running animation; its self-test first, under the service's CSP and through the same
+// lifecycle (settled, acted on, looked at after the same wait): a page that moves must be seen moving, its 180 ms
+// script animations over by then included, one that keeps its motion for those who don't ask for less must be seen
+// still, or proof fails and no act is judged.
 // `bun run proof home review` takes only the shots whose name contains one of the words. `--jobs=<n>` shoots n at
 // once (4 by default).
 // `bun run proof --diff <base-ref>` also shoots <base-ref> (into .proof/base) and lists only the shots whose
 // bytes differ; .proof/index.html then shows those, base beside current. Base shots are kept in the temp folder
-// (lookover-proof-cache, a week after their last use) per base commit and version of these two files and the
+// (lookover-proof-cache, a week after their last use) per base commit and version of proof's files and the
 // browser, so a second diff against the same base shoots only the current tree; otherwise the base is shot from a
 // temporary worktree, at the same time as the current tree.
 // Shots are deterministic: the service's clock stands still, the page's `Date` with it, the time zone fixed,
-// animations and transitions off, a toast held as it is. Each worktree takes its own ports (scripts/port.ts), so
+// every motion settled before a shot, the loops still. Each worktree takes its own ports (scripts/port.ts), so
 // two can run proof at once. Proof never calls `claude`, `codex` or the network.
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -36,8 +60,43 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { API, DEMO_API, type DemoCommand, type DemoListing, type FaultId } from "@lookover/contracts";
-import { type Browser, type BrowserContextOptions, chromium, type Request } from "playwright";
+import { CSP } from "@lookover/service";
+import { type Browser, type BrowserContextOptions, chromium, type Page, type Request } from "playwright";
 import { instanceOf, portFor } from "./port.ts";
+import {
+  allowedOn,
+  type BitePage,
+  type Failure,
+  failureLine,
+  judgeScript,
+  LAYOUT_BITES,
+  MEASURED,
+  NARROW_PHONE,
+  PHONE,
+  sameWidthMisses,
+  unneeded,
+  widthsOf,
+} from "./proof-layout.ts";
+import {
+  BITE_MOTION,
+  biteAct,
+  type Frame,
+  finishMotion,
+  frameTimes,
+  MOTION_BITE_PAGE,
+  MOTION_BITES,
+  type MotionBite,
+  motionSeen,
+  motionStarted,
+  pauseMotion,
+  regionOf,
+  STILL,
+  seekMotion,
+  settle,
+  stripPage,
+  unpausedMotion,
+  watchMotion,
+} from "./proof-motion.ts";
 import { type Demo, SHOTS, type Shot, screenOf } from "./proof-shots.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -51,8 +110,8 @@ const FROZEN_AT = Date.UTC(2026, 9, 6, 8, 52);
 // The time zone of the page and of the service alike (its log lines, the times it puts on GitHub's checks): a shot
 // never depends on the machine's.
 const ZONE = "UTC";
-// Shot as they are: no animation, no transition, so a toast is caught whole and the eyes stand still.
-const STILL = "*, *::before, *::after { animation: none !important; transition: none !important; }";
+// How long a page may take to settle (scripts/proof-motion.ts): a leaving thing that outlives it is a fault.
+const SETTLE_MS = 5_000;
 
 type Cookie =
   NonNullable<BrowserContextOptions["storageState"]> extends infer S
@@ -291,6 +350,82 @@ async function enter(demo: DemoDoor, shot: Shot): Promise<number> {
   return demo.now();
 }
 
+// ---- The console -------------------------------------------------------------------------------------------
+
+/**
+ * What a page said wrong from now on: each console message of type error, with the address it came from (` at <url>`:
+ * Chromium's "Failed to load resource" line names no URL), and each uncaught error it threw.
+ */
+function watchConsole(page: Page): () => string[] {
+  const said: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() !== "error") return;
+    const url = message.location().url;
+    said.push(`console error: ${message.text()}${url ? ` at ${url}` : ""}`);
+  });
+  page.on("pageerror", (error) => said.push(`page error: ${error.message}`));
+  return () => [...said];
+}
+
+/** Waits up to 3 s for what the page said to hold a line `wanted` matches. */
+async function heard(said: () => string[], wanted: RegExp): Promise<boolean> {
+  for (let i = 0; i < 60; i++) {
+    if (said().some((line) => wanted.test(line))) return true;
+    await Bun.sleep(50);
+  }
+  return false;
+}
+
+// The bite page: served by `page.route` on an origin of its own, under the service's CSP. Its stylesheet is a file,
+// so only its face breaks the policy; every other path answers empty, so no missing file logs an error of its own.
+const BITE = "http://bite.localhost";
+const BITE_PAGE =
+  '<!doctype html><html><head><meta charset="utf-8"><title>Bite</title><link rel="stylesheet" href="/bite.css"></head><body><p>Lookover</p></body></html>';
+const BITE_FACE =
+  '@font-face { font-family: "Bite"; src: url(data:font/woff2;base64,d09GMgABAAAAAAZ0) format("woff2"); } p { font-family: "Bite"; }';
+
+/**
+ * Proves the shots' listeners bite (ADR 0085): a `data:` font the service's CSP blocks must log a console error, and
+ * a throw in a timer must be a page error. The lines missed, or none.
+ */
+async function consoleBites(browser: Browser): Promise<string[]> {
+  const context = await browser.newContext();
+  try {
+    await context.route(`${BITE}/**`, (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const [type, body] =
+        path === "/"
+          ? ["text/html", BITE_PAGE]
+          : path === "/bite.css"
+            ? ["text/css", BITE_FACE]
+            : ["text/plain", ""];
+      return route.fulfill({
+        status: body ? 200 : 204,
+        contentType: type,
+        headers: { "content-security-policy": CSP },
+        body,
+      });
+    });
+    const page = await context.newPage();
+    const said = watchConsole(page);
+    await page.goto(`${BITE}/`);
+    await page.evaluate(() => document.fonts.load('16px "Bite"', "Lookover").catch(() => []));
+    const missed: string[] = [];
+    if (!(await heard(said, /^console error: .*font-src/)))
+      missed.push("a data: font the CSP blocks logged no console error");
+    await page.evaluate(() => {
+      setTimeout(() => {
+        throw new Error("proof's bite");
+      });
+    });
+    if (!(await heard(said, /^page error: proof's bite$/)))
+      missed.push("a throw in a timer was no page error");
+    return missed;
+  } finally {
+    await context.close();
+  }
+}
+
 // ---- Shots -------------------------------------------------------------------------------------------------
 
 /** At most `n` shots at once, across both trees. */
@@ -317,14 +452,29 @@ interface Visit {
   cookie: Cookie;
   demo: DemoDoor;
   now: number;
+  /** Whether the page's console is judged: what it said wrong fails the shot. */
+  judged: boolean;
 }
 
-async function shootOne(browser: Browser, visit: Visit, theme: Theme, shot: Shot, file: string) {
+/** A shot's window: a phone's, or a desktop's at its width (1180 px unless it names one). */
+const viewportOf = (shot: Shot) =>
+  shot.phone
+    ? { width: shot.phone === "narrow" ? NARROW_PHONE : PHONE, height: 780 }
+    : { width: shot.width ?? 1180, height: 820 };
+
+/** How a visit treats motion: on, as the app ships (its loops still), or as one who asks for reduced motion. */
+interface Motion {
+  /** Under `prefers-reduced-motion: reduce`, nothing stilled, every animation and transition that starts recorded. */
+  reduced?: boolean;
+  /** Runs once the page has settled, just before the shot's act (a frames shot stands its timeline still). */
+  beforeAct?: (page: Page) => Promise<void>;
+}
+
+/** A shot's browser context in `theme`: its window, its session, its loops still or its motion watched. */
+async function contextFor(browser: Browser, visit: Visit, theme: Theme, shot: Shot, reduced: boolean) {
   const context = await browser.newContext({
-    viewport: shot.phone
-      ? { width: shot.phone === "narrow" ? 375 : 390, height: 780 }
-      : { width: 1180, height: 820 },
-    reducedMotion: "reduce",
+    viewport: viewportOf(shot),
+    reducedMotion: reduced ? "reduce" : "no-preference",
     timezoneId: ZONE,
     locale: "en-GB",
     ...(shot.noSession ? {} : { storageState: { cookies: [visit.cookie], origins: [] } }),
@@ -333,29 +483,48 @@ async function shootOne(browser: Browser, visit: Visit, theme: Theme, shot: Shot
     ([t, drawer, still]) => {
       localStorage.setItem("lookover.theme", t);
       localStorage.setItem("lookover.drawer", drawer);
-      // Before the first paint: an animation that ran and was stopped later can leave Chrome painting a stale
-      // frame (the eyes' pupils, cut out by an SVG mask, stayed where the animation left them).
-      const hold = () => {
-        const style = document.createElement("style");
-        style.textContent = still;
-        document.documentElement.append(style);
-      };
-      if (document.documentElement) hold();
-      else
-        new MutationObserver((_, watch) => {
-          if (!document.documentElement) return;
-          watch.disconnect();
-          hold();
-        }).observe(document, { childList: true });
+      // The loops stopped before the first paint: a loop that ran and was stopped later can leave Chrome painting a
+      // stale frame (the eyes' pupils, cut out by an SVG mask, stayed where the animation left them). An adopted
+      // sheet, not a `<style>`: a page served under the service's CSP (GitHub's fake pages) refuses inline styles,
+      // and says so in the console.
+      if (still === "") return;
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(still);
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
     },
-    [theme, shot.drawer ? "open" : "closed", STILL] as const,
+    // Under reduced motion nothing is stilled: the app's own rule must keep every loop still.
+    [theme, shot.drawer ? "open" : "closed", reduced ? "" : STILL] as const,
   );
+  if (reduced) await context.addInitScript(watchMotion);
   // The page's `Date` stands where the service's clock stands.
   await context.clock.setFixedTime(visit.now);
+  return context;
+}
+
+/** Settles the page (scripts/proof-motion.ts): finite motion finished, nothing left leaving. Throws if it can't. */
+async function atRest(page: Page): Promise<void> {
+  const left = await page.evaluate(settle, SETTLE_MS);
+  if (left !== null) throw new Error(`The page didn't settle within ${SETTLE_MS} ms: ${left}`);
+}
+
+/**
+ * Opens the shot's page in `theme`, settles it, acts on it, checks it is still on its screen, then runs `look` on it;
+ * then judges what its console said (when the visit is judged).
+ */
+async function visitShot(
+  browser: Browser,
+  visit: Visit,
+  theme: Theme,
+  shot: Shot,
+  look: (page: Page) => Promise<void>,
+  motion: Motion = {},
+) {
+  const context = await contextFor(browser, visit, theme, shot, motion.reduced === true);
   // A shot takes a few seconds; a step that waits longer waits for something that won't come (a screen the
   // base doesn't have), and its second try would double Playwright's 30 s.
   context.setDefaultTimeout(15_000);
   const page = await context.newPage();
+  const said = watchConsole(page);
   // The commands the page sent and the service has not answered yet: an act moves the clock only once they are.
   let unanswered = 0;
   const isCommand = (request: Request) =>
@@ -389,25 +558,368 @@ async function shootOne(browser: Browser, visit: Visit, theme: Theme, shot: Shot
   try {
     await page.goto(`${visit.url}${shot.path ?? "/"}`);
     await page.waitForSelector(screen);
+    // The page as it lands, its entries played out: an act starts from rest.
+    await atRest(page);
+    await motion.beforeAct?.(page);
     await shot.act?.(page, demo);
     // Still on its own screen once acted: never the session screen, or the setup, in place of the app.
     await page.waitForSelector(screen);
     if (!shot.noSession && (await page.locator(".session").count()) > 0)
       throw new Error("The session screen showed: the service no longer knew the tab");
-    // A sticky top bar, or setup's sticky footer, would be drawn in the middle of a full-page shot.
-    if (shot.fullPage)
-      await page.addStyleTag({ content: ".app > .top, .setup-acts-footer { position: static !important; }" });
     await page.evaluate(() => document.fonts.ready);
-    await page.waitForTimeout(350);
-    await page.screenshot({ path: file, fullPage: shot.fullPage ?? false, animations: "disabled" });
+    await look(page);
+    // What the shot's page logged that it isn't made to, and what it is made to log but didn't.
+    const lines = said();
+    const meant = shot.console ?? [];
+    const wrong = [
+      ...lines.filter((line) => !meant.some((pattern) => pattern.test(line))),
+      ...meant
+        .filter((pattern) => !lines.some((line) => pattern.test(line)))
+        .map((p) => `nothing matched ${p}`),
+    ];
+    if (visit.judged && wrong.length > 0) throw new Error(`The page said: ${wrong.join(" | ")}`);
   } finally {
     await context.close();
   }
 }
 
+function shootOne(browser: Browser, visit: Visit, theme: Theme, shot: Shot, file: string) {
+  return visitShot(browser, visit, theme, shot, async (page) => {
+    // A sticky top bar, or setup's sticky footer, would be drawn in the middle of a full-page shot.
+    if (shot.fullPage) await adopt(page, ".app > .top, .setup-acts-footer { position: static !important; }");
+    await page.waitForTimeout(350);
+    // Shot with its motion on, as it ships: settled first, so it lands where a person sees it come to rest.
+    await atRest(page);
+    await page.screenshot({ path: file, fullPage: shot.fullPage ?? false, animations: "allow" });
+  });
+}
+
+/** Waits for the page's next frame to be drawn: what a seek changed is painted. */
+const nextFrame = (page: Page) =>
+  page.evaluate(
+    () => new Promise<void>((ok) => requestAnimationFrame(() => requestAnimationFrame(() => ok()))),
+  );
+
+/**
+ * The page's timeline stood still, through DevTools' animation rate: a motion the act starts can't run ahead of proof,
+ * however slow the act's round trip. Gives back a function that lets it run again.
+ */
+async function standStill(page: Page): Promise<() => Promise<void>> {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Animation.enable");
+  await cdp.send("Animation.setPlaybackRate", { playbackRate: 0 });
+  return async () => {
+    await cdp.send("Animation.setPlaybackRate", { playbackRate: 1 });
+    await cdp.detach();
+  };
+}
+
+/**
+ * The motion the act started, shot at each of `frameTimes` in the box `around` names, then finished, the timeline let
+ * go (`letGo`) and the page settled, shot last.
+ */
+async function framesOf(page: Page, shot: Shot, letGo: () => Promise<void>): Promise<Frame[]> {
+  if (!(await page.evaluate(motionStarted, 2_000))) throw new Error("Its act started no motion");
+  const end = await page.evaluate(pauseMotion);
+  // The box at the motion's end: what it grows to.
+  await page.evaluate(seekMotion, end);
+  const around = shot.frames?.around;
+  const clip = around ? await page.evaluate(regionOf, { selector: around, margin: 24 }) : null;
+  if (around && clip === null) throw new Error(`Nothing on the page is ${around}`);
+  const frames: Frame[] = [];
+  const take = async (label: string) => {
+    await nextFrame(page);
+    const png = await page.screenshot({ animations: "allow", ...(clip ? { clip } : {}) });
+    frames.push({ label, png: png.toString("base64") });
+  };
+  for (const ms of frameTimes(end)) {
+    await page.evaluate(seekMotion, ms);
+    await take(`${ms} ms`);
+  }
+  // What started after the pause stood at its first frame through every one: the strip would lie.
+  const frozen = await page.evaluate(unpausedMotion);
+  if (frozen.length > 0)
+    throw new Error(`Motion started after its frames' pause, shown frozen: ${frozen.join(", ")}`);
+  await page.evaluate(finishMotion);
+  await letGo();
+  await atRest(page);
+  await take("settled");
+  return frames;
+}
+
+/**
+ * A frames shot (scripts/proof-motion.ts): its page settled, its timeline stood still, its act run; the motion paused
+ * and sought to each of `frameTimes`, then finished, the timeline let go and the page settled, each shot; the frames
+ * laid side by side into `file`.
+ */
+async function shootFrames(browser: Browser, visit: Visit, theme: Theme, shot: Shot, file: string) {
+  let frames: Frame[] = [];
+  let letGo: () => Promise<void> = async () => {};
+  const look = async (page: Page) => {
+    frames = await framesOf(page, shot, letGo);
+  };
+  const beforeAct = async (page: Page) => {
+    letGo = await standStill(page);
+  };
+  await visitShot(browser, visit, theme, shot, look, { beforeAct });
+  await stripOf(browser, shot.name, theme, frames, file);
+}
+
+/** Lays `frames` side by side on a page of their own, shot by the browser into `file` (site:strip's way). */
+async function stripOf(browser: Browser, name: string, theme: Theme, frames: Frame[], file: string) {
+  const context = await browser.newContext({ viewport: { width: 800, height: 100 } });
+  try {
+    const page = await context.newPage();
+    await page.setContent(stripPage(name, theme, frames), { waitUntil: "load" });
+    mkdirSync(dirname(file), { recursive: true });
+    await page.screenshot({ path: file, fullPage: true });
+  } finally {
+    await context.close();
+  }
+}
+
+// ---- The reduced-motion pass (ADR 0087) -------------------------------------------------------------------------
+
+/** The motion bite's origin: its own, served under the service's CSP. */
+const MOTION_BITE = "http://motion.localhost";
+
+/** The reduced-motion pass's look once acted, the bite's and each act's: a frame drawn, 300 ms on, what moved. */
+async function reducedLook(page: Page): Promise<string[]> {
+  await nextFrame(page);
+  await page.waitForTimeout(300);
+  return page.evaluate(motionSeen);
+}
+
+/** What `watchMotion` saw on one bite page, settled then acted on: what the pass missed on it, or nothing. */
+async function motionBiteMissed(browser: Browser, bite: MotionBite): Promise<string[]> {
+  const context = await browser.newContext({ reducedMotion: "reduce" });
+  try {
+    await context.addInitScript(watchMotion);
+    await context.route(`${MOTION_BITE}/**`, (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const [type, body] =
+        path === "/"
+          ? ["text/html", MOTION_BITE_PAGE]
+          : path === "/motion.css"
+            ? ["text/css", bite.css]
+            : path === "/motion.js"
+              ? ["text/javascript", bite.js]
+              : ["", ""];
+      return route.fulfill({
+        status: body ? 200 : 204,
+        contentType: type || "text/plain",
+        headers: { "content-security-policy": CSP },
+        body,
+      });
+    });
+    const page = await context.newPage();
+    // The service pass's lifecycle (visitShot): settled as it lands, acted on, looked at after the same wait.
+    await page.goto(`${MOTION_BITE}/`);
+    await atRest(page);
+    await page.evaluate(biteAct);
+    const seen = await reducedLook(page);
+    if (!bite.moves) return seen.length > 0 ? [`${bite.name}: seen moving (${seen.join(", ")})`] : [];
+    const missed = BITE_MOTION.filter((m) => !seen.includes(m));
+    return missed.length > 0 ? [`${bite.name}: not seen (${missed.join(", ")})`] : [];
+  } finally {
+    await context.close();
+  }
+}
+
+/** What the reduced-motion pass found wrong on this run: its self-test, a frames shot's act. */
+const motionWrong: string[] = [];
+
+/**
+ * The reduced-motion pass on the service: its self-test first, then each frames shot's act replayed under reduced
+ * motion, in the dark theme: any animation or transition that starts, or still runs, fails it.
+ */
+async function reducedService(s: Shooting, server: ServiceServer): Promise<void> {
+  const framed = shots.filter((shot) => shot.frames !== undefined);
+  if (framed.length === 0) return;
+  const missed = (await Promise.all(MOTION_BITES.map((bite) => motionBiteMissed(s.browser, bite)))).flat();
+  if (missed.length > 0) {
+    for (const line of missed) console.log(`FAIL the reduced-motion bite: ${line}`);
+    motionWrong.push(...missed);
+    return;
+  }
+  console.log(
+    "ok   the reduced-motion bite: a page that moves was seen moving, one kept still was seen still",
+  );
+  const { url, cookie, demo } = server;
+  for (const shot of framed) {
+    const label = `reduced motion ${shot.name}`;
+    let seen: string[] = [];
+    const look = async (page: Page) => {
+      seen = await reducedLook(page);
+    };
+    try {
+      const attempt = async () => {
+        const now = await enter(demo, shot);
+        await visitShot(s.browser, { url, cookie, demo, now, judged: true }, "dark", shot, look, {
+          reduced: true,
+        });
+      };
+      await s.slot(() => attempt().catch(() => attempt()));
+    } catch (error) {
+      seen = [`could not replay its act: ${String(error).split("\n")[0]}`];
+    }
+    const line = seen.length > 0 ? `${label}: ${seen.join(", ")}` : null;
+    if (line) motionWrong.push(line);
+    console.log(line ? `FAIL ${line}` : `ok   ${label}: nothing moved`);
+  }
+}
+
+/** Adds `rules` to the page's CSS: an adopted sheet, which a page under the service's CSP accepts. */
+function adopt(page: Page, rules: string): Promise<void> {
+  return page.evaluate((rules) => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(rules);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  }, rules);
+}
+
+// ---- The layout pass (scripts/proof-layout.ts) ----------------------------------------------------------------
+
+/** The shot laid out at `width` in the dark theme and judged: what failed, allowed or not. */
+async function measureOne(browser: Browser, visit: Visit, shot: Shot, width: number): Promise<Failure[]> {
+  let failures: Failure[] = [];
+  const window: Shot = { ...shot, phone: width === PHONE, width };
+  await visitShot(browser, visit, "dark", window, async (page) => {
+    await page.waitForTimeout(350);
+    await atRest(page);
+    failures = await page.evaluate<Failure[]>(judgeScript("body", allowedOn(shot.name)));
+  });
+  return failures;
+}
+
+/** One page of the layout's self-test laid out in `page`: what the pass missed on it, or nothing. */
+async function biteMissed(page: Page, bite: BitePage): Promise<string[]> {
+  await page.evaluate(
+    ({ html, css }) => {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(css);
+      document.adoptedStyleSheets = [sheet];
+      const body = document.createElement("body");
+      body.innerHTML = html;
+      document.body.replaceWith(body);
+    },
+    { html: bite.html, css: bite.css },
+  );
+  await page.evaluate(() => document.fonts.ready);
+  const found = await page.evaluate<Failure[]>(judgeScript("body", []));
+  const lines = found.map((f) => failureLine(bite.name, 1024, f)).join("; ");
+  if (bite.fails !== null)
+    return found.some((f) => f.measure === bite.fails)
+      ? []
+      : [`${bite.name} passed its ${bite.fails} measure${lines ? ` (found only: ${lines})` : ""}`];
+  // The correct page passes, and its `SameWidth` places, under the app's own CSS, hold width, never height.
+  const sameWidth = (await page.evaluate(sameWidthMisses)).map((miss) => `${bite.name}'s SameWidth: ${miss}`);
+  return [...(found.length > 0 ? [`${bite.name} failed: ${lines}`] : []), ...sameWidth];
+}
+
+/**
+ * Proves the layout pass bites (ADR 0086) on pages of its own under the app's CSS, the app's session screen emptied:
+ * each bad page must fail its measure, the correct page must pass, its `SameWidth` places as wide as their widest
+ * label and as tall as the label they show. What it missed, or nothing.
+ */
+async function layoutBites(browser: Browser, url: string): Promise<string[]> {
+  const context = await browser.newContext({ viewport: { width: 1024, height: 820 } });
+  try {
+    await context.addInitScript(() => localStorage.setItem("lookover.theme", "dark"));
+    const page = await context.newPage();
+    await page.goto(`${url}/`);
+    await page.waitForSelector(".session");
+    await page.evaluate(() => document.fonts.ready);
+    const missed: string[] = [];
+    for (const bite of LAYOUT_BITES) missed.push(...(await biteMissed(page, bite)));
+    return missed;
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * What the layout pass found wrong on this run (the self-test, a screen), the allowances it used, and whether it
+ * judged every screen it measured: the bite bit, every world entered, every screen measured.
+ */
+const layoutWrong: string[] = [];
+const allowancesUsed = new Set<number>();
+let layoutJudgedAll = false;
+
+/**
+ * The layout pass on one side's service: its self-test first, then each measured shot among those this run takes,
+ * at each of its widths, one world after another (an `alone` shot loaded for each width).
+ */
+async function measureService(s: Shooting, server: ServiceServer): Promise<void> {
+  const missed = await layoutBites(s.browser, server.url);
+  if (missed.length > 0) {
+    for (const line of missed) console.log(`FAIL the layout's bite: ${line}`);
+    layoutWrong.push(...missed);
+    return;
+  }
+  let judgedAll = true;
+  console.log("ok   the layout's bite: every bad page failed its measure, the correct page passed");
+  const named = new Map(shots.map((shot) => [shot.name, shot]));
+  const todo = MEASURED.flatMap((m) => {
+    const shot = named.get(m.shot);
+    return shot === undefined ? [] : widthsOf(m).map((width) => ({ shot, width }));
+  });
+  const worlds = new Map<string, typeof todo>();
+  for (const item of todo) {
+    const id = item.shot.alone ? `${item.shot.name}@${item.width}` : JSON.stringify(worldOf(item.shot));
+    worlds.set(id, [...(worlds.get(id) ?? []), item]);
+  }
+  const { url, cookie, demo } = server;
+  const one = async (shot: Shot, width: number, now: number | null) => {
+    const label = `layout ${shot.name} at ${width} px`;
+    try {
+      // A second try, as a shot has: an `alone` shot's world loaded again for it.
+      const attempt = async () => {
+        const at = now ?? (await enter(demo, shot));
+        return measureOne(s.browser, { url, cookie, demo, now: at, judged: true }, shot, width);
+      };
+      const found = await attempt().catch(() => attempt());
+      const wrong = found.filter((f) => f.allowedBy === null);
+      for (const f of found) if (f.allowedBy !== null) allowancesUsed.add(f.allowedBy);
+      const allowed = found.length - wrong.length;
+      if (wrong.length === 0) console.log(`ok   ${label}${allowed ? ` (${allowed} allowed)` : ""}`);
+      for (const f of wrong) {
+        const line = failureLine(shot.name, width, f);
+        layoutWrong.push(line);
+        console.log(`FAIL layout ${line}`);
+      }
+    } catch (error) {
+      judgedAll = false;
+      layoutWrong.push(`${label}: ${String(error).split("\n")[0]}`);
+      console.log(`FAIL ${label}: ${String(error).split("\n")[0]}`);
+    }
+  };
+  for (const items of worlds.values()) {
+    const [first] = items;
+    if (!first) continue;
+    if (first.shot.alone) {
+      await s.slot(() => one(first.shot, first.width, null));
+      continue;
+    }
+    let now: number;
+    try {
+      now = await enter(demo, first.shot);
+    } catch (error) {
+      judgedAll = false;
+      layoutWrong.push(`layout ${first.shot.name}: ${String(error).split("\n")[0]}`);
+      console.log(`FAIL layout ${first.shot.name}: ${String(error).split("\n")[0]}`);
+      continue;
+    }
+    await Promise.all(items.map(({ shot, width }) => s.slot(() => one(shot, width, now))));
+  }
+  layoutJudgedAll = judgedAll;
+}
+
 /** "<theme>/<name>": a shot in one theme, and its file under an output folder. */
 type Key = `${Theme}/${string}`;
 const keyOf = (theme: Theme, shot: Shot): Key => `${theme}/${shot.name}`;
+/** Where a frames shot's strip goes: `.proof/frames/<name>-<theme>.png`, the current tree's only. */
+const stripFile = (shot: Shot, theme: Theme) => join(out, "frames", `${shot.name}-${theme}.png`);
 
 interface Side {
   worktree: string;
@@ -449,8 +961,12 @@ function byWorld(todo: Todo): Todo[] {
 /** One world's shots on the service: loaded once and its shots taken at once, or alone, loaded on each try. */
 async function shootWorld(s: Shooting, server: ServiceServer, items: Todo): Promise<void> {
   const { url, cookie, demo } = server;
-  const take = (theme: Theme, shot: Shot, key: Key, now: number) =>
-    shootOne(s.browser, { url, cookie, demo, now }, theme, shot, s.fileOf(key));
+  const take = (theme: Theme, shot: Shot, key: Key, now: number) => {
+    const visit = { url, cookie, demo, now, judged: !s.side.base };
+    return shot.frames
+      ? shootFrames(s.browser, visit, theme, shot, stripFile(shot, theme))
+      : shootOne(s.browser, visit, theme, shot, s.fileOf(key));
+  };
   const [first] = items;
   if (!first) return;
   if (first.shot.alone) {
@@ -501,6 +1017,9 @@ async function shootService(s: Shooting): Promise<void> {
       return;
     }
     for (const items of byWorld(todo)) await shootWorld(s, server, items);
+    // Reduced motion and the layout are judged on the tree being proved, never on a diff's base.
+    if (!s.side.base) await reducedService(s, server);
+    if (!s.side.base) await measureService(s, server);
   } finally {
     await server.stop();
   }
@@ -571,10 +1090,11 @@ async function shootBase(
     .stdout.toString()
     .trim();
   if (!sha) throw new Error(`${ref} is not a commit`);
-  // The shots depend on the base's tree, on what proof does and on the browser.
+  // The shots depend on the base's tree, on what proof does (its loops still, how it settles) and on the browser.
   const harness = createHash("sha1")
     .update(readFileSync(join(import.meta.dir, "proof.ts")))
     .update(readFileSync(join(import.meta.dir, "proof-shots.ts")))
+    .update(readFileSync(join(import.meta.dir, "proof-motion.ts")))
     .update(browser.version())
     .digest("hex")
     .slice(0, 12);
@@ -655,14 +1175,26 @@ function parseArgs(args: string[]): { words: string[]; baseRef: string | undefin
 
 const { words, baseRef, jobs } = parseArgs(process.argv.slice(2));
 const shots: Shot[] = SHOTS.filter((shot) => words.length === 0 || words.some((w) => shot.name.includes(w)));
-// The index labels each shot by its scenario.
-const everyShot = THEMES.flatMap((theme) => shots.map((shot) => ({ theme, shot, key: keyOf(theme, shot) })));
+// The index labels each shot by its scenario. A frames shot is a strip, never a still: listed apart, never compared.
+const stills = shots.filter((shot) => shot.frames === undefined);
+const everyShot = THEMES.flatMap((theme) => stills.map((shot) => ({ theme, shot, key: keyOf(theme, shot) })));
+const everyStrip = THEMES.flatMap((theme) =>
+  shots.filter((shot) => shot.frames !== undefined).map((shot) => ({ theme, shot, key: keyOf(theme, shot) })),
+);
 
 const began = Date.now();
 // The system Edge: no browser download needed on Windows. Elsewhere, Playwright's own Chromium.
 const browser = await chromium.launch(process.platform === "win32" ? { channel: "msedge" } : {});
 // No shot left over from an earlier run.
 rmSync(out, { recursive: true, force: true });
+// The console's listeners bite, or no shot is worth judging by them.
+const missed = await consoleBites(browser);
+if (missed.length > 0) {
+  for (const line of missed) console.log(`FAIL the console's bite: ${line}`);
+  await browser.close();
+  process.exit(1);
+}
+console.log("ok   the console's bite: a font the CSP blocks and a throw in a timer were both heard");
 const slot = limiter(jobs);
 // Both trees at once: the base's worktree is made and installed while the current tree is shot.
 const [baseFailed, failed] = await Promise.all([
@@ -681,8 +1213,15 @@ await browser.close();
 
 const cell = (dir: string, s: (typeof everyShot)[number], tag = "") =>
   `<figure><img loading="lazy" src="${dir}${s.key}.png" alt=""><figcaption>${s.shot.name} · ${s.theme} · ${s.shot.scenario}${tag}</figcaption></figure>`;
+// The strips the run made, each at its own size: a motion in both themes, never compared with a base.
+const strips = everyStrip
+  .filter(({ key }) => !failed.includes(key))
+  .map(
+    ({ theme, shot }) =>
+      `<figure><img loading="lazy" src="frames/${shot.name}-${theme}.png" alt=""><figcaption>${shot.name} · ${theme} · ${shot.scenario} · frames</figcaption></figure>`,
+  );
 const html = (title: string, body: string) =>
-  `<!doctype html><meta charset="utf-8"><title>${title}</title><style>body{font:14px system-ui;background:#111;color:#ddd;margin:24px}main{display:grid;grid-template-columns:1fr 1fr;gap:16px}img{width:100%;border:1px solid #333}figure{margin:0}figcaption{padding:4px 0 12px;color:#999}</style><h1>${title}</h1><main>${body}</main>`;
+  `<!doctype html><meta charset="utf-8"><title>${title}</title><style>body{font:14px system-ui;background:#111;color:#ddd;margin:24px}main{display:grid;grid-template-columns:1fr 1fr;gap:16px}img{width:100%;border:1px solid #333}figure{margin:0}figcaption{padding:4px 0 12px;color:#999}.strips{display:flex;flex-direction:column;gap:16px;overflow-x:auto}.strips img{width:auto;max-width:none}</style><h1>${title}</h1><main>${body}</main>${strips.length ? `<h2>Motion, frame by frame</h2><section class="strips">${strips.join("")}</section>` : ""}`;
 
 if (baseRef) {
   const bytes = (key: string, dir: string) => readFileSync(join(dir, `${key}.png`));
@@ -701,13 +1240,28 @@ if (baseRef) {
   for (const { key } of added) console.log(`  new     ${key}`);
   if (body.length > 0) console.log(`Base beside current: ${join(out, "index.html")}`);
 } else {
-  const body = shots.map((shot) =>
+  const body = stills.map((shot) =>
     THEMES.map((theme) => cell("", { theme, shot, key: keyOf(theme, shot) })).join(""),
   );
   writeFileSync(join(out, "index.html"), html("Lookover proof", body.join("")));
 }
+// On a whole run that judged every screen, an allowance nothing needed is one its ticket fixed: it goes.
+for (const line of unneeded(allowancesUsed, words.length === 0 && layoutJudgedAll)) {
+  layoutWrong.push(line);
+  console.log(`FAIL layout ${line}`);
+}
 const seconds = Math.round((Date.now() - began) / 1000);
+// Stills and strips counted apart: a failed strip is no missing screenshot.
+const stillsFailed = everyShot.filter(({ key }) => failed.includes(key)).length;
+const stripsFailed = everyStrip.filter(({ key }) => failed.includes(key)).length;
+const stripsLine = everyStrip.length
+  ? `, ${everyStrip.length - stripsFailed} frames strips${stripsFailed ? ` (${stripsFailed} failed)` : ""}`
+  : "";
 console.log(
-  `\n${everyShot.length - failed.length} screenshots in ${out} (${seconds} s)${failed.length ? `, ${failed.length} failed` : ""}`,
+  `\n${everyShot.length - stillsFailed} screenshots${stillsFailed ? ` (${stillsFailed} failed)` : ""}${stripsLine} in ${out} (${seconds} s)`,
 );
-process.exit(failed.length ? 1 : 0);
+if (layoutWrong.length > 0)
+  console.log(`The layout pass found ${layoutWrong.length} wrong (lines FAIL above)`);
+if (motionWrong.length > 0)
+  console.log(`The reduced-motion pass found ${motionWrong.length} wrong (lines FAIL above)`);
+process.exit(failed.length || layoutWrong.length || motionWrong.length ? 1 : 0);
