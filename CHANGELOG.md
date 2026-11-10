@@ -2,6 +2,18 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.14.0](https://github.com/lookover-dev/lookover/compare/v0.13.0...v0.14.0) (2026-11-10)
+
+### Features
+
+- **setup:** an account you install the GitHub App on, or whose repositories you change on GitHub, shows within seconds: every link to GitHub's install page or an installation's settings starts a look, every few seconds for up to three minutes, and coming back to the app checks at once. Until then setup, Settings › GitHub and the foot of Repositories say Lookover is looking, with Check again at any time; a toast says when the account arrives.
+- **app:** a fix in the status band or the status menu that sends you to GitHub says Looking… while its look runs.
+- **github:** without a look, Lookover reads your installations every 2 minutes instead of 5, and when GitHub asks it to wait, it waits once for the whole sign-in and lists again as soon as the wait ends.
+
+### Bug Fixes
+
+- **setup:** on a phone, an account's Installed status is as tall as its line, so a hovered row no longer runs past it.
+
 ## [0.13.0](https://github.com/lookover-dev/lookover/compare/v0.12.0...v0.13.0) (2026-11-10)
 
 ### Features

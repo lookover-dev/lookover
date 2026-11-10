@@ -279,6 +279,8 @@ function connectionOf(f: Facts): State["connection"] {
     accounts: installed ? f.accounts : [],
     listed: f.listed,
     listingCause: f.listingCause,
+    // A look doesn't outlive the service (ADR 0088): none at start.
+    look: null,
     unreached: [],
     web: f.web,
     since: f.startedAt,

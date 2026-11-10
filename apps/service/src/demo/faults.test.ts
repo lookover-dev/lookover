@@ -164,9 +164,9 @@ test("github-limit: GitHub asks to wait twenty minutes; the connection says unti
   const door = await morning();
   expect(await inject(door, "github-limit")).toBe(200);
   expect((await snapshotOf(door)).connection.limitUntil).toBe(T0 + 20 * MIN);
-  const refused = await send(door, { type: "refresh" });
-  expect(refused.status).toBe(502);
-  expect(await refused.json()).toEqual({ error: "rate_limited" });
+  // "Refresh" during the wait asks GitHub nothing (ADR 0088): it answers, the wait kept, the loop lists at its end.
+  expect((await send(door, { type: "refresh" })).status).toBe(200);
+  expect((await snapshotOf(door)).connection.limitUntil).toBe(T0 + 20 * MIN);
   await advance(door, 20 * MIN + 10_000);
   expect((await snapshotOf(door)).connection.limitUntil).toBeNull();
   expect((await send(door, { type: "refresh" })).status).toBe(200);
@@ -366,7 +366,7 @@ test("app-uninstalled: the connection shows the App uninstalled; installed again
     cause: { kind: "uninstalled", suspended: false },
   });
   await installApp(door, `${DEMO_API.github}${install}`);
-  // No repository left to poll: the next discovery, five minutes on, finds the new installation.
+  // No repository left to poll: the next discovery, at most 2 minutes on, finds the new installation.
   await advance(door, 5 * MIN);
   const back = (await snapshotOf(door)).connection;
   expect(back).toMatchObject({ state: "connected", cause: null });

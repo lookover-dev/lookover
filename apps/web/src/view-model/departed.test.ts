@@ -62,7 +62,7 @@ test("connected: an account no longer reached with nothing left watched is one N
       label: "No access",
       text: "Lookover no longer has access to ledger-labs. Its 2 repositories are no longer reviewed.",
       repoIds: [repositoryId("ledger-labs/ledger-sdk"), repositoryId("ledger-labs/ledger-cli")],
-      fix: { label: "Install on ledger-labs", href: INSTALL },
+      fix: { label: "Install on ledger-labs", href: INSTALL, command: { type: "connection.look" } },
     },
   ]);
   expect(said.quiet.map((r) => String(r.id))).toEqual(["fernhill/legacy-portal", "fernhill/onboarding"]);
@@ -122,7 +122,11 @@ test("an account not reached with one of its repositories still watched is not g
 test("No access's fix is the accounts list's for that login: owner, member, asked; else Install on", () => {
   const fixOf = (u: UnreachedAccount[]) =>
     departedSaid(at([departed("ledger-labs", "ledger-sdk")], { unreached: u })).gone[0]?.fix;
-  expect(fixOf([unreached("ledger-labs", true)])).toEqual({ label: "Install on ledger-labs", href: INSTALL });
+  expect(fixOf([unreached("ledger-labs", true)])).toEqual({
+    label: "Install on ledger-labs",
+    href: INSTALL,
+    command: { type: "connection.look" },
+  });
   expect(fixOf([unreached("ledger-labs", false)])).toEqual({
     label: "Ask to install on ledger-labs",
     href: INSTALL,
@@ -133,7 +137,11 @@ test("No access's fix is the accounts list's for that login: owner, member, aske
     href: "https://github.com/orgs/ledger-labs/people?query=role%3Aowner",
   });
   // Not named by `gh` at all: Install on, GitHub's page lists every account.
-  expect(fixOf([])).toEqual({ label: "Install on ledger-labs", href: INSTALL });
+  expect(fixOf([])).toEqual({
+    label: "Install on ledger-labs",
+    href: INSTALL,
+    command: { type: "connection.look" },
+  });
 });
 
 test("the quiet ones: none, one alone, from two up the summary, one sentence, with the ids it shows", () => {

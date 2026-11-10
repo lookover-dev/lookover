@@ -200,6 +200,42 @@ test("asked to install on ledger-hq, it waits for an owner; the drawer's owner i
   expect(installed.repos.map((r) => r.id)).toContain(repositoryId("ledger-hq/ledger-app"));
 });
 
+test("asked to install on ledger-hq, the drawer's owner approves the request: no listing at once, the next one, within 2 minutes, finds it", async () => {
+  await named();
+  expect(await refused("owner-approves")).toEqual({
+    status: 409,
+    body: { error: "no organisation waits for an owner" },
+  });
+  expect((await send(door, { type: "connection.askToInstall", account: "ledger-hq" })).status).toBe(200);
+  // The ask's look runs its 3 minutes with nothing new; then discovery's pace, the next listing 2 minutes on.
+  expect((await after(3 * MIN)).connection.look).toMatchObject({ ended: T0 + 3 * MIN, arrived: null });
+
+  expect(await inject(door, "owner-approves")).toBe(200);
+  const reachedHq = (s: State) => s.connection.accounts.some((a) => a.account.login === "ledger-hq");
+  expect(reachedHq(await snapshotOf(door))).toBe(false);
+  expect(reachedHq(await after(2 * MIN - 1_000))).toBe(false);
+  await advance(door, 1_000);
+  const found = await eventually(() => snapshotOf(door), reachedHq);
+  expect(unreachedOf(found)).toEqual([["ledger-labs", true, false]]);
+  expect(found.repos.map((r) => r.id)).toContain(repositoryId("ledger-hq/ledger-app"));
+});
+
+test("asked to install on ledger-hq, the drawer's owner approves the request while the ask's look runs: its next listing, within 4 s, finds it", async () => {
+  await named();
+  expect((await send(door, { type: "connection.askToInstall", account: "ledger-hq" })).status).toBe(200);
+  // A minute into the ask's look, which lists every 4 s.
+  expect((await after(MIN)).connection.look).toMatchObject({ ended: null });
+
+  expect(await inject(door, "owner-approves")).toBe(200);
+  const reachedHq = (s: State) => s.connection.accounts.some((a) => a.account.login === "ledger-hq");
+  expect(reachedHq(await snapshotOf(door))).toBe(false);
+  await advance(door, 4_000);
+  const found = await eventually(() => snapshotOf(door), reachedHq);
+  expect(found.connection.look).toMatchObject({ arrived: { accounts: ["ledger-hq"] } });
+  expect(found.connection.look?.ended).toBeLessThanOrEqual(T0 + MIN + 4_000);
+  expect(unreachedOf(found)).toEqual([["ledger-labs", true, false]]);
+});
+
 test("the drawer has an owner suspend the App on ledger-dev: its account says so, naming who", async () => {
   await named();
   expect(await inject(door, "organisation-suspended")).toBe(200);

@@ -19,6 +19,7 @@ import {
   changeId,
   changeIdOf,
   changePrefixOf,
+  DISCOVERY_RETRY_MS,
   type EngineHealth,
   type EngineId,
   type EngineState,
@@ -29,6 +30,7 @@ import {
   type IdGen,
   type JobState,
   type LoginItemKind,
+  type LookRefusal,
   type NoiseChoice,
   type PauseFor,
   type RepositoryId,
@@ -67,12 +69,7 @@ import { createDeviceFlow } from "./device-flow.ts";
 import { createDismissals, type Dismissing, type DismissRefusal } from "./dismiss.ts";
 import { EventLog } from "./events.ts";
 import { checkItems, freeGbOf } from "./health-checks.ts";
-import {
-  createInstallation,
-  DISCOVERY_RETRY_MS,
-  type GitHubSide,
-  type Installation,
-} from "./installation.ts";
+import { createInstallation, type GitHubSide, type Installation } from "./installation.ts";
 import { differsLine, droppedLine, logLineOf, skippedLine } from "./log-lines.ts";
 import { secretShapesRemoved } from "./log-sink.ts";
 import { type LoginItem, nowhereLoginItem } from "./login-item.ts";
@@ -329,6 +326,12 @@ export interface Room {
      * `Connection.unreached` doesn't name, or one the person owns.
      */
     askToInstall(account: string): Promise<"ok" | { refused: AskToInstallRefusal }>;
+    /**
+     * An install look (ADR 0088), asked by a link to GitHub's install page or settings, the window coming back or
+     * "Check again", and begun by an ask kept too: the installations listed now, then every 4 s for 3 minutes or until
+     * something new arrives; asked while one runs, its end moved on. Refused before a sign-in.
+     */
+    look(): Promise<"ok" | { refused: LookRefusal }>;
   };
   /**
    * The settings in their files (ADR 0049): the owner's defaults (`settings.set`), a watched repository's own
@@ -487,6 +490,9 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     installed: (granted) => setup.installed(granted),
     reached: (cause) => poller.reached(cause),
     accountBack: () => queue.take(),
+    limitUntil: () => shown.connection.limitUntil,
+    limited: (until) => poller.limited(until),
+    asked: () => shown.connection.unreached.filter((u) => u.askedAt !== null).map((u) => u.account.login),
     log: logLine,
   });
   const listedAtStart = await opened(store, github);
@@ -923,14 +929,17 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   // Everything the queue takes with is made: the self-tests that ended meanwhile are told it now.
   tested.ready(queue.tested);
   await sinceLastStart({ store, github, listed: listedAtStart, leave: moves.leave, emit, at: startedAt });
+  const waitsAtStart = holdPollsForStartLimit(github, poller, o.clock.now());
   // The first listing: what changed while the service was stopped. A job the last service left running never
   // finished: it runs again, once, or fails, "the service stopped"; then the jobs left waiting are taken (#62).
   // Then the poll goes on by itself.
   // A rate limit at start is only a wait: the poller keeps GitHub's reset time, and lists then; a refusal is logged,
   // the connection showing it (`Poller.first`), and the service starts all the same (ADR 0053). With no bot installed
   // yet (the setup's GitHub step) there is nothing to list: the setup lists once it is (ADR 0047). With the App or its
-  // installation refused at start, the loop lists, and shows the connection back once GitHub answers.
-  if (shown.connection.state !== "not-connected" && github.down() === null) await poller.first();
+  // installation refused at start, the loop lists, and shows the connection back once GitHub answers; asked to wait
+  // there, it lists at the wait's end.
+  if (shown.connection.state !== "not-connected" && github.down() === null && !waitsAtStart)
+    await poller.first();
   queue.recover();
   // The run folders older than 30 days go, now that the recovery said which runs go on, then once a day (ADR 0056).
   const runFolders = createRunFolders({
@@ -967,7 +976,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       await atLogin.match();
     },
   };
-  // The installation's own loop: its repositories every 5 minutes, or the install waited for (ADR 0053).
+  // The installation's own loop: its repositories every 2 minutes (ADR 0088), or the install waited for (ADR 0053).
   github.begin(store.setup.read());
 
   /** Settles once `stop` began: what waits on the engines or the disk then ends at once. */
@@ -1108,7 +1117,13 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     github: {
       signIn: deviceFlow.start,
       cancelSignIn: deviceFlow.cancel,
-      askToInstall: unreached.ask,
+      // An ask kept opens GitHub's install page: Lookover looks for what an owner does there (ADR 0088).
+      askToInstall: async (account) => {
+        const answer = await unreached.ask(account);
+        if (answer === "ok") await github.look();
+        return answer;
+      },
+      look: github.look,
     },
     review: queue.request,
     checkEngines: queue.checkEngines,
@@ -1393,6 +1408,17 @@ async function sinceLastStart(d: {
     });
 }
 
+/**
+ * GitHub asked the start's listing of the installations to wait (ADR 0088): the poller keeps it, and asks nothing
+ * before its end. Whether that end is still to come at `now`.
+ */
+function holdPollsForStartLimit(github: Installation, poller: Poller, now: number): boolean {
+  const until = github.limitedAtStart();
+  if (until === null) return false;
+  poller.limited(until);
+  return until > now;
+}
+
 /** A poll of one repository; nothing for none (a change of no repository watched: no such change). */
 const listedOf = async (poller: Poller, repo: RepositoryRef | null): Promise<void> => {
   if (repo !== null) await poller.poll(repo);
@@ -1535,6 +1561,8 @@ function identityLeft(shown: State, github: Installation, at: number): EventBody
     ...(isDeepStrictEqual(github.listingCause(), was.listingCause)
       ? {}
       : { listingCause: github.listingCause() }),
+    // A look doesn't outlive the service (ADR 0088): one the log ran is over.
+    ...(was.look === null ? {} : { look: null }),
   };
   return Object.keys(patch).length === 0 ? [] : [{ type: "connection.changed", at, patch }];
 }

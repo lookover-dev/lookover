@@ -146,8 +146,8 @@ test("signed in on two accounts, both are the connection's, and their two same-n
 test("the organisation suspended: its account shows it, naming who suspended it, its repository stays watched, and the person's own keeps reviewing", async () => {
   const { service, cookie, host, time } = await onTwoAccounts(2);
   host.suspend(ORG.login, "rhea-k");
-  // The next listing of the accounts, five minutes on.
-  await time.advance(5 * MIN);
+  // The next listing of the accounts, at most 2 minutes on.
+  await time.advance(2 * MIN);
   const suspended = await eventually(
     () => snapshot(service, cookie),
     (s) => s.connection.accounts[1]?.cause !== null && s.connection.accounts[1] !== undefined,
@@ -384,11 +384,11 @@ async function passage(meet: (host: FakeGitHost, time: DemoClock) => Promise<voi
 test("an organisation suspended, then uninstalled: first its account's cause, its repository still watched; at the next listing it departs and the account is gone; never both", async () => {
   const { said, last } = await passage(async (host, time) => {
     host.suspend(ORG.login, "rhea-k");
-    // The next listing of the accounts, five minutes on, says the cause.
-    await time.advance(5 * MIN);
+    // The next listing of the accounts, at most 2 minutes on, says the cause.
+    await time.advance(2 * MIN);
     host.uninstall(ORG.login);
-    // The listing after it.
-    await time.advance(5 * MIN);
+    // The listing after it, 2 minutes on.
+    await time.advance(2 * MIN);
   });
   expect(said).toEqual(["reached", "cause", "leaving", "gone"]);
   expect(last.connection).toMatchObject({ state: "connected", cause: null });

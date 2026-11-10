@@ -58,6 +58,7 @@ const CONNECTED: Connection = {
   ],
   listed: true,
   listingCause: null,
+  look: null,
   unreached: [],
   signIn: null,
   person: { id: 7, login: "sam" },

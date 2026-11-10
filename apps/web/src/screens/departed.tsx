@@ -4,6 +4,7 @@
 import type { Command, Connection } from "@lookover/contracts";
 import { Button, IconButton, LinkButton, Notice, NoticeDisclosure } from "../ui/basics.tsx";
 import { type Shown as Leaving, leavingProps, PresenceList } from "../ui/presence.tsx";
+import type { AccountLink } from "../view-model/accounts.ts";
 import { type AccountGone, DEPARTED, type departedShown } from "../view-model/departed.ts";
 import { repositoryLabel } from "../view-model/format.ts";
 import { departedNotice } from "../view-model/onboarding.ts";
@@ -52,21 +53,26 @@ function noticeOf(n: OneNotice, connection: Connection, send: Send, shown: Leavi
     return (
       <NoAccess
         gone={g}
-        ask={g.fix.command === undefined ? undefined : () => g.fix.command && send(g.fix.command)}
+        opened={opened(g.fix, send)}
         dismiss={() => send({ type: "repos.dismiss", repoIds: g.repoIds })}
         shown={shown}
       />
     );
   }
   const { quiet } = n;
-  return quiet.kind === "one" ? (
-    <LeftOne
-      name={repositoryLabel(quiet.repo)}
-      {...departedNotice(connection, quiet.repo)}
-      dismiss={() => send({ type: "repos.dismiss", repoIds: [quiet.repo.id] })}
-      shown={shown}
-    />
-  ) : (
+  if (quiet.kind === "one") {
+    const notice = departedNotice(connection, quiet.repo);
+    return (
+      <LeftOne
+        name={repositoryLabel(quiet.repo)}
+        {...notice}
+        opened={opened(notice.addBack, send)}
+        dismiss={() => send({ type: "repos.dismiss", repoIds: [quiet.repo.id] })}
+        shown={shown}
+      />
+    );
+  }
+  return (
     <LeftSummaryNotice
       quiet={quiet}
       dismissAll={() => send({ type: "repos.dismiss", repoIds: quiet.repoIds })}
@@ -76,15 +82,22 @@ function noticeOf(n: OneNotice, connection: Connection, send: Send, shown: Leavi
   );
 }
 
+/** What a link sends as its page opens, when it sends anything: the command it carries. */
+function opened(link: AccountLink, send: Send): (() => void) | undefined {
+  const { command } = link;
+  return command === undefined ? undefined : () => send(command);
+}
+
 /** An account the App no longer reaches: amber, though nothing waits, since it may be a loss the person didn't choose. */
 function NoAccess({
   gone,
-  ask,
+  opened,
   dismiss,
   shown,
 }: {
   gone: AccountGone;
-  ask: (() => void) | undefined;
+  /** What its fix sends as GitHub's page opens: the ask kept, or the look (ADR 0088). */
+  opened: (() => void) | undefined;
   dismiss: () => void;
   shown: Leaving;
 }) {
@@ -95,7 +108,7 @@ function NoAccess({
       shown={shown}
       action={
         <span className="banner-acts">
-          <LinkButton size="sm" href={gone.fix.href} {...(ask === undefined ? {} : { onClick: ask })}>
+          <LinkButton size="sm" href={gone.fix.href} {...(opened === undefined ? {} : { onClick: opened })}>
             {gone.fix.label}
           </LinkButton>
           <IconButton icon="close" label={DEPARTED.dismiss} onClick={dismiss} />
@@ -113,13 +126,16 @@ function LeftOne({
   label,
   text,
   addBack,
+  opened,
   dismiss,
   shown,
 }: {
   name: string;
   label: string;
   text: string;
-  addBack: string;
+  addBack: AccountLink;
+  /** What Add it back sends as GitHub's page opens: the look (ADR 0088). */
+  opened: (() => void) | undefined;
   dismiss: () => void;
   shown: Leaving;
 }) {
@@ -130,8 +146,8 @@ function LeftOne({
       shown={shown}
       action={
         <span className="banner-acts">
-          <LinkButton size="sm" href={addBack}>
-            {DEPARTED.addBack}
+          <LinkButton size="sm" href={addBack.href} {...(opened === undefined ? {} : { onClick: opened })}>
+            {addBack.label}
           </LinkButton>
           <IconButton icon="close" label={DEPARTED.dismiss} onClick={dismiss} />
         </span>

@@ -13,12 +13,13 @@
 //   connection shows at start, the room keeps what it listed last, and the installations are listed again a minute on.
 // - Discovery: every installation of the shared App the sign-in reaches (`HostAccounts`) and their repositories
 //   (archived ones left out by the port), all watched together, cut to `allowed` when `live.json` gives an allow-list.
-//   At start (`open`, when the setup says the App is installed), every 5 minutes (every minute while GitHub refuses
-//   it), on "Reconnect", and when the poller asks (`discover`: a repository's token refused, the connection back): a
-//   repository the room doesn't watch is added (`added`: polled at once, `repo.added` with its switch on), one no
-//   installation lists any more removed (`removed`: its jobs cancelled, a running one stopped, its unsent posts
-//   dropped, `repo.removed`). What each met is told (`reached`): answered, or the cause of its refusal. Whose accounts
-//   they are, and those not reached, are the room's `unreached` (ADR 0067): the installation asks no `gh`.
+//   At start (`open`, when the setup says the App is installed), every 2 minutes (every minute while GitHub refuses
+//   it, never before the end of a wait GitHub asked for), on "Reconnect", and when the poller asks (`discover`: a
+//   repository's token refused, the connection back): a repository the room doesn't watch is added (`added`: polled
+//   at once, `repo.added` with its switch on), one no installation lists any more removed (`removed`: its jobs
+//   cancelled, a running one stopped, its unsent posts dropped, `repo.removed`). What each met is told (`reached`):
+//   answered, or the cause of its refusal. Whose accounts they are, and those not reached, are the room's `unreached`
+//   (ADR 0067): the installation asks no `gh`.
 // - The install's wait (`waitForInstall`, while the setup waits for it, ADR 0053): the accounts read every 4 s until
 //   they list repositories, sent as soon as they are read, before any repository is polled (ADR 0086); one listing
 //   none is "nothing granted" (the setup says so, and the wait goes on); one listing some has every one added
@@ -27,6 +28,30 @@
 //   connection at once, the poller saying nothing before the setup is done; a new sign-in or a listing answered clears
 //   it. A repository's first poll refused is never the connection's: its account's, or nobody's until the next check.
 //   One wait at a time; asked again while it runs, it reads now.
+// - The install look (`look`, ADR 0088): the installations listed at once, then every 4 s, until a listing finds an
+//   account or a repository none listed when it began, or an account then listed with a cause (or since, or no longer
+//   reached) listed again with none (what arrived: the accounts' logins, those back, how many repositories) or
+//   3 minutes pass with nothing new. Begun while nothing is listed under the sign-in (refused at start), it measures
+//   from the repositories the room watches and their accounts, an account its first answer lists with no repository
+//   beyond them taken as already there; under a new sign-in, or with nothing watched, from its first answer. Asked again while it runs, listed at once and its end moved 3 minutes on. One look
+//   at a time, kept as `Connection.look` and sent as it moves: when it began, when it ends, when a listing during it
+//   last answered, when it ended and what arrived; ended with nothing new and not stopped by GitHub's wait, the first
+//   later listing that finds something beyond what it began with (an owner approving later) is said as what arrived,
+//   within 15 minutes of its end, or later when an account awaiting an owner's approval as it ended is among it (a
+//   find dropped as too late is taken as there: a later arrival never counts it). A
+//   refused listing doesn't end it: it goes on at its pace, the connection showing the cause. Every listing counts,
+//   whoever asks; a new sign-in drops it. Nobody signed in, it is refused.
+// - GitHub's wait (ADR 0088): a listing refused as rate limited keeps the time GitHub gave as `Connection.limitUntil`
+//   (`limited`, the poller's too: one limit for the person's sign-in, a minute when GitHub gave none; the start's,
+//   `limitedAtStart`, given to the poller by the room once it runs) and stops the look running (`stopped:
+//   "rate-limited"`; what a listing found arrived all the same when only a new repository's first poll met it); a
+//   sign-in by another person clears it (it was the last one's token's), the same person's keeps it; while a wait holds (`limitUntil`, whoever met it), nothing is listed, a look asked then stops at
+//   once, and the next listing comes at its end (the install's check 4 s on at the least): a look asked, or a listing
+//   held back or refused, so arms it there, never later, a wait a repository's poll met included. A listing answered once the wait is over clears it; one under way when another act
+//   met it leaves it.
+// - One timer for all three: the install's wait's check while it waits (a look then rides on its checks, ended by
+//   the first past its end), else the look's next listing while one runs, else the next discovery (a minute on after a
+//   refused listing, the look's end included).
 // - Listed (`listed`, ADR 0086): whether a listing answered under the sign-in held now, the start's, discovery's or an
 //   install's check, even one finding nothing new; false again once another sign-in is held, sent with its person
 //   (and the accounts gone, when the person is another: theirs are never the last one's). A listing refused while not
@@ -64,6 +89,8 @@ import {
   type ConnectionCause,
   type ConnectionId,
   connectionCauseOf,
+  DISCOVERY_MS,
+  DISCOVERY_RETRY_MS,
   type EventBody,
   type HostAccounts,
   HostError,
@@ -71,25 +98,40 @@ import {
   type HostLogin,
   type HostSignIn,
   type HostWriter,
+  type InstallLook,
+  type LookRefusal,
   type ReachedAccount,
   type RepositoryRef,
   type Setup,
   type SignIn,
   type SignInKeeper,
+  sameLogin,
   sameRepository,
 } from "@lookover/contracts";
 import { installationLines } from "./log-lines.ts";
+import { isRateLimit } from "./rate-limit.ts";
 import { said } from "./said.ts";
 import type { SignInStore } from "./sign-in-store.ts";
 import { connectionIdOf } from "./snapshot.ts";
 import type { Timers } from "./timers.ts";
 
-/** How often the installations' repositories are listed while installed: GitHub sends no webhook here. */
-const DISCOVERY_MS = 5 * 60_000;
-/** How soon they are listed again when GitHub refused the last listing: the poll's quiet cadence. */
-export const DISCOVERY_RETRY_MS = 60_000;
+// The installations are listed every 2 minutes while nobody looks (`DISCOVERY_MS`, the contracts', which the app says):
+// 30 listings an hour, 150 requests for four installations, 3% of the person's 5,000 an hour; a minute on after GitHub
+// refused the last (`DISCOVERY_RETRY_MS`), the poll's quiet cadence.
 /** How often the accounts are read while the setup waits for the install: the "few seconds" the screen says. */
 const INSTALL_CHECK_MS = 4_000;
+/**
+ * How long an install look goes on with nothing new, from the last command that asked it (ADR 0088): enough for a
+ * person to finish GitHub's install page and come back; about 45 listings at most, 225 requests for four installations.
+ */
+const LOOK_MS = 3 * 60_000;
+/** How often the installations are listed while a look runs: the install wait's "few seconds". */
+const LOOK_EVERY_MS = INSTALL_CHECK_MS;
+/**
+ * How long after a look ended with nothing new what a listing finds is still its arrival (ADR 0088): an owner who
+ * approves within it, or one the person asked, whenever.
+ */
+const LATE_ARRIVAL_MS = 15 * 60_000;
 
 /** The repository ports the room reviews through: GitHub's, as the person signed in. */
 export interface HostPorts {
@@ -134,6 +176,30 @@ interface Listed {
   repos: RepositoryRef[];
 }
 
+/**
+ * What an install look measures from (ADR 0088): the accounts' logins and the repositories listed as it began; `away`,
+ * those of its accounts with a cause then or in a listing since, or that a listing since didn't reach (one listed
+ * again with no cause is back); `unlisted`, true until a first listing answers when nothing was listed under the
+ * sign-in as it began (the room's watched repositories and their owners stood in): an account that answer lists with
+ * no repository beyond them is taken as one already there.
+ */
+interface LookedFrom {
+  accounts: string[];
+  repos: RepositoryRef[];
+  away: string[];
+  unlisted: boolean;
+}
+
+/** The logins of `accounts`. */
+const loginsOf = (accounts: readonly ConnectionAccount[]): string[] => accounts.map((a) => a.account.login);
+
+/** `logins` with those `more` adds, each once (GitHub ignores a login's case). */
+function withLogins(logins: readonly string[], more: readonly string[]): string[] {
+  const all = [...logins];
+  for (const login of more) if (!all.some((was) => sameLogin(was, login))) all.push(login);
+  return all;
+}
+
 export interface InstallationDeps {
   side: GitHubSide;
   timers: Timers;
@@ -154,6 +220,18 @@ export interface InstallationDeps {
   reached(cause: ConnectionCause | null): void;
   /** An account's cause cleared (ADR 0066): what waited on it can start. */
   accountBack(): void;
+  /**
+   * Until when GitHub asked the person's sign-in to wait (`Connection.limitUntil`), whoever met it (a listing, a
+   * repository's poll); null when it asks nothing.
+   */
+  limitUntil(): number | null;
+  /** GitHub asked a listing to wait until `until`, or answered one again (null): the poller waits with it. */
+  limited(until: number | null): void;
+  /**
+   * The logins of the accounts awaiting an owner's approval (ADR 0067, 0088): not reached, the person having asked
+   * their owner to install the shared App (`UnreachedAccount.askedAt`).
+   */
+  asked(): readonly string[];
   log(line: string): void;
 }
 
@@ -208,6 +286,11 @@ export interface Installation {
   /** Why the connection can't be used at start (ADR 0053): GitHub's refusal of what `open` read; null otherwise. */
   down(): ConnectionCause | null;
   /**
+   * Until when GitHub asked what `open` read to wait (ADR 0088); null when it asked nothing. The room gives it to the
+   * poller once it runs: nothing is sent before the start is done.
+   */
+  limitedAtStart(): number | null;
+  /**
    * At start: the sign-in read, and, when `installed` (the setup says so), the installations' repositories, the
    * room's to watch. Null when nothing was listed (no sign-in, the App not installed yet, GitHub's refusal, the App
    * installed nowhere any more): the room keeps what it listed last, and `down` says why. A refusal is logged, never
@@ -216,7 +299,7 @@ export interface Installation {
   open(installed: boolean): Promise<RepositoryRef[] | null>;
   /**
    * After start, as the setup stands: the install waited for while the setup waits for it (or nothing was granted),
-   * else the listing every 5 minutes once installed.
+   * else the listing every 2 minutes once installed.
    */
   begin(setup: Setup): void;
   /**
@@ -227,6 +310,12 @@ export interface Installation {
   discover(): Promise<void>;
   /** The setup waits for the install: the accounts read now, then every 4 s until they list repositories. */
   waitForInstall(): void;
+  /**
+   * `connection.look` (ADR 0088): an install look begun, or, while one runs, its end moved 3 minutes on; either way
+   * the installations' listing queued now, settled without waiting on GitHub to answer (what it throws logged, the
+   * look going on). Refused with nobody signed in.
+   */
+  look(): Promise<"ok" | { refused: LookRefusal }>;
   /** Nothing armed any more; a listing under way changes nothing once it answers. */
   stop(): void;
 }
@@ -333,8 +422,24 @@ export function createInstallation(d: InstallationDeps): Installation {
   });
   /** The listings, the install's checks and the holdings, one after the other; never rejects. */
   let chain: Promise<unknown> = Promise.resolve();
-  /** The timer armed: the next discovery, or the install's next check; null when none is. */
+  /** The timer armed: the next discovery, the look's next listing, or the install's next check; null when none is. */
   let timer: (() => void) | null = null;
+  /** The install look (`Connection.look`, ADR 0088): the one running, or the last; null before any and once dropped. */
+  let look: InstallLook | null = null;
+  /**
+   * What the look measures from: what a listing during it finds beyond it is what arrived. Null for a look begun under
+   * a new sign-in not listed yet: its first answered listing is then what it measures from.
+   */
+  let lookedFrom: LookedFrom | null = null;
+  /**
+   * Whether the repositories the room watches are the person's held now: true from the start (the room's log is
+   * theirs), false from a new sign-in of another person (or the first) until a listing under it answers.
+   */
+  let watchedTheirs = true;
+  /** The accounts awaiting an owner's approval when the look ended with nothing new: theirs arrive however late. */
+  let askedWhenEnded: readonly string[] = [];
+  /** Whether the last discovery was refused: the next one, after a look too, is then a minute on. */
+  let refusedLast = false;
   /** Whether the install is waited for, and whether its last check was refused (logged once). */
   let waiting = false;
   let refused = false;
@@ -346,6 +451,8 @@ export function createInstallation(d: InstallationDeps): Installation {
   let causeWaiting: ConnectionCause | null = null;
   /** GitHub's refusal of what `open` listed, as the connection's cause; null when it listed, or wasn't asked. */
   let refusedAtStart: ConnectionCause | null = null;
+  /** Until when GitHub asked what `open` listed to wait; null when it asked nothing. */
+  let limitedAtStart: number | null = null;
 
   /** The person signed in, held: what their sign-in reaches, and the ports as them. */
   const hold = (person: HostLogin): void => {
@@ -361,6 +468,17 @@ export function createInstallation(d: InstallationDeps): Installation {
 
   /** The person held; null before a sign-in. */
   const personHeld = (): HostLogin | null => (held.state === "signed-in" ? held.person : null);
+  /**
+   * `person` signing in: whether the accounts kept are another person's. Another than the one held (or the first),
+   * what the room watches isn't theirs either, until theirs are listed, and GitHub's wait was the last one's sign-in's
+   * (one user token): cleared, the poller's too, and the connection told. The same person keeps it.
+   */
+  const anotherKept = (person: HostLogin): boolean => {
+    if (personHeld()?.id === person.id) return false;
+    watchedTheirs = false;
+    if (d.limitUntil() !== null) d.limited(null);
+    return accounts.length > 0;
+  };
 
   /** `work` in the one turn, after everything asked before it. */
   const inTurn = <T>(work: () => Promise<T>): Promise<T> => {
@@ -446,6 +564,7 @@ export function createInstallation(d: InstallationDeps): Installation {
   /** Listed now under the sign-in held: what refused an earlier listing is over; the patch that says it. */
   const listedNow = (): Partial<Connection> => {
     listed = true;
+    watchedTheirs = true;
     const refusedBefore = listingCause !== null;
     listingCause = null;
     return { listed: true, ...(refusedBefore ? { listingCause } : {}) };
@@ -504,14 +623,254 @@ export function createInstallation(d: InstallationDeps): Installation {
     timer = stopping ? null : d.timers.after(ms, fire);
   };
 
-  /** The next discovery, `ms` on (5 minutes unless said): what it throws is logged; `discover` arms the one after. */
+  /** The log line of a listing GitHub refused. */
+  const notListed = (error: unknown): void =>
+    d.log(`the installation's repositories could not be listed: ${said(error)}`);
+
+  /** A listing begun by a timer or a look: what it throws is logged, as it arms the one after. */
+  const logged = (listing: Promise<void>): Promise<void> => listing.catch(notListed);
+  const discoverLogged = (): Promise<void> => logged(discover());
+
+  /** The next discovery, `ms` on (2 minutes unless said); `discover` arms the one after. */
   const armDiscovery = (ms = DISCOVERY_MS): void =>
     arm(ms, () => {
       timer = null;
-      discover().catch((error: unknown) =>
-        d.log(`the installation's repositories could not be listed: ${said(error)}`),
-      );
+      void discoverLogged();
     });
+
+  /** The look running now; null when none runs. */
+  const looking = (): InstallLook | null => (look !== null && look.ended === null ? look : null);
+
+  /** How long GitHub's wait has left: 0 when it asks none. */
+  const limitLeft = (): number => {
+    const until = d.limitUntil();
+    return until === null ? 0 : Math.max(0, until - d.now());
+  };
+
+  /** The look moved to `next`, and the connection told. */
+  const lookMoved = (next: InstallLook | null): void => {
+    if (stopping) return;
+    look = next;
+    d.emit({ type: "connection.changed", at: d.now(), patch: { look } });
+  };
+
+  /** A new sign-in: the look is the last one's, what it measured from not this one's; the patch that says it. */
+  const lookDropped = (): Partial<Connection> => {
+    if (look === null) return {};
+    look = null;
+    return { look };
+  };
+
+  /** The look running ended with nothing new once its end has come. */
+  const lookBound = (): void => {
+    const running = looking();
+    if (stopping || running === null || d.now() < running.until) return;
+    askedWhenEnded = d.asked();
+    lookMoved({ ...running, ended: d.now() });
+  };
+
+  /**
+   * What a look begun now measures from: what is listed under this sign-in; while nothing is, the repositories the
+   * room watches and their accounts, when it watches some of this person's (refused at start); else null, its first
+   * answered listing (a new sign-in, or nothing ever watched: nothing tells an old install from a new one).
+   */
+  const lookStart = (): LookedFrom | null => {
+    const away = loginsOf(accounts.filter((a) => a.cause !== null));
+    if (listed) return { accounts: loginsOf(accounts), repos: [...d.watched()], away, unlisted: false };
+    const repos = [...d.watched()];
+    if (!watchedTheirs || repos.length === 0) return null;
+    return {
+      accounts: withLogins(
+        [],
+        repos.map((r) => r.owner),
+      ),
+      repos,
+      away,
+      unlisted: true,
+    };
+  };
+
+  /**
+   * What `found` lists beyond what the look measured from (`from`): the logins of the accounts that arrived, of those
+   * back (away since, now listed with no cause), and how many repositories, those new and those of the accounts back.
+   * Measured from what the room watched (`unlisted`), an account with no repository beyond it isn't one arrived.
+   */
+  const beyond = (from: LookedFrom, found: Listed | null): NonNullable<InstallLook["arrived"]> | null => {
+    const reached = found?.accounts ?? [];
+    const repos = found?.repos ?? [];
+    const fresh = repos.filter((r) => !from.repos.some((was) => sameRepository(was, r)));
+    const back = loginsOf(
+      reached.filter((a) => a.cause === null && from.away.some((was) => sameLogin(was, a.account.login))),
+    );
+    const accounts = loginsOf(reached).filter(
+      (login) =>
+        !from.accounts.some((was) => sameLogin(was, login)) &&
+        (!from.unlisted || fresh.some((r) => sameLogin(r.owner, login))),
+    );
+    const counted = repos.filter((r) => fresh.includes(r) || back.some((login) => sameLogin(login, r.owner)));
+    return accounts.length > 0 || back.length > 0 || counted.length > 0
+      ? { accounts, back, repositories: counted.length }
+      : null;
+  };
+
+  /**
+   * What the look measures from once `found` answered: an account it lists with a cause, or one it no longer reaches,
+   * is away; measured from what the room watched, every account it lists is then one already there.
+   */
+  const measuredOn = (from: LookedFrom, found: Listed | null): LookedFrom => {
+    const reached = found?.accounts ?? [];
+    const unreached = from.accounts.filter((was) => !reached.some((a) => sameLogin(a.account.login, was)));
+    const caused = loginsOf(reached.filter((a) => a.cause !== null));
+    return {
+      accounts: from.unlisted ? withLogins(from.accounts, loginsOf(reached)) : from.accounts,
+      repos: from.repos,
+      away: withLogins(from.away, [...caused, ...unreached]),
+      unlisted: false,
+    };
+  };
+
+  /**
+   * What a look ended with nothing new measures from once a later listing (`found`) was judged, said or dropped as no
+   * longer its news: what it found is taken as there (its accounts and repositories, those back no longer away), so a
+   * later arrival counts only what came after.
+   */
+  const foldedIn = (from: LookedFrom, found: Listed | null): LookedFrom => {
+    const measured = measuredOn(from, found);
+    const reached = found?.accounts ?? [];
+    const fresh = (found?.repos ?? []).filter((r) => !from.repos.some((was) => sameRepository(was, r)));
+    return {
+      accounts: withLogins(measured.accounts, loginsOf(reached)),
+      repos: [...from.repos, ...fresh],
+      away: measured.away.filter(
+        (login) => !reached.some((a) => a.cause === null && sameLogin(a.account.login, login)),
+      ),
+      unlisted: false,
+    };
+  };
+
+  /**
+   * A listing after the look ended with nothing new and not stopped by GitHub's wait (`ended`): what it finds beyond
+   * what the look began with (an owner approving later, found by discovery) is what arrived, said once, the look
+   * ending when it did, so the line says it rather than nothing new. Within 15 minutes of its end; later, only when
+   * an account awaiting an owner's approval as it ended is among what arrived: anything else is no longer its news.
+   */
+  const lateArrival = (ended: InstallLook, from: LookedFrom, found: Listed | null): void => {
+    if (ended.arrived !== null || ended.stopped !== null || ended.ended === null) return;
+    const arrived = beyond(from, found);
+    lookedFrom = foldedIn(from, found);
+    if (arrived === null) return;
+    const late = d.now() - ended.ended > LATE_ARRIVAL_MS;
+    const wasAsked = arrived.accounts.some((login) =>
+      askedWhenEnded.some((asked) => sameLogin(asked, login)),
+    );
+    if (late && !wasAsked) return;
+    lookMoved({ ...ended, arrived });
+  };
+
+  /**
+   * A listing answered (`found`, null when it reached no account) while a look runs: when it looked, and what arrived
+   * since the look began, which ends it.
+   */
+  const lookAnswered = (found: Listed | null): void => {
+    // Past its end (the install's wait reads on), the look ended before this listing.
+    lookBound();
+    if (look === null || stopping) return;
+    const from = lookedFrom;
+    if (from === null) {
+      // A new sign-in not listed yet as it began: this first answer is what it measures from.
+      const reached = found?.accounts ?? [];
+      lookedFrom = {
+        accounts: loginsOf(reached),
+        repos: [...(found?.repos ?? [])],
+        away: loginsOf(reached.filter((a) => a.cause !== null)),
+        unlisted: false,
+      };
+      if (look.ended === null) lookMoved({ ...look, lookedAt: d.now() });
+      return;
+    }
+    if (look.ended !== null) {
+      lateArrival(look, from, found);
+      return;
+    }
+    const arrived = beyond(from, found);
+    lookedFrom = measuredOn(from, found);
+    const at = d.now();
+    lookMoved({ ...look, lookedAt: at, ...(arrived === null ? {} : { ended: at, arrived }) });
+  };
+
+  /** The look running stopped by GitHub's wait (ADR 0088): nothing is listed before its end. */
+  const lookStopped = (): void => {
+    const running = looking();
+    if (running !== null) lookMoved({ ...running, ended: d.now(), stopped: "rate-limited" });
+  };
+
+  /**
+   * Whether GitHub's wait holds every listing back now; the look running then stopped. A wait any act met (a
+   * repository's poll too) is the person's sign-in's, as the listing's.
+   */
+  const heldBack = (): boolean => {
+    if (limitLeft() === 0) return false;
+    lookStopped();
+    return true;
+  };
+
+  /**
+   * A listing refused as rate limited: GitHub's wait kept until the time it gave (a minute when it gave none), the
+   * poller waiting with it (a wait of its own ending later stays), and the look running stopped. A time already past
+   * holds nothing back: the listings' own pace (4 s at the most) is never a busy loop. False for any other refusal.
+   */
+  const rateLimited = (error: unknown): boolean => {
+    if (!isRateLimit(error) || stopping) return false;
+    d.limited(error.retryAt ?? d.now() + DISCOVERY_RETRY_MS);
+    lookStopped();
+    return true;
+  };
+
+  /**
+   * A listing answered: GitHub's wait, once over, is cleared. One still to come was met while this listing was under
+   * way (a repository's poll, another listing): it holds.
+   */
+  const answeredAgain = (): void => {
+    if (d.limitUntil() !== null && limitLeft() === 0 && !stopping) d.limited(null);
+  };
+
+  /**
+   * After a listing, outside the install's wait: the look's next listing 4 s on while it runs (sooner when its end
+   * comes first), else the next discovery, a minute on when the last was refused, and never before GitHub's wait
+   * ends; `atWaitEnd` (the listing held back or refused by the wait), right at its end.
+   */
+  const armNext = (atWaitEnd = false): void => {
+    lookBound();
+    const running = looking();
+    if (running !== null)
+      arm(Math.min(LOOK_EVERY_MS, running.until - d.now()), () => {
+        timer = null;
+        lookBound();
+        if (looking()) void discoverLogged();
+        else armNext();
+      });
+    else {
+      const left = limitLeft();
+      const pace = refusedLast ? DISCOVERY_RETRY_MS : DISCOVERY_MS;
+      armDiscovery(atWaitEnd && left > 0 ? left : Math.max(pace, left));
+    }
+  };
+
+  /**
+   * What a listing under the holding `at` found (`found`, null when it reached no account) followed, then said to the
+   * look. A repository's first poll refused (GitHub's wait) throws out of the following once each was added: what was
+   * listed arrived all the same, so the look is told before the refusal can stop it.
+   */
+  const followedThenLooked = async (found: Listed | null, at: number): Promise<void> => {
+    try {
+      await follow(found?.repos ?? [], at);
+    } catch (error) {
+      if (!(error instanceof Superseded)) lookAnswered(found);
+      throw error;
+    }
+    still(at);
+    lookAnswered(found);
+  };
 
   /** The installations' repositories listed and followed; false with nobody signed in. */
   const listedAgain = async (at: number): Promise<boolean> => {
@@ -519,16 +878,15 @@ export function createInstallation(d: InstallationDeps): Installation {
     const now = held;
     // Another sign-in held meanwhile: what this one reached is not theirs (ADR 0066), and the work ends here.
     const found = await settled(at, () => list(now));
+    answeredAgain();
     if (found === null) {
       // No account reached any more departs every one, as one gone departs (ADR 0066); then refused.
       installedAs([], true);
-      await follow([], at);
-      still(at);
+      await followedThenLooked(null, at);
       throw uninstalled(now);
     }
     installedAs(found.accounts, true);
-    await follow(found.repos, at);
-    still(at);
+    await followedThenLooked(found, at);
     return true;
   };
 
@@ -553,33 +911,46 @@ export function createInstallation(d: InstallationDeps): Installation {
    * The installations listed again, whoever asks (the timer, "Reconnect", a repository refused or regained), and the
    * next one armed after it: a minute on while GitHub refuses it, so a refused listing (at start, after Sign in again)
    * is tried again within the minute its cause promises (ADR 0070). The setup's install check keeps its own timer.
+   * While GitHub asks to wait, nothing is listed: the next one comes at the wait's end.
    */
   async function discover(): Promise<void> {
     try {
-      await listedOnce();
+      if ((await listedOnce()) === "held back") {
+        if (!waiting) armNext(true);
+        return;
+      }
     } catch (error) {
-      if (!waiting) armDiscovery(DISCOVERY_RETRY_MS);
+      refusedLast = true;
+      if (!waiting) armNext(isRateLimit(error));
       throw error;
     }
-    if (!waiting) armDiscovery();
+    refusedLast = false;
+    if (!waiting) armNext();
   }
 
-  /** One listing of the installations, in the turn: the room told what it reached, or the cause that refused it. */
-  async function listedOnce(): Promise<void> {
-    await serially(
-      (at) =>
-        listedAgain(at).then(
-          (followedAll) => {
-            still(at);
-            if (followedAll) d.reached(null);
-          },
-          (error: unknown) => {
-            still(at);
-            refusedFor(error);
-            throw error;
-          },
-        ),
-      undefined,
+  /**
+   * One listing of the installations, in the turn: the room told what it reached, or the cause that refused it.
+   * "listed" (superseded too), or "held back" when GitHub's wait holds it back as its turn comes: a wait met
+   * meanwhile by a listing queued before it holds it back too.
+   */
+  async function listedOnce(): Promise<"listed" | "held back"> {
+    return serially<"listed" | "held back">(
+      async (at) =>
+        heldBack()
+          ? "held back"
+          : listedAgain(at).then(
+              (followedAll) => {
+                still(at);
+                if (followedAll) d.reached(null);
+                return "listed" as const;
+              },
+              (error: unknown) => {
+                still(at);
+                if (!rateLimited(error)) refusedFor(error);
+                throw error;
+              },
+            ),
+      "listed",
     );
   }
 
@@ -594,9 +965,7 @@ export function createInstallation(d: InstallationDeps): Installation {
       found = await settled(at, () => list(now));
     } catch (error) {
       if (error instanceof Superseded) throw error;
-      // The listing itself refused: its cause is the connection's, and the listing's.
-      causeAt(error);
-      listingRefused(error instanceof HostError ? connectionCauseOf(error) : null);
+      checkListingRefused(error);
       return checkRefused(error);
     }
     try {
@@ -610,17 +979,25 @@ export function createInstallation(d: InstallationDeps): Installation {
   };
   /** An install's check GitHub answered under the holding `at`: what it lists followed, a refusal before it over. */
   const checkAnswered = async (found: Listed | null, at: number): Promise<Listed | null> => {
+    answeredAgain();
     // Answered: the accounts sent now, before their repositories' first poll; installed nowhere, listed all the same,
     // and every account an earlier check sent gone (uninstalled since, its first poll refused meanwhile).
     installedAs(found === null ? [] : found.accounts, true);
     if (causeWaiting !== null) d.emit(causeCleared());
-    if (found !== null) {
-      await follow(found.repos, at);
-      still(at);
-    }
+    if (found === null) lookAnswered(null);
+    else await followedThenLooked(found, at);
     if (refused) d.log("the pull requests are listed again");
     refused = false;
     return found;
+  };
+  /**
+   * An install's check whose listing itself was refused: GitHub's wait kept when it asked to wait, else the cause the
+   * connection shows, and the listing's.
+   */
+  const checkListingRefused = (error: unknown): void => {
+    if (rateLimited(error)) return;
+    causeAt(error);
+    listingRefused(error instanceof HostError ? connectionCauseOf(error) : null);
   };
   /** An install's check refused: logged once while it keeps refusing. */
   const checkRefused = (error: unknown): "refused" => {
@@ -649,7 +1026,7 @@ export function createInstallation(d: InstallationDeps): Installation {
   /** One check of the install: listed, followed, and the setup told; armed again until repositories are granted. */
   const check = (): Promise<void> =>
     serially(async (at) => {
-      if (stopping || held.state !== "signed-in") return;
+      if (stopping || held.state !== "signed-in" || heldBack()) return;
       const found = await followed(held, at);
       // Still the holding it began under: the install found is that person's.
       still(at);
@@ -658,8 +1035,14 @@ export function createInstallation(d: InstallationDeps): Installation {
       if (found.repos.length > 0) waiting = false;
     }, undefined).finally(() => {
       if (stopping || held.state === "none") return;
-      if (waiting) arm(INSTALL_CHECK_MS, () => void check());
-      else armDiscovery();
+      if (waiting) {
+        // The wait keeps its pace; a look beside it rides on its checks, and ends at the first past its end.
+        lookBound();
+        arm(Math.max(INSTALL_CHECK_MS, limitLeft()), () => void check());
+      } else {
+        refusedLast = false;
+        armNext();
+      }
     });
 
   /** What the installations list at start for `now`; null, logged and kept as `down`'s cause, when GitHub refused. */
@@ -675,12 +1058,29 @@ export function createInstallation(d: InstallationDeps): Installation {
       return found.repos;
     } catch (error) {
       if (!(error instanceof HostError)) throw error;
-      d.log(`the installation's repositories could not be listed: ${said(error)}`);
-      refusedAtStart = connectionCauseOf(error);
-      // Nothing is sent before the start is done: the snapshot's facts carry it.
-      if (!listed) listingCause = refusedAtStart;
+      refusedOnStart(error);
       return null;
     }
+  };
+  /**
+   * The start's listing refused: logged, its cause kept as `down`'s, GitHub's wait as `limitedAtStart` (a minute
+   * when it gave none). Nothing is sent before the start is done: the snapshot's facts carry it.
+   */
+  const refusedOnStart = (error: HostError): void => {
+    notListed(error);
+    refusedAtStart = connectionCauseOf(error);
+    if (isRateLimit(error)) limitedAtStart = error.retryAt ?? d.now() + DISCOVERY_RETRY_MS;
+    if (!listed) listingCause = refusedAtStart;
+  };
+
+  /**
+   * The first discovery after start, once installed: 2 minutes on; a minute on when the start's listing was refused;
+   * at the end of the wait GitHub asked it for.
+   */
+  const firstDiscoveryIn = (): number => {
+    const left = limitedAtStart === null ? 0 : limitedAtStart - d.now();
+    if (left > 0) return left;
+    return refusedAtStart === null && limitedAtStart === null ? DISCOVERY_MS : DISCOVERY_RETRY_MS;
   };
 
   const waitForInstall = (): void => {
@@ -715,7 +1115,7 @@ export function createInstallation(d: InstallationDeps): Installation {
       await inTurn(async () => {
         await shared.signIns.write(signIn);
         // Another person's accounts are never theirs (ADR 0066): sent as listed, they go until theirs are listed.
-        const another = personHeld()?.id !== signIn.person.id && accounts.length > 0;
+        const another = anotherKept(signIn.person);
         hold(signIn.person);
         moveHolding();
         // Not listed under this sign-in yet: still looking (ADR 0086).
@@ -732,6 +1132,7 @@ export function createInstallation(d: InstallationDeps): Installation {
             listed: false,
             ...(refusedBefore ? { listingCause } : {}),
             ...(another ? { accounts } : {}),
+            ...lookDropped(),
           },
         });
         if (causeWaiting !== null) d.emit(causeCleared());
@@ -745,6 +1146,7 @@ export function createInstallation(d: InstallationDeps): Installation {
     answered: (repo, at) =>
       at === holding && (accountOf(accounts, repo.owner)?.cause ?? null) !== null && accountHolds(repo, null),
     down: () => refusedAtStart,
+    limitedAtStart: () => limitedAtStart,
     open: async (installed) => {
       const read = await shared.signIns.read();
       // A sign-in no longer opening is still held: its ports refuse as signed out (ADR 0066).
@@ -754,12 +1156,39 @@ export function createInstallation(d: InstallationDeps): Installation {
     begin: (setup) => {
       if (held.state === "none") return;
       if (setup.github === "waiting-for-install" || setup.github === "nothing-granted") waitForInstall();
-      // Refused at start: listed again a minute on, as after any refused listing.
-      else if (setup.github === "done")
-        armDiscovery(refusedAtStart === null ? DISCOVERY_MS : DISCOVERY_RETRY_MS);
+      // Refused at start: listed again a minute on, as after any refused listing; asked to wait, at the wait's end.
+      else if (setup.github === "done") armDiscovery(firstDiscoveryIn());
     },
     discover,
     waitForInstall,
+    look: async () => {
+      if (held.state === "none" || stopping) return { refused: "signed-out" };
+      const at = d.now();
+      const running = looking();
+      if (running !== null) lookMoved({ ...running, until: at + LOOK_MS });
+      else {
+        lookedFrom = lookStart();
+        lookMoved({
+          since: at,
+          until: at + LOOK_MS,
+          lookedAt: null,
+          ended: null,
+          arrived: null,
+          stopped: null,
+        });
+      }
+      // GitHub asks to wait: the look stops at once, nothing listed before the wait's end, and the next listing right
+      // at it, whoever met the wait (a repository's poll arms no listing). A timer armed sooner would only be held
+      // back (the look's own, stopped now, would arm discovery's pace); the install's wait keeps its own pace.
+      if (heldBack()) {
+        if (!waiting) armDiscovery(limitLeft());
+        return "ok";
+      }
+      // Listed now, in the one turn, without waiting on GitHub to answer; the install's wait then keeps its own pace,
+      // else the look's comes after this.
+      void logged(waiting ? check() : discover());
+      return "ok";
+    },
     stop: () => {
       stopping = true;
       timer?.();

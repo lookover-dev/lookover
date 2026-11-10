@@ -184,3 +184,9 @@ test("the step list's frames shots: a step advancing by its marks, the verdict t
   const framed = SHOTS.filter((s) => s.frames !== undefined).map((s) => s.name);
   expect(framed).toEqual(expect.arrayContaining(["frames-step-advancing", "frames-verdict-arriving"]));
 });
+
+test("the accounts list's frames shot: an account an owner approves arriving at its place among those reached (#713)", () => {
+  const shot = SHOTS.find((s) => s.name === "frames-account-arriving");
+  expect(shot?.frames).toEqual({ around: ".accounts-list" });
+  expect(shot?.scenario).toBe("S17");
+});

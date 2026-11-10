@@ -14,6 +14,7 @@ import {
   type Finding,
   findingId,
   GITHUB_WEB,
+  type InstallLook,
   type JobState,
   jobId,
   type LoopState,
@@ -122,6 +123,7 @@ function calm(): State {
       accounts: [],
       listed: true,
       listingCause: null,
+      look: null,
       unreached: [],
       signIn: null,
       person: { id: 7, login: "sam" },
@@ -429,7 +431,11 @@ test("each connection cause is said with its one fix: a command, or a link that 
         title: "Lookover's App is no longer installed",
         detail:
           "lookover-dev is installed on none of your GitHub accounts. Reviews cannot be read or posted until it is installed again.",
-        fix: { label: "Install on sam", href: "https://github.com/apps/lookover-dev/installations/new" },
+        fix: {
+          label: "Install on sam",
+          href: "https://github.com/apps/lookover-dev/installations/new",
+          command: { type: "connection.look" },
+        },
       },
     ],
     [
@@ -438,7 +444,11 @@ test("each connection cause is said with its one fix: a command, or a link that 
         short: "GitHub App suspended",
         title: "Lookover's App is suspended on GitHub",
         detail: "Reviews cannot be read or posted until you unsuspend it on GitHub.",
-        fix: { label: "Unsuspend it on GitHub", href: "https://github.com/settings/installations/77" },
+        fix: {
+          label: "Unsuspend it on GitHub",
+          href: "https://github.com/settings/installations/77",
+          command: { type: "connection.look" },
+        },
       },
     ],
     [{ kind: "signed-out" }, SIGNED_OUT],
@@ -986,6 +996,55 @@ test("nothing is a problem before setup is done", () => {
 test("a signed-out AI is fixed with Sign in, never Fix", () => {
   const [p] = problems(signedOut(calm(), "claude"));
   expect(p?.fix).toEqual({ label: "Sign in", command: { type: "engine.signIn", id: "claude" } });
+});
+
+test("a fix that opens GitHub's install page or an installation's settings is busy while a look runs, until it ends (ADR 0088)", () => {
+  const look = (ended: number | null): InstallLook => ({
+    since: NOW - MIN,
+    until: NOW + 2 * MIN,
+    lookedAt: NOW - 4_000,
+    ended,
+    arrived: null,
+    stopped: null,
+  });
+  const at = (cause: ConnectionCause, l: InstallLook | null) => {
+    const st = down(cause);
+    return problems({ ...st, connection: { ...st.connection, look: l } });
+  };
+  const uninstalled = { kind: "uninstalled", suspended: false } as const;
+  const suspended = { kind: "uninstalled", suspended: true } as const;
+  expect(at(uninstalled, look(null)).map((p) => p.busy)).toEqual([true]);
+  expect(at(suspended, look(null)).map((p) => p.busy)).toEqual([true]);
+  // None yet, or ended: the fix again.
+  expect(at(uninstalled, null).map((p) => p.busy)).toEqual([false]);
+  expect(at(uninstalled, look(NOW - 1_000)).map((p) => p.busy)).toEqual([false]);
+  // Stopped early by GitHub's rate limit: ended too, so the fix again, never Looking… held.
+  const limited: InstallLook = { ...look(NOW - 1_000), stopped: "rate-limited" };
+  expect(at(uninstalled, limited).map((p) => p.busy)).toEqual([false]);
+  // A page that installs nothing, or a command: never busy for a look.
+  expect(at({ kind: "sso", organisation: "ledger-dev", url: null }, look(null)).map((p) => p.busy)).toEqual([
+    false,
+  ]);
+  expect(at({ kind: "signed-out" }, look(null)).map((p) => p.busy)).toEqual([false]);
+  // An account's own problem, its fix the accounts list's: Install on it, busy too.
+  const st = calm();
+  const gone = problems({
+    ...st,
+    connection: {
+      ...st.connection,
+      look: look(null),
+      accounts: [
+        ...st.connection.accounts,
+        {
+          account: { id: 9, login: "ledger-dev", type: "Organization" },
+          installationId: 99,
+          cause: uninstalled,
+          owner: true,
+        },
+      ],
+    },
+  });
+  expect(gone.map((p) => [p.fix?.label, p.busy])).toEqual([["Install on ledger-dev", true]]);
 });
 
 test("a sign-in in progress shows as busy", () => {

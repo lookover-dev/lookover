@@ -105,6 +105,11 @@ pre {
 .nowrap {
   white-space: nowrap;
 }
+/* a time of day to the second (design-system.md "Clock to the second"): tabular figures, so a new second moves
+   nothing after it */
+.clock-s {
+  font-variant-numeric: tabular-nums;
+}
 /* a running time (ADR 0058, 0070): a duration in tabular figures, laid in one cell over the longest ones `duration()`
    writes, "59 min 59 s" and "99 h 59 min", hidden, so the box holds the wider in its own face and ticking moves
    nothing beside it; the step list's column sets it right, a run line's end keeps it where it starts */
@@ -1057,6 +1062,11 @@ textarea.input {
   width: var(--w-fix);
   justify-content: center;
 }
+/* a link fix whose look runs: "Looking…" in the button's place, centred as its label was, the place as wide as the
+   button (ADR 0088) */
+.alert .busy-status {
+  margin-inline: auto;
+}
 /* the Refused line: the × sits where the other lines keep their fix button */
 .alert.refused .anchor {
   justify-self: end;
@@ -1069,7 +1079,8 @@ textarea.input {
     grid-template-columns: 1fr;
     gap: 6px;
   }
-  .alert .btn {
+  .alert .btn,
+  .alert .same-width {
     justify-self: start;
   }
   .alert.refused {
@@ -2401,8 +2412,9 @@ a.btn {
   /* done, the sub-step has no action left: its held place, a row of its own here, would leave a blank band under the
      card's last line (round 6, the sign-in card signed in). The one place held here that is not held in every state:
      a sub-step done or undone (signed in, signed out) brings or takes away the accounts list under it, which moves
-     what is below anyway (design-system.md "Setup's Continue") */
-  .substep.done > .substep-act {
+     what is below anyway (design-system.md "Setup's Continue"). Your accounts keeps its Check again, done or not
+     (design-system.md "Look line") */
+  .substep.done > .substep-act:not(:has(.look-again)) {
     display: none;
   }
   /* the list from under the square: on a phone the text column's room is worth more than its edge (T7: a waiting
@@ -2464,6 +2476,10 @@ code.device-code {
   padding: var(--s-2);
   border-radius: var(--r-1);
   transition: background var(--d-1) var(--e-out);
+}
+/* An account arriving after the list first showed (its own gate, ADR 0087): it comes in as Reviews' rows do. */
+.account-row.new[data-arrived] {
+  animation: row-in var(--d-4) var(--e-out);
 }
 .account-row + .account-row::before {
   content: "";
@@ -2596,6 +2612,11 @@ code.device-code {
   }
   .account-row .account-action-floor {
     overflow: hidden;
+  }
+  /* stacked, Installed has no button beside it to end level with: as tall as its line, so the row's band ends under
+     its words, not a button's height under them (ADR 0086; row 55: 5 px of tint under "Installed" on a hovered row) */
+  .account-status {
+    height: auto;
   }
   /* stacked, Installed and the button at the start of the place */
   .account-status,
@@ -2895,6 +2916,44 @@ code.device-code {
 .setcard-accounts {
   padding: var(--s-3) 0 calc(var(--setrow-y) - var(--s-2));
   border-top: 1px solid var(--line);
+}
+/* the look line (design-system.md "Look line", ADR 0088): at the accounts card's end, a settings row's padding under a
+   hairline; the eyes, their place held in every state (reading while a look runs), so the words never move sideways,
+   and Check again on the right edge where the list's buttons end, on the words' first baseline, so it stays put
+   however many lines the words take (centred, it dropped half a line as they wrapped). As tall as its words: at the
+   card's end, growing moves nothing in the card (ADR 0086) */
+.look-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--s-4);
+  align-items: baseline;
+  padding: var(--setrow-y) 0;
+  border-top: 1px solid var(--line);
+}
+.look-line-said {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font: 400 var(--t-13) / 1.45 var(--body);
+  color: var(--ink-2);
+}
+.look-line-said > .eyes {
+  flex: none;
+  color: var(--muted);
+}
+/* at Repositories' foot, under who is signed in: the foot's own small text, no hairline (the foot is the page's end,
+   not a card's), Check again at the page's right edge */
+.foot .look-line {
+  padding: var(--s-2) 0 0;
+  border-top: 0;
+}
+/* on a phone Check again goes under the words, at their start, as the accounts list's actions do */
+@media (max-width: 640px) {
+  .look-line {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--s-2);
+    justify-items: start;
+  }
 }
 /* a value to copy: a code block of its own row, even padding all round, the copy icon button inside it, in its top
    right corner, level with the value's first line, so it plainly belongs to the block (2026-11-08: outside its edge it

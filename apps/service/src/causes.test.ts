@@ -152,13 +152,14 @@ for (const fault of INSTALLATION_FAULTS)
     expect(room.snapshot().connection).toMatchObject({ state: "connected", cause: null });
     expect(room.snapshot().repos).toEqual([]);
 
+    // The next listing of the installations, 2 minutes on.
     fault.meet(host);
-    await time.advance(5 * MIN);
+    await time.advance(2 * MIN);
     await time.advance(0);
     expect(room.snapshot().connection).toMatchObject({
       state: "disconnected",
       cause: fault.cause,
-      since: T0 + 5 * MIN,
+      since: T0 + 2 * MIN,
     });
   });
 

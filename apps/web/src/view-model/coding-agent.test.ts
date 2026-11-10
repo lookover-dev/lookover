@@ -578,6 +578,7 @@ function world(
       accounts: [],
       listed: true,
       listingCause: null,
+      look: null,
       unreached: [],
       signIn: null,
       person: null,

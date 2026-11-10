@@ -12,7 +12,13 @@ import type { Change } from "./change.ts";
 import type { FindingClaim } from "./claim.ts";
 import type { AgentSkill, CodingAgent, CommandPathState } from "./coding-agent.ts";
 import type { Confirmation, ConfirmFailure, ConfirmFallback } from "./confirm.ts";
-import type { Connection, ConnectionAccount, ConnectionCause, UnreachedAccount } from "./connection.ts";
+import type {
+  Connection,
+  ConnectionAccount,
+  ConnectionCause,
+  InstallLook,
+  UnreachedAccount,
+} from "./connection.ts";
 import type { Anchoring, DiffSide } from "./diff.ts";
 import type { Engine, EngineId, EngineState } from "./engine.ts";
 import type { EngineUnusable, EngineUsage } from "./engines-port.ts";
@@ -165,6 +171,18 @@ const unreachedAccount = tiedTo<UnreachedAccount>()(
     askedAt: z.number().nullable(),
   }),
 );
+const installLook = tiedTo<InstallLook>()(
+  z.object({
+    since: z.number(),
+    until: z.number(),
+    lookedAt: z.number().nullable(),
+    ended: z.number().nullable(),
+    arrived: z
+      .object({ accounts: z.array(z.string()), back: z.array(z.string()), repositories: z.number() })
+      .nullable(),
+    stopped: z.literal("rate-limited").nullable(),
+  }),
+);
 const connectionState = z.enum(["not-connected", "connected", "disconnected"]);
 
 const connectionSchema = tiedTo<Connection>()(
@@ -177,6 +195,7 @@ const connectionSchema = tiedTo<Connection>()(
     accounts: z.array(connectionAccount),
     listed: z.boolean(),
     listingCause: connectionCause.nullable(),
+    look: installLook.nullable(),
     unreached: z.array(unreachedAccount),
     web: z.string(),
     since: z.number(),

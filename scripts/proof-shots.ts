@@ -456,6 +456,160 @@ async function askToInstallOnLedgerHq(page: Page) {
     .waitFor();
 }
 
+/**
+ * Install on ledger-labs pressed (S16, S17: an organisation the person owns, without the App): GitHub's fake page
+ * opens in a tab, where Install is clicked or not (`install`), and the tab is closed. The look the link started runs
+ * (ADR 0088), the clock standing still until the act moves it.
+ */
+async function installOnLedgerLabs(page: Page, install: boolean) {
+  const [tab] = await Promise.all([page.waitForEvent("popup"), link(page, "Install on ledger-labs").click()]);
+  // GitHub's page first asks where, the person having other accounts: ledger-labs, then its own page.
+  await tab
+    .locator("li", { hasText: "ledger-labs" })
+    .getByRole("link", { name: "Install", exact: true })
+    .click();
+  const press = tab.getByRole("button", { name: "Install" });
+  await press.waitFor();
+  if (install) {
+    await press.click();
+    await tab.getByText("Installed on", { exact: false }).waitFor();
+  }
+  await tab.close();
+}
+
+/**
+ * Repositories' Add a repository pressed (S16): GitHub's fake page for the person's own installation opens in a tab,
+ * closed with nothing changed there. The look the link started runs (ADR 0088).
+ */
+async function addARepository(page: Page) {
+  const [tab] = await Promise.all([page.waitForEvent("popup"), link(page, "Add a repository").click()]);
+  await tab.waitForLoadState();
+  await tab.close();
+}
+
+/** Fails if Check again's box changed between `before` and `after`, as `what` happened. */
+function checkAgainStayed(what: string, before: unknown, after: unknown) {
+  if (JSON.stringify(before) !== JSON.stringify(after))
+    throw new Error(`Check again moved ${what}: ${JSON.stringify(before)} to ${JSON.stringify(after)}`);
+}
+
+/**
+ * The look line's words, whichever place says them: Settings › GitHub's line, or setup's Your accounts line, which
+ * says them in its own detail.
+ */
+const lookWords = (page: Page) =>
+  page.locator(".look-line-said, .substep:has(.account-row) > .substep-detail");
+
+/**
+ * The look running, its listing at once answered: the demo clock moved one look's step (4 s), the line saying it
+ * looks every few seconds and when it last did, to the second, in the place it said the state before. Fails if Check
+ * again moved as the look began.
+ */
+async function looksForLedgerLabs(page: Page, demo: { advance: (ms: number) => Promise<void> }) {
+  const again = page.getByRole("button", { name: "Check again" });
+  const before = await again.boundingBox();
+  await installOnLedgerLabs(page, false);
+  await demo.advance(4 * SEC);
+  await lookWords(page).getByText("Looking every few seconds, last at", { exact: false }).waitFor();
+  await lookWords(page).locator(".clock-s").waitFor();
+  const after = await again.boundingBox();
+  if (JSON.stringify(before) !== JSON.stringify(after))
+    throw new Error(
+      `Check again moved as the look began: ${JSON.stringify(before)} to ${JSON.stringify(after)}`,
+    );
+}
+
+/**
+ * ledger-labs installed on GitHub's fake page, then the demo clock moved in the look's 4 s steps until the line says
+ * it arrived (a minute at most): the look found it, no drawer's Reconnect.
+ */
+async function ledgerLabsArrives(page: Page, demo: { advance: (ms: number) => Promise<void> }) {
+  await installOnLedgerLabs(page, true);
+  const arrived = lookWords(page).getByText("ledger-labs arrived:", { exact: false });
+  for (let step = 0; step < 15 && !(await arrived.isVisible()); step++) await demo.advance(4 * SEC);
+  await arrived.waitFor();
+  await entriesPlayed(page);
+}
+
+/**
+ * The person back from GitHub's page without installing: the demo clock moved past the look's 3-minute bound in its
+ * 4 s steps, and the line says nothing new and that Lookover keeps checking. Fails if Check again moved between the
+ * look running and its end: aligned to the words' first line, it stays put however the words wrap.
+ */
+async function nothingNewForLedgerLabs(page: Page, demo: { advance: (ms: number) => Promise<void> }) {
+  const again = page.getByRole("button", { name: "Check again" });
+  await installOnLedgerLabs(page, false);
+  await demo.advance(4 * SEC);
+  await lookWords(page).getByText("Looking every few seconds", { exact: false }).waitFor();
+  await entriesPlayed(page);
+  const looking = await again.boundingBox();
+  for (let step = 0; step < 46; step++) await demo.advance(4 * SEC);
+  await lookWords(page).getByText("every 2 minutes", { exact: false }).waitFor();
+  await lookWords(page).getByText("Nothing new yet.", { exact: false }).waitFor();
+  await entriesPlayed(page);
+  const nothing = await again.boundingBox();
+  if (JSON.stringify(looking) !== JSON.stringify(nothing))
+    throw new Error(
+      `Check again moved between looking and nothing new: ${JSON.stringify(looking)} to ${JSON.stringify(nothing)}`,
+    );
+}
+
+/**
+ * The band's Install on sasensi, the App uninstalled everywhere: GitHub's install page opens in a tab, closed again,
+ * and the look its link started runs (ADR 0088), the clock standing still: "Looking…" in the fix's place. Fails if
+ * the fix's place or the line's words moved, or the fix still shows.
+ */
+async function bandLooks(page: Page) {
+  const line = page.locator(".alert", { hasText: "no longer installed" });
+  const place = line.locator(".same-width");
+  const words = line.locator(".alert-text");
+  await place.waitFor();
+  await entriesPlayed(page);
+  const before = { place: await place.boundingBox(), words: await words.boundingBox() };
+  const [tab] = await Promise.all([page.waitForEvent("popup"), link(page, "Install on sasensi").click()]);
+  await tab.getByText("Where do you want to install it?").waitFor();
+  await tab.close();
+  await line.locator(".busy-status", { hasText: "Looking…" }).waitFor();
+  await page.mouse.move(0, 0);
+  await entriesPlayed(page);
+  const after = { place: await place.boundingBox(), words: await words.boundingBox() };
+  if (JSON.stringify(after) !== JSON.stringify(before))
+    throw new Error(`The band's line moved as its look began: ${JSON.stringify({ before, after })}`);
+  if (await line.getByRole("link", { name: "Install on sasensi" }).isVisible())
+    throw new Error("The band still shows Install on sasensi while its look runs");
+}
+
+/**
+ * The status menu's Install on sasensi, the App uninstalled everywhere: the menu opened on its fix, GitHub's install
+ * page opened from it and closed again, and the menu open again on "Looking…" in the fix's place (ADR 0088), the
+ * clock standing still. Fails if the fix's place moved, or the fix still shows.
+ */
+async function menuLooks(page: Page) {
+  const pill = button(page, "GitHub App uninstalled");
+  const menu = page.locator(".menu");
+  const place = menu.locator(".st-fix .same-width");
+  await pill.click();
+  await place.waitFor();
+  await entriesPlayed(page);
+  const before = await place.boundingBox();
+  const [tab] = await Promise.all([
+    page.waitForEvent("popup"),
+    menu.getByRole("link", { name: "Install on sasensi" }).click(),
+  ]);
+  await tab.getByText("Where do you want to install it?").waitFor();
+  await tab.close();
+  // The link may close the menu as its tab opens: open it again where it was.
+  if (!(await menu.isVisible())) await pill.click();
+  await menu.locator(".st-fix .busy-status", { hasText: "Looking…" }).waitFor();
+  await page.mouse.move(0, 0);
+  await entriesPlayed(page);
+  const after = await place.boundingBox();
+  if (JSON.stringify(after) !== JSON.stringify(before))
+    throw new Error(`The menu's fix moved as its look began: ${JSON.stringify({ before, after })}`);
+  if (await menu.getByRole("link", { name: "Install on sasensi" }).isVisible())
+    throw new Error("The menu still shows Install on sasensi while its look runs");
+}
+
 /** Waits for the page's scroll to come to rest: a smooth scroll the app started is shot where it ends. */
 async function scrollAtRest(page: Page) {
   let last = Number.NaN;
@@ -712,6 +866,22 @@ const LISTED: Shot[] = [
       { name: `status-pill-${name}`, ...world, act: (p) => button(p, pill).click() },
     ]),
   ),
+  // The App uninstalled everywhere, the band's Install on sasensi clicked (ADR 0088): its look runs, "Looking…" in
+  // the fix's place, nothing on the line moved; then the status menu's own Install on sasensi, the same.
+  {
+    name: "home-app-uninstalled-looking",
+    scenario: "S16",
+    inject: ["app-uninstalled"],
+    alone: true,
+    act: bandLooks,
+  },
+  {
+    name: "status-pill-app-uninstalled-looking",
+    scenario: "S16",
+    inject: ["app-uninstalled"],
+    alone: true,
+    act: menuLooks,
+  },
   // Both AIs missing too: each with its one fix.
   { name: "home-service-problems", scenario: "S13", advance: 7 * MIN },
   { name: "home-paused-waiting", scenario: "S8", advance: 3 * MIN },
@@ -797,6 +967,41 @@ const LISTED: Shot[] = [
   { name: "home-two-accounts", scenario: "S16" },
   { name: "review-other-account", scenario: "S16", path: "/reviews/ledger-dev/ledger-api/151" },
   { name: "repositories-two-accounts", scenario: "S16", path: "/repositories" },
+  // Repositories' foot (ADR 0088): Add a repository opened GitHub's page, and the foot's look line says Lookover
+  // looks every few seconds; then a repository added there arrives, said in the line and in a toast.
+  {
+    name: "repositories-look-looking",
+    scenario: "S16",
+    path: "/repositories",
+    fullPage: true,
+    alone: true,
+    act: async (p, demo) => {
+      const again = p.getByRole("button", { name: "Check again" });
+      const before = await again.boundingBox();
+      await addARepository(p);
+      await demo.advance(4 * SEC);
+      await lookWords(p).getByText("Looking every few seconds, last at", { exact: false }).waitFor();
+      checkAgainStayed("as the look began", before, await again.boundingBox());
+    },
+  },
+  {
+    name: "repositories-look-arrived",
+    scenario: "S16",
+    path: "/repositories",
+    fullPage: true,
+    alone: true,
+    // The new repository's row is added to the table above the foot, which moves down with it: the line's own place
+    // is checked while the look runs (above).
+    act: async (p, demo) => {
+      await addARepository(p);
+      await demo.advance(4 * SEC);
+      await lookWords(p).getByText("Looking every few seconds", { exact: false }).waitFor();
+      await demo.inject("repository-added");
+      await lookWords(p).getByText("1 repository arrived.", { exact: true }).waitFor();
+      await p.locator(".toast", { hasText: "1 repository arrived." }).waitFor();
+      await entriesPlayed(p);
+    },
+  },
   // An owner of ledger-dev suspends the App there (ADR 0067): its group's head says who, with its fix, on a phone too.
   {
     name: "repositories-organisation-suspended",
@@ -1523,6 +1728,62 @@ const LISTED: Shot[] = [
       await toSharedGitHub(p);
     },
   },
+  // The look line (ADR 0088): Install on ledger-labs opened GitHub's page, and Lookover looks every few seconds,
+  // saying when it last did; then ledger-labs installed there arrives; or, nothing installed, the look ends with
+  // nothing new past its 3 minutes.
+  {
+    name: "settings-github-look-looking",
+    scenario: "S16",
+    path: "/settings#github",
+    alone: true,
+    act: async (p, demo) => {
+      await toSharedGitHub(p);
+      await looksForLedgerLabs(p, demo);
+    },
+  },
+  {
+    name: "settings-github-look-arrived",
+    scenario: "S16",
+    path: "/settings#github",
+    alone: true,
+    act: async (p, demo) => {
+      await toSharedGitHub(p);
+      await ledgerLabsArrives(p, demo);
+    },
+  },
+  {
+    name: "settings-github-look-nothing",
+    scenario: "S16",
+    path: "/settings#github",
+    alone: true,
+    act: async (p, demo) => {
+      await toSharedGitHub(p);
+      await nothingNewForLedgerLabs(p, demo);
+    },
+  },
+  // An ask an owner approves later (ADR 0088): Ask to install on ledger-hq, the look it started ends past its 3
+  // minutes with nothing new, then an owner of ledger-hq approves on GitHub with nothing listed at once; the 2-minute
+  // base cadence finds it: ledger-hq's row is reached, and the line and a toast say it arrived.
+  {
+    name: "settings-github-approved-later",
+    scenario: "S16",
+    path: "/settings#github",
+    alone: true,
+    act: async (p, demo) => {
+      await toSharedGitHub(p);
+      await askToInstallOnLedgerHq(p);
+      for (let step = 0; step < 46; step++) await demo.advance(4 * SEC);
+      await lookWords(p).getByText("an owner may still have to approve", { exact: false }).waitFor();
+      await demo.inject("owner-approves");
+      const asked = link(p, "Ask again");
+      for (let step = 0; step < 13 && (await asked.isVisible()); step++) await demo.advance(10 * SEC);
+      await asked.waitFor({ state: "detached" });
+      await lookWords(p).getByText("ledger-hq arrived: 1 repository.", { exact: true }).waitFor();
+      await p.locator(".toast", { hasText: "ledger-hq arrived: 1 repository." }).waitFor();
+      await entriesPlayed(p);
+      await p.mouse.move(0, 0);
+    },
+  },
   // Asked an owner of ledger-hq to install it: the row waits for them, with Ask again.
   {
     name: "settings-github-shared-waiting",
@@ -1846,6 +2107,37 @@ const LISTED: Shot[] = [
     act: async (p) => {
       await link(p, "Ask to install on ledger-hq").waitFor();
       await accountsLinesFit(p);
+    },
+  },
+  // The look line in setup (ADR 0088): Your accounts says the look in its own line, Check again its action.
+  {
+    name: "setup-github-look-looking",
+    scenario: "S17",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await link(p, "Install on ledger-labs").waitFor();
+      await looksForLedgerLabs(p, demo);
+    },
+  },
+  {
+    name: "setup-github-look-arrived",
+    scenario: "S17",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await link(p, "Install on ledger-labs").waitFor();
+      await ledgerLabsArrives(p, demo);
+    },
+  },
+  {
+    name: "setup-github-look-nothing",
+    scenario: "S17",
+    screen: ".setup",
+    alone: true,
+    act: async (p, demo) => {
+      await link(p, "Install on ledger-labs").waitFor();
+      await nothingNewForLedgerLabs(p, demo);
     },
   },
   // Asked: ledger-hq's row waits for an owner, with Ask again; then an owner installs it, and it is reached.
@@ -2781,6 +3073,23 @@ const LISTED: Shot[] = [
       await chevron(p, "ledger-dev", false).click();
     },
   },
+  // An account arriving in setup's accounts list (#713): ledger-hq asked, an owner installs there and Lookover lists
+  // it at once (S17's owner-installs); its row leaves the part not reached and fades in, dropping 6 px into place, at its new place
+  // among the accounts reached. The rows around it change nothing. Under reduced motion it is there at once.
+  {
+    name: "frames-account-arriving",
+    scenario: "S17",
+    screen: ".setup",
+    alone: true,
+    frames: { around: ".accounts-list" },
+    act: async (p, demo) => {
+      await askToInstallOnLedgerHq(p);
+      // The pointer off the list, so no row's hover joins the motion.
+      await p.mouse.move(0, 0);
+      await demo.inject("owner-installs");
+      await p.locator(".account-row[data-arrived]", { hasText: "ledger-hq" }).waitFor();
+    },
+  },
   // Rows and notices leaving (#702). A review ending on Home: #192's row leaves Reviewing now, the section with its
   // last row, and rises in where it lands. The act waits for the row in its new section, which both motion and
   // reduced motion show.
@@ -2912,6 +3221,15 @@ const WIDE = [
   "review-posting-longest",
   "setup-github-names",
   "setup-github-signed-in-looking",
+  "settings-github-look-looking",
+  "settings-github-look-arrived",
+  "settings-github-look-nothing",
+  "setup-github-look-looking",
+  "setup-github-look-arrived",
+  "setup-github-look-nothing",
+  "repositories-look-looking",
+  "repositories-look-arrived",
+  "settings-github-approved-later",
 ] as const;
 
 /** `name`'s shot at each of the two widths. */

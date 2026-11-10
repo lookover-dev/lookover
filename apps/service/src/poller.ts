@@ -46,10 +46,13 @@
 //   `poll` says whether it saw anything; the caller takes then (the loop does after each poll that saw something).
 // - The loop wakes every 10 s and polls each repository whose poll is due: every 10 s while it is hot, every 60 s
 //   otherwise (`core.pollEvery`: a review of one of its changes asked, waiting or running, or a round of one posted in
-//   the last 30 minutes, or setup showing Repositories or First review, ADR 0068). The rate limit is the
-//   installation's, one for every repository: a listing refused as rate limited waits until the time GitHub gave (a
-//   minute when it gave none), and the connection says so (`limitUntil`) until a listing answers again; meanwhile the
-//   loop asks GitHub nothing, of any repository, and a poll stops at the repository that met it. A refusal that is the
+//   the last 30 minutes, or setup showing Repositories or First review, ADR 0068). The rate limit is the sign-in's,
+//   one for every repository and shared with the installations' listing (`limited`, ADR 0088): a listing refused as
+//   rate limited waits until the time GitHub gave (a minute when it gave none), and the connection says so
+//   (`limitUntil`) until a listing answers once it is over (one under way when the wait began leaves it); meanwhile no poll
+//   asks GitHub anything, of any repository: one asked during the wait ("Reconnect", "Refresh", "Review now", one
+//   queued) or reaching its turn in it lists nothing and throws nothing, the loop polls at the wait's end, and a poll
+//   stops at the repository that met it. A refusal that is the
 //   installation's (the key refused, a cause the adapter named: the App uninstalled or suspended) stops a poll too: the
 //   repositories after it wait for the next one. GitHub unavailable, or not finding one repository, is that
 //   repository's: the others are asked all the same, so one answering 5xx at every poll never starves those after it.
@@ -75,7 +78,7 @@
 //   is polled at the cadence of one with nothing asked: what it waits for waits on its account. A repository whose
 //   owner is no account listed takes no cause: its refusal is the connection's.
 // - A repository's listing refused as not found with no cause (its token refused: it may have left the installation)
-//   has the installation's repositories listed again at once (`discover`), not at the next 5-minute listing; once a
+//   has the installation's repositories listed again at once (`discover`), not at the next 2-minute listing; once a
 //   minute at most, as a repository the installation still lists is refused so at every poll of it.
 // Errors: what a listing throws reaches `poll`'s caller ("Refresh", "Review now", "Reconnect"), once the repositories
 // after it were polled (unless it was a rate limit or the installation's), the first error of the poll (an account's
@@ -124,6 +127,7 @@ import {
 } from "@lookover/contracts";
 import { agentPushed, pollEvery, writerOf } from "@lookover/core";
 import type { CommentPlace, OpenChange, RequestComment, Store, WriterRead } from "@lookover/store";
+import { isRateLimit } from "./rate-limit.ts";
 import { said } from "./said.ts";
 import { changeOf, changesLeft, repoIdOf } from "./snapshot.ts";
 import type { Timers } from "./timers.ts";
@@ -215,7 +219,8 @@ export interface PollerDeps {
 export interface Poller {
   /**
    * Lists the open changes of `repo`, else of every repository watched, once, after any poll under way; true when it
-   * saw anything change.
+   * saw anything change. GitHub's wait on as its turn comes, it asks nothing and sees nothing (the loop polls at the
+   * wait's end).
    */
   poll(repo?: RepositoryRef): Promise<boolean>;
   /**
@@ -231,6 +236,12 @@ export interface Poller {
    * another cause; answered, the connection shows back when no repository is watched.
    */
   reached(cause: ConnectionCause | null): void;
+  /**
+   * A listing of the installations met GitHub's wait until `until` (ADR 0088), or answered again (null): the same
+   * limit as the repositories' (the person's sign-in), so the loop asks nothing before it ends, and the connection
+   * says so.
+   */
+  limited(until: number | null): void;
   /** Starts the loop. */
   start(): void;
   /** Stops the loop and waits for the poll under way. */
@@ -340,11 +351,14 @@ export function createPoller(d: PollerDeps): Poller {
   const accountHeld = (repo: RepositoryRef): boolean =>
     (accountOf(d.connection().accounts, repo.owner)?.cause ?? null) !== null;
 
-  /** The connection says until when GitHub asked to wait, or that it asks nothing any more. */
+  /**
+   * The connection says until when GitHub asked to wait, or that it asks nothing any more. A wait already kept that
+   * ends later stays, whoever met the shorter one (a poll, the installations' listing): only an answer clears it.
+   */
   const limited = (until: number | null) => {
-    limitUntil = until;
-    if (d.connection().limitUntil === until) return;
-    d.emit({ type: "connection.changed", at: now(), patch: { limitUntil: until } });
+    limitUntil = until === null || limitUntil === null ? until : Math.max(until, limitUntil);
+    if (d.connection().limitUntil === limitUntil) return;
+    d.emit({ type: "connection.changed", at: now(), patch: { limitUntil } });
   };
 
   /** Whether GitHub's wait is on now: nothing is asked of it until it ends. */
@@ -363,12 +377,12 @@ export function createPoller(d: PollerDeps): Poller {
     } catch (error) {
       still(at);
       // A reset time already past (the machine's clock ahead of GitHub's) still waits a wake: never a busy loop.
-      if (error instanceof HostError && error.failure === "rate_limited")
-        limited(Math.max(error.retryAt ?? now() + LIMIT_MS, now() + WAKE_MS));
+      if (isRateLimit(error)) limited(Math.max(error.retryAt ?? now() + LIMIT_MS, now() + WAKE_MS));
       throw error;
     }
     still(at);
-    if (limitUntil !== null) limited(null);
+    // A wait still to come was met while this was under way (another repository's poll, the installations' listing).
+    if (limitUntil !== null && !waiting()) limited(null);
     return answer;
   }
 
@@ -667,8 +681,9 @@ export function createPoller(d: PollerDeps): Poller {
     const at = d.holding();
     const polled: { saw: boolean; error?: unknown }[] = [];
     for (const repo of repos) {
-      // GitHub's wait is the installation's: met in this poll, it holds for every repository after.
-      if (stopping || (polled.length > 0 && waiting())) break;
+      // GitHub's wait is the installation's: on as this poll begins its turn (a listing's, an earlier poll's, one
+      // queued before it), or met in it, it holds for every repository; the loop polls them at its end.
+      if (stopping || waiting()) break;
       const one = await tried(repo, at);
       // Another sign-in or App held meanwhile: what this poll met is dropped (`Superseded` too).
       if (d.holding() !== at) break;
@@ -718,8 +733,7 @@ export function createPoller(d: PollerDeps): Poller {
   async function first(): Promise<void> {
     const { errors } = await serially(() => each(d.repos()));
     // A rate limit is only a wait: the loop lists at GitHub's reset.
-    for (const error of errors)
-      if (!(error instanceof HostError && error.failure === "rate_limited")) logRefusal(error);
+    for (const error of errors) if (!isRateLimit(error)) logRefusal(error);
   }
 
   /**
@@ -744,8 +758,9 @@ export function createPoller(d: PollerDeps): Poller {
 
   function arm(): void {
     if (stopping) return;
-    // GitHub's wait ends between two wakes: the loop wakes at its end.
-    const until = limitUntil === null ? WAKE_MS : Math.min(WAKE_MS, Math.max(0, limitUntil - now()));
+    // GitHub's wait ends between two wakes: the loop wakes at its end. One already over is no wait: kept until an
+    // answer clears it (none comes with nothing watched), it would wake the loop at once, again and again.
+    const until = limitUntil !== null && waiting() ? Math.min(WAKE_MS, limitUntil - now()) : WAKE_MS;
     wake = d.timers.after(until, () => {
       wake = null;
       void tick();
@@ -781,6 +796,7 @@ export function createPoller(d: PollerDeps): Poller {
       } else if (cause.kind !== "unreachable" || none || d.connection().state === "disconnected")
         connection("disconnected", cause);
     },
+    limited,
     start: arm,
     stop: async () => {
       stopping = true;

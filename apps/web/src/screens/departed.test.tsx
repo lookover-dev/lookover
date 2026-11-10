@@ -58,8 +58,8 @@ function page(state: State, store = app()) {
     sent,
     dismissAll: () => control("dismissAll")(),
     dismiss: () => control("dismiss")(),
-    /** No access's fix, when it keeps an ask. */
-    ask: () => control("ask")(),
+    /** The notice's link as GitHub's page opens (No access's fix, Add it back): what it sends, if anything. */
+    open: () => control("opened")(),
     /** A line's Dismiss, in the summary. */
     line: (repoId: RepositoryId) => control("dismiss", "dismissAll")(repoId),
   };
@@ -226,6 +226,28 @@ test("an account gone the person is a member of: No access asks to install, and 
   };
   const shown = page({ ...base, connection: { ...base.connection, unreached: [member] } });
   expect(shown.html).toContain("Ask to install on ledger-labs");
-  shown.ask();
+  shown.open();
+  // The ask alone: the service starts the look as it keeps it (ADR 0088).
   expect(shown.sent).toEqual([{ type: "connection.askToInstall", account: "ledger-labs" }]);
+});
+
+test("an account gone the person owns: No access's Install on starts the look as GitHub's page opens (ADR 0088)", () => {
+  const base = at([departed("ledger-labs", "ledger-sdk")]);
+  const owned: UnreachedAccount = {
+    account: { id: 501, login: "ledger-labs" },
+    kind: "organisation",
+    owner: true,
+    askedAt: null,
+  };
+  const shown = page({ ...base, connection: { ...base.connection, unreached: [owned] } });
+  expect(shown.html).toContain("Install on ledger-labs");
+  shown.open();
+  expect(shown.sent).toEqual([{ type: "connection.look" }]);
+});
+
+test("one repository left: Add it back starts the look as GitHub's page opens (ADR 0088)", () => {
+  const shown = page(at([DOCS]));
+  expect(shown.html).toContain("Add it back");
+  shown.open();
+  expect(shown.sent).toEqual([{ type: "connection.look" }]);
 });

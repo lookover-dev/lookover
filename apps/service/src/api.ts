@@ -20,6 +20,7 @@ import {
   DEMO_API,
   type Event,
   HostError,
+  type LookRefusal,
   type MintedLink,
   type NoSession,
   type SettingsFileError,
@@ -243,6 +244,11 @@ const ASK_REFUSED = {
   owner: "you own that account: install it there",
 } as const satisfies Record<AskToInstallRefusal, string>;
 
+/** Why an install look didn't start (ADR 0088), for the console; `look` names it for the app. */
+const LOOK_REFUSED = {
+  "signed-out": "nobody is signed in to the shared App here",
+} as const satisfies Record<LookRefusal, string>;
+
 /** The demo clock's verbs in live mode: the room has no demo clock, nothing to move. */
 const NO_CLOCK: Answer = [{ error: "no demo clock in live mode" }, 501];
 
@@ -263,7 +269,9 @@ const NO_CLOCK: Answer = [{ error: "no demo clock in live mode" }, 501];
  * `signIn`) while one waits; GitHub refusing the code is 502 through `onError`.
  * `connection.cancelSignIn` gives the waiting one up. "Ask to install on <org>" (`connection.askToInstall`, ADR 0067)
  * keeps the ask, refused (409, why in `askToInstall`) before a sign-in, for an account Lookover doesn't name as not
- * reached, or for one the person owns.
+ * reached, or for one the person owns, and starts an install look (ADR 0088) once kept. `connection.look` starts one,
+ * or moves the one running on, the installations' listing queued, never waited for; refused (409, why in `look`)
+ * before a sign-in.
  * The developer drawer's fault (ADR 0046) happens on the demo driver: 501 in live mode, where nothing scripted
  * touches a real repository, 409 when the story has nothing left for it. A load is the room swap: 404 for an id the
  * catalogue hasn't, 500 with the fixture's error when the seed fails (the old room still answers).
@@ -325,6 +333,11 @@ const COMMANDS: { [K in Parsed["type"]]?: Row<K> } = {
     const answer = await room.github.askToInstall(account);
     if (answer === "ok") return OK;
     return [{ error: ASK_REFUSED[answer.refused], askToInstall: answer.refused }, 409];
+  },
+  "connection.look": async ({ room }) => {
+    const answer = await room.github.look();
+    if (answer === "ok") return OK;
+    return [{ error: LOOK_REFUSED[answer.refused], look: answer.refused }, 409];
   },
   "service.runChecks": async ({ room }) =>
     (await room.runChecks()) === "running" ? [{ error: "the checks are already running" }, 409] : OK,

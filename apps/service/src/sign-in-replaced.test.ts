@@ -169,7 +169,7 @@ test("a discovery begun under the last sign-in that answers once another person 
     "sasensi/lookover-sandbox",
   ]);
 
-  // The five minutes' discovery asks the accounts as the owner, and GitHub hasn't answered yet.
+  // The 2 minutes' discovery asks the accounts as the owner, and GitHub hasn't answered yet.
   shared.hold(true);
   await time.advance(5 * MIN);
   await until(() => shared.held.length === 1);
@@ -245,6 +245,43 @@ test("a sign-in replaced while the service was stopped: the connection names the
   const again = await start({ home: dir, host, time, github: shared.github });
   const restarted: State = await snapshot(again.service, await openApp(again.service));
   expect(restarted.connection).toMatchObject({ id: "github:sasensi", person: OWNER });
+});
+
+test("another person signing in during the last one's rate-limit wait is not held by it: listed and polled at once", async () => {
+  const dir = home();
+  const time = new DemoClock({ at: T0 });
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+  });
+  const shared = await sharedFor(host, dir, { hold: false, listing: SANDBOX });
+  const { service } = await start({ home: dir, host, time, github: shared.github });
+  const cookie = await openApp(service);
+
+  // The minute's poll, as the owner, meets a 30-minute wait: the owner's sign-in's.
+  const resetAt = T0 + 31 * MIN;
+  host.refuse("rate_limited", { retryAt: resetAt });
+  await time.advance(MIN);
+  await eventually(
+    () => stateOf(service, cookie),
+    (s) => s.connection.limitUntil === resetAt,
+  );
+  host.refuse(null);
+
+  // Bob signs in: the wait is not his, so the connection asks none, and his listing and poll come at once.
+  shared.holdListings(true);
+  const asBob: State = await bobSignsIn(service, cookie, host, time);
+  expect(asBob.connection.limitUntil).toBeNull();
+  await eventually(
+    () => stateOf(service, cookie),
+    (s) => s.connection.listed,
+  );
+  await until(() => shared.listings.length === 1);
+  shared.holdListings(false);
+  shared.listings[0]?.answer(await host.listOpenChanges(SANDBOX));
 });
 
 /** An organisation both people reach, and its repository. */

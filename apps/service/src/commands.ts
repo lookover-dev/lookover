@@ -51,6 +51,7 @@ const command = z.discriminatedUnion("type", [
   z.object({ type: z.literal("connection.cancelSignIn") }),
   // The account is taken only once it is one `Connection.unreached` names (ADR 0067): any login parses.
   z.object({ type: z.literal("connection.askToInstall"), account: z.string().min(1) }),
+  z.object({ type: z.literal("connection.look") }),
   z.object({ type: z.literal("connection.reconnect") }),
   z.object({
     type: z.literal("setup.goto"),
@@ -115,6 +116,7 @@ const demoInject = z.object({
     "sso-asked",
     "organisation-suspended",
     "owner-installs",
+    "owner-approves",
     "connection-lost",
     "app-uninstalled",
     "app-suspended",

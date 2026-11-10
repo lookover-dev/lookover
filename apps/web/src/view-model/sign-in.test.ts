@@ -93,6 +93,7 @@ function at(github: SetupGitHub, connection: Partial<Connection> = {}, repos: Re
       accounts: [],
       listed: true,
       listingCause: null,
+      look: null,
       unreached: [],
       web: GITHUB_WEB,
       since: NOW,
@@ -240,7 +241,8 @@ test("signed in, the listing refused: your own row says the cause and its fix in
   const install = {
     label: "Install on sasensi",
     href: "https://github.com/apps/lookover-dev/installations/new",
-  };
+    command: { type: "connection.look" },
+  } as const;
   // `uninstalled`: the App was installed and no longer is, said as on any account it left.
   expect(row({ kind: "uninstalled", suspended: false })).toEqual([
     "sasensi",
@@ -252,7 +254,7 @@ test("signed in, the listing refused: your own row says the cause and its fix in
   const [, , suspended, unsuspend] = row({ kind: "uninstalled", suspended: true, suspendedBy: "octo" });
   expect([suspended, unsuspend]).toEqual([
     "Suspended by octo.",
-    { label: "Unsuspend it on GitHub", href: install.href },
+    { label: "Unsuspend it on GitHub", href: install.href, command: install.command },
   ]);
 });
 
@@ -526,4 +528,58 @@ test("Settings › GitHub with nobody signed in and the connection down: signed 
   const view = settings(connected({ person: null, cause: { kind: "signed-out" }, state: "disconnected" }));
   expect(view.signIn.text).toBe("You're signed out of GitHub.");
   expect(JSON.stringify(view)).not.toMatch(/new key|Use an existing App/);
+});
+
+// ---- the look line (ADR 0088) ----
+
+/** A look begun at `NOW`, its last listing at 10:00:04. */
+const LOOKING = {
+  since: NOW,
+  until: NOW + 3 * MIN,
+  lookedAt: NOW + 4000,
+  ended: null,
+  arrived: null,
+  stopped: null,
+};
+
+test("Your accounts says the look line's state in its own line while a look runs or once it ended, with Check again", () => {
+  const person = { person: SASENSI, id: connectionId("github:sasensi") };
+  const own = { account: { ...SASENSI, type: "User" as const }, installationId: 1, cause: null, owner: true };
+  const used = [repo("sasensi", "ledger-api")];
+  const looking = step(at("done", { ...person, accounts: [own], look: LOOKING }, used));
+  expect(looking.accounts).toMatchObject({
+    state: "done",
+    text: ["Looking every few seconds, last at ", { time: "10:00:04" }, "."],
+    look: { state: "looking", again: { label: "Check again", command: { type: "connection.look" } } },
+  });
+  const arrived = {
+    ...LOOKING,
+    ended: NOW + 8000,
+    arrived: { accounts: ["ledger-labs"], back: [], repositories: 3 },
+  };
+  expect(step(at("done", { ...person, accounts: [own], look: arrived }, used)).accounts.text).toEqual([
+    "ledger-labs arrived: 3 repositories.",
+  ]);
+  // No look yet: the step's own line, Check again still there.
+  const idle = step(at("done", { ...person, accounts: [own] }, used)).accounts;
+  expect(idle.text).toBe("Install it on more accounts any time.");
+  expect(idle.look?.again.label).toBe("Check again");
+  // Not listed yet: the step's own line says where it is.
+  expect(step(at("waiting-for-install", { ...person, listed: false, look: LOOKING })).accounts.text).toBe(
+    "Looking for your accounts on GitHub.",
+  );
+});
+
+test("before a sign-in there is no look line, nor Check again: nobody to look for", () => {
+  expect(step(at("start")).accounts.look).toBeNull();
+  expect(settings(at("start")).look).toBeNull();
+});
+
+test("Settings › GitHub ends its accounts card on the look line, idle too", () => {
+  expect(settings(connected()).look).toMatchObject({
+    state: "idle",
+    words: ["Lookover checks GitHub every 2 minutes."],
+    again: { label: "Check again" },
+  });
+  expect(settings(connected({ look: LOOKING })).look?.state).toBe("looking");
 });

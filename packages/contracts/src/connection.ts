@@ -64,6 +64,44 @@ export interface UnreachedAccount {
  */
 export type AskToInstallRefusal = "signed-out" | "not-named" | "owner";
 
+/** Why `connection.look` was refused (ADR 0088), answered as the 409's `look`: nobody is signed in here yet. */
+export type LookRefusal = "signed-out";
+
+/**
+ * An install look (ADR 0088): the installations listed at once and every 4 s, from `since` (the first
+ * `connection.look`, or `connection.askToInstall`) until `until`, which each command while it runs moves 3 minutes on,
+ * or until a listing finds an account or a repository not listed at `since`. Times are ms since the epoch.
+ * `lookedAt`: when a listing during it last answered, null before one did (a refused one doesn't count). `ended`: when
+ * it ended, null while it runs. `arrived`: what the listing that ended it found that none listed at `since`, the
+ * accounts (their logins, in GitHub's order); `back`, the accounts already listed then that had a cause then or since
+ * (suspended, SSO, no longer reached) and now have none, their logins; and how many repositories, those not listed at
+ * `since` and those of the accounts back. While nothing was listed under the sign-in at `since`, what it measures from
+ * is the repositories the room watched and their accounts, and an account the first answer lists with no repository
+ * beyond them is taken as one already there, not one arrived (an install of a moment ago or an old one with nothing
+ * granted can't be told apart); a new sign-in (another person, or the first) measures from its first answered
+ * listing. Null while it runs, and when it ended with
+ * nothing new and not stopped by GitHub's wait, until a later listing (discovery's: an owner approving later) finds
+ * something beyond what was listed at `since`, within 15 minutes of `ended` or later with an account then awaiting an
+ * owner's approval among it (`UnreachedAccount.askedAt`), then that, once, `ended` unchanged. `stopped`: why it ended
+ * before `until` with nothing new, a rate limit (no listing before `Connection.limitUntil`); null otherwise.
+ */
+export interface InstallLook {
+  since: number;
+  until: number;
+  lookedAt: number | null;
+  ended: number | null;
+  arrived: { accounts: string[]; back: string[]; repositories: number } | null;
+  stopped: "rate-limited" | null;
+}
+
+/**
+ * How often the person's installations are listed while nobody looks (ADR 0088), ms: the base cadence the app says.
+ * GitHub sends no webhook to a local service, and an owner may approve a request at any time.
+ */
+export const DISCOVERY_MS = 2 * 60_000;
+/** How soon they are listed again after GitHub refused the last listing, ms (ADR 0070). */
+export const DISCOVERY_RETRY_MS = 60_000;
+
 /** Whether two logins name one account: GitHub ignores their case. */
 export const sameLogin = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 
@@ -108,6 +146,11 @@ export interface Connection {
    * sign-in, and while no listing was refused.
    */
   listingCause: ConnectionCause | null;
+  /**
+   * The install look (ADR 0088): the one running, or the last one, until the next or a new sign-in; null before any,
+   * and at each start (a look doesn't outlive the service).
+   */
+  look: InstallLook | null;
   /**
    * The person's accounts the shared App doesn't reach (ADR 0067), always empty before a sign-in and until `listed`:
    * their own account first when the App isn't installed there, then the organisations their own `gh` names, in

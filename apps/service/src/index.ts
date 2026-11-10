@@ -111,7 +111,7 @@
 // refused is logged, the start failing only when every one is or the installation is), and serves the API on
 // 127.0.0.1. The owner is the person signed in; the snapshot's connection carries them and every account reached with
 // its installation's id. While the setup waits for the install, the installations are read every 4 s ("nothing granted" until it lists a repository, then
-// every one switched on and the step moved on); once installed, its repositories are listed every 5 minutes and on
+// every one switched on and the step moved on); once installed, its repositories are listed every 2 minutes and on
 // "Reconnect": one added is polled at once (`repo.added`, switched on), one gone leaves (`repo.removed`, its jobs
 // cancelled, a running one stopped, its unsent posts dropped; said departed in the snapshot until it is added again,
 // when it starts with no waiting job, or dismissed with `repos.dismiss`, ADR 0059, one `repo.dismissed` for each

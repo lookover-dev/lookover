@@ -2,8 +2,10 @@ import type { Command } from "@lookover/contracts";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import type { WebMode } from "./dev/mode.ts";
+import { LookOnReturn } from "./look-on-return.tsx";
 import { GitHubMock } from "./screens/github.tsx";
 import { AllReviews, Home } from "./screens/home.tsx";
+import { ArrivalToast } from "./screens/look-line.tsx";
 import { Review } from "./screens/review.tsx";
 import { Logs, Repositories, RepositoryPage, Settings, SettingsSection } from "./screens/settings.tsx";
 import { Setup } from "./screens/setup.tsx";
@@ -145,6 +147,8 @@ export function App({
         <StateProvider value={state}>
           <ToastProvider>
             <RefusalToast refusal={refusal} setup={!state.setup.done} />
+            <LookOnReturn />
+            <ArrivalToast />
             <TickingProvider state={state} pace={dev?.pace ?? REAL_PACE}>
               <Routes>
                 <Route path="/github/:owner/:name/:number" element={<GitHubMock />} />

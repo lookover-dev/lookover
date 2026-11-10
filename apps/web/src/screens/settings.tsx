@@ -40,7 +40,7 @@ import { AGENT_INTRO } from "../view-model/coding-agent.ts";
 import { departedShown } from "../view-model/departed.ts";
 import { plural, repositoryLabel, SEPARATOR } from "../view-model/format.ts";
 import { followLogs, logRunsShown } from "../view-model/logs.ts";
-import { addRepositoryLink, repositoriesFoot } from "../view-model/onboarding.ts";
+import { addRepositoryLink, repositoriesFoot, repositoriesLook } from "../view-model/onboarding.ts";
 import { REPOSITORIES_BAR, RepositoriesChoice, repositoriesList } from "../view-model/repositories.ts";
 import { differences, lastReviewAt } from "../view-model/select.ts";
 import {
@@ -60,6 +60,7 @@ import { CodingAgent } from "./coding-agent.tsx";
 import { Page, Sentence, useSaving } from "./common.tsx";
 import { DepartedNotices } from "./departed.tsx";
 import { AccountsList, CodeActions } from "./github-app.tsx";
+import { LookLine } from "./look-line.tsx";
 import { RepositoryGroupRows } from "./repository-group.tsx";
 
 /** The control for one setting, used for your defaults and for a repository's own value. */
@@ -278,6 +279,7 @@ function GitHubGroup({
           <AccountsList list={view.list} />
         </div>
       ) : null}
+      {view.look === null ? null : <LookLine look={view.look} />}
     </Card>
   );
 }
@@ -477,12 +479,19 @@ export function RepositoriesOn({ choice }: { choice: RepositoriesChoice }) {
   useEffect(() => remember(list.firstFolds), [remember, list.firstFolds]);
   // GitHub decides what the App sees: more repositories are granted in the installation's settings (ADR 0053).
   const add = addRepositoryLink(state.connection);
+  const look = repositoriesLook(state);
   return (
     <Page screen="repositories">
       <Sentence
         title="Repositories."
         small="Pull requests opened by you or your agents in these repositories are reviewed automatically."
-        action={add ? <LinkButton href={add}>Add a repository</LinkButton> : null}
+        action={
+          add ? (
+            <LinkButton href={add.href} onClick={() => add.command && send(add.command)}>
+              {add.label}
+            </LinkButton>
+          ) : null
+        }
       />
       <DepartedNotices shown={departedShown(state, leftSummary)} connection={state.connection} send={send} />
       {barShown ? (
@@ -537,7 +546,12 @@ export function RepositoriesOn({ choice }: { choice: RepositoriesChoice }) {
           ))}
         </table>
       )}
-      <div className="foot">{repositoriesFoot(state.connection)}</div>
+      {/* The page's end: who is signed in, then the look line (ADR 0088), so the person back from Add a repository
+          sees Lookover look and what arrived; as tall as its words, it moves nothing above it. */}
+      <div className="foot">
+        <div>{repositoriesFoot(state.connection)}</div>
+        {look === null ? null : <LookLine look={look} />}
+      </div>
     </Page>
   );
 }

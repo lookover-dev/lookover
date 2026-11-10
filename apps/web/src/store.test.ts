@@ -60,6 +60,7 @@ function snapshot(seq: number, title: string): State {
       accounts: [],
       listed: true,
       listingCause: null,
+      look: null,
       unreached: [],
       signIn: null,
       person: null,

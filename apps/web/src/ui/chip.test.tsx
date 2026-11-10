@@ -19,7 +19,7 @@ test("Waiting and To fix: the same amber, Waiting its own class for its ring dot
 test("the busy status is a status line in its tone's colour with the reading eyes, neither a chip nor a button", () => {
   for (const tone of ["run", "wait"] as const) {
     const out = renderToStaticMarkup(<BusyStatus tone={tone}>Reviewing…</BusyStatus>);
-    expect(out.startsWith(`<span class="busy-status" data-tone="${tone}">`)).toBe(true);
+    expect(out.startsWith(`<span class="busy-status" data-tone="${tone}" tabindex="-1">`)).toBe(true);
     expect(out).not.toContain("chip");
     expect(out).not.toContain("btn");
     expect(out).toContain('class="eyes');

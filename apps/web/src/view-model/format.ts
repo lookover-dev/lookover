@@ -97,6 +97,24 @@ export function clock(at: number): string {
   return `${twoDigits(d.getHours())}:${twoDigits(d.getMinutes())}`;
 }
 
+/**
+ * "16:02:31": a time of day to the second, in `timeZone` (the machine's by default), for what changes every few
+ * seconds (the look line, ADR 0088), where `clock()`'s minutes would say the same time for a minute. Shown in tabular
+ * figures (design-system.md "Clock to the second"), so a new second moves nothing after it.
+ */
+export function clockToSecond(at: number, timeZone?: string): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(at);
+  const n = (type: Intl.DateTimeFormatPartTypes) =>
+    twoDigits(Number(parts.find((p) => p.type === type)?.value));
+  return `${n("hour")}:${n("minute")}:${n("second")}`;
+}
+
 const DAY_MS = 86_400_000;
 
 /** The calendar day (as days since the epoch) and the "10:11" of `at`, in `timeZone` (the machine's by default). */

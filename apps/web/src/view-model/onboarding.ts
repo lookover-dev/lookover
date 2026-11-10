@@ -13,12 +13,14 @@ import {
   type Repository,
   type RepositoryId,
   repositoryRefOf,
+  type State,
   upperFirst,
 } from "@lookover/contracts";
-import { sharedRepositoriesLink, signedIn } from "./accounts.ts";
+import { type AccountLink, LOOK, sharedRepositoriesLink, signedIn } from "./accounts.ts";
 import { DEPARTED } from "./departed.ts";
 import { until } from "./format.ts";
 import { connectionText, ENGINE_CHECK_AGAIN, ENGINE_TRY_AGAIN, engineStateText } from "./health.ts";
+import { type LookLineView, lookLine } from "./look-line.ts";
 
 /**
  * An AI's line in the setup's first step: ready with its plan and version, signing in, signed out, or not found; one
@@ -135,11 +137,13 @@ export const aiStepLabels = (engines: readonly Engine[]): string[] => [
 ];
 
 /**
- * Where the App's repositories are chosen ("Add a repository", ADR 0067): `sharedRepositoriesLink`'s; null while
- * nobody is signed in.
+ * Where the App's repositories are chosen ("Add a repository", ADR 0067): `sharedRepositoriesLink`'s, the look sent as
+ * it opens (ADR 0088); null while nobody is signed in.
  */
-export function addRepositoryLink(connection: Connection): string | null {
-  return signedIn(connection) ? sharedRepositoriesLink(connection) : null;
+export function addRepositoryLink(connection: Connection): AccountLink | null {
+  return signedIn(connection)
+    ? { label: "Add a repository", href: sharedRepositoriesLink(connection), command: LOOK }
+    : null;
 }
 
 /**
@@ -169,6 +173,18 @@ export function repositoriesFoot(connection: Connection): string {
 }
 
 /**
+ * The look line at Repositories' foot (ADR 0088), in its fuller form: the person back from Add a repository sees where
+ * Lookover stands with GitHub's installations, and Check again, in every state of the connection while signed in.
+ * Null with nobody signed in or signed out: Sign in again is the way, and a look would be refused.
+ */
+export function repositoriesLook(
+  state: Pick<State, "now" | "connection">,
+  o: { timeZone?: string } = {},
+): LookLineView | null {
+  return signedIn(state.connection) ? lookLine(state, o) : null;
+}
+
+/**
  * A repository the installation stopped listing (ADR 0059), as Repositories says it until it is back or dismissed:
  * labelled "Left" (nothing waits on the person: the status says all good), after its name, that it is no longer
  * reviewed and where it may have gone; and "Add it back" (ADR 0067): its account's installation settings when the
@@ -180,12 +196,12 @@ export function departedNotice(
 ): {
   label: string;
   text: string;
-  addBack: string;
+  addBack: AccountLink;
 } {
   return {
     label: DEPARTED.left,
     text: "left the App's installation and is no longer reviewed: moved, deleted, or taken off its access.",
-    addBack: sharedRepositoriesLink(connection, repo.owner),
+    addBack: { label: DEPARTED.addBack, href: sharedRepositoriesLink(connection, repo.owner), command: LOOK },
   };
 }
 

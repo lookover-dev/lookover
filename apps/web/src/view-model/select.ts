@@ -31,8 +31,11 @@ import {
 } from "@lookover/contracts";
 import type { Tone } from "../ui/basics.tsx";
 import {
+  type AccountLink,
   accountFix,
   installFirstFix,
+  LOOK,
+  lookRuns,
   ownsAccount,
   saidSignedOut,
   sharedRepositoriesLink,
@@ -767,16 +770,21 @@ export interface Problem {
   detailHere?: string;
   /**
    * Its one fix: a command the service answers, a page to open (GitHub's, for what only GitHub can change), with the
-   * code to `copy` as it opens when the page asks for one (Sign in again's), or a place in the app (`path`: what the
-   * owner changes in Settings).
+   * code to `copy` as it opens when the page asks for one (Sign in again's), or the look sent as it opens when it is
+   * the install page or an installation's settings (`LOOK`, ADR 0088), or a place in the app (`path`: what the owner
+   * changes in Settings).
    */
   fix:
     | ({ label: string } & (
         | Exclude<FixAction, { href: string }>
-        | { href: string; copy?: string }
+        | { href: string; copy?: string; command?: AccountLink["command"] }
         | { path: string }
       ))
     | null;
+  /**
+   * Whether its fix's work is under way: a command fix waiting (a sign-in), or a link fix whose look runs (ADR 0088),
+   * which says "Looking…" in its place until the look ends.
+   */
   busy: boolean;
 }
 
@@ -809,7 +817,7 @@ function causeProblem(connection: Connection, cause: ConnectionCause): Omit<Prob
 const suspendedFix = (connection: Connection): ProblemSaid => ({
   title: "Lookover's App is suspended on GitHub",
   detail: "Reviews cannot be read or posted until you unsuspend it on GitHub.",
-  fix: { label: "Unsuspend it on GitHub", href: sharedRepositoriesLink(connection) },
+  fix: { label: "Unsuspend it on GitHub", href: sharedRepositoriesLink(connection), command: LOOK },
 });
 
 /** Installed on none of the person's accounts any more (ADR 0066): the accounts list's first fix. */
@@ -940,12 +948,25 @@ function accountProblem(connection: Connection, a: ConnectionAccount, cause: Acc
  */
 function connectionProblems(state: State): Problem[] {
   const { connection } = state;
-  if (connection.state !== "connected") return [connectionProblem(connection, state.now)];
+  if (connection.state !== "connected")
+    return [withLookBusy(connectionProblem(connection, state.now), connection)];
   const until = connection.limitUntil;
   const accounts = connection.accounts.flatMap((a) =>
     a.cause === null ? [] : [accountProblem(connection, a, a.cause)],
   );
-  return [...(until !== null && until > state.now ? [connectionLimit(until)] : []), ...accounts];
+  return [...(until !== null && until > state.now ? [connectionLimit(until)] : []), ...accounts].map((p) =>
+    withLookBusy(p, connection),
+  );
+}
+
+/**
+ * A problem whose fix opens GitHub's install page or an installation's settings is busy while the look its link
+ * starts runs (ADR 0088): "Looking…" in the fix's place, until the look ends; then the fix again.
+ */
+function withLookBusy(problem: Problem, connection: Connection): Problem {
+  const { fix } = problem;
+  const looks = fix !== null && "href" in fix && fix.command?.type === LOOK.type;
+  return looks && lookRuns(connection) ? { ...problem, busy: true } : problem;
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   engineSetupText,
   pullRequestLink,
   repositoriesFoot,
+  repositoriesLook,
 } from "./onboarding.ts";
 
 const NOW = Date.UTC(2026, 9, 10, 10, 0, 0);
@@ -80,6 +81,7 @@ function connection(patch: Partial<Connection> = {}): Connection {
     accounts: [],
     listed: true,
     listingCause: null,
+    look: null,
     unreached: [],
     signIn: null,
     person: null,
@@ -123,10 +125,15 @@ test("the repositories step ticks what the installation granted, keeps what the 
 // ---- links ----
 
 test("Add a repository: the installation's settings on the one account the person owns, and nothing before a sign-in", () => {
-  expect(addRepositoryLink(signedIn([account(7, "sam", "User")]))).toBe(
-    "https://github.com/settings/installations/7",
+  // The look starts as it opens (ADR 0088).
+  expect(addRepositoryLink(signedIn([account(7, "sam", "User")]))).toEqual({
+    label: "Add a repository",
+    href: "https://github.com/settings/installations/7",
+    command: { type: "connection.look" },
+  });
+  expect(addRepositoryLink(signedIn([]))?.href).toBe(
+    "https://github.com/apps/lookover-dev/installations/new",
   );
-  expect(addRepositoryLink(signedIn([]))).toBe("https://github.com/apps/lookover-dev/installations/new");
   expect(addRepositoryLink(connection())).toBeNull();
   // Accounts but nobody signed in (ADR 0073): no link.
   expect(addRepositoryLink(connection({ accounts: [account(7, "sam", "User")] }))).toBeNull();
@@ -157,6 +164,44 @@ test("Repositories' foot names the person signed in and every account reached (A
   expect(repositoriesFoot({ ...out, state: "not-connected" })).toBe("Not connected to GitHub.");
 });
 
+test("Repositories' foot carries the look line in every state of the connection while signed in (ADR 0088)", () => {
+  const sam = signedIn([account(7, "sam", "User")]);
+  const look = {
+    since: NOW,
+    until: NOW + 180_000,
+    lookedAt: null,
+    ended: null,
+    arrived: null,
+    stopped: null,
+  };
+  const foot = (c: Connection) => repositoriesLook({ now: NOW, connection: c }, { timeZone: "UTC" });
+  expect(
+    [
+      sam,
+      { ...sam, look },
+      {
+        ...sam,
+        look: { ...look, ended: NOW, arrived: { accounts: ["ledger-labs"], back: [], repositories: 3 } },
+      },
+      { ...sam, state: "disconnected" as const, cause: { kind: "unreachable" as const } },
+      { ...sam, state: "disconnected" as const, cause: { kind: "uninstalled" as const, suspended: false } },
+    ].map((c) => {
+      const line = foot(c);
+      return line === null ? null : `${line.state}: ${line.full.join("")} | ${line.again.label}`;
+    }),
+  ).toEqual([
+    "idle: Lookover checks GitHub every 2 minutes. | Check again",
+    "looking: Looking on GitHub every few seconds. | Check again",
+    "arrived: ledger-labs arrived: 3 repositories. | Check again",
+    // Disconnected, GitHub is tried again sooner than the 2 minutes' pace: the line names none.
+    "idle: Lookover keeps checking GitHub. | Check again",
+    "idle: Lookover keeps checking GitHub. | Check again",
+  ]);
+  // Nobody signed in, or signed out: no look to send, Sign in again is the way.
+  expect(foot(connection())).toBeNull();
+  expect(foot({ ...sam, state: "disconnected", cause: { kind: "signed-out" } })).toBeNull();
+});
+
 test("Repositories' foot with nobody signed in says so, connected or not", () => {
   expect(repositoriesFoot(connection())).toBe("Not connected to GitHub.");
   expect(repositoriesFoot(connection({ state: "connected" }))).toBe("Not connected to GitHub.");
@@ -169,17 +214,21 @@ test("a departed repository is said in one sentence, labelled Left, and Add it b
   expect(departedNotice(signedIn([sam]), { owner: "sam" })).toEqual({
     label: "Left",
     text,
-    addBack: "https://github.com/settings/installations/7",
+    addBack: {
+      label: "Add it back",
+      href: "https://github.com/settings/installations/7",
+      command: { type: "connection.look" },
+    },
   });
   // Its account no longer reached: GitHub's page lists every account.
-  expect(departedNotice(signedIn([sam]), { owner: "acme" }).addBack).toBe(
+  expect(departedNotice(signedIn([sam]), { owner: "acme" }).addBack.href).toBe(
     "https://github.com/apps/lookover-dev/installations/new",
   );
   expect(departedNotice(signedIn([sam]), { owner: "sam" }).text).toBe(text);
 });
 
 test("every link to GitHub is built on the connection's web address: demo mode's stays on GitHub's fake", () => {
-  expect(addRepositoryLink({ ...signedIn([]), web: DEMO_API.github })).toBe(
+  expect(addRepositoryLink({ ...signedIn([]), web: DEMO_API.github })?.href).toBe(
     `${DEMO_API.github}/apps/lookover-dev/installations/new`,
   );
 });

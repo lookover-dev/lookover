@@ -1,9 +1,9 @@
 // The shared App's installations and the repositories they list (ADR 0053, ADR 0066), through the service's door on
 // the held demo clock and the fake GitHub, the owner signed in: the install waited for every 4 s while the setup
-// waits for it, "nothing granted" until it lists a repository; the installation's repositories followed every 5
-// minutes, one added arriving switched on, one removed leaving with its waiting and running jobs cancelled and its
-// unsent posts dropped, and back again with no waiting job; the allow-list cutting what is listed; nobody signed in
-// showing the setup, and a restart's setup following the sign-in kept (ADR 0073).
+// waits for it, "nothing granted" until it lists a repository; the installation's repositories followed every 2
+// minutes (a minute on after a refused listing), one added arriving switched on, one removed leaving with its waiting
+// and running jobs cancelled and its unsent posts dropped, and back again with no waiting job; the allow-list cutting
+// what is listed; nobody signed in showing the setup, and a restart's setup following the sign-in kept (ADR 0073).
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ import {
   commitSha,
   type Event,
   type HostChange,
+  HostError,
   type Listing,
   type Repository,
   type RepositoryRef,
@@ -78,16 +79,22 @@ const opened = (repo: RepositoryRef, number: number): FakeChange => ({
   },
 });
 
-/** A fake GitHub that counts each repository's listings, and how often the installation is read. */
+/**
+ * A fake GitHub that counts each repository's listings, and how often the installation is read; `listingRefused`
+ * refuses only the installation's reads as unreachable, the repositories still answering.
+ */
 class Counting extends FakeGitHost {
   lists = new Map<string, number>();
   reads = 0;
+  listingRefused = false;
   override listOpenChanges(repo: RepositoryRef): Promise<Listing<HostChange>> {
     this.lists.set(repo.name, (this.lists.get(repo.name) ?? 0) + 1);
     return super.listOpenChanges(repo);
   }
   override accounts(...args: Parameters<FakeGitHost["accounts"]>) {
     this.reads++;
+    if (this.listingRefused)
+      return Promise.reject(new HostError("unavailable", "GitHub could not be reached"));
     return super.accounts(...args);
   }
 }
@@ -190,12 +197,42 @@ test("the App installed after the start: the install read every 4 s, nothing gra
   // What was open before is listed, not reviewed.
   expect(granted.reviews[changeId("sasensi/lookover-sandbox#1")]?.job ?? null).toBeNull();
 
-  // Granted: no more reads every 4 s; the installation is next read by the discovery, 5 minutes on.
+  // Granted: no more reads every 4 s; the installation is next read by the discovery, 2 minutes on.
   const reads = host.reads;
-  await time.advance(MIN);
+  await time.advance(2 * MIN - 1_000);
   expect(host.reads).toBe(reads);
-  await time.advance(4 * MIN);
+  await time.advance(1_000);
   expect(host.reads).toBe(reads + 1);
+});
+
+test("set up, the installations are listed every 2 minutes; one refused is listed again a minute on, then every 2 again", async () => {
+  const time = new DemoClock({ at: T0 });
+  const host = new Counting({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1], clock: time });
+  await start({ host, time });
+  const reads = host.reads;
+
+  await time.advance(2 * MIN - 1_000);
+  expect(host.reads).toBe(reads);
+  await time.advance(1_000);
+  expect(host.reads).toBe(reads + 1);
+  await time.advance(2 * MIN);
+  expect(host.reads).toBe(reads + 2);
+
+  // GitHub can't list the installations: the next listing refused, the one after a minute on.
+  host.listingRefused = true;
+  await time.advance(2 * MIN);
+  expect(host.reads).toBe(reads + 3);
+  host.listingRefused = false;
+  await time.advance(MIN - 1_000);
+  expect(host.reads).toBe(reads + 3);
+  await time.advance(1_000);
+  expect(host.reads).toBe(reads + 4);
+
+  // Answered: 2 minutes again.
+  await time.advance(2 * MIN - 1_000);
+  expect(host.reads).toBe(reads + 4);
+  await time.advance(1_000);
+  expect(host.reads).toBe(reads + 5);
 });
 
 test("uninstalled and installed again while nothing is granted: the new installation is shown at once, and kept once a repository is granted", async () => {
@@ -277,7 +314,7 @@ test("a repository added to the installation and one removed appear and leave wi
   if (runId === undefined) throw new Error("sasensi/ledger-api#1 has a run");
   expect(store.posts.of(runId)?.posts.filter((p) => p.hostId === null).length).toBeGreaterThan(0);
 
-  // On GitHub: ledger-api leaves the installation, ledger-web joins it. One listing, at most 5 minutes on.
+  // On GitHub: ledger-api leaves the installation, ledger-web joins it. One listing, at most 2 minutes on.
   host.removeRepository(LEDGER);
   host.addRepository(WEB);
   host.open(opened(WEB, 4));

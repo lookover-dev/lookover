@@ -300,6 +300,17 @@ test("a fresh row rises in only behind the first-paint gate, never on the page's
   expect(rulesWhere((s) => s === ".rowi.new")).toEqual([]);
 });
 
+test("an account's row arriving comes in as Reviews' rows do, over --d-4, only behind the first-paint gate", () => {
+  expect(rule(".account-row.new[data-arrived]")).toContain("animation: row-in var(--d-4) var(--e-out);");
+  expect(rulesWhere((s) => s === ".account-row.new")).toEqual([]);
+  expect(rulesWhere((s) => s === ".account-row").filter((r) => /animation/.test(r.body))).toEqual([]);
+  // Under reduced motion it runs none: an animation and nothing else, which the one global rule cuts on every element.
+  expect(rule(".account-row.new[data-arrived]")).not.toMatch(/transition|!important/);
+  expect(
+    rule("*, *::before, *::after, ::backdrop", { at: "@media (prefers-reduced-motion: reduce)" }),
+  ).toMatch(/(^|;)\s*animation:\s*none !important;/);
+});
+
 test("the alert band slides in only behind the first-paint gate, never on the page's first paint", () => {
   expect(rule(".alerts[data-arrived]")).toMatch(/animation:\s*page-in /);
   expect(rulesWhere((s) => s === ".alerts").filter((r) => /animation/.test(r.body))).toEqual([]);
@@ -425,8 +436,11 @@ test("setup's sign-in card ends as it starts: its bottom as deep as the title's 
   expect(rule(".engine")).toMatch(/--engine-pad:\s*14px;/);
   expect(rule(".engine")).toMatch(/padding:\s*var\(--engine-pad\);/);
   expect(rule(".substep")).toMatch(/padding-bottom:\s*calc\(var\(--engine-pad\) \+ var\(--s-2\)\);/);
-  // On a phone a done sub-step holds no blank row for the action it no longer has (the sign-in card's empty band).
-  expect(rule(".substep.done > .substep-act", { at: PHONE })).toMatch(/display:\s*none;/);
+  // On a phone a done sub-step holds no blank row for the action it no longer has (the sign-in card's empty band);
+  // Your accounts keeps its Check again, done or not (ADR 0088).
+  expect(rule(".substep.done > .substep-act:not(:has(.look-again))", { at: PHONE })).toMatch(
+    /display:\s*none;/,
+  );
   // The installs' rows keep their own padding: rows of a card, not cards.
   expect(rule(".agent-rows > .engine")).toMatch(/padding:\s*var\(--s-3\) 0;/);
 });
@@ -529,6 +543,13 @@ test("a group head's second row scrolls with its group at every width, and no he
 test("an account row's action place is pinned to its top, so a detail growing a line moves no button", () => {
   // Row 52: centred on the login and its detail, a button moved half a line under the pointer when its detail grew.
   expect(rule(".account-row")).toMatch(/align-items:\s*start;/);
+});
+
+test("stacked on a phone, Installed is as tall as its line, holding no button's height (ADR 0086)", () => {
+  // Row 55: beside the login it is as tall as a button so the column ends on one line; stacked, with no button beside
+  // it, that height was a band 5 px under its words, seen as a hovered row's tint (proof's setup-github-signed-in).
+  expect(rule(".account-status")).toContain("height: var(--h-sm);");
+  expect(rule(".account-status", { at: PHONE })).toMatch(/height:\s*auto;/);
 });
 
 test("a group head's count wraps rather than take the account's width", () => {

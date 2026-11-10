@@ -10,6 +10,7 @@
 import type { Connection, DeviceCode, SignInStartRefusal, State } from "@lookover/contracts";
 import { type AccountsList, accountRows, readingRepositories, saidSignedOut, signedIn } from "./accounts.ts";
 import { until, type WithCommand } from "./format.ts";
+import { LONGEST_LOOK_LINES, type LookLineView, type LookWords, lookLine } from "./look-line.ts";
 
 /** How a code went without a sign-in: it ran out, or GitHub didn't sign the person in (refused, or failed). */
 export type SignInEnd = "expired" | "ended";
@@ -48,10 +49,15 @@ interface SignInRowView {
 
 interface AccountsRowView {
   state: RowState;
-  /** One line over the list: where the step is with the accounts. */
-  text: string;
+  /**
+   * One line over the list: where the step is with the accounts, or, listed, once a look began (ADR 0088), the look
+   * line's words.
+   */
+  text: string | LookWords;
   /** Every account, one row each, with its state or its one fix (ADR 0067): empty until signed in. */
   list: AccountsList;
+  /** The look line once signed in: its Check again, the row's action, and its status line; null before. */
+  look: LookLineView | null;
 }
 
 export interface SignInStepView {
@@ -108,6 +114,8 @@ export const ACCOUNTS_TEXT = {
   done: "Install it on more accounts any time.",
   /** Done, with an account still to set up: one is enough to go on (Repositories, First review and the agent come next), the rest can wait. */
   rest: "Enough to go on. The rest can wait.",
+  /** Listed, once a look began: the look line's words (ADR 0088), each at its longest. */
+  ...LONGEST_LOOK_LINES,
 } as const;
 
 const ENDED: Record<SignInEnd, string> = {
@@ -157,8 +165,18 @@ const zoned = (timeZone: string | undefined) => (timeZone === undefined ? {} : {
 
 function accountsRow(state: State, timeZone: string | undefined): AccountsRowView {
   const list = accountRows(state, zoned(timeZone));
-  const row = (rowState: RowState, text: string): AccountsRowView => ({ state: rowState, text, list });
-  if (!signedIn(state.connection)) return row("later", ACCOUNTS_TEXT.later);
+  if (!signedIn(state.connection)) return { state: "later", text: ACCOUNTS_TEXT.later, list, look: null };
+  const look = lookLine(state, zoned(timeZone));
+  // Listed, a look begun says where it is in place of the step's own line (ADR 0088): not before, when the step
+  // still looks for the accounts or reads their repositories for the first time.
+  const said = (text: string) =>
+    state.connection.listed && !readingRepositories(state) && look.state !== "idle" ? look.words : text;
+  const row = (rowState: RowState, text: string): AccountsRowView => ({
+    state: rowState,
+    text: said(text),
+    list,
+    look,
+  });
   switch (state.setup.github) {
     case "done":
       // An account with a fix still needs the person (installing, SSO, an owner): the rest can wait, said so.
@@ -219,19 +237,24 @@ interface SettingsSignInView {
 
 /**
  * Settings › GitHub (ADR 0067): who is signed in (or signed out), with Sign in again and its code in place, also while
- * connected, to change person, and the accounts list. Nothing else: there is no other way in (ADR 0073).
+ * connected, to change person, the accounts list and, ending the card under it, the look line with Check again
+ * (ADR 0088). Nothing else: there is no other way in (ADR 0073).
  */
 export interface GitHubSettingsView {
   signIn: SettingsSignInView;
   list: AccountsList;
+  /** The look line, in every state once signed in; null before a sign-in and once signed out, with no list. */
+  look: LookLineView | null;
 }
 
 /** Settings › GitHub at the state the service says; `timeZone`, the zone times are said in (the browser's by default). */
 export function githubSettings(state: State, o: { timeZone?: string } = {}): GitHubSettingsView {
   const { connection } = state;
-  const who = signedIn(connection) ? signedInText(connection) : SIGNED_OUT_ROW;
+  const inNow = signedIn(connection);
+  const who = inNow ? signedInText(connection) : SIGNED_OUT_ROW;
   return {
     signIn: { text: codeText(state, o.timeZone, who), code: connection.signIn },
     list: accountRows(state, zoned(o.timeZone)),
+    look: inNow ? lookLine(state, zoned(o.timeZone)) : null,
   };
 }

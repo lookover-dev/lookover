@@ -29,6 +29,7 @@
 // section the start's own when it doesn't read, check results always the start's, each piece dropped a `Dropped`;
 // `reviewRequest`, `readRequest`, `isReviewRequest` and `requestedCommit`, a review request's text as written and
 // read (ADR 0043, ADR 0052: `full`, and the reply a request asks to have answered);
+// `DISCOVERY_MS` and `DISCOVERY_RETRY_MS`, the pace the installations are listed at, which the app says (ADR 0088).
 // `NOT_CHECKED`, the confirmation of a finding no confirm judged, the default every producer fills (ADR 0044).
 // The second look (ADR 0044): who found each finding and what the confirm pass said of it, and the finder,
 // confirmer, fallback and failure a run and a round record (the shapes in `confirm.ts`); a candidate's verdict
@@ -112,7 +113,9 @@
 // names, with when they asked an owner to install it), "Ask to install on <org>" records that ask
 // (`connection.askToInstall`, refused with `AskToInstallRefusal`), a suspension names who suspended it
 // (`suspendedBy`), and `githubLinks.owners` is an organisation's owners page. The person's `gh` reads every active
-// membership with its role at once (`Gh.memberships`, `GhMemberships`).
+// membership with its role at once (`Gh.memberships`, `GhMemberships`). A new install is looked for (ADR 0088):
+// `connection.look` starts an install look or moves its end (`Connection.look`, `InstallLook`), refused with
+// `LookRefusal`.
 // The types row 9 fills so the app shows what is happening now (ADR 0055, `activity.ts`): what an engine did
 // (`EngineActivity`: a file read, a search, a listing, a command), reported through `EngineRunSpec.onActivity` as
 // its output arrives and never after `run` resolves; a run's activities by engine and pass (`RunActivity`,
@@ -166,9 +169,11 @@ export type {
   Connection,
   ConnectionAccount,
   ConnectionCause,
+  InstallLook,
+  LookRefusal,
   UnreachedAccount,
 } from "./connection.ts";
-export { accountOf, sameLogin } from "./connection.ts";
+export { accountOf, DISCOVERY_MS, DISCOVERY_RETRY_MS, sameLogin } from "./connection.ts";
 export {
   asSentence,
   CODEX_REVIEWS,

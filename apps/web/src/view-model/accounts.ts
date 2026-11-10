@@ -31,14 +31,34 @@ import { agoSentence, metaLine, plural, startsAt } from "./format.ts";
 import { HeldValue } from "./held.ts";
 
 /**
- * One of an account's links: GitHub's page, opened in a new tab, with the command sent as it opens when there is one
- * (Ask to install's, which keeps that the person asked).
+ * What a link to GitHub's install page or to an installation's settings sends as its tab opens (ADR 0088): Lookover
+ * looks for what the person installs or chooses there, at once and every few seconds, so it shows within seconds.
+ */
+export const LOOK = { type: "connection.look" } as const satisfies Command;
+
+/**
+ * One of an account's links: GitHub's page, opened in a new tab, with the command sent as it opens when there is one:
+ * Ask to install's, which keeps that the person asked (and starts the look on the service's side), or the look of
+ * every other link to the install page or an installation's settings (`LOOK`). A page that installs nothing (the
+ * owners', SSO's) sends none.
  */
 export interface AccountLink {
   label: string;
   href: string;
-  command?: Extract<Command, { type: "connection.askToInstall" }>;
+  command?: Extract<Command, { type: "connection.askToInstall" | "connection.look" }>;
 }
+
+/** What a link fix says in its place while the look it started runs (ADR 0088), with the reading eyes. */
+export const LOOKING = "Looking…";
+
+/**
+ * Whether an install look runs (ADR 0088): one began and hasn't ended. Only then does coming back to the app read at
+ * once, and does a link fix say it is looking.
+ */
+export const lookRuns = ({ look }: Pick<Connection, "look">): boolean => look !== null && look.ended === null;
+
+/** A link to GitHub's install page or an installation's settings: the look starts as it opens. */
+const installLink = (label: string, href: string): AccountLink => ({ label, href, command: LOOK });
 
 /**
  * Where an account stands: `installed`, its repositories used; `reading`, installed, its repositories read for the
@@ -109,7 +129,7 @@ export function accountMark(row: AccountRow): AccountMark {
       return "repositories";
     // A member's fix keeps the ask as GitHub's page opens; the person's own never asks.
     case "not-installed":
-      return row.fix?.command === undefined ? "not-installed" : "ask";
+      return row.fix?.command?.type === "connection.askToInstall" ? "ask" : "not-installed";
     default:
       return row.state;
   }
@@ -117,6 +137,11 @@ export function accountMark(row: AccountRow): AccountMark {
 
 export interface AccountsList {
   rows: AccountRow[];
+  /**
+   * The key of the person's own row (their login), whatever it says: looking, the listing's cause, not installed or
+   * installed; null before a sign-in.
+   */
+  own: string | null;
 }
 
 const ANOTHER = "Install on another account";
@@ -139,7 +164,13 @@ const askAnOwnerOf = (login: string) => `Ask an owner of ${login}`;
  * A login as a fix's place holds it: whole up to a long login of a usual kind, 16 characters, cut there past it
  * (GitHub allows 39), so a long login's label is cut with an ellipsis and never squeezes its row's detail.
  */
-const heldLogin = (login: string) => login.slice(0, 16);
+const HELD_LOGIN = 16;
+/**
+ * A login as the accounts list holds it: whole up to 16 characters, cut there past it; `ellipsis`, the cut said with
+ * one, where the login is in a sentence (the look line) rather than a place sized for it.
+ */
+export const heldLogin = (login: string, o: { ellipsis?: boolean } = {}): string =>
+  login.length <= HELD_LOGIN ? login : `${login.slice(0, HELD_LOGIN)}${o.ellipsis === true ? "…" : ""}`;
 
 /**
  * The labels a row's fix place holds where it is in the list: a reached account's (no repository yet, SSO, then what
@@ -227,10 +258,11 @@ export const ssoFix = ({ web }: Pick<Connection, "web">, organisation: string, u
  * The shared App installed on none of the person's accounts: the accounts list's first fix, Install on their own
  * account (always listed first), else Install on another account; GitHub's install page either way.
  */
-export const installFirstFix = (connection: Pick<Connection, "person" | "web">) => ({
-  label: connection.person === null ? ANOTHER : installOn(connection.person.login),
-  href: installPage(connection),
-});
+export const installFirstFix = (connection: Pick<Connection, "person" | "web">): AccountLink =>
+  installLink(
+    connection.person === null ? ANOTHER : installOn(connection.person.login),
+    installPage(connection),
+  );
 
 /**
  * The accounts list's fix for an account by its login, when it is one not reached: Install on it, Ask to install on
@@ -244,7 +276,7 @@ export function unreachedFix(state: State, login: string): AccountLink {
       sameLogin(r.account, login) &&
       (r.state === "not-installed" || r.state === "waiting"),
   );
-  return row?.fix ?? { label: installOn(login), href: installPage(state.connection) };
+  return row?.fix ?? installLink(installOn(login), installPage(state.connection));
 }
 
 /** Ask to install on `login`: GitHub's install page, and the ask kept as it opens. */
@@ -265,13 +297,13 @@ export function accountFix(
   connection: Pick<Connection, "person" | "web" | "accounts">,
   a: Pick<ConnectionAccount, "owner"> & { account: HostLogin },
   cause: AccountCause,
-): { label: string; href: string } {
+): AccountLink {
   const { login } = a.account;
   if (cause.kind === "sso") return ssoFix(connection, cause.organisation, cause.url);
   if (!ownsAccount(connection, a)) return askAnOwner(connection, login);
   return cause.suspended
-    ? { label: UNSUSPEND, href: sharedRepositoriesLink(connection, login) }
-    : { label: installOn(login), href: installPage(connection) };
+    ? installLink(UNSUSPEND, sharedRepositoriesLink(connection, login))
+    : installLink(installOn(login), installPage(connection));
 }
 
 /** Whether the App is still installed on an account reached: any cause but no longer installed (a suspended one is). */
@@ -343,7 +375,7 @@ function reachedRow(state: State, a: ConnectionAccount): AccountRow {
     state: "installed",
     detail,
     ...(n === 0
-      ? { fix: { label: CHOOSE, href: sharedRepositoriesLink(connection, login) } }
+      ? { fix: installLink(CHOOSE, sharedRepositoriesLink(connection, login)) }
       : { fix: null, status: INSTALLED }),
   };
 }
@@ -366,7 +398,7 @@ function unreachedRow(
       ...said,
       state: "not-installed",
       detail: DETAIL.notInstalled,
-      fix: { label: installOn(login), href: installPage(connection) },
+      fix: installLink(installOn(login), installPage(connection)),
       again: null,
     };
   if (u.askedAt === null)
@@ -445,17 +477,18 @@ function refusedListing(
  */
 export function accountRows(state: State, o: { timeZone?: string } = {}): AccountsList {
   const { connection } = state;
-  if (!signedIn(connection)) return { rows: [] };
+  if (!signedIn(connection)) return { rows: [], own: null };
   if (!connection.listed && connection.person !== null) {
     const looking = lookingRow(connection.person.login);
     // Only this sign-in's listing says what refused it, whatever the repositories' polls say: the connection's cause
     // can be left from before it (Sign in again while uninstalled), and nothing is said missing before the listing
     // answers (ADR 0086). Every refused listing sets it: the start's, discovery's, the install check's.
     const cause = connection.listingCause;
-    if (cause === null || saidSignedOut(cause)) return { rows: [looking] };
+    if (cause === null || saidSignedOut(cause)) return { rows: [looking], own: looking.key };
     const said = refusedListing(connection, connection.person, cause);
     return {
       rows: [{ ...looking, ...said, state: "needs-you", labels: said.fix === null ? [] : [said.fix.label] }],
+      own: looking.key,
     };
   }
   const another: AccountRow = {
@@ -464,7 +497,7 @@ export function accountRows(state: State, o: { timeZone?: string } = {}): Accoun
     name: ANOTHER_ACCOUNT,
     state: "another",
     detail: DETAIL.another,
-    fix: { label: ANOTHER, href: installPage(connection) },
+    fix: installLink(ANOTHER, installPage(connection)),
     labels: [ANOTHER],
     againLabels: [],
     again: null,
@@ -475,7 +508,7 @@ export function accountRows(state: State, o: { timeZone?: string } = {}): Accoun
     ...connection.unreached.map((u) => unreachedRow(state, u, o.timeZone)),
     another,
   ];
-  return { rows };
+  return { rows, own: connection.person?.login ?? null };
 }
 
 /**

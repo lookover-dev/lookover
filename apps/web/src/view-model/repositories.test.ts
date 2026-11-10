@@ -77,6 +77,7 @@ function world(repos: Repository[], departed: DepartedRepository[] = []): State 
       accounts: [account(1, "sasensi"), account(2, "Fernhill"), account(3, "ledger-dev")],
       listed: true,
       listingCause: null,
+      look: null,
       unreached: [],
       web: GITHUB_WEB,
       since: NOW,

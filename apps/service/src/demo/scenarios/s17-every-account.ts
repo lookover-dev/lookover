@@ -16,7 +16,7 @@ export const S17: Scenario = {
   steps: [
     "The GitHub step lists ledger-dev and ledger-ops reached (ledger-ops needs SSO), then sasensi and ledger-labs to install on, and ledger-hq to ask about.",
     "Ask to install on ledger-hq: GitHub's page offers Request, and the step says you wait for an owner of ledger-hq.",
-    'Install on ledger-labs: GitHub\'s page installs it there, and the step lists it reached a few minutes later (or at once with "Reconnect").',
+    "Install on ledger-labs: GitHub's page installs it there, and back here the step lists it reached within seconds, saying it arrived.",
   ],
   later: "",
   path: "/setup",

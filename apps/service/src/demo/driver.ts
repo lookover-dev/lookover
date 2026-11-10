@@ -401,7 +401,7 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     return "ok";
   };
   /**
-   * A move on the installation's repositories: listed again now (the 5-minute discovery's, "Reconnect"'s) once the
+   * A move on the installation's repositories: listed again now (the 2-minute discovery's, "Reconnect"'s) once the
    * App is installed; while the setup waits for the install, its next check (4 s) reads it.
    */
   const discovered = async (move: () => void): Promise<"ok"> => {
@@ -410,6 +410,8 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     return "ok";
   };
   const installed = () => world.host.onGitHub().installation;
+  /** The organisation the person asked to install on first, still waiting for an owner. */
+  const askedFirst = () => room.snapshot().connection.unreached.find((u) => u.askedAt !== null);
   /** The person's move on the code the sign-in shows; nothing when none waits. */
   const onTheCode = (move: (userCode: string) => void): Promise<"ok" | InjectRefusal> => {
     const code = room.snapshot().connection.signIn;
@@ -481,7 +483,7 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
         : onGitHubThen(() => world.host.askSso(first.organisation.login));
     },
     // An owner of the first organisation the shared App reaches suspends it there (ADR 0067), GitHub naming them: its
-    // account holds the cause, found by the accounts listed again now (the 5-minute discovery's); the others go on.
+    // account holds the cause, found by the accounts listed again now (the 2-minute discovery's); the others go on.
     "organisation-suspended": () => {
       const [first] = scenario.world.shared?.reaches ?? [];
       return first === undefined
@@ -489,12 +491,20 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
         : discovered(() => world.host.suspend(first.organisation.login, SUSPENDED_BY));
     },
     // An owner of the organisation the person asked about first installs the shared App there (ADR 0067), on all its
-    // repositories: listed again now, as the 5-minute discovery would, the ask forgotten in the same event.
+    // repositories: listed again now, as the 2-minute discovery would, the ask forgotten in the same event.
     "owner-installs": () => {
-      const asked = room.snapshot().connection.unreached.find((u) => u.askedAt !== null);
+      const asked = askedFirst();
       return asked === undefined
         ? Promise.resolve("nothing_asked" as const)
         : discovered(() => world.host.installOn(asked.account.login));
+    },
+    // The same owner approves the request on GitHub later (ADR 0088), nothing listed now: the look running finds it
+    // within 4 s, else the next discovery, at most 2 minutes on the clock.
+    "owner-approves": () => {
+      const asked = askedFirst();
+      if (asked === undefined) return Promise.resolve("nothing_asked" as const);
+      world.host.installOn(asked.account.login);
+      return Promise.resolve("ok" as const);
     },
     "connection-lost": () => played({ kind: "refuse", failure: "unavailable", forMs: CONNECTION_LOST_MS }),
     // The shared App uninstalled from every account the sign-in reaches (ADR 0067): none left, the connection's cause.

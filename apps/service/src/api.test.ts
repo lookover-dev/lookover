@@ -105,6 +105,7 @@ test("the one-time token becomes a cookie, and the snapshot lists the sandbox's 
     // Listed by the start, under the sign-in it read (ADR 0086).
     listed: true,
     listingCause: null,
+    look: null,
     // The accounts the shared App doesn't reach: none here.
     unreached: [],
     signIn: null,

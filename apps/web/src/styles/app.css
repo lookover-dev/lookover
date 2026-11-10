@@ -435,6 +435,14 @@ button {
   display: flex;
   padding: var(--s-2) 0 0 15px;
 }
+/* "Looking…" in a link fix's place while its look runs: at the place's start, in line with the text, as the fix was,
+   the fix laid out hidden in the same cell (`SameWidth`: a grid, which the menu's lines' `span` rule would make a row) */
+.menu .st-fix .same-width {
+  display: inline-grid;
+}
+.menu .st-fix .busy-status {
+  margin-inline: 0 auto;
+}
 /* every line in a well of one inset, a hairline round it, so the list has one left edge (round 5: the fine lines flush
    beside boxed problems made it jump): the lines that lead (a problem on them) each in a well of their own on the
    page's own ground, standing apart; the fine ones after them together in one, on the menu's surface

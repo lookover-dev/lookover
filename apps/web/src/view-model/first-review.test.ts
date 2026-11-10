@@ -176,6 +176,7 @@ function world(prs: [number, Reviewed][]): State {
       accounts: [],
       listed: true,
       listingCause: null,
+      look: null,
       unreached: [],
       signIn: null,
       person: null,

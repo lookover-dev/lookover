@@ -30,15 +30,19 @@ import {
   repositoryStanding,
   setupRepoGroups,
   tickAccount,
+  unreachedFix,
 } from "./accounts.ts";
 import { SEPARATOR } from "./format.ts";
 import { addRepositoryLink, chosenRepos, departedNotice } from "./onboarding.ts";
+import { problems } from "./select.ts";
 
 /** 2026-10-30 10:00 UTC; times are said in UTC here. */
 const NOW = Date.UTC(2026, 9, 30, 10, 0, 0);
 const MIN = 60_000;
 const UTC = "UTC";
 const INSTALL = "https://github.com/apps/lookover-dev/installations/new";
+/** What a link to the install page or an installation's settings sends as it opens (ADR 0088). */
+const LOOK = { type: "connection.look" } as const;
 const DEFAULTS: ResolvedSettings = {
   strictness: { value: "recommended", origin: "lookover-default", overrode: null },
   reviewers: { value: "both", origin: "lookover-default", overrode: null },
@@ -92,6 +96,7 @@ function signedIn(connection: Partial<Connection> = {}, repos: Repository[] = []
       accounts: [],
       listed: true,
       listingCause: null,
+      look: null,
       unreached: [],
       web: GITHUB_WEB,
       since: NOW,
@@ -181,7 +186,7 @@ test("Install on another account is always last, to GitHub's own page, even with
       name: "Another account",
       state: "another",
       detail: "GitHub's page lists every account you belong to.",
-      fix: { label: "Install on another account", href: INSTALL },
+      fix: { label: "Install on another account", href: INSTALL, command: LOOK },
       labels: ["Install on another account"],
       againLabels: [],
       again: null,
@@ -299,7 +304,11 @@ test("an account installed with no repository yet: Choose repositories, its inst
     name: "sasensi",
     state: "installed",
     detail: "No repository yet.",
-    fix: { label: "Choose repositories", href: "https://github.com/settings/installations/11" },
+    fix: {
+      label: "Choose repositories",
+      href: "https://github.com/settings/installations/11",
+      command: LOOK,
+    },
     labels: ["Choose repositories", "Sign in with SSO", "Unsuspend it on GitHub", "Install on sasensi"],
     againLabels: [],
     again: null,
@@ -308,9 +317,14 @@ test("an account installed with no repository yet: Choose repositories, its inst
   expect(row(state, "ledger-dev")?.fix).toEqual({
     label: "Choose repositories",
     href: "https://github.com/organizations/ledger-dev/settings/installations/22",
+    command: LOOK,
   });
   // A member's, or nobody said: GitHub's install page, which shows Configure on an installed account.
-  expect(row(state, "ledger-labs")?.fix).toEqual({ label: "Choose repositories", href: INSTALL });
+  expect(row(state, "ledger-labs")?.fix).toEqual({
+    label: "Choose repositories",
+    href: INSTALL,
+    command: LOOK,
+  });
 });
 
 test("an account asking for SSO: its SSO page, GitHub's own when the 403 gave one", () => {
@@ -349,6 +363,7 @@ test("suspended on an account the person owns: Unsuspend it on GitHub, the insta
   expect(row(owned, "ledger-dev")?.fix).toEqual({
     label: "Unsuspend it on GitHub",
     href: "https://github.com/organizations/ledger-dev/settings/installations/22",
+    command: LOOK,
   });
 });
 
@@ -401,7 +416,7 @@ test("the person's own account not reached: Install on it", () => {
     name: "sasensi",
     state: "not-installed",
     detail: "Not installed.",
-    fix: { label: "Install on sasensi", href: INSTALL },
+    fix: { label: "Install on sasensi", href: INSTALL, command: LOOK },
     labels: ["Install on sasensi"],
     againLabels: [],
     again: null,
@@ -418,7 +433,8 @@ test("an organisation the person owns: Install on it; one they're a member of, o
     detail: "Not installed.",
     fix: { label: "Install on ledger-co", href: INSTALL },
   });
-  expect(row(state, "ledger-co")?.fix).not.toHaveProperty("command");
+  // It keeps no ask: it starts the look as GitHub's page opens (ADR 0088).
+  expect(row(state, "ledger-co")?.fix?.command).toEqual(LOOK);
   for (const login of ["ledger-labs", "ledger-ops"])
     expect(row(state, login)).toEqual({
       key: login,
@@ -556,6 +572,82 @@ test("every link is built on the connection's web address: demo mode's stays on 
     `${DEMO_API.github}/orgs/ledger-labs/people?query=role%3Aowner`,
   );
   expect(rows(state).at(-1)?.fix?.href).toBe(`${DEMO_API.github}/apps/lookover-dev/installations/new`);
+});
+
+test("every link to GitHub's install page or an installation's settings starts a look as it opens; Ask to install only keeps the ask (ADR 0088)", () => {
+  const ask = (account: string) => ({ type: "connection.askToInstall", account }) as const;
+  const look = (state: State) => {
+    const links = [
+      ...rows(state).flatMap((r) => [r.fix, r.again]),
+      ...repositoryGroups(state).map((g) => g.head.fix),
+      ...problems(state).map((p) => p.fix),
+      addRepositoryLink(state.connection),
+      departedNotice(state.connection, departed("sasensi", "ledger-api")).addBack,
+      unreachedFix(state, "ledger-labs"),
+      unreachedFix(state, "acme"),
+    ];
+    return links.flatMap((l) =>
+      l !== null && "href" in l ? [{ label: l.label, command: "command" in l ? l.command : null }] : [],
+    );
+  };
+  const owned = signedIn(
+    {
+      accounts: [
+        own,
+        org("ledger-dev", null, true, 22),
+        org("ledger-ops", SUSPENDED, true, 23),
+        org("ledger-qa", GONE, true, 24),
+        org("ledger-hq", SUSPENDED, false, 25),
+        org("ledger-sso", { kind: "sso", organisation: "ledger-sso", url: null }, true, 26),
+      ],
+      unreached: [
+        unreached("ledger-co", true),
+        unreached("ledger-labs", false),
+        unreached("ledger-xy", false, NOW),
+      ],
+    },
+    [repo("sasensi", "ledger-api")],
+  );
+  expect(look(owned)).toEqual([
+    { label: "Choose repositories", command: LOOK },
+    { label: "Unsuspend it on GitHub", command: LOOK },
+    { label: "Install on ledger-qa", command: LOOK },
+    { label: "Ask an owner of ledger-hq", command: null },
+    { label: "Sign in with SSO", command: null },
+    { label: "Install on ledger-co", command: LOOK },
+    { label: "Ask to install on ledger-labs", command: ask("ledger-labs") },
+    { label: "Ask an owner of ledger-xy", command: null },
+    { label: "Ask again", command: ask("ledger-xy") },
+    { label: "Install on another account", command: LOOK },
+    // Repositories' group heads: sasensi's has its repository and no cause, so no fix; the others have no group.
+    // The band's and the menu's fixes, one per account's problem.
+    { label: "Unsuspend it on GitHub", command: LOOK },
+    { label: "Install on ledger-qa", command: LOOK },
+    { label: "Ask an owner of ledger-hq", command: null },
+    { label: "Sign in with SSO", command: null },
+    { label: "Add a repository", command: LOOK },
+    { label: "Add it back", command: LOOK },
+    { label: "Ask to install on ledger-labs", command: ask("ledger-labs") },
+    { label: "Install on acme", command: LOOK },
+  ]);
+  // Installed on none of the person's accounts: the band's first fix, the install page.
+  const nowhere = signedIn({
+    state: "disconnected",
+    cause: { kind: "uninstalled", suspended: false },
+    unreached: [unreached("sasensi", true, null, "user")],
+  });
+  expect(problems(nowhere).map((p) => p.fix)).toEqual([
+    { label: "Install on sasensi", href: INSTALL, command: LOOK },
+  ]);
+  // The whole App suspended: unsuspended where the repositories are chosen.
+  const suspended = signedIn({
+    state: "disconnected",
+    cause: { kind: "uninstalled", suspended: true },
+    accounts: [own],
+  });
+  expect(problems(suspended).map((p) => p.fix)).toEqual([
+    { label: "Unsuspend it on GitHub", href: "https://github.com/settings/installations/11", command: LOOK },
+  ]);
 });
 
 // ---- Repositories' group heads ----
@@ -880,28 +972,30 @@ const SUSPENDED = { kind: "uninstalled", suspended: true } as const;
 
 test("Add a repository on the shared App: the installation's settings when exactly one account is the person's and installed", () => {
   const { connection } = signedIn({ accounts: [org("ledger-dev", null, false), own] });
-  expect(addRepositoryLink(connection)).toBe("https://github.com/settings/installations/11");
+  expect(addRepositoryLink(connection)?.href).toBe("https://github.com/settings/installations/11");
   // A suspended installation is still there: its settings list its repositories.
   const suspended = signedIn({ accounts: [org("ledger-dev", null, null), { ...own, cause: SUSPENDED }] });
-  expect(addRepositoryLink(suspended.connection)).toBe("https://github.com/settings/installations/11");
+  expect(addRepositoryLink(suspended.connection)?.href).toBe("https://github.com/settings/installations/11");
   // The person's own account no longer installed: the one left that they own and is installed.
   const gone = signedIn({ accounts: [{ ...own, cause: GONE }, org("ledger-dev", null, true, 22)] });
-  expect(addRepositoryLink(gone.connection)).toBe(
+  expect(addRepositoryLink(gone.connection)?.href).toBe(
     "https://github.com/organizations/ledger-dev/settings/installations/22",
   );
 });
 
 test("Add a repository on the shared App with two accounts the person owns, or none installed: GitHub's install page", () => {
   const two = signedIn({ accounts: [org("ledger-dev", null, true, 22), own] }).connection;
-  expect(addRepositoryLink(two)).toBe(INSTALL);
+  expect(addRepositoryLink(two)?.href).toBe(INSTALL);
   const gone = signedIn({ accounts: [{ ...own, cause: GONE }, org("ledger-dev", null, false)] }).connection;
-  expect(addRepositoryLink(gone)).toBe(INSTALL);
+  expect(addRepositoryLink(gone)?.href).toBe(INSTALL);
 });
 
 test("Add a repository on the shared App with no account reached the person owns: GitHub's install page", () => {
-  expect(addRepositoryLink(signedIn({ accounts: [org("ledger-dev", null, null)] }).connection)).toBe(INSTALL);
-  expect(addRepositoryLink(signedIn().connection)).toBe(INSTALL);
-  expect(addRepositoryLink(signedIn({ web: DEMO_API.github }).connection)).toBe(
+  expect(addRepositoryLink(signedIn({ accounts: [org("ledger-dev", null, null)] }).connection)?.href).toBe(
+    INSTALL,
+  );
+  expect(addRepositoryLink(signedIn().connection)?.href).toBe(INSTALL);
+  expect(addRepositoryLink(signedIn({ web: DEMO_API.github }).connection)?.href).toBe(
     `${DEMO_API.github}/apps/lookover-dev/installations/new`,
   );
 });
@@ -918,24 +1012,24 @@ test("Add a repository on the shared App is hidden while nobody is signed in to 
 
 test("Add it back on the shared App: its account's installation settings when the person owns it, else GitHub's install page", () => {
   const { connection } = signedIn({ accounts: [own, org("ledger-dev", null, false)] });
-  expect(departedNotice(connection, departed("sasensi", "ledger-api")).addBack).toBe(
+  expect(departedNotice(connection, departed("sasensi", "ledger-api")).addBack.href).toBe(
     "https://github.com/settings/installations/11",
   );
-  expect(departedNotice(connection, departed("ledger-dev", "billing")).addBack).toBe(INSTALL);
+  expect(departedNotice(connection, departed("ledger-dev", "billing")).addBack.href).toBe(INSTALL);
   // Its account no longer reached: GitHub's page lists every account.
-  expect(departedNotice(connection, departed("acme", "site")).addBack).toBe(INSTALL);
+  expect(departedNotice(connection, departed("acme", "site")).addBack.href).toBe(INSTALL);
 });
 
 test("Add it back on the shared App: GitHub's install page when its account is no longer installed, its settings when suspended", () => {
   const gone = signedIn({ accounts: [{ ...own, cause: GONE }] }).connection;
-  expect(departedNotice(gone, departed("sasensi", "ledger-api")).addBack).toBe(INSTALL);
+  expect(departedNotice(gone, departed("sasensi", "ledger-api")).addBack.href).toBe(INSTALL);
   const suspended = signedIn({ accounts: [{ ...own, cause: SUSPENDED }] }).connection;
-  expect(departedNotice(suspended, departed("sasensi", "ledger-api")).addBack).toBe(
+  expect(departedNotice(suspended, departed("sasensi", "ledger-api")).addBack.href).toBe(
     "https://github.com/settings/installations/11",
   );
   // Two accounts the person owns: Add it back still names its own.
   const two = signedIn({ accounts: [own, org("ledger-dev", null, true, 22)] }).connection;
-  expect(departedNotice(two, departed("ledger-dev", "billing")).addBack).toBe(
+  expect(departedNotice(two, departed("ledger-dev", "billing")).addBack.href).toBe(
     "https://github.com/organizations/ledger-dev/settings/installations/22",
   );
 });

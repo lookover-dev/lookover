@@ -64,6 +64,7 @@ import { engineMark } from "../view-model/state-square.ts";
 import { CodingAgent } from "./coding-agent.tsx";
 import { roundDuration, Sentence, StateSquare, StepList, SubStep } from "./common.tsx";
 import { AccountsList, CodeActions, FixButton, GitHubButton } from "./github-app.tsx";
+import { CheckAgain, LookSaid, LookStatus } from "./look-line.tsx";
 
 const STEPS: { id: SetupStep; label: string }[] = [
   { id: "ai", label: "Your AI" },
@@ -268,10 +269,12 @@ function StepGitHub() {
         state={step.accounts.state}
         todo="install"
         title={T.accounts}
+        action={step.accounts.look === null ? undefined : <CheckAgain />}
         below={step.accounts.list.rows.length > 0 ? <AccountsList list={step.accounts.list} /> : null}
       >
-        {step.accounts.text}
+        <LookSaid words={step.accounts.text} />
       </SubStep>
+      {step.accounts.look === null ? null : <LookStatus look={step.accounts.look} />}
       <div className="setup-acts">
         {/* Against the primary it is about: a refusal of a sign-in it started, else the step satisfied. Always there,
             as tall as it says, beside buttons taller than its two lines (on a phone, under them), so nothing moves

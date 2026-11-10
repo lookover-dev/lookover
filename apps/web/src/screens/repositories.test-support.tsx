@@ -100,6 +100,7 @@ export function world(
       accounts: [account(1, "sasensi", "User"), account(2, "fernhill", "Organization")],
       listed: true,
       listingCause: null,
+      look: null,
       unreached: [],
       web: GITHUB_WEB,
       since: NOW,

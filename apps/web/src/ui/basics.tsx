@@ -6,6 +6,7 @@ import {
   type InputHTMLAttributes,
   type MouseEvent,
   type ReactNode,
+  type Ref,
   useEffect,
   useId,
   useRef,
@@ -211,10 +212,20 @@ export function Button({
  * status line, the state's words in its colour (lavender running, amber waiting) with the reading eyes before them, at
  * the start of the place, no fill and no edge, so it reads as Lookover at work, never as a dimmed control. Not a live region itself: inside `SameWidth`'s hidden
  * slots it would never be announced, so its caller says its words in one visually hidden status line beside it.
+ * Focusable by script only (`tabIndex` -1): the button it stands in for, pressed from the keyboard and hidden, may hand
+ * it the focus, which would otherwise drop to the page.
  */
-export function BusyStatus({ tone, children }: { tone: "run" | "wait"; children: ReactNode }) {
+export function BusyStatus({
+  tone,
+  ref,
+  children,
+}: {
+  tone: "run" | "wait";
+  ref?: Ref<HTMLSpanElement>;
+  children: ReactNode;
+}) {
   return (
-    <span className="busy-status" data-tone={tone}>
+    <span className="busy-status" data-tone={tone} tabIndex={-1} ref={ref}>
       <Eyes />
       {children}
     </span>
