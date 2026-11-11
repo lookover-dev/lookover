@@ -51,10 +51,7 @@ export interface AccountLink {
 /** What a link fix says in its place while the look it started runs (ADR 0088), with the reading eyes. */
 export const LOOKING = "Looking…";
 
-/**
- * Whether an install look runs (ADR 0088): one began and hasn't ended. Only then does coming back to the app read at
- * once, and does a link fix say it is looking.
- */
+/** Whether an install look runs (ADR 0088): one began and hasn't ended. Only then does a link fix say it is looking. */
 export const lookRuns = ({ look }: Pick<Connection, "look">): boolean => look !== null && look.ended === null;
 
 /** A link to GitHub's install page or an installation's settings: the look starts as it opens. */
@@ -62,7 +59,7 @@ const installLink = (label: string, href: string): AccountLink => ({ label, href
 
 /**
  * Where an account stands: `installed`, its repositories used; `reading`, installed, its repositories read for the
- * first time while setup's GitHub step waits on them; `needs-you`, a cause holds it (SSO, suspended, gone);
+ * first time (it grants some, none read yet: ADR 0091); `needs-you`, a cause holds it (SSO, suspended, gone);
  * `not-installed`, the App isn't on it; `waiting`, asked, for an owner; `looking`, the person's own while their
  * accounts aren't listed yet; `another`, Install on another account's row.
  */
@@ -336,12 +333,31 @@ function causeDetail(cause: AccountCause, elsewhere = false): string {
   return cause.suspended ? suspendedText(cause.suspendedBy) : CAUSE_LINES.uninstalled;
 }
 
+/** How many of the account's repositories are in the state: those whose first read has answered. */
+const shownOf = ({ repos, connection }: Pick<State, "repos" | "connection">, a: ConnectionAccount): number =>
+  repos.filter((r) => accountOf(connection.accounts, r.owner)?.account.id === a.account.id).length;
+
 /**
- * Whether the repositories are being read for the first time: setup's GitHub step waits on the first read of every
- * repository of the accounts listed (ADR 0083, ADR 0086). The step's accounts line and an account's row both say so.
+ * Whether the account's repositories are being read for the first time (ADR 0091), whatever setup's step: it grants
+ * some, none of them in the state yet. One with a cause is said by its cause.
  */
-export const readingRepositories = ({ setup, connection }: Pick<State, "setup" | "connection">): boolean =>
-  setup.github === "waiting-for-install" && connection.listed && connection.accounts.length > 0;
+const beingRead = (state: Pick<State, "repos" | "connection">, a: ConnectionAccount): boolean =>
+  a.cause === null && a.granted.length > 0 && shownOf(state, a) === 0;
+
+/**
+ * Whether a listed account is being read (ADR 0091): its repositories' first read under way. Setup's accounts line
+ * says so whatever the step, and the account's row.
+ */
+export const readingRepositories = (state: Pick<State, "repos" | "connection">): boolean =>
+  state.connection.listed && state.connection.accounts.some((a) => beingRead(state, a));
+
+/**
+ * Whether an installation listed lists some repository, its account with no cause (ADR 0091): one with a cause is
+ * said by its cause, whatever its last listing gave. While setup waits for the install, the step moves on once these
+ * are read (ADR 0083).
+ */
+export const listsRepositories = (state: Pick<State, "connection">): boolean =>
+  state.connection.listed && state.connection.accounts.some((a) => a.cause === null && a.granted.length > 0);
 
 function reachedRow(state: State, a: ConnectionAccount): AccountRow {
   const { connection } = state;
@@ -363,12 +379,9 @@ function reachedRow(state: State, a: ConnectionAccount): AccountRow {
       fix: accountFix(connection, a, a.cause),
     };
   }
-  const n = state.repos.filter(
-    (r) => accountOf(connection.accounts, r.owner)?.account.id === a.account.id,
-  ).length;
-  // Setup's GitHub step waits for every repository's first read: one not read yet isn't "No repository yet".
-  if (n === 0 && readingRepositories(state))
-    return { ...said, state: "reading", detail: DETAIL.reading, fix: null };
+  const n = shownOf(state, a);
+  // Granted and not read yet isn't "No repository yet" (ADR 0091): Choose repositories would ask for it again.
+  if (beingRead(state, a)) return { ...said, state: "reading", detail: DETAIL.reading, fix: null };
   const detail = n === 0 ? DETAIL.none : `${plural(n, "repository", "repositories")}.`;
   return {
     ...said,

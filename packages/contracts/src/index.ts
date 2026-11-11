@@ -13,7 +13,8 @@
 // `isUnsettled`, the definition of an unsettled finding, and `isCounted`, one that counts on the pull request
 // (unsettled and posted, I-152); `bySeverity`, the order findings are listed in, by publish and the app alike;
 // `fingerprintWord`, a category or a kind key as fingerprints compare it;
-// `isWaiting`, a job not started yet (queued or deferred); `deferralEngine`, the engine a deferral waits for;
+// `isWaiting`, a job not started yet (queued or deferred); `blockJob`, the job a change's status block says (ADR
+// 0092); `endedByPush`, a fork's request a push cancelled, whose block says it ended; `deferralEngine`, the engine a deferral waits for;
 // `engineDeferral`, what an engine's state makes a review wait for;
 // `sameDeferral`, when two deferrals are the same reason to wait; `sameLoginHolder`, two answers of who holds start
 // at login the same (ADR 0068); `sameTurn`, two turns the same thing to wait
@@ -44,8 +45,9 @@
 // (`engineName`, `deferralText`, the safety check's states `FAILED_SAFETY_CHECK` and `UNFINISHED_SAFETY_CHECK`,
 // `failureWords` (a failure by its cause, ADR 0081) and `failedTitle`, `cancelText` and `cancelPhrase`, `skipText`,
 // `confirmFailureText`, `findersText`, `foundAndCheckedText`, `keptText`, `ruleText`, `CODEX_REVIEWS`, `postWaitText`,
-// `pushedText`; the status block's headings `NEEDS_YOUR_LOOK`, `thingsText`, `lookingOverHead`, `waitingHead` and
-// `failedHead`, its lines `roundLine` (with `roundCountsText`), `failedLine` (`stoppedText`, `TRY_AGAIN`),
+// `pushedText`; the status block's headings `NEEDS_YOUR_LOOK`, `thingsText`, `lookingOverHead`, `waitingHead`,
+// `endedHead` (a fork's request a push ended, ADR 0092) and `failedHead`, its lines `roundLine` (with
+// `roundCountsText`), `ENDED_LINE`, `failedLine` (`stoppedText`, `TRY_AGAIN`),
 // `waitingText` and `startsOnceText`, its notes `notInDiffText` and `escalationText`; a thread reply's `replyKind`
 // and `STILL_PRESENT`), and the ways of writing they share (`asSentence`, `shortSha`, `dayText`, `twoDigits`),
 // written once here because the web may import only this package and `publish` words the pull request: everything
@@ -115,7 +117,8 @@
 // (`suspendedBy`), and `githubLinks.owners` is an organisation's owners page. The person's `gh` reads every active
 // membership with its role at once (`Gh.memberships`, `GhMemberships`). A new install is looked for (ADR 0088):
 // `connection.look` starts an install look or moves its end (`Connection.look`, `InstallLook`), refused with
-// `LookRefusal`.
+// `LookRefusal`; `connection.returned` (the tab coming back, ADR 0091) only lists at once while a look runs, its end
+// unmoved, and is never refused.
 // The types row 9 fills so the app shows what is happening now (ADR 0055, `activity.ts`): what an engine did
 // (`EngineActivity`: a file read, a search, a listing, a command), reported through `EngineRunSpec.onActivity` as
 // its output arrives and never after `run` resolves; a run's activities by engine and pass (`RunActivity`,
@@ -182,6 +185,8 @@ export {
   confirmFailureText,
   dayText,
   deferralText,
+  ENDED_LINE,
+  endedHead,
   engineDetailText,
   engineHealthText,
   engineName,
@@ -366,7 +371,9 @@ export type {
   Turn,
 } from "./job.ts";
 export {
+  blockJob,
   deferralEngine,
+  endedByPush,
   engineDeferral,
   isWaiting,
   sameDeferral,

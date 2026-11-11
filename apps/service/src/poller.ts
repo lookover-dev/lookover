@@ -94,6 +94,8 @@
 // followed by `still`: past each, another held since ends the poll there (`Superseded`), before anything GitHub
 // answered changes the connection, an account, GitHub's wait, the inbox or the requests, and before anything more is
 // asked. What it ended is no error: nothing is logged or thrown, and the repository is polled as if it hadn't been.
+// While nothing is held (`holding` null: another person's sign-in on its way to be held, ADR 0090), every poll begun
+// before ends at its next wait, and one begun then polls nothing, its repositories left to the next poll.
 // (No wait is wrapped twice: the queue's and the checks' tests count on how many turns a poll takes.)
 // It must never know: what a job is or when one runs (the queue's), the rules (`core`'s), or which reactions are owed
 // (the store's and `reactions`').
@@ -203,8 +205,12 @@ export interface PollerDeps {
    * most, the connection back's at once.
    */
   discover(why: "refused" | "regained"): void;
-  /** Which sign-in is held now (ADR 0066), as a number that moves when another is: what a listing began under. */
-  holding(): number;
+  /**
+   * Which sign-in is held now (ADR 0066), as a number that moves when another is: what a listing began under. Null
+   * while none is to be polled under (another person's sign-in on its way to be held, ADR 0090): every poll begun
+   * before is superseded, and one begun then polls nothing.
+   */
+  holding(): number | null;
   /**
    * A listing of `repo` begun under the holding `at` refused with an account's cause (ADR 0066): true when its
    * account holds it, or when it was an earlier holding's (nothing to say of the one held now); false when it is the
@@ -679,6 +685,8 @@ export function createPoller(d: PollerDeps): Poller {
    */
   async function each(repos: readonly RepositoryRef[]): Promise<{ saw: boolean; errors: unknown[] }> {
     const at = d.holding();
+    // Nothing held to poll under: every repository waits for the next poll.
+    if (at === null) return { saw: false, errors: [] };
     const polled: { saw: boolean; error?: unknown }[] = [];
     for (const repo of repos) {
       // GitHub's wait is the installation's: on as this poll begins its turn (a listing's, an earlier poll's, one

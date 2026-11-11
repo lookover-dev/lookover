@@ -9,8 +9,10 @@
 // change stands then (ADR 0074), the check from the round restated over the ledger as it then is (`core.standing`),
 // so a late resend never says less than the ledger. While its posts are owed the change is busy for the take; once
 // they end (sent, or given up at a host refusal, which goes to the log) the queue takes again. A dismissal a stopped
-// service left owing is resumed at the next start (`resume`). It must never know: the loop's rules (`core`), the
-// words on GitHub (`publish`), or which job is next (the queue).
+// service left owing is resumed at the next start (`resume`). The sign-in changed (ADR 0090, the store ended every
+// dismissal's posts): `cut` aborts every send under way or queued and ends it, so none posts after it as whoever signs
+// in next, nor at a later start, and settles once they have (a post the host is answering lands first). It must never
+// know: the loop's rules (`core`), the words on GitHub (`publish`), or which job is next (the queue).
 import {
   type ChangeId,
   type Clock,
@@ -51,9 +53,17 @@ export interface Dismissing {
   dismiss(changeId: ChangeId, findingId: FindingId): "ok" | DismissRefusal;
   /** The dismissals a stopped service left owing posts: sent again, in the order they were saved. */
   resume(): void;
+  /**
+   * The sign-in changed (ADR 0090), the store having ended every dismissal's posts: each send under way or queued is
+   * cut and ended, nothing more of it posted, now or at a later start; settles once they have.
+   */
+  cut(): Promise<void>;
   /** Stops: a post under way is cut (the next start resumes it); waits for the sends to settle. */
   stop(): Promise<void>;
 }
+
+/** Why the sends were cut: the sign-in changed, not the service stopping. */
+const CUT = Symbol("the sign-in changed");
 
 /** What a dismissal reads of the round it restates: the plan its run saved, as `publish` took it. */
 interface SavedPlan {
@@ -61,31 +71,40 @@ interface SavedPlan {
 }
 
 export function createDismissals(d: DismissDeps): Dismissing {
-  const controller = new AbortController();
+  /** What cuts the sends queued since the last `cut`: a send keeps the one it was queued under. */
+  let controller = new AbortController();
   /**
    * The sends of each change, one dismissal at a time, in the order they were saved: a later one's status block is
    * the last word. Changes apart: their blocks and checks are their own.
    */
   const chains = new Map<ChangeId, Promise<void>>();
 
-  const outboxOf = (id: string, posts: DismissalOutbox["posts"]): DismissalOutbox => ({
+  const outboxOf = (id: string, posts: DismissalOutbox["posts"], signal: AbortSignal): DismissalOutbox => ({
     posts,
     sending(kind: DismissalPostKind) {
-      if (controller.signal.aborted) throw new Error("the service is stopping");
+      if (signal.aborted) throw new Error("the dismissal's sends were cut");
       d.store.dismissals.sending(id, kind);
     },
     sent(kind: DismissalPostKind, hostId: string) {
       // Answered after the cut: not marked, so the next start looks for it again.
-      if (controller.signal.aborted) return;
+      if (signal.aborted) return;
       d.store.dismissals.sent(id, kind, hostId);
     },
   });
 
-  /** Sends one dismissal's owed posts; ended once they are sent or given up, unless the service is stopping. */
-  async function send(id: string): Promise<void> {
+  /**
+   * Its posts over unsent, cut by the sign-in changing (ADR 0090): ended, so no start resumes them as whoever is signed
+   * in then. Stopping leaves them owing: the next start resumes them.
+   */
+  const endIfCut = (id: string, signal: AbortSignal): void => {
+    if (signal.reason === CUT) d.store.dismissals.ended(id, d.clock.now());
+  };
+
+  /** Sends one dismissal's owed posts; ended once they are sent or given up, or cut; owing if the service stops. */
+  async function send(id: string, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return endIfCut(id, signal);
     const dismissal = d.store.dismissals.of<SavedPlan>(id);
     if (dismissal === null) return;
-    const { signal } = controller;
     try {
       // The round's ledger as it is now (never a preview's after it, which posts nothing): the check says where the
       // change stands at the send (the block reads it itself).
@@ -102,21 +121,22 @@ export function createDismissals(d: DismissDeps): Dismissing {
           degraded: dismissal.degraded,
           checkId: dismissal.checkId,
         },
-        outboxOf(id, dismissal.posts),
+        outboxOf(id, dismissal.posts, signal),
         signal,
       );
     } catch (error) {
-      if (signal.aborted) return;
+      if (signal.aborted) return endIfCut(id, signal);
       d.log(`the dismissal of ${dismissal.findingId} on ${dismissal.changeId} was not posted: ${error}`);
     }
-    if (signal.aborted) return;
+    if (signal.aborted) return endIfCut(id, signal);
     d.store.dismissals.ended(id, d.clock.now());
     d.take();
   }
 
   const queued = (id: string, changeId: ChangeId): void => {
+    const { signal } = controller;
     const chain = (chains.get(changeId) ?? Promise.resolve())
-      .then(() => send(id))
+      .then(() => send(id, signal))
       .catch((error: unknown) => d.log(`dismissal ${id}: ${error}`));
     chains.set(changeId, chain);
     // The last send of the change gone, its chain goes too.
@@ -166,6 +186,12 @@ export function createDismissals(d: DismissDeps): Dismissing {
         const changeId = d.store.dismissals.of<SavedPlan>(id)?.changeId;
         if (changeId !== undefined) queued(id, changeId);
       }
+    },
+    async cut() {
+      const cutting = controller;
+      controller = new AbortController();
+      cutting.abort(CUT);
+      await Promise.all(chains.values());
     },
     async stop() {
       controller.abort();

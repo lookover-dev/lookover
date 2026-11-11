@@ -272,6 +272,16 @@ async function opening(
   };
 }
 
+const cookies = new WeakMap<Awaited<ReturnType<typeof opening>>["service"], string>();
+/** The job the app's page says pull request #1's block is (`Review.described`, ADR 0092), as the app's state has it. */
+async function described(w: Awaited<ReturnType<typeof opening>>) {
+  // The link opens the app once: its cookie is kept for the next look.
+  const cookie = cookies.get(w.service) ?? (await openApp(w.service));
+  cookies.set(w.service, cookie);
+  const state = await snapshot(w.service, cookie);
+  return state.reviews[changeId(`${repo}#1`)]?.described;
+}
+
 // ---------- the states ----------
 
 test("S1: round 1 is running: Looking over its commit, no list; then the round posts over it", async () => {
@@ -317,6 +327,66 @@ test("S8: the review failed: Couldn't look over, its cause (the engine crashed),
       ),
     ),
   );
+});
+
+test("S9: a fork's request waiting when the fork is pushed: Didn't look over its commit, and how to ask for the newest (ADR 0092)", async () => {
+  const w = await opening({ ...opened(), fork: true }, []);
+  // A fork is skipped as it opens: no block.
+  expect(w.description()).toBe("");
+  w.engines.setHealth("claude", { installed: true, version: "2.4.1", signedIn: false });
+  w.host.seedComment(PR, { author: OWNER, body: "/lookover review" });
+  await w.time.advance(MIN);
+  expect(w.headings()).toEqual([`Waiting to look over ${at(1, SHA_1)}`]);
+  w.host.push(PR, SHA_2, COMMENTABLE);
+  await w.time.advance(MIN);
+  await w.time.advance(0);
+  expect(w.description()).toBe(
+    describe(
+      "",
+      block(
+        `Didn't look over ${at(1, SHA_1)}`,
+        "A newer commit was pushed after the request. Comment `/lookover review` to look over the newest one.",
+      ),
+    ),
+  );
+});
+
+test("a fork's first review still running keeps Looking over when a push ends the request that waits behind it (ADR 0092)", async () => {
+  const w = await opening({ ...opened(), fork: true }, []);
+  w.engines.answer(...slow(10 * MIN, finds([F1])));
+  w.host.seedComment(PR, { author: OWNER, body: "/lookover review" });
+  await w.time.advance(MIN);
+  expect(w.headings()).toEqual([`Looking over ${at(1, SHA_1)}`]);
+  // A second request waits behind the running review; the push ends it, never the review.
+  w.host.seedComment(PR, { author: OWNER, body: "/lookover review" });
+  await w.time.advance(MIN);
+  w.host.push(PR, SHA_2, COMMENTABLE);
+  await w.time.advance(MIN);
+  await w.time.advance(0);
+  expect(w.headings()).toEqual([`Looking over ${at(1, SHA_1)}`]);
+  // The app's page says the block GitHub has: the running review's.
+  expect(await described(w)).toMatchObject({ state: "running", sha: SHA_1 });
+  // The review posts its round over it, never the ended block.
+  await w.time.advance(10 * MIN);
+  expect(w.headings()).toEqual([`Looking over ${at(1, SHA_1)}`, things(1)]);
+});
+
+test("a fork's first review that fails after a push ended the request behind it: Didn't look over, never Looking over left (ADR 0092)", async () => {
+  const w = await opening({ ...opened(), fork: true }, []);
+  w.engines.answer({ outcome: "crashed", text: "", tookMs: 10 * MIN });
+  w.host.seedComment(PR, { author: OWNER, body: "/lookover review" });
+  await w.time.advance(MIN);
+  w.host.seedComment(PR, { author: OWNER, body: "/lookover review" });
+  await w.time.advance(MIN);
+  w.host.push(PR, SHA_2, COMMENTABLE);
+  await w.time.advance(MIN);
+  expect(w.headings()).toEqual([`Looking over ${at(1, SHA_1)}`]);
+  expect(await described(w)).toMatchObject({ state: "running", sha: SHA_1 });
+  await w.time.advance(10 * MIN);
+  await w.time.advance(0);
+  expect(w.headings()).toEqual([`Looking over ${at(1, SHA_1)}`, `Didn't look over ${at(1, SHA_1)}`]);
+  // The app's page says it too, though the newest job is the fork's skip on the new head.
+  expect(await described(w)).toMatchObject({ state: "cancelled", cancel: "pushed", sha: SHA_1 });
 });
 
 test("S2: round 1 posts three things to fix, the one off the diff with its lines through a permalink", async () => {

@@ -161,6 +161,7 @@ const connectionAccount = tiedTo<ConnectionAccount>()(
     installationId: z.number(),
     cause: accountCause.nullable(),
     owner: z.boolean().nullable(),
+    granted: z.array(repositoryIdSchema),
   }),
 );
 const unreachedAccount = tiedTo<UnreachedAccount>()(
@@ -632,7 +633,7 @@ const reviewJob = tiedTo<ReviewJob>()(
     deferral: deferral.nullable(),
     stepIn: engineIdSchema.nullable(),
     skip: z.enum(["not-yours", "draft", "repo-off", "on-open-off", "codex-not-yours", "fork"]).nullable(),
-    cancel: z.enum(["closed", "replaced", "pushed"]).nullable(),
+    cancel: z.enum(["closed", "replaced", "pushed", "sign-in-changed"]).nullable(),
     failure: jobFailure.nullable(),
     turn: turn.nullable(),
     askedBy: askedBy.nullable(),
@@ -662,6 +663,7 @@ const reviewSchema = tiedTo<Review>()(
   z.object({
     changeId: changeIdSchema,
     job: reviewJob.nullable(),
+    described: reviewJob.nullable(),
     run: run.nullable(),
     loop: z.enum(["open", "needs_owner", "settled"]).nullable(),
     rounds: z.array(round),

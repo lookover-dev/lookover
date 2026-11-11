@@ -14,16 +14,18 @@ import {
   githubLinks,
   repositoryId,
   SHARED_APP,
+  SSE,
   type State,
 } from "@lookover/contracts";
 import { scenarioOf } from "../index.ts";
-import { eventually, TEST_LIMIT_MS } from "../service.test-support.ts";
+import { eventually, next, TEST_LIMIT_MS } from "../service.test-support.ts";
 import {
   advance,
   BRIEF_SEEDED,
   brief,
   inject,
   installApp,
+  load,
   onGitHub,
   send,
   snapshotOf,
@@ -589,6 +591,99 @@ test("nothing-granted: S1 signed in, the App installed on no repository, the set
   expect(granted.repos).toHaveLength(3);
 });
 
+test("first-read-slow: granted after nothing granted, the account grants its repositories while none is read for 30 s (ADR 0091)", async () => {
+  const door = await startScenario(scenarioOf("S1"));
+  expect((await send(door, { type: "setup.goto", step: "github" })).status).toBe(200);
+  expect(await inject(door, "nothing-granted")).toBe(200);
+  expect((await send(door, { type: "connection.signIn" })).status).toBe(200);
+  expect(await inject(door, "sign-in-entered")).toBe(200);
+  await advance(door, 5_000);
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.connection.person !== null,
+  );
+  await advance(door, 4_000);
+  expect((await snapshotOf(door)).setup).toMatchObject({ github: "nothing-granted" });
+  expect(await inject(door, "first-read-slow")).toBe(200);
+  await installApp(door, githubLinks.install(DEMO_API.github, SHARED_APP.slug));
+  await advance(door, 4_000);
+  const reading = await eventually(
+    () => snapshotOf(door),
+    (s) => (s.connection.accounts[0]?.granted.length ?? 0) > 0,
+  );
+  expect(reading.connection.accounts[0]?.granted).toHaveLength(3);
+  expect(reading.repos).toEqual([]);
+  await advance(door, 20_000);
+  expect((await snapshotOf(door)).repos).toEqual([]);
+  await advance(door, 10_000);
+  const read = await eventually(
+    () => snapshotOf(door),
+    (s) => s.setup.github === "done",
+  );
+  expect(read.repos).toHaveLength(3);
+});
+
+test("first-read-slow outlives a restart: GitHub's slowness is the world's, so the restarted room's first reads wait out the 30 s too", async () => {
+  const door = await startScenario(scenarioOf("S1"));
+  expect((await send(door, { type: "setup.goto", step: "github" })).status).toBe(200);
+  expect(await inject(door, "nothing-granted")).toBe(200);
+  expect((await send(door, { type: "connection.signIn" })).status).toBe(200);
+  expect(await inject(door, "sign-in-entered")).toBe(200);
+  await advance(door, 5_000);
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.connection.person !== null,
+  );
+  await advance(door, 4_000);
+  expect(await inject(door, "first-read-slow")).toBe(200);
+  // The service restarted (another install took start at login meanwhile): the hold goes on in the new room.
+  expect(await inject(door, "login-taken")).toBe(200);
+  await installApp(door, githubLinks.install(DEMO_API.github, SHARED_APP.slug));
+  await advance(door, 4_000);
+  const reading = await eventually(
+    () => snapshotOf(door),
+    (s) => (s.connection.accounts[0]?.granted.length ?? 0) > 0,
+  );
+  expect(reading.repos).toEqual([]);
+  await advance(door, 20_000);
+  expect((await snapshotOf(door)).repos).toEqual([]);
+  await advance(door, 10_000);
+  const read = await eventually(
+    () => snapshotOf(door),
+    (s) => s.setup.github === "done",
+  );
+  expect(read.repos).toHaveLength(3);
+});
+
+test("first-read-slow, restarted while a first read is held: the new room's start reads every repository it has, and the slowness waits only for those added after", async () => {
+  const door = await startScenario(scenarioOf("S1"));
+  expect((await send(door, { type: "setup.goto", step: "github" })).status).toBe(200);
+  expect(await inject(door, "nothing-granted")).toBe(200);
+  expect((await send(door, { type: "connection.signIn" })).status).toBe(200);
+  expect(await inject(door, "sign-in-entered")).toBe(200);
+  await advance(door, 5_000);
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.connection.person !== null,
+  );
+  await advance(door, 4_000);
+  expect(await inject(door, "first-read-slow")).toBe(200);
+  await installApp(door, githubLinks.install(DEMO_API.github, SHARED_APP.slug));
+  await advance(door, 4_000);
+  const held = await eventually(
+    () => snapshotOf(door),
+    (s) => (s.connection.accounts[0]?.granted.length ?? 0) > 1,
+  );
+  expect(held.repos).toEqual([]);
+  // Three repositories granted, the first one's poll held: the restart's stop ends it, and the new room starts.
+  expect(await inject(door, "login-taken")).toBe(200);
+  const read = await eventually(
+    () => snapshotOf(door),
+    (s) => s.setup.github === "done",
+  );
+  expect(read.repos).toHaveLength(3);
+});
+
 test("sign-in-entered: S1 signed in to the shared App from the setup, the code on GitHub's fake page; then the person and their repositories", async () => {
   const door = await startScenario(scenarioOf("S1"));
   expect((await send(door, { type: "setup.goto", step: "github" })).status).toBe(200);
@@ -711,6 +806,49 @@ test("accounts-slow: signed in, the accounts not listed for 30 s; nothing said m
   );
   expect(listed.connection.listed).toBe(true);
   expect(listed.connection.accounts.map((a) => a.account.login)).toEqual(["sasensi"]);
+});
+
+test("gh-slow: the story starts again, and its organisations are named only once gh answers, 30 s on (ADR 0091)", async () => {
+  const door = await startScenario(scenarioOf("S16"));
+  const before = await snapshotOf(door);
+  expect(before.connection.unreached.map((u) => u.account.login)).toEqual(["ledger-labs", "ledger-hq"]);
+  expect(await inject(door, "gh-slow")).toBe(200);
+  const started = await snapshotOf(door);
+  // Started afresh: listed, the accounts reached and reading as before, nothing named by `gh` yet.
+  expect(started.connection).toMatchObject({ listed: true, unreached: [] });
+  expect(started.connection.accounts.map((a) => [a.account.login, a.owner])).toEqual([
+    ["sasensi", true],
+    ["ledger-dev", null],
+  ]);
+  await advance(door, 20_000);
+  expect((await snapshotOf(door)).connection.unreached).toEqual([]);
+  await advance(door, 10_000);
+  const named = await eventually(
+    () => snapshotOf(door),
+    (s) => s.connection.unreached.length > 0,
+  );
+  expect(named.connection.unreached.map((u) => u.account.login)).toEqual(["ledger-labs", "ledger-hq"]);
+  expect(named.connection.accounts.map((a) => [a.account.login, a.owner])).toEqual([
+    ["sasensi", true],
+    ["ledger-dev", false],
+  ]);
+});
+
+test("gh-slow from an open tab: its stream is told to reload, as the story it followed was swapped out", async () => {
+  const door = await startScenario(scenarioOf("S16"));
+  const open = await stream(door, (await snapshotOf(door)).seq);
+  expect(await inject(door, "gh-slow")).toBe(200);
+  expect((await next(open)).event).toBe(SSE.reload);
+});
+
+test("gh-slow, then another story loaded: the slowness was the story's, so the next one's gh answers at once", async () => {
+  const door = await startScenario(scenarioOf("S16"));
+  expect(await inject(door, "gh-slow")).toBe(200);
+  expect((await load(door, "S16")).status).toBe(200);
+  expect((await snapshotOf(door)).connection.unreached.map((u) => u.account.login)).toEqual([
+    "ledger-labs",
+    "ledger-hq",
+  ]);
 });
 
 test("a fault that isn't one is refused at the door", async () => {

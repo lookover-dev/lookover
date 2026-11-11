@@ -1,8 +1,9 @@
 // Settings opened at a place (design-system.md "label"): a section's own place (#github, #agent) lands its group at
 // the top, its label under the top bar; a setting's row (#when, #login) is brought to the middle, where it is lit.
 import { expect, test } from "bun:test";
+import { openPlace, type Place } from "../keep-place.ts";
 import { app, screen } from "./repositories.test-support.tsx";
-import { openPlace, type Place, Settings } from "./settings.tsx";
+import { Settings } from "./settings.tsx";
 
 const html = screen(app(), undefined, () => <Settings />);
 

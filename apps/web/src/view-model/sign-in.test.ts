@@ -276,12 +276,19 @@ test("signed in, listed, installed nowhere: your own account not installed with 
 
 test("listed, the step still waiting on the repositories' first read: said, and an account with none yet is being read, not empty", () => {
   const accounts = [
-    { account: { ...SASENSI, type: "User" as const }, installationId: 1, cause: null, owner: true },
+    {
+      account: { ...SASENSI, type: "User" as const },
+      installationId: 1,
+      cause: null,
+      owner: true,
+      granted: [],
+    },
     {
       account: { id: 4242, login: "ledger-co", type: "Organization" as const },
       installationId: 2,
       cause: null,
       owner: false,
+      granted: [repositoryId("ledger-co/books")],
     },
   ];
   const reading = step(
@@ -301,12 +308,173 @@ test("listed, the step still waiting on the repositories' first read: said, and 
   const shown = reading.accounts.list.rows.flatMap((r) => [r.detail, r.fix?.label]);
   expect(shown).not.toContain("No repository yet.");
   expect(shown).not.toContain("Choose repositories");
-  // The read done with none there: said as before, with its one fix.
-  const done = step(at("done", { person: SASENSI, accounts }, [repo("sasensi", "ledger-api")]));
-  expect(done.accounts.list.rows[1]).toMatchObject({
-    detail: "No repository yet.",
-    fix: { label: "Choose repositories" },
+  // The read done: its repository there, counted.
+  const read = step(
+    at("waiting-for-install", { person: SASENSI, accounts }, [
+      repo("sasensi", "ledger-api"),
+      repo("ledger-co", "books"),
+    ]),
+  );
+  expect(read.accounts.list.rows[1]).toMatchObject({
+    state: "installed",
+    detail: "1 repository.",
+    fix: null,
   });
+});
+
+/** sasensi's own account, granting `granted`, and the organisation ledger-co, granting its books. */
+const grantingAccounts = (granted: string[] = ["sasensi/ledger-api"]) => [
+  {
+    account: { ...SASENSI, type: "User" as const },
+    installationId: 1,
+    cause: null,
+    owner: true,
+    granted: granted.map(repositoryId),
+  },
+  {
+    account: { id: 4242, login: "ledger-co", type: "Organization" as const },
+    installationId: 2,
+    cause: null,
+    owner: false,
+    granted: [repositoryId("ledger-co/books"), repositoryId("ledger-co/ledger")],
+  },
+];
+
+test("an account granting repositories none of which is read yet is being read, whatever the step: after nothing granted, and once done", () => {
+  const person = { person: SASENSI, id: connectionId("github:sasensi"), state: "connected" as const };
+  for (const github of ["nothing-granted", "done"] as const) {
+    const view = step(
+      at(github, { ...person, accounts: grantingAccounts() }, [repo("sasensi", "ledger-api")]),
+    );
+    expect(
+      view.accounts.list.rows.slice(0, 2).map((r) => [r.name, r.state, r.detail, r.fix?.label ?? null]),
+    ).toEqual([
+      ["sasensi", "installed", "1 repository.", null],
+      ["ledger-co", "reading", "Reading its repositories…", null],
+    ]);
+    // The step's accounts line says so too, not "Install it on more accounts any time." nor "with no repository".
+    expect(view.accounts.text).toBe("Reading your accounts' repositories…");
+  }
+  // Read: "2 repositories.", and the step's own line back.
+  const read = step(
+    at("done", { ...person, accounts: grantingAccounts() }, [
+      repo("sasensi", "ledger-api"),
+      repo("ledger-co", "books"),
+      repo("ledger-co", "ledger"),
+    ]),
+  );
+  expect(read.accounts.list.rows[1]).toMatchObject({
+    state: "installed",
+    detail: "2 repositories.",
+    fix: null,
+  });
+  expect(read.accounts.text).toBe("Install it on more accounts any time.");
+});
+
+test("an account granting none says so with its one fix, at every step; nothing is being read then", () => {
+  const person = { person: SASENSI, id: connectionId("github:sasensi"), state: "connected" as const };
+  for (const github of ["waiting-for-install", "nothing-granted", "done"] as const) {
+    const view = step(at(github, { ...person, accounts: grantingAccounts([]).slice(0, 1) }));
+    expect(view.accounts.list.rows[0]).toMatchObject({
+      state: "installed",
+      detail: "No repository yet.",
+      fix: { label: "Choose repositories" },
+    });
+    expect(view.accounts.text).not.toBe("Reading your accounts' repositories…");
+  }
+  expect(
+    step(at("nothing-granted", { ...person, accounts: grantingAccounts([]).slice(0, 1) })).accounts.text,
+  ).toBe("Installed, with no repository chosen.");
+});
+
+test("listed and still waiting, every account granting none: the line says what the rows show, not that it looks for them", () => {
+  const view = step(
+    at("waiting-for-install", { person: SASENSI, listed: true, accounts: grantingAccounts([]).slice(0, 1) }),
+  );
+  expect(view.accounts.list.rows[0]).toMatchObject({ name: "sasensi", detail: "No repository yet." });
+  // The frame before setup turns nothing-granted says what that step says, in its state: nothing moves.
+  expect(view.accounts).toMatchObject({ state: "current", text: "Installed, with no repository chosen." });
+});
+
+/** grantingAccounts' ledger-co refused by its SSO after its listing: its cause set, its grants kept as listed. */
+const ssoRefused = (granted: string[]) => {
+  const [, ledger] = grantingAccounts();
+  if (ledger === undefined) throw new Error("grantingAccounts lists ledger-co second");
+  return {
+    ...ledger,
+    cause: { kind: "sso", organisation: "ledger-co", url: null } as const,
+    granted: granted.map(repositoryId),
+  };
+};
+
+test("listed and still waiting, an account SSO refused after it granted some: its row says SSO, the line reads nothing", () => {
+  const view = step(
+    at("waiting-for-install", { person: SASENSI, listed: true, accounts: [ssoRefused(["ledger-co/books"])] }),
+  );
+  expect(view.accounts.list.rows[0]?.state).not.toBe("reading");
+  expect(view.accounts.text).not.toBe("Reading your accounts' repositories…");
+});
+
+test("listed and still waiting, nothing read: the line is the one nothing-granted says for the same accounts, causes and all", () => {
+  for (const accounts of [
+    [ssoRefused(["ledger-co/books"])],
+    [ssoRefused([])],
+    [...grantingAccounts([]).slice(0, 1), ssoRefused(["ledger-co/books"])],
+  ]) {
+    const connection = { person: SASENSI, listed: true, accounts };
+    const waiting = step(at("waiting-for-install", connection)).accounts;
+    const nothing = step(at("nothing-granted", connection)).accounts;
+    expect({ state: waiting.state, text: waiting.text }).toEqual({
+      state: nothing.state,
+      text: nothing.text,
+    });
+    expect(waiting).toMatchObject({ state: "current", text: "Installed, with no repository chosen." });
+  }
+});
+
+test("a look's arrival gives way to the reading line while the account it found is read; once read, the arrival is said", () => {
+  const person = { person: SASENSI, id: connectionId("github:sasensi"), state: "connected" as const };
+  const look = {
+    since: NOW,
+    until: NOW + 3 * MIN,
+    lookedAt: NOW + 4000,
+    ended: NOW + 4000,
+    arrived: { accounts: ["ledger-co"], back: [], repositories: 2 },
+    stopped: null,
+  };
+  const accounts = grantingAccounts();
+  const reading = step(at("done", { ...person, accounts, look }, [repo("sasensi", "ledger-api")]));
+  expect(reading.accounts.text).toBe("Reading your accounts' repositories…");
+  expect(reading.accounts.look?.state).not.toBe("idle");
+  const read = step(
+    at("done", { ...person, accounts, look }, [
+      repo("sasensi", "ledger-api"),
+      repo("ledger-co", "books"),
+      repo("ledger-co", "ledger"),
+    ]),
+  );
+  expect(read.accounts.text).toEqual(["ledger-co arrived: 2 repositories."]);
+});
+
+test("Settings › GitHub: an account being read says so, its look line beside it", () => {
+  const view = githubSettings(
+    at(
+      "done",
+      {
+        person: SASENSI,
+        id: connectionId("github:sasensi"),
+        state: "connected",
+        accounts: grantingAccounts(),
+      },
+      [repo("sasensi", "ledger-api")],
+    ),
+    { timeZone: UTC },
+  );
+  expect(view.list.rows.slice(0, 2).map((r) => [r.name, r.detail, r.fix?.label ?? null])).toEqual([
+    ["sasensi", "1 repository.", null],
+    ["ledger-co", "Reading its repositories…", null],
+  ]);
+  expect(view.look?.state).toBe("idle");
 });
 
 test("the lead says what teammates see of a review posted as you", () => {
@@ -375,24 +543,33 @@ test("signed in and installed: who you are, then the list, each account reached 
     repo("sasensi", "ledger-web"),
   ];
   const accounts = [
-    { account: { ...SASENSI, type: "User" as const }, installationId: 1, cause: null, owner: null },
+    {
+      account: { ...SASENSI, type: "User" as const },
+      installationId: 1,
+      cause: null,
+      owner: null,
+      granted: [],
+    },
     {
       account: { id: 4242, login: "ledger-co", type: "Organization" as const },
       installationId: 2,
       cause: null,
       owner: null,
+      granted: [],
     },
     {
       account: { id: 4343, login: "ledger-labs", type: "Organization" as const },
       installationId: 3,
       cause: null,
       owner: null,
+      granted: [],
     },
     {
       account: { id: 4444, login: "ledger-dev", type: "Organization" as const },
       installationId: 4,
       cause: { kind: "sso", organisation: "ledger-dev", url: null } as const,
       owner: null,
+      granted: [],
     },
   ];
   const connection = {
@@ -422,7 +599,13 @@ test("signed in and installed: who you are, then the list, each account reached 
 
 test("done with every account installed and used: more accounts any time; one still without it: the rest can wait", () => {
   const person = { person: SASENSI, id: connectionId("github:sasensi") };
-  const own = { account: { ...SASENSI, type: "User" as const }, installationId: 1, cause: null, owner: true };
+  const own = {
+    account: { ...SASENSI, type: "User" as const },
+    installationId: 1,
+    cause: null,
+    owner: true,
+    granted: [],
+  };
   const used = [repo("sasensi", "ledger-api")];
   const all = step(at("done", { ...person, accounts: [own] }, used));
   expect(all.accounts.text).toBe("Install it on more accounts any time.");
@@ -469,7 +652,9 @@ const connected = (connection: Partial<Connection> = {}) =>
     id: connectionId("github:sasensi"),
     state: "connected",
     person: SASENSI,
-    accounts: [{ account: { ...SASENSI, type: "User" }, installationId: 1, cause: null, owner: true }],
+    accounts: [
+      { account: { ...SASENSI, type: "User" }, installationId: 1, cause: null, owner: true, granted: [] },
+    ],
     ...connection,
   });
 
@@ -544,7 +729,13 @@ const LOOKING = {
 
 test("Your accounts says the look line's state in its own line while a look runs or once it ended, with Check again", () => {
   const person = { person: SASENSI, id: connectionId("github:sasensi") };
-  const own = { account: { ...SASENSI, type: "User" as const }, installationId: 1, cause: null, owner: true };
+  const own = {
+    account: { ...SASENSI, type: "User" as const },
+    installationId: 1,
+    cause: null,
+    owner: true,
+    granted: [],
+  };
   const used = [repo("sasensi", "ledger-api")];
   const looking = step(at("done", { ...person, accounts: [own], look: LOOKING }, used));
   expect(looking.accounts).toMatchObject({

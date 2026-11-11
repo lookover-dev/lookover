@@ -6,7 +6,9 @@ import {
   cancelText,
   confirmFailureText,
   deferralText,
+  ENDED_LINE,
   type EngineId,
+  endedHead,
   engineDeferral,
   engineDetailText,
   engineHealthText,
@@ -318,6 +320,10 @@ test("the status block's headings and its note for a finding not in the diff", (
   expect(lookingOverHead("C", true)).toEqual(["Looking over ", "C", " again"]);
   expect(waitingHead("C")).toEqual(["Waiting to look over ", "C"]);
   expect(failedHead("C")).toEqual(["Couldn't look over ", "C"]);
+  expect(endedHead("C")).toEqual(["Didn't look over ", "C"]);
+  expect(ENDED_LINE).toBe(
+    "A newer commit was pushed after the request. Comment `/lookover review` to look over the newest one.",
+  );
   expect(notInDiffText("Reminders go out twice.")).toBe("Not in the diff: reminders go out twice.");
 });
 

@@ -17,6 +17,7 @@ const FAULT_IDS = [
   "sign-in-entered",
   "sign-in-denied",
   "accounts-slow",
+  "first-read-slow",
   "github-signed-out",
   "sso-asked",
   "organisation-suspended",
@@ -49,6 +50,7 @@ const FAULT_IDS = [
   "gh-signed-in",
   "gh-uninstalled",
   "gh-signed-out",
+  "gh-slow",
 ] as const;
 
 export type FaultId = (typeof FAULT_IDS)[number];
@@ -70,6 +72,7 @@ const LABELS: Record<FaultId, string> = {
   "sign-in-entered": "You enter the sign-in code on GitHub",
   "sign-in-denied": "You cancel the sign-in on GitHub",
   "accounts-slow": "GitHub takes 30 s to list your accounts",
+  "first-read-slow": "GitHub takes 30 s to read new repositories",
   "github-signed-out": "GitHub signs you out",
   "sso-asked": "An organisation asks you to sign in with SSO",
   "organisation-suspended": "An owner suspends the App on an organisation",
@@ -102,6 +105,7 @@ const LABELS: Record<FaultId, string> = {
   "gh-signed-in": "You sign in to gh",
   "gh-uninstalled": "gh is uninstalled",
   "gh-signed-out": "You sign out of gh",
+  "gh-slow": "The story starts again and gh takes 30 s to name your organisations",
 };
 
 /** Every fault with its label, as the listing answers them. */

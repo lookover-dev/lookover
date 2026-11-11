@@ -164,12 +164,12 @@ describe("lookover wait: exit codes", () => {
     }
   });
 
-  test("9: neither a 👀 nor a check within the appear timeout: run lookover status to see whether it runs", async () => {
+  test("9: neither a 👀 nor a check within the appear timeout: Lookover not running, or its repositories not chosen yet (ADR 0090)", async () => {
     const w = world();
     expect(await w.lookover("wait")).toBe(9);
     expect(w.elapsed()).toBe(180_000);
     expect(w.err.at(-1)).toBe(
-      "No review appeared for 5d9114c (pull request #7) in 3m: is Lookover running? Run lookover status.",
+      "No review appeared for 5d9114c (pull request #7) in 3m: Lookover may not be running (run lookover status), or its repositories may not be chosen yet in setup (run lookover open).",
     );
   });
 

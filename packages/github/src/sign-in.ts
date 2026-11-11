@@ -3,7 +3,9 @@
 // answer a refusal with status 200 and an `error` field; the device flow's own (`authorization_pending`,
 // `slow_down`, `expired_token`, `access_denied`) are polls' outcomes, the refresh's `bad_refresh_token` signs the
 // person out, as does `incorrect_client_credentials` (what GitHub answers a refresh token it doesn't know, with the
-// App's right client ID and no secret: seen live), and any other is `invalid`. A network failure or a 5xx is `unavailable`; a 429, or a limit's headers, is
+// App's right client ID and no secret: seen live), and any other is `invalid`. Each call is a write for ADR 0080
+// (ADR 0092): 60 s a try, sent again only when nothing reached GitHub (`exchange`, `GitHubApi`'s own rules, its
+// `Waits`). A network failure, a try past its limit or a 5xx is `unavailable`; a 429, or a limit's headers, is
 // `rate_limited`, read as the API's answers are (`waitAsked`). The poll gives the tokens as soon as GitHub issues them,
 // the code spent; who the person is, the one Lookover posts as, is `GET /user` with the new token (`person`), asked
 // apart so a failure there never loses the tokens; a refresh keeps them.
@@ -19,7 +21,7 @@ import {
   type SignInTokens,
 } from "@lookover/contracts";
 import type { z } from "zod";
-import { type Fetch, type GitHubApi, message, waitAsked } from "./api.ts";
+import { exchange, type Fetch, type GitHubApi, type Waits, waitAsked } from "./api.ts";
 import { deviceCode, oauthAnswer, oauthRefusal, type oauthToken, parse, person } from "./schemas.ts";
 
 /** What GitHub asks a device flow's poll to add to its interval when it says `slow_down`. */
@@ -43,6 +45,8 @@ export interface SignInParts {
   /** GitHub's web address, where its OAuth endpoints are. */
   web: string;
   clock: Clock;
+  /** The pause between two tries and a try's time limit: the very ones the API client takes. */
+  waits: Waits;
   secret: (value: string) => void;
 }
 
@@ -50,24 +54,22 @@ export interface SignInParts {
 export const signedOut = (words: string) =>
   new HostError("unauthorized", words, { connectionCause: { kind: "signed-out" } });
 
-export function createSignIn({ api, fetch, web, clock, secret }: SignInParts): HostSignIn {
-  /** One POST to an OAuth endpoint, its JSON answer given back unparsed; a network failure or a 5xx is unavailable. */
+export function createSignIn({ api, fetch, web, clock, waits, secret }: SignInParts): HostSignIn {
+  /**
+   * One POST to an OAuth endpoint, its JSON answer given back unparsed. A write for ADR 0080 (ADR 0092): each try has
+   * its 60 s, sent again only when it surely never reached GitHub, as `GitHubApi`'s are (`exchange`); any other
+   * failure of the connection, or a 5xx, is unavailable at once.
+   */
   async function post(path: string, body: Record<string, string>): Promise<unknown> {
-    let status: number;
-    let headers: Headers;
-    let text: string;
-    try {
-      const response = await fetch(`${web}${path}`, {
+    const { status, headers, text } = await exchange(fetch, waits, {
+      url: `${web}${path}`,
+      init: {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/json", "user-agent": "lookover" },
         body: JSON.stringify(body),
-      });
-      status = response.status;
-      headers = response.headers;
-      text = await response.text();
-    } catch (error) {
-      throw new HostError("unavailable", `GitHub could not be reached: ${message(error)}`);
-    }
+      },
+      read: false,
+    });
     const wait = waitAsked(status, headers, text, clock.now());
     if (wait !== null) throw wait;
     if (status >= 500) throw new HostError("unavailable", `GitHub answered POST ${path} with ${status}`);

@@ -12,7 +12,16 @@ import {
   type SignIn,
   type SignInKeeper,
 } from "@lookover/contracts";
-import { AT, type Call, fakeWaits, noWaits, type Route, stubGitHub } from "./github.test-support.ts";
+import {
+  AT,
+  type Call,
+  type Failure,
+  failing,
+  fakeWaits,
+  noWaits,
+  type Route,
+  stubGitHub,
+} from "./github.test-support.ts";
 import { createGitHub, createHostSignIn } from "./index.ts";
 
 const WEB = "https://github.com";
@@ -269,6 +278,15 @@ const KEPT: SignIn = {
   person: PERSON,
 };
 
+/** Another person's sign-in, kept in place of the owner's on the same machine (ADR 0090). */
+const BOB: SignIn = {
+  token: "ghu_bob",
+  expiresAt: AT + 16 * HOUR,
+  refreshToken: "ghr_bob",
+  refreshExpiresAt: AT + 4000 * HOUR,
+  person: { id: 42, login: "bob" },
+};
+
 describe("the refresh", () => {
   test("renews both tokens with the refresh token, the person kept (GitHub's docs)", async () => {
     const { signIn, calls } = signInOver(refreshRoute(() => tokenAnswer("ghu_second", "ghr_second")));
@@ -509,11 +527,11 @@ describe("the person's session", () => {
     expect(s.bearers().at(-1)).toBe("Bearer ghu_theirs");
   });
 
-  test("a new sign-in kept while a renewal waits on GitHub stands: the renewal is dropped, the new one used", async () => {
+  test("the person's new sign-in kept while a renewal waits on GitHub stands: the renewal is dropped, the new one used", async () => {
     const clock = held();
     const api = stubGitHub(
       refreshRoute(() => tokenAnswer("ghu_alice_2", "ghr_alice_2")),
-      repoRoute(() => ["ghu_bob"]),
+      repoRoute(() => ["ghu_again"]),
     );
     let release = () => {};
     const answered = new Promise<void>((resolve) => {
@@ -535,17 +553,18 @@ describe("the person's session", () => {
     clock.set(KEPT.expiresAt);
     const call = github.identity(SANDBOX);
     await refreshAsked;
-    const bob: SignIn = {
-      token: "ghu_bob",
+    // The same person signed in again (Sign in again): another person's would sign this session out.
+    const again: SignIn = {
+      token: "ghu_again",
       expiresAt: AT + 16 * HOUR,
-      refreshToken: "ghr_bob",
+      refreshToken: "ghr_again",
       refreshExpiresAt: AT + 4000 * HOUR,
-      person: { id: 42, login: "bob" },
+      person: PERSON,
     };
-    memory.signInAgain(bob);
+    memory.signInAgain(again);
     release();
-    expect((await call).poster).toEqual({ id: 42, login: "bob" });
-    expect(memory.kept()).toEqual(bob);
+    expect((await call).poster).toEqual(PERSON);
+    expect(memory.kept()).toEqual(again);
   });
 
   test("a 401 on a token not yet expired refreshes once and asks again", async () => {
@@ -677,6 +696,73 @@ describe("the person's session", () => {
     expect(s.refreshes()).toBe(0);
   });
 
+  test("a write refused (401) under the owner's token, Bob's sign-in kept since, is never made again as Bob: signed out, and every call after it (ADR 0090)", async () => {
+    const reactions: (string | null)[] = [];
+    const s = session(
+      KEPT,
+      (c) => {
+        if (!/\/issues\/comments\/\d+\/reactions$/.test(c.path)) return undefined;
+        reactions.push(c.authorization);
+        return c.authorization === `Bearer ${BOB.token}`
+          ? { status: 201, body: { id: 1, content: "eyes" } }
+          : { status: 401, body: { message: "Bad credentials" } };
+      },
+      repoRoute(() => ["ghu_first"]),
+    );
+    // The owner's sign-in in use, then GitHub takes it no more, and Bob's is kept in its place.
+    await s.github.identity(SANDBOX);
+    s.memory.signInAgain(BOB);
+    const refused = await refusal(s.github.writer.react(SANDBOX, "10", "eyes"));
+    expect([refused.failure, connectionCauseOf(refused)]).toEqual(["unauthorized", { kind: "signed-out" }]);
+    const next = await refusal(s.github.writer.react(SANDBOX, "11", "rocket"));
+    expect([next.failure, connectionCauseOf(next)]).toEqual(["unauthorized", { kind: "signed-out" }]);
+    expect(reactions).toEqual(["Bearer ghu_first"]);
+    expect(s.refreshes()).toBe(0);
+  });
+
+  test("a renewal due on the owner's sign-in, Bob's kept since, is not made with Bob's: the call is signed out (ADR 0090)", async () => {
+    const s = session(
+      KEPT,
+      repoRoute(() => ["ghu_first", BOB.token]),
+    );
+    await s.github.identity(SANDBOX);
+    s.memory.signInAgain(BOB);
+    s.clock.set(KEPT.expiresAt);
+    const refused = await refusal(s.github.identity(SANDBOX));
+    expect(connectionCauseOf(refused)).toEqual({ kind: "signed-out" });
+    expect(s.bearers()).toEqual(["Bearer ghu_first"]);
+    expect(s.refreshes()).toBe(0);
+  });
+
+  test("Bob's renewal his session failed to keep is kept by the owner's session on the keeper, never used by it: signed out (ADR 0090)", async () => {
+    const clock = held();
+    const api = stubGitHub(
+      refreshRoute((refreshToken) =>
+        refreshToken === BOB.refreshToken
+          ? tokenAnswer("ghu_bob_2", "ghr_bob_2")
+          : oauthError("bad_refresh_token"),
+      ),
+      repoRoute(() => ["ghu_first", BOB.token, "ghu_bob_2"]),
+    );
+    const memory = memoryKeeper(KEPT);
+    const owners = createGitHub({ keeper: memory.keeper, fetch: api.fetch, clock });
+    const bobs = createGitHub({ keeper: memory.keeper, fetch: api.fetch, clock });
+    const bearers = () => api.calls.filter((c) => c.path.startsWith("/repos/")).map((c) => c.authorization);
+    // The owner's session in use, then Bob signs in: his own session renews his sign-in, the write failing.
+    await owners.identity(SANDBOX);
+    memory.signInAgain(BOB);
+    clock.set(BOB.expiresAt - 5 * MIN);
+    memory.failWrites(1);
+    expect((await refusal(bobs.identity(SANDBOX))).failure).toBe("unavailable");
+    const refused = await refusal(owners.identity(SANDBOX));
+    expect(connectionCauseOf(refused)).toEqual({ kind: "signed-out" });
+    expect(bearers()).toEqual(["Bearer ghu_first"]);
+    // Bob's renewal is kept all the same, the only one GitHub still takes, and his session uses it.
+    expect(memory.kept()).toMatchObject({ token: "ghu_bob_2", refreshToken: "ghr_bob_2" });
+    expect((await bobs.identity(SANDBOX)).poster).toEqual(BOB.person);
+    expect(bearers()).toEqual(["Bearer ghu_first", "Bearer ghu_bob_2"]);
+  });
+
   test("nobody signed in is signed out, and a sign-in kept later is read with no restart", async () => {
     const s = session(
       null,
@@ -685,5 +771,139 @@ describe("the person's session", () => {
     expect(connectionCauseOf(await refusal(s.github.identity(SANDBOX)))).toEqual({ kind: "signed-out" });
     s.memory.signInAgain(KEPT);
     expect((await s.github.identity(SANDBOX)).poster).toEqual(PERSON);
+  });
+});
+
+/** The sign-in over a `fetch` meeting `failures` first, its waits fake: what each try met, and the waits asked. */
+function signInMeeting(failures: Failure[], ...routes: Route[]) {
+  const api = stubGitHub(...routes);
+  const waits = fakeWaits();
+  const { fetch, sent } = failing(api.fetch, waits, failures);
+  const signIn = createHostSignIn({
+    fetch,
+    clock: { now: () => AT },
+    sleep: waits.sleep,
+    deadline: waits.deadline,
+  });
+  return { signIn, sent, waits };
+}
+
+/** A try of the token endpoint, the poll's or the refresh's, as `failing` records it. */
+const TOKEN_SENT = "POST /login/oauth/access_token";
+
+describe("the OAuth calls' time limit (ADR 0092)", () => {
+  test("a refresh that never answers fails after 60 s as unavailable, sent once", async () => {
+    for (const hang of ["hang", "hang-body"] as const) {
+      const { signIn, sent, waits } = signInMeeting(
+        [hang],
+        refreshRoute(() => tokenAnswer("ghu_second", "ghr_second")),
+      );
+      const error = await refusal(signIn.refreshSignIn(KEPT));
+      expect([error.failure, error.message, connectionCauseOf(error)]).toEqual([
+        "unavailable",
+        "GitHub could not be reached: no answer within 60 s",
+        { kind: "unreachable" },
+      ]);
+      expect(sent).toEqual([TOKEN_SENT]);
+      expect([waits.limits, waits.sleeps, waits.open()]).toEqual([[60_000], [], 0]);
+    }
+  });
+
+  test("a refresh that sent nothing is sent again, 1 s then 3 s apart, 3 tries at most", async () => {
+    const renewed = signInMeeting(
+      [{ code: "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR" }, { code: "ConnectionRefused", cause: true }],
+      refreshRoute(() => tokenAnswer("ghu_second", "ghr_second")),
+    );
+    expect((await renewed.signIn.refreshSignIn(KEPT)).token).toBe("ghu_second");
+    expect(renewed.sent).toEqual([TOKEN_SENT, TOKEN_SENT, TOKEN_SENT]);
+    expect(renewed.waits.sleeps).toEqual([1000, 3000]);
+    const unresolved = signInMeeting(
+      [
+        { code: "ENOTFOUND" },
+        { code: "ENOTFOUND", cause: true },
+        { code: "ENOTFOUND" },
+        { code: "ENOTFOUND" },
+      ],
+      refreshRoute(() => tokenAnswer("ghu_second", "ghr_second")),
+    );
+    const error = await refusal(unresolved.signIn.refreshSignIn(KEPT));
+    expect([error.failure, error.message]).toEqual([
+      "unavailable",
+      "GitHub could not be reached after 3 tries: ENOTFOUND: the connection failed",
+    ]);
+    expect(unresolved.sent).toHaveLength(3);
+    expect(unresolved.waits.sleeps).toEqual([1000, 3000]);
+  });
+
+  test("a refresh that may have reached GitHub (a reset, a closed socket, a 5xx) is sent once", async () => {
+    const failures: Failure[] = [
+      { code: "ECONNRESET" },
+      { code: "ConnectionClosed", cause: true },
+      { status: 502 },
+      { status: 503 },
+    ];
+    for (const failure of failures) {
+      const { signIn, sent, waits } = signInMeeting(
+        [failure],
+        refreshRoute(() => tokenAnswer("ghu_second", "ghr_second")),
+      );
+      const error = await refusal(signIn.refreshSignIn(KEPT));
+      expect([error.failure, connectionCauseOf(error)]).toEqual(["unavailable", { kind: "unreachable" }]);
+      expect(sent).toEqual([TOKEN_SENT]);
+      expect(waits.sleeps).toEqual([]);
+    }
+  });
+
+  test("the device code and the poll go by the same rules", async () => {
+    const code = signInMeeting([{ code: "ENOTFOUND" }], deviceCodeRoute);
+    expect(await code.signIn.startSignIn()).toEqual(GRANT);
+    expect([code.sent, code.waits.sleeps, code.waits.limits]).toEqual([
+      ["POST /login/device/code", "POST /login/device/code"],
+      [1000],
+      [60_000, 60_000],
+    ]);
+    const hung = signInMeeting(["hang"], deviceCodeRoute);
+    expect((await refusal(hung.signIn.startSignIn())).message).toBe(
+      "GitHub could not be reached: no answer within 60 s",
+    );
+    expect(hung.sent).toHaveLength(1);
+    const poll = signInMeeting(
+      [{ code: "ConnectionRefused" }],
+      pollRoute(() => oauthError("authorization_pending")),
+    );
+    expect(await poll.signIn.pollSignIn(GRANT)).toEqual({ kind: "pending", grant: GRANT });
+    expect([poll.sent, poll.waits.sleeps]).toEqual([[TOKEN_SENT, TOKEN_SENT], [1000]]);
+    const reset = signInMeeting(
+      [{ code: "ECONNRESET" }],
+      pollRoute(() => oauthError("authorization_pending")),
+    );
+    expect((await refusal(reset.signIn.pollSignIn(GRANT))).failure).toBe("unavailable");
+    expect(reset.sent).toHaveLength(1);
+  });
+
+  test("a refresh that never answers keeps the person signed in: the next call refreshes again, with the API's waits", async () => {
+    const clock = held();
+    const api = stubGitHub(
+      refreshRoute(() => tokenAnswer("ghu_second", "ghr_second")),
+      repoRoute(() => ["ghu_second"]),
+    );
+    const waits = fakeWaits();
+    const meeting = failing(api.fetch, waits, ["hang"], (input) => input.startsWith(WEB));
+    const memory = memoryKeeper(KEPT);
+    const github = createGitHub({
+      keeper: memory.keeper,
+      fetch: meeting.fetch,
+      clock,
+      sleep: waits.sleep,
+      deadline: waits.deadline,
+    });
+    clock.set(KEPT.expiresAt);
+    const error = await refusal(github.identity(SANDBOX));
+    expect([error.failure, connectionCauseOf(error)]).toEqual(["unavailable", { kind: "unreachable" }]);
+    expect(memory.kept()).toEqual(KEPT);
+    expect(waits.limits).toEqual([60_000]);
+    expect((await github.identity(SANDBOX)).poster).toEqual(PERSON);
+    expect(meeting.sent.filter((s) => s === TOKEN_SENT)).toHaveLength(2);
+    expect(memory.kept()).toMatchObject({ token: "ghu_second", refreshToken: "ghr_second" });
   });
 });

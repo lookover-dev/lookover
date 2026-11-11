@@ -228,9 +228,12 @@ function reason({ status, error }: Refusal): string {
 
 /**
  * A refusal said nowhere, neither band nor toast: a command on many repositories (ADR 0082) answered 404 named only
- * ones gone already, as a departure or a dismissal in another tab, and the list follows the events that said so.
+ * ones gone already, as a departure or a dismissal in another tab, and the list follows the events that said so; a
+ * return to the tab (`connection.returned`, ADR 0091), whatever refused it (signed out elsewhere, the
+ * server locked while the tab was hidden): the person did nothing.
  */
 export function saysNothing({ status, command }: Refusal): boolean {
+  if (command?.type === "connection.returned") return true;
   return status === 404 && (command?.type === "repos.setEnabled" || command?.type === "repos.dismiss");
 }
 

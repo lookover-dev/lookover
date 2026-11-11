@@ -70,6 +70,7 @@ function notInstalled(): State {
           installationId: 43,
           cause: null,
           owner: true,
+          granted: [],
         },
       ],
       unreached: [

@@ -9,6 +9,8 @@ import {
   api,
   blockOn,
   fakeEngines,
+  heldRuns,
+  home,
   messages,
   OWNER,
   openApp,
@@ -86,6 +88,11 @@ const commit = (sha: string) =>
   `[\`${sha.slice(0, 7)}\`](https://github.com/${SANDBOX.owner}/${SANDBOX.name}/pull/7/commits/${sha})`;
 /** The block's heading on the fork's pull request, past the wordmark. */
 const heading = (host: FakeGitHost) => blockOn(host, FORK).split("\n")[0]?.split(" · ").slice(1).join(" · ");
+/** The block's line under its heading. */
+const line = (host: FakeGitHost) => blockOn(host, FORK).split("\n\n")[1];
+/** The line of a request a push ended, as the person reads it (ADR 0092). */
+const ENDED =
+  "A newer commit was pushed after the request. Comment `/lookover review` to look over the newest one.";
 
 const startedBy = (events: Event[]) =>
   events.flatMap((e) => (e.type === "run.started" ? [e.run.reviewer] : []));
@@ -173,8 +180,214 @@ test("a fork's request waiting when the fork is pushed ends cancelled on its com
   ]);
   expect(checks(pushed)).toEqual([]);
   expect(engines.runs).toEqual([]);
-  // The block it wrote as it waited stays: no round ever posted to put back, and no block is taken off (I-229).
+  // No round ever posted to put back: the block says the request ended, and how to ask again (ADR 0092).
+  expect(heading(host)).toBe(`Didn't look over ${commit(fork.head.sha)}`);
+  expect(line(host)).toBe(ENDED);
+});
+
+test("the person's own fork, reviewed after every push: the fork skip the push records on the new head leaves the ended request's block (ADR 0092)", async () => {
+  const engines = fakeEngines({ signedIn: false });
+  const { service, host, time } = await start({
+    changes: [pr1],
+    engines,
+    repositorySettings: { onPush: true },
+  });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  const checks = (on: typeof fork.head.sha) =>
+    host.view(FORK, on).checks.map((c) => `${c.status} ${c.conclusion}: ${c.output.title}`);
+
+  host.open(fork);
+  await time.advance(MIN);
+  await until(stream, "job.changed");
+  host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  expect((await until(stream, "job.changed")).at(-1)).toMatchObject({
+    job: { trigger: "comment", skip: null, sha: fork.head.sha },
+  });
   expect(heading(host)).toBe(`Waiting to look over ${commit(fork.head.sha)}`);
+
+  const pushed = commitSha("8".repeat(40));
+  host.push(FORK, pushed, []);
+  await time.advance(MIN);
+  await time.advance(MIN);
+  await time.advance(0);
+  // The push's own review is skipped on the new head, after the request ended: the newest job is that skip.
+  expect((await snapshot(service, cookie)).reviews[id]?.job).toMatchObject({
+    state: "skipped",
+    skip: "fork",
+    sha: pushed,
+  });
+  expect(checks(fork.head.sha)).toContain("completed skipped: A newer commit was pushed after the request");
+  expect(checks(pushed)).toEqual(["completed skipped: Not reviewed: it comes from a fork"]);
+  expect(heading(host)).toBe(`Didn't look over ${commit(fork.head.sha)}`);
+  expect(line(host)).toBe(ENDED);
+});
+
+test("the person's own fork, its review running when a push ends the request behind it: the app's page and GitHub's block say the same, running then failed (ADR 0092)", async () => {
+  const engines = fakeEngines();
+  engines.answerFor("claude", { outcome: "crashed", text: "" });
+  const held = heldRuns(engines);
+  const { service, host, time } = await start({
+    changes: [pr1],
+    engines: held.engines,
+    repositorySettings: { onPush: true },
+  });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  const app = async () => (await snapshot(service, cookie)).reviews[id];
+
+  host.open(fork);
+  await time.advance(MIN);
+  await until(stream, "job.changed");
+  host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  await until(stream, "run.started");
+  // A second request waits behind the running review; a push ends it. No fork skip is recorded on the new head: a
+  // job of the change is pending (core's `skipOutcome`).
+  host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  const pushed = commitSha("8".repeat(40));
+  host.push(FORK, pushed, []);
+  await time.advance(MIN);
+  await time.advance(0);
+  expect(heading(host)).toBe(`Looking over ${commit(fork.head.sha)}`);
+  expect(await app()).toMatchObject({
+    job: { state: "running", sha: fork.head.sha },
+    described: { state: "running", sha: fork.head.sha },
+  });
+
+  // The review fails: GitHub's block says the request ended, and so does the app's page, the request sent after it.
+  held.release();
+  await until(stream, "job.changed");
+  await time.advance(0);
+  await time.advance(0);
+  expect(heading(host)).toBe(`Didn't look over ${commit(fork.head.sha)}`);
+  const ended = { state: "cancelled", cancel: "pushed", sha: fork.head.sha };
+  expect(await app()).toMatchObject({ job: ended, described: ended });
+  // The fork pushed again, its review's skip recorded now: both still say the request ended.
+  host.push(FORK, commitSha("9".repeat(40)), []);
+  await time.advance(MIN);
+  await time.advance(0);
+  expect(heading(host)).toBe(`Didn't look over ${commit(fork.head.sha)}`);
+  expect(await app()).toMatchObject({ job: { state: "skipped", skip: "fork" }, described: ended });
+});
+
+test("the person's own fork, its review deferred at Claude's limit after a push ended the request behind it: the review still due decides both blocks, not the ended request (ADR 0092)", async () => {
+  const engines = fakeEngines();
+  engines.answerFor("claude", { outcome: "quota_exhausted", text: "" });
+  const held = heldRuns(engines);
+  const { service, host, time } = await start({ changes: [pr1], engines: held.engines });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  const app = async () => (await snapshot(service, cookie)).reviews[id];
+
+  host.open(fork);
+  await time.advance(MIN);
+  await until(stream, "job.changed");
+  host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  await until(stream, "run.started");
+  host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  host.push(FORK, commitSha("8".repeat(40)), []);
+  await time.advance(MIN);
+  await time.advance(0);
+
+  // Claude at its limit: the review waits to run again, and the request a push ended is sent after it.
+  held.release();
+  await until(stream, "job.changed");
+  await time.advance(0);
+  await time.advance(0);
+  expect(heading(host)).not.toStartWith("Didn't look over");
+  expect(line(host)).not.toBe(ENDED);
+  const due = { state: "deferred", sha: fork.head.sha, deferral: { reason: "engine-limit" } };
+  expect(await app()).toMatchObject({ job: { state: "cancelled", cancel: "pushed" }, described: due });
+});
+
+test("the person's own fork, its review deferred behind a request a push ended, then a second push ends that review: both blocks say the request ended, never Waiting (ADR 0092)", async () => {
+  const engines = fakeEngines();
+  engines.answerFor("claude", { outcome: "quota_exhausted", text: "" });
+  const held = heldRuns(engines);
+  const { service, host, time } = await start({ changes: [pr1], engines: held.engines });
+  const cookie = await openApp(service);
+  const stream = messages(await fetch(api(service, "/events"), { headers: { cookie } }));
+  const app = async () => (await snapshot(service, cookie)).reviews[id];
+
+  host.open(fork);
+  await time.advance(MIN);
+  await until(stream, "job.changed");
+  host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  await until(stream, "run.started");
+  host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  host.push(FORK, commitSha("8".repeat(40)), []);
+  await time.advance(MIN);
+  await time.advance(0);
+  held.release();
+  await until(stream, "job.changed");
+  await time.advance(0);
+  await time.advance(0);
+  expect(line(host)).not.toBe(ENDED);
+  const request = (await app())?.job;
+  const review = (await app())?.described;
+  expect(request).toMatchObject({ state: "cancelled", cancel: "pushed" });
+  expect(review).toMatchObject({ state: "deferred" });
+
+  // A second push ends the deferred review too: nothing is due any more, and both blocks say the newer request, the
+  // one the first push ended, ended.
+  host.push(FORK, commitSha("9".repeat(40)), []);
+  await time.advance(MIN);
+  await time.advance(0);
+  await time.advance(0);
+  expect(heading(host)).toBe(`Didn't look over ${commit(fork.head.sha)}`);
+  expect(line(host)).toBe(ENDED);
+  expect(await app()).toMatchObject({
+    job: request ?? {},
+    described: request ?? {},
+  });
+});
+
+test("the person's own fork, its review back in the queue after a restart, a push having ended the request behind it: the review still due decides both blocks (ADR 0092)", async () => {
+  const dir = home();
+  const first = await start({ home: dir, changes: [pr1], engines: heldRuns(fakeEngines()).engines });
+  const cookie = await openApp(first.service);
+  const stream = messages(await fetch(api(first.service, "/events"), { headers: { cookie } }));
+
+  first.host.open(fork);
+  await first.time.advance(MIN);
+  await until(stream, "job.changed");
+  first.host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await first.time.advance(MIN);
+  await until(stream, "run.started");
+  first.host.seedComment(FORK, { author: OWNER, body: "/lookover review" });
+  await first.time.advance(MIN);
+  first.host.push(FORK, commitSha("8".repeat(40)), []);
+  await first.time.advance(MIN);
+  await first.time.advance(0);
+  await first.service.stop();
+
+  // Started again with Claude signed out: the review is back in the queue, waiting, and still due.
+  const second = await start({
+    home: dir,
+    host: first.host,
+    time: first.time,
+    idsFrom: 100,
+    engines: fakeEngines({ signedIn: false }),
+  });
+  await second.time.advance(0);
+  await second.time.advance(0);
+  expect(heading(second.host)).not.toStartWith("Didn't look over");
+  expect(line(second.host)).not.toBe(ENDED);
+  const again = await openApp(second.service);
+  const due = {
+    id: "id-2",
+    state: "deferred",
+    deferral: { reason: "engine-signed-out" },
+    sha: fork.head.sha,
+  };
+  expect((await snapshot(second.service, again)).reviews[id]).toMatchObject({ described: due });
 });
 
 test("a teammate's fork gets nothing; the person's request on it waiting when it is pushed ends on the asked commit only (ADR 0078)", async () => {
@@ -224,7 +437,9 @@ test("a teammate's fork gets nothing; the person's request on it waiting when it
   expect(checks(before)).toEqual(["completed skipped: A newer commit was pushed after the request"]);
   expect(checks(pushed)).toEqual([]);
   expect(engines.runs).toEqual([]);
-  expect(heading(host)).toBe(`Waiting to look over ${commit(before)}`);
+  // The line speaks to the person, in a teammate's description too (ADR 0092).
+  expect(heading(host)).toBe(`Didn't look over ${commit(before)}`);
+  expect(line(host)).toBe(ENDED);
 });
 
 test("a fork's second request waiting when the fork is pushed puts the block of the round that posted back", async () => {

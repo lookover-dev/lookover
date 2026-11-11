@@ -16,6 +16,7 @@ import {
   type HostAccount,
   type Repository,
   type RepositoryRef,
+  repositoryId,
   type SignIn,
   type State,
   statusOf,
@@ -123,8 +124,20 @@ test("signed in on two accounts, both are the connection's, and their two same-n
   const state: State = await snapshot(service, cookie);
   expect(state.connection).toMatchObject({ id: "github:sasensi", state: "connected" });
   expect(state.connection.accounts).toEqual([
-    { account: SASENSI, installationId: 60_000_001, cause: null, owner: true },
-    { account: ORG, installationId: 60_000_002, cause: null, owner: null },
+    {
+      account: SASENSI,
+      installationId: 60_000_001,
+      cause: null,
+      owner: true,
+      granted: [repositoryId("sasensi/lookover-sandbox")],
+    },
+    {
+      account: ORG,
+      installationId: 60_000_002,
+      cause: null,
+      owner: null,
+      granted: [repositoryId("lookover-dev/lookover-sandbox")],
+    },
   ]);
   expect(idsOf(state)).toEqual(["sasensi/lookover-sandbox", "lookover-dev/lookover-sandbox"]);
   expect(Object.keys(state.changes).sort()).toEqual([ORG_PLANTED, PLANTED].sort());
@@ -154,12 +167,19 @@ test("the organisation suspended: its account shows it, naming who suspended it,
   );
   expect(suspended.connection).toMatchObject({ state: "connected", cause: null });
   expect(suspended.connection.accounts).toEqual([
-    { account: SASENSI, installationId: 60_000_001, cause: null, owner: true },
+    {
+      account: SASENSI,
+      installationId: 60_000_001,
+      cause: null,
+      owner: true,
+      granted: [repositoryId("sasensi/lookover-sandbox")],
+    },
     {
       account: ORG,
       installationId: 60_000_002,
       cause: { kind: "uninstalled", suspended: true, suspendedBy: "rhea-k" },
       owner: null,
+      granted: [],
     },
   ]);
   // Kept, not departed: what it waited for is there when it is lifted.
@@ -212,6 +232,7 @@ test("an organisation asking for SSO refuses its repository alone: the poll give
     installationId: 60_000_002,
     cause: sso,
     owner: null,
+    granted: [repositoryId("lookover-dev/lookover-sandbox")],
   });
   // "Refresh" says nothing of it: the account does.
   expect((await post(service, cookie, { type: "refresh" })).status).toBe(200);
@@ -239,6 +260,7 @@ test("an organisation asking for SSO refuses its repository alone: the poll give
     installationId: 60_000_002,
     cause: null,
     owner: null,
+    granted: [repositoryId("lookover-dev/lookover-sandbox")],
   });
   expect(summariesOn(host, ORG_SANDBOX)).toHaveLength(1);
 });
@@ -311,7 +333,13 @@ test("an organisation no longer reached at all departs with its repository; the 
   );
   expect(gone.connection).toMatchObject({ state: "connected", cause: null });
   expect(gone.connection.accounts).toEqual([
-    { account: SASENSI, installationId: 60_000_001, cause: null, owner: true },
+    {
+      account: SASENSI,
+      installationId: 60_000_001,
+      cause: null,
+      owner: true,
+      granted: [repositoryId("sasensi/lookover-sandbox")],
+    },
   ]);
   expect(idsOf(gone)).toEqual(["sasensi/lookover-sandbox"]);
   expect(gone.departed.map((r) => String(r.id))).toEqual(["lookover-dev/lookover-sandbox"]);
@@ -343,7 +371,15 @@ test("no account reached any more: every one departs with its repositories, and 
     (s) => s.connection.state === "connected" && s.repos.length === 1,
   );
   expect(back.connection.cause).toBeNull();
-  expect(back.connection.accounts).toEqual([{ account: SASENSI, installationId, cause: null, owner: true }]);
+  expect(back.connection.accounts).toEqual([
+    {
+      account: SASENSI,
+      installationId,
+      cause: null,
+      owner: true,
+      granted: [repositoryId("sasensi/lookover-sandbox")],
+    },
+  ]);
   expect(idsOf(back)).toEqual(["sasensi/lookover-sandbox"]);
   expect(back.departed.map((r) => String(r.id))).toEqual(["lookover-dev/lookover-sandbox"]);
 });

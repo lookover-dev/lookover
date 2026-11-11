@@ -16,7 +16,6 @@ import {
   type Clock,
   type Connection,
   type ConnectionAccount,
-  changeId,
   changeIdOf,
   changePrefixOf,
   DISCOVERY_RETRY_MS,
@@ -28,7 +27,6 @@ import {
   type Finding,
   GITHUB_WEB,
   type IdGen,
-  type JobState,
   type LoginItemKind,
   type LookRefusal,
   type NoiseChoice,
@@ -55,6 +53,7 @@ import { createConfirm, createReview } from "@lookover/review";
 import type { SettingsFiles } from "@lookover/settings";
 import { openStore, type Store } from "@lookover/store";
 import { createChecks } from "./checks.ts";
+import { chooseAgain, endedSent } from "./choice-again.ts";
 import {
   type AgentPorts,
   type CodingAgentFlow,
@@ -261,6 +260,10 @@ type NoiseRefusal = "no_such_change" | "no_rule" | "no_such_repository" | Dismis
 /** What an engine's activity passes before it leaves the room (ADR 0055): the sink's, else the shapes'. */
 const secretsRemovedOf = (o: Pick<RoomOptions, "secretsRemoved">) => o.secretsRemoved ?? secretShapesRemoved;
 
+/** Where each part logs: where the options say, else (nothing given) to the console. */
+const loggedOf = (o: Pick<RoomOptions, "log">): { log?: (line: string) => void } =>
+  o.log === undefined ? {} : { log: o.log };
+
 /** The running room, as the API reaches it. */
 export interface Room {
   /** The UI's state now: what the events made it, as of this moment. */
@@ -307,9 +310,9 @@ export interface Room {
   unlock(): void;
   /**
    * The first-run setup and each watched repository's switch (ADR 0047); its finish registers start at login as the
-   * owner chose (ADR 0054), and settles once it has.
+   * owner chose (ADR 0054), and settles once it has. The choice made again is the room's own (ADR 0090).
    */
-  setup: Omit<SetupFlow, "finish"> & { finish(): Promise<void> };
+  setup: Omit<SetupFlow, "finish" | "again" | "heldAtStart"> & { finish(): Promise<void> };
   /** The person on GitHub (ADR 0066): their sign-in to the shared App, and their asks to install it. */
   github: {
     /**
@@ -327,11 +330,16 @@ export interface Room {
      */
     askToInstall(account: string): Promise<"ok" | { refused: AskToInstallRefusal }>;
     /**
-     * An install look (ADR 0088), asked by a link to GitHub's install page or settings, the window coming back or
-     * "Check again", and begun by an ask kept too: the installations listed now, then every 4 s for 3 minutes or until
-     * something new arrives; asked while one runs, its end moved on. Refused before a sign-in.
+     * An install look (ADR 0088), asked by a link to GitHub's install page or settings or "Check again", and begun
+     * by an ask kept too: the installations listed now, then every 4 s for 3 minutes or until something new arrives;
+     * asked while one runs, its end moved on. Refused before a sign-in.
      */
     look(): Promise<"ok" | { refused: LookRefusal }>;
+    /**
+     * The tab coming back (ADR 0091): while a look runs, the installations listed now, its end unmoved; else, or
+     * nobody signed in, nothing.
+     */
+    returned(): void;
   };
   /**
    * The settings in their files (ADR 0049): the owner's defaults (`settings.set`), a watched repository's own
@@ -495,7 +503,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     asked: () => shown.connection.unreached.filter((u) => u.askedAt !== null).map((u) => u.account.login),
     log: logLine,
   });
-  const listedAtStart = await opened(store, github);
+  const { listed: listedAtStart, again: againAtStart } = await opened(store, github);
   // What the installations list now; what the store listed last when they weren't listed (nobody signed in yet).
   const watched = watchedOf(listedAtStart ?? store.repos.listed());
   watching.all = () => watched.all;
@@ -750,7 +758,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       statusNow(store, changeIdOf(change.repo, change.number), threads, statusFacts),
   });
   /** Each part logs where the options say, else to the console. */
-  const logged = o.log === undefined ? {} : { log: o.log };
+  const logged = loggedOf(o);
   // The check follows every job from the moment it is recorded (ADR 0043); `publish` writes it.
   const checks = createChecks({
     store,
@@ -812,6 +820,11 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     settings,
     // The store's setup at each decision (ADR 0079): nothing asks by itself before the repositories are chosen.
     reposChosen: () => reposChosen(store.setup.read()),
+    // Nothing taken and nothing owed written from the choice made again until another person's sign-in is held (ADR
+    // 0090): what would be taken then would post as the last person.
+    mayTake: () => switching === null,
+    // An ask from the app is the sign-in's it began under: none past another person's (ADR 0090).
+    signInTurn: () => (switching === null ? signInTurn : null),
     // An engine's limit given a new end (the queue sends every one): the checks waiting on it say the new reset.
     emit: (body) => {
       emit(body);
@@ -865,7 +878,9 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     },
     take: () => queue.take(),
     discover: (why) => rediscover(why),
-    holding: () => github.holding(),
+    // While another person's sign-in is on its way to be held (ADR 0090) nothing is: every poll ends at its next wait,
+    // nothing of it applied or handed over, and what it read is read again under the new one.
+    holding: () => (switching === null ? github.holding() : null),
     accountRefused: (repo, cause, at) => github.refused(repo, cause, at),
     accountAnswered: (repo, at) => github.answered(repo, at),
     log: logLine,
@@ -877,6 +892,15 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   };
   /** Whether `stop` began: a read that answers late sends nothing then. */
   let stopping = false;
+  /**
+   * While another person's sign-in is on its way to be held (ADR 0090), from the choice of repositories made again
+   * until it is, what settles then; null otherwise. Meanwhile the poller hands nothing over, the queue takes nothing
+   * and writes nothing owed, and "Review now" waits for it, so nothing read, taken or asked under the last person runs
+   * or posts as the new one.
+   */
+  let switching: Promise<void> | null = null;
+  /** Which person's sign-in the app's asks are made under: moves as another person's begins to be held (ADR 0090). */
+  let signInTurn = 0;
   /** Whether "Reconnect" runs: it lists the installation's repositories itself, first. */
   let reconnecting = false;
   /** The installation's repositories listed at the poller's asking, while they are: one listing at a time. */
@@ -928,7 +952,42 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   });
   // Everything the queue takes with is made: the self-tests that ended meanwhile are told it now.
   tested.ready(queue.tested);
-  await sinceLastStart({ store, github, listed: listedAtStart, leave: moves.leave, emit, at: startedAt });
+  const setupFlow = createSetup({
+    store,
+    clock: o.clock,
+    emit,
+    repos: () => watched.all,
+    github,
+    review: queue.firstReview,
+    chosen: () => queue.chosen(),
+  });
+  /**
+   * The sign-in changed (ADR 0090): the choice of repositories made again with the room's parts (`chooseAgain`), every
+   * run under way stopped, every review not finished cancelled, nothing written to GitHub, and the setup back at the
+   * GitHub step's start, all in this turn. Settles once the stopped runs have ended; whoever then signs in is held,
+   * and their install waited for.
+   */
+  const signInChanged = (): Promise<void> =>
+    chooseAgain({
+      store,
+      stopRuns: () => queue.leave(""),
+      checks,
+      shown: () => shown,
+      emit,
+      now: () => o.clock.now(),
+      setup: setupFlow,
+    });
+  await sinceLastStart({
+    store,
+    github,
+    listed: listedAtStart,
+    leave: moves.leave,
+    signInChanged: againAtStart
+      ? () => signInChangedAtStart({ store, github, signInChanged, setup: setupFlow })
+      : null,
+    emit,
+    at: startedAt,
+  });
   const waitsAtStart = holdPollsForStartLimit(github, poller, o.clock.now());
   // The first listing: what changed while the service was stopped. A job the last service left running never
   // finished: it runs again, once, or fails, "the service stopped"; then the jobs left waiting are taken (#62).
@@ -941,6 +1000,9 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   if (shown.connection.state !== "not-connected" && github.down() === null && !waitsAtStart)
     await poller.first();
   queue.recover();
+  // The repositories chosen already: the coding agent's requests kept before are answered now (ADR 0090), those a
+  // stopped service left kept, or kept until a start set up at once (`setUpAtOnce`) chose without the setup's write.
+  queue.chosen();
   // The run folders older than 30 days go, now that the recovery said which runs go on, then once a day (ADR 0056).
   const runFolders = createRunFolders({
     runsDir: join(o.home, "runs"),
@@ -959,14 +1021,6 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     emit,
     shown: () => shown.service.atLogin,
     log: logLine,
-  });
-  const setupFlow = createSetup({
-    store,
-    clock: o.clock,
-    emit,
-    repos: () => watched.all,
-    github,
-    review: queue.firstReview,
   });
   // The setup done: start at login registered as the owner chose (ADR 0054).
   const setup: Room["setup"] = {
@@ -1091,12 +1145,40 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   };
 
   /**
+   * Another person's sign-in held in place of the setup's (ADR 0090): the sign-in changed first (`signInChanged`),
+   * then the last person's dismissal sends cut, and their check, block, reaction and dismissal writes under way
+   * landed, all before it is held, nothing handed
+   * over, taken or asked meanwhile (`switching`), so nothing of the last person's posts as them; the connection names
+   * nobody's installation until theirs is found. Then what waited (a "Review now" asked meanwhile) is taken, as them.
+   */
+  const switchedTo = async (made: SignIn): Promise<void> => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    switching = promise;
+    signInTurn++;
+    try {
+      await signInChanged();
+      await dismissals.cut();
+      await checks.idle();
+      await reactions.idle();
+      // No installation of theirs found yet: the connection names nobody's, as a fresh setup's does.
+      if (shown.connection.id !== null)
+        emit({ type: "connection.changed", at: o.clock.now(), patch: { id: null } });
+      await github.signedIn(made);
+    } finally {
+      switching = null;
+      resolve();
+    }
+    queue.take();
+  };
+  /**
    * A sign-in to the shared App made (ADR 0066): kept and held, the ports posting as its person; then its install
    * waited for, or, installed already (Sign in again once signed out), the connection named for the person and its
-   * repositories and changes listed again.
+   * repositories and changes listed again. Another person than the setup's (ADR 0090): `switchedTo` first.
    */
   const signedIn = async (made: SignIn): Promise<void> => {
-    await github.signedIn(made);
+    if (anotherThanSetups(store.setup.person(), made.person)) await switchedTo(made);
+    else await github.signedIn(made);
+    store.setup.keepPerson(made.person.id);
     // Their organisations, as their `gh` names them: read once per sign-in, never waited for.
     void unreached.read().catch(unshown);
     // Another person signed in: their changes and the others' are told apart for them now.
@@ -1124,8 +1206,15 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
         return answer;
       },
       look: github.look,
+      returned: github.returned,
     },
-    review: queue.request,
+    // Asked while another person's sign-in is on its way to be held (ADR 0090): asked once it is, as them.
+    review: async (changeId) => {
+      await switching;
+      // Asked by the last person while its listing was under way: answered by the choice made again, nothing asked.
+      const answer = await queue.request(changeId);
+      return answer === "signed-in-since" ? "ok" : answer;
+    },
     checkEngines: queue.checkEngines,
     signIn: signIn.start,
     reroute: queue.reroute,
@@ -1154,7 +1243,13 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       }),
       watched.find,
       (id) => store.rounds.ledger(id),
-      dismissals.dismiss,
+      // Asked while another person's sign-in is on its way to be held (ADR 0090): the earlier person's round is no
+      // longer theirs to post on, and the setup is being made again; refused once it is held, nothing saved or posted.
+      async (changeId, findingId) => {
+        if (switching === null) return dismissals.dismiss(changeId, findingId);
+        await switching;
+        return "settled";
+      },
     ),
     startAtLogin: atLogin.choose,
     agent: { check: codingAgent.check, path: codingAgent.path, skill: codingAgent.skill },
@@ -1283,30 +1378,44 @@ function setUp(store: Store, o: Pick<RoomOptions, "setup" | "setUpAtOnce">): voi
  * nothing was listed. With nobody signed in, the setup's GitHub step shows again, whatever the setup kept and whatever
  * else the data folder holds (ADR 0073: an App of its own from an earlier version is read no more). A sign-in kept
  * while the setup still asks for one (the service stopped before the setup heard of it) has its install waited for,
- * as `signedIn` would.
+ * as `signedIn` would. `again`: nobody is signed in while the setup said someone was, or another person than the
+ * setup's is (ADR 0090), so the start makes the choice of repositories again (ADR 0079, ADR 0090), once its events
+ * can be sent. A setup that names nobody (set up at once, or before its person was kept) is the person's signed in
+ * now, nothing else changed.
  */
-async function opened(store: Store, github: Installation): Promise<RepositoryRef[] | null> {
+async function opened(
+  store: Store,
+  github: Installation,
+): Promise<{ listed: RepositoryRef[] | null; again: boolean }> {
   const listed = await github.open(appInstalled(store.setup.read()));
-  const signedIn = github.person() !== null;
+  const person = github.person();
   const asked = signedInAtSetup(store.setup.read());
-  // Its furthest step reached goes back there too: whoever signs in next chooses the repositories again before
-  // anything is asked by itself (ADR 0079).
-  if (!signedIn && asked)
-    store.setup.write({ done: false, step: "github", reached: "github", github: "start" });
-  else if (signedIn && !asked) store.setup.write({ github: "waiting-for-install" });
-  return listed;
+  if (person !== null && !asked) store.setup.write({ github: "waiting-for-install" });
+  const kept = store.setup.person();
+  if (person !== null && kept === null) store.setup.keepPerson(person.id);
+  return { listed, again: (person === null && asked) || anotherThanSetups(kept, person) };
 }
 
-/** The job states that haven't ended: a repository that leaves cancels its jobs in them. */
-const PENDING = {
-  queued: true,
-  deferred: true,
-  running: true,
-  done: false,
-  skipped: false,
-  cancelled: false,
-  failed: false,
-} as const satisfies Record<JobState, boolean>;
+/** Whether `person`, signed in, is another than the one the setup belongs to (ADR 0090): never when it names nobody. */
+const anotherThanSetups = (kept: number | null, person: { id: number } | null): boolean =>
+  kept !== null && person !== null && person.id !== kept;
+
+/**
+ * The sign-in changed while the service was stopped (ADR 0090): the choice of repositories made again, then the setup
+ * kept as the person's signed in now, or nobody's; with someone signed in, the GitHub step waits for their install
+ * (`SetupFlow.heldAtStart`).
+ */
+async function signInChangedAtStart(d: {
+  store: Store;
+  github: Pick<Installation, "person">;
+  signInChanged(): Promise<void>;
+  setup: Pick<SetupFlow, "heldAtStart">;
+}): Promise<void> {
+  await d.signInChanged();
+  const person = d.github.person();
+  d.store.setup.keepPerson(person?.id ?? null);
+  if (person !== null) d.setup.heldAtStart();
+}
 
 /** What the repositories the installation adds or removes while the room runs reach (ADR 0053). */
 interface MovesDeps {
@@ -1355,14 +1464,9 @@ function repositoryMoves(d: MovesDeps) {
       const repoId = repoIdOf(repo);
       const stopped = d.stopRuns(changes);
       d.store.repos.removed(repo, changes, d.now());
-      const { setup, changes: open, reviews } = d.shown();
+      const { setup, changes: open } = d.shown();
       // Each review the UI shows waiting or running is sent its job as it ended: cancelled, its run gone.
-      for (const [id, review] of Object.entries(reviews)) {
-        if (!id.startsWith(changes) || review.job === null || !PENDING[review.job.state]) continue;
-        const ended = d.store.jobs.latest(changeId(id));
-        if (ended !== null)
-          d.emit({ type: "job.changed", at: d.now(), changeId: ended.changeId, job: ended.job });
-      }
+      endedSent(d, changes);
       const first = setup.firstReviewChange;
       if (first !== null && open[first]?.repoId === repoId) d.store.setup.write({ firstReviewChange: null });
       d.watched.remove(repo);
@@ -1385,13 +1489,15 @@ function saidAtStart({ skipped, dropped, differs }: Started, logLine: (line: str
 /**
  * What changed while the service was stopped (ADR 0053), sent before anything is listed: each repository the store
  * listed and the installation no longer lists leaves; a key that no longer opens, or GitHub refusing the App, its
- * installation or its repositories, is shown at once as the connection's cause.
+ * installation or its repositories, is shown at once as the connection's cause. The sign-in changed since (from
+ * `opened`, ADR 0090): `signInChanged`, so nothing of the earlier session resumes, runs or posts; null when it didn't.
  */
 async function sinceLastStart(d: {
   store: Store;
   github: Installation;
   listed: readonly RepositoryRef[] | null;
   leave(repo: RepositoryRef): Promise<void>;
+  signInChanged: (() => Promise<void>) | null;
   emit(body: EventBody): void;
   at: number;
 }): Promise<void> {
@@ -1399,6 +1505,7 @@ async function sinceLastStart(d: {
   if (listed !== null)
     for (const repo of d.store.repos.listed())
       if (!listed.some((r) => sameRepository(r, repo))) await d.leave(repo);
+  if (d.signInChanged !== null) await d.signInChanged();
   const down = d.github.down();
   if (down !== null)
     d.emit({
@@ -1507,7 +1614,7 @@ function withNoise(
   commands: Omit<Room["settings"], "quiet">,
   repoOf: (changeId: ChangeId) => RepositoryRef | null,
   ledger: (changeId: ChangeId) => Finding[],
-  dismiss: Dismissing["dismiss"],
+  dismiss: (...args: Parameters<Dismissing["dismiss"]>) => Promise<ReturnType<Dismissing["dismiss"]>>,
 ): Room["settings"] {
   return {
     ...commands,
@@ -1515,7 +1622,7 @@ function withNoise(
       const repo = repoOf(choice.changeId);
       if (repo === null) return "no_such_change";
       const findings = ledger(choice.changeId);
-      if (choice.kind === "wrong") return dismiss(choice.changeId, choice.findingId);
+      if (choice.kind === "wrong") return await dismiss(choice.changeId, choice.findingId);
       if (choice.kind === "blocking-only") return commands.set(repoIdOf(repo), "strictness", "blocking");
       const finding = findings.find((f) => f.id === choice.findingId);
       if (finding === undefined) return "no_such_finding";

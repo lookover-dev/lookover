@@ -474,7 +474,8 @@ export function Palette({ mode: asked, onClose }: { mode: PaletteMode | null; on
 
   const all = useMemo<PaletteItem[]>(() => {
     const go = (to: string) => () => navigate(to);
-    // Review a pull request…: the person's first, then others' (ADR 0078), none that runs or waits.
+    // Review a pull request…: only those its review page offers Review now or Review again for
+    // (ADR 0092), the person's first, then others' (ADR 0078).
     const reviewable = paletteReviews(state, mode);
     const changes: PaletteItem[] = reviewable.map((it) => {
       const c = chip(it);

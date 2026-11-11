@@ -236,6 +236,100 @@ test("asked to install on ledger-hq, the drawer's owner approves the request whi
   expect(unreachedOf(found)).toEqual([["ledger-labs", true, false]]);
 });
 
+test("GitHub slow to read new repositories, the owner's approval found by the look: ledger-hq grants its repository while it is read (ADR 0091)", async () => {
+  await named();
+  expect((await send(door, { type: "connection.askToInstall", account: "ledger-hq" })).status).toBe(200);
+  expect(await inject(door, "first-read-slow")).toBe(200);
+  expect(await inject(door, "owner-approves")).toBe(200);
+  await advance(door, 4_000);
+  const hq = (s: State) => s.connection.accounts.find((a) => a.account.login === "ledger-hq");
+  const reading = await eventually(
+    () => snapshotOf(door),
+    (s) => hq(s) !== undefined,
+  );
+  expect(hq(reading)?.granted).toEqual([repositoryId("ledger-hq/ledger-app")]);
+  expect(reading.repos.map((r) => r.id)).not.toContain(repositoryId("ledger-hq/ledger-app"));
+  await advance(door, 30_000);
+  const read = await eventually(
+    () => snapshotOf(door),
+    (s) => s.repos.some((r) => r.id === repositoryId("ledger-hq/ledger-app")),
+  );
+  expect(hq(read)?.granted).toEqual([repositoryId("ledger-hq/ledger-app")]);
+});
+
+test("a scenario loaded while a first read is held stops the room at once: the stop releases it, on a clock standing still", async () => {
+  await named();
+  expect((await send(door, { type: "connection.askToInstall", account: "ledger-hq" })).status).toBe(200);
+  expect(await inject(door, "first-read-slow")).toBe(200);
+  expect(await inject(door, "owner-approves")).toBe(200);
+  await advance(door, 4_000);
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.connection.accounts.some((a) => a.account.login === "ledger-hq"),
+  );
+  await loaded("S16");
+});
+
+/** The drawer's command answered before `ms` of real time: never waiting on the clock it disables meanwhile. */
+async function answered(command: Promise<number>, ms = 2_000): Promise<number | "waiting"> {
+  const waiting = new Promise<"waiting">((resolve) => setTimeout(() => resolve("waiting"), ms));
+  return Promise.race([command, waiting]);
+}
+
+test("GitHub slow to read new repositories: a drawer command never waits on a held first read, the clock alone brings the repository (ADR 0091)", async () => {
+  await named();
+  const added = repositoryId("sasensi/docs-site");
+  expect(await inject(door, "first-read-slow")).toBe(200);
+  // Listed again now, its first read held: the command answers, the repository not in the state yet.
+  expect(await answered(inject(door, "repository-added"))).toBe(200);
+  expect((await snapshotOf(door)).repos.map((r) => r.id)).not.toContain(added);
+  // Every command that lists or reconnects while that first read is held answers too.
+  expect(await answered(inject(door, "repository-added"))).toBe(200);
+  expect(await answered(inject(door, "agent-opens-change"))).toBe(200);
+  expect(await answered(inject(door, "connection-lost"))).toBe(200);
+  expect(await answered(inject(door, "sso-asked"))).toBe(200);
+  expect((await send(door, { type: "connection.askToInstall", account: "ledger-hq" })).status).toBe(200);
+  expect(await answered(inject(door, "owner-installs"))).toBe(200);
+  expect((await snapshotOf(door)).repos.map((r) => r.id)).not.toContain(added);
+  await advance(door, 30_000);
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.repos.some((r) => r.id === added),
+  );
+});
+
+test("a reset or a load while the app's reconnect waits on a held first read: the load lets go of the hold, both answer (ADR 0091)", async () => {
+  for (const next of ["S16", "S10"]) {
+    await named();
+    expect(await inject(door, "first-read-slow")).toBe(200);
+    expect(await answered(inject(door, "repository-added"))).toBe(200);
+    // The app's Reconnect, behind the listing the repository's held first read keeps under way.
+    const reconnect = send(door, { type: "connection.reconnect" }).then((res) => res.status);
+    expect(await answered(reconnect, 200)).toBe("waiting");
+    expect(
+      await answered(
+        load(door, next).then((res) => res.status),
+        5_000,
+      ),
+    ).toBe(200);
+    expect(await answered(reconnect)).toBe(200);
+  }
+});
+
+test("a restart while the app's reconnect waits on a held first read: the restart lets go of the hold, both answer, the slowness goes on (ADR 0091)", async () => {
+  await named();
+  expect(await inject(door, "first-read-slow")).toBe(200);
+  expect(await answered(inject(door, "repository-added"))).toBe(200);
+  const reconnect = send(door, { type: "connection.reconnect" }).then((res) => res.status);
+  expect(await answered(reconnect, 200)).toBe("waiting");
+  expect(await answered(inject(door, "login-taken"), 5_000)).toBe(200);
+  expect(await answered(reconnect)).toBe(200);
+  // The restarted room read the repository it had; one added after still waits out the 30 s.
+  const later = repositoryId("sasensi/status-page");
+  expect(await answered(inject(door, "repository-added"))).toBe(200);
+  expect((await snapshotOf(door)).repos.map((r) => r.id)).not.toContain(later);
+});
+
 test("the drawer has an owner suspend the App on ledger-dev: its account says so, naming who", async () => {
   await named();
   expect(await inject(door, "organisation-suspended")).toBe(200);

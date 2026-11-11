@@ -33,6 +33,7 @@ import {
   type RepositoryId,
   type RepositoryRef,
   type ResolvedSettings,
+  type ReviewJob,
   type Rule,
   readState,
   repositoryId,
@@ -449,6 +450,14 @@ function ownerNames(state: State): Map<ChangeId, ChangeId> {
   return renamed;
 }
 
+/** The job with the changes it waits behind named again; as it was when it waits behind none. */
+function turnNamed(job: ReviewJob | null, named: (id: ChangeId) => ChangeId): ReviewJob | null {
+  const turn = job?.turn;
+  return job === null || turn?.behind !== "engines"
+    ? job
+    : { ...job, turn: { ...turn, changes: turn.changes.map(named) } };
+}
+
 /**
  * The UI's state with every change named `<owner>/<name>#<n>` (ADR 0066), as the store names it once migrated, when
  * the events a data folder kept from before name some `<name>#<n>` (they are history, kept as written); null when
@@ -465,12 +474,9 @@ function ownerNamed(state: State): State | null {
     changes[named(change.id)] = { ...change, id: named(change.id) };
   const reviews: State["reviews"] = {};
   for (const review of Object.values(state.reviews)) {
-    const turn = review.job?.turn;
-    const job =
-      review.job === null || turn?.behind !== "engines"
-        ? review.job
-        : { ...review.job, turn: { ...turn, changes: turn.changes.map(named) } };
-    reviews[named(review.changeId)] = { ...review, changeId: named(review.changeId), job };
+    const job = turnNamed(review.job, named);
+    const described = turnNamed(review.described, named);
+    reviews[named(review.changeId)] = { ...review, changeId: named(review.changeId), job, described };
   }
   const first = state.setup.firstReviewChange;
   const setup = first === null ? state.setup : { ...state.setup, firstReviewChange: named(first) };

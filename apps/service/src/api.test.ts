@@ -33,6 +33,7 @@ afterEach(stopAll);
 const expectedReview1: Review = {
   changeId: expectedChange1.id,
   job: null,
+  described: null,
   run: null,
   loop: null,
   rounds: [],
@@ -100,6 +101,8 @@ test("the one-time token becomes a cookie, and the snapshot lists the sandbox's 
         installationId: 60_000_001,
         cause: null,
         owner: true,
+        // What it grants, as Lookover names them (ADR 0091): the sandbox, already read.
+        granted: ["sasensi/lookover-sandbox"],
       },
     ],
     // Listed by the start, under the sign-in it read (ADR 0086).

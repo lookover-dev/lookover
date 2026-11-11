@@ -4,6 +4,7 @@
 import type { Command, Repository, Rule, SettingKey, SettingValue } from "@lookover/contracts";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { browserLanding, keepPlace, pageOf } from "../keep-place.ts";
 import { MORE_SETTINGS } from "../shell.tsx";
 import {
   useApp,
@@ -91,23 +92,6 @@ function SettingControl({
 /** The settings of your defaults picked from a list, in the order the page shows them. */
 const DEFAULT_PICKS = ["strictness", "depth", "reviewers"] as const satisfies readonly SettingKey[];
 
-/** What `openPlace` scrolls: an element of the page, and the section it lands on when it is one's own place. */
-export interface Place {
-  closest(selector: string): { scrollIntoView(options?: ScrollIntoViewOptions): void } | null;
-  scrollIntoView(options?: ScrollIntoViewOptions): void;
-}
-
-/**
- * Settings opened at a place: a section's own (#github, #agent, in a `Group` marked `landing`) opens its group, the
- * label under the top bar and nothing of the card above it showing (`.page > .grp`'s scroll margin); a setting's row
- * is brought to the middle, where it is lit.
- */
-export function openPlace(target: Place | null) {
-  const group = target?.closest("[data-landing]");
-  if (group) group.scrollIntoView({ block: "start" });
-  else target?.scrollIntoView({ block: "center" });
-}
-
 export function Settings() {
   const state = useAppState();
   const { mode } = useApp();
@@ -117,19 +101,24 @@ export function Settings() {
   const { hash } = useLocation();
   const s = state.settings;
 
-  // Once the page has come in: measured while `page-in` still lifts it, the place would land 6 px off.
+  // Once the page has come in: measured while `page-in` still lifts it, the place would land 6 px off. Then kept
+  // until the person acts (ADR 0091): another hash or the page left ends it here.
   useEffect(() => {
     if (!hash) return;
     let gone = false;
+    let stop = () => {};
     const coming = document
       .getAnimations()
       .filter((a) => a instanceof CSSAnimation && a.animationName === "page-in")
       .map((a) => a.finished);
     void Promise.allSettled(coming).then(() => {
-      if (!gone) openPlace(document.getElementById(hash.slice(1)));
+      if (gone) return;
+      const place = () => document.getElementById(hash.slice(1));
+      stop = keepPlace(place, browserLanding(pageOf(place())));
     });
     return () => {
       gone = true;
+      stop();
     };
   }, [hash]);
 

@@ -85,16 +85,21 @@
 // its caller marks `read`) is tried 3 times in all, 1 s then 3 s apart, after any failure of the connection or a 502,
 // 503 or 504; a write is tried again only after a failure that means it never reached GitHub (no address, the
 // connection refused, the certificate refused: an exact list of codes). What still fails is `unavailable`, with the
-// last failure's words and the tries it took; a limit or any other refusal is never tried again. Nothing else here
-// retries but a token GitHub no longer takes: `publish` does. `view` shows an inline comment as GitHub does after a
+// last failure's words and the tries it took; a limit or any other refusal is never tried again. Signing in's device
+// code, poll and refresh are writes under the same rule (ADR 0092): 60 s a try, sent again only after a failure on
+// that list, a try past its limit `unavailable`. Nothing else here retries but a token GitHub no longer takes:
+// `publish` does. `view` shows an inline comment as GitHub does after a
 // push: `line` (and a range's `endLine`) null once outdated, `originalLine` where it was posted.
 // Signing in's errors: GitHub's OAuth endpoints answer their refusals with status 200 and an `error` field; the device
 // flow's own are polls' outcomes, a refresh's `bad_refresh_token` (or `incorrect_client_credentials`, a refresh token
-// GitHub doesn't know) is `unauthorized` with the cause `signed-out`, any other is `invalid`; a network failure or a
-// 5xx is `unavailable`. On the person's session a token refused (401) while not yet expired is renewed once and the
+// GitHub doesn't know) is `unauthorized` with the cause `signed-out`, any other is `invalid`; a network failure, a
+// 5xx or a try past its 60 s is `unavailable`, sent again only when it never reached GitHub (ADR 0080, 0092). On the
+// person's session a token refused (401) while not yet expired is renewed once and the
 // call made again; a 401 on a token just renewed, a refresh refused, or no sign-in kept is `signed-out`, which stays,
-// with no refresh, until the keeper holds another sign-in; a renewed sign-in the keeper fails to write is
-// `unavailable`, held and written again before its first use; an act refused asking for SAML SSO (a 403 with GitHub's
+// with no refresh, until the keeper holds another sign-in; another person's sign-in kept is `signed-out` on a session
+// that held someone else (ADR 0090), for good: no call of it made, renewed or made again with their token; a
+// renewed sign-in the keeper fails to write is `unavailable`, held and written again before its first use; an act
+// refused asking for SAML SSO (a 403 with GitHub's
 // `X-GitHub-SSO: required; url=…`, or its words "SAML enforcement", REST's or GraphQL's) is `unauthorized` with the
 // cause `sso` of the repository's owner, GitHub's page in its `url` when it gave one: that account's, never the
 // connection's; an act refused (403, or GraphQL's `FORBIDDEN`) with no cause named is the person's own permission,

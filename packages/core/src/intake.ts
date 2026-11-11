@@ -7,14 +7,17 @@
 // than its base) is never reviewed unless asked by hand (ADR 0048): its code could try to steer the reviewer. It is
 // skipped, its check saying why. Before every rule: until the person has chosen the repositories in setup
 // (`reposChosen`, ADR 0079), nothing asks by itself, so opening and a push are not asked, whatever the switches say
-// (the owner's fork's told skip included); what the person asks in person is answered as before.
-import type { Change, ReviewJob, SettingValues, SkipReason, Trigger } from "@lookover/contracts";
+// (the owner's fork's told skip included); what the person asks in person is answered as before. The coding agent's
+// request (a review request comment carrying `lookover wait`'s marker, ADR 0081) is not asked in person: before the
+// choice it is not asked either, and waits for the choice (ADR 0090).
+import type { AskedBy, Change, ReviewJob, SettingValues, SkipReason, Trigger } from "@lookover/contracts";
 
 /**
  * `job`: a review job is asked for. `skipped`: the job is recorded as skipped, with the reason on the check.
  * `not-asked`: a push with reviews after every push switched off, another author's change on a trigger nobody
- * asked in person, or a trigger nobody asked in person before the repositories are chosen (ADR 0079). Nobody asked,
- * so there is no job and nothing on GitHub: the change waits for a review request.
+ * asked in person, or a trigger nobody asked in person before the repositories are chosen (ADR 0079), the coding
+ * agent's request included (ADR 0090). Nobody asked, so there is no job and nothing on GitHub: the change waits for a
+ * review request (the agent's, for the choice).
  */
 export type Intake = { kind: "job" } | { kind: "skipped"; reason: SkipReason } | { kind: "not-asked" };
 
@@ -34,16 +37,21 @@ const ASKED_BY = {
 
 const automatic = (trigger: Trigger): boolean => ASKED_BY[trigger] === "automatic";
 
+/**
+ * `askedBy`: who wrote a review request comment (ADR 0081), the person or their coding agent; null for the other
+ * triggers.
+ */
 export function intake(
   change: Pick<Change, "author" | "draft" | "fork">,
   repository: { enabled: boolean; settings: Pick<SettingValues, "onOpen" | "onPush"> },
   trigger: Trigger,
   setup: { reposChosen: boolean },
+  askedBy: AskedBy | null,
 ): Intake {
   const skip = (reason: SkipReason): Intake => ({ kind: "skipped", reason });
-  // Before the person has chosen the repositories, nothing asks by itself: a repository they meant to leave out
-  // never sees Lookover (ADR 0079). First, so not even the owner's fork is told why.
-  if (automatic(trigger) && !setup.reposChosen) return { kind: "not-asked" };
+  // Before the person has chosen the repositories, nothing asks by itself, nor does their coding agent: a repository
+  // they meant to leave out never sees Lookover (ADR 0079, ADR 0090). First, so not even the owner's fork is told why.
+  if ((automatic(trigger) || askedBy === "agent") && !setup.reposChosen) return { kind: "not-asked" };
   // A push with the switch off asks nothing, so there is nothing to skip, whoever's change it is (ADR 0043).
   if (trigger === "push" && !repository.settings.onPush) return { kind: "not-asked" };
   // Owner-only in v1: the owner's coding agents push as the owner, so "agent" is the owner too (ADR 0016); the

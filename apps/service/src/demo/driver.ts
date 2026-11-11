@@ -23,6 +23,7 @@ import {
   type EngineId,
   FAULTS,
   type FaultId,
+  type Gh,
   HostError,
   type JobFailure,
   type PathOffer,
@@ -81,7 +82,23 @@ export interface DemoRoomOptions {
    * it in as the scenario's owner.
    */
   gh?: MemoryGh;
+  /**
+   * The person's `gh` slow from the start ("gh-slow", ADR 0091): what it names held until the clock is 30 s past the
+   * seed's end, so a page opened on the story sees the organisations arrive. Absent, it answers at once.
+   */
+  ghSlow?: true;
+  /**
+   * The story started afresh, its `gh` slow ("gh-slow"): the service loads this scenario again, `ghSlow` set, once
+   * the commands under way (`settled`) have answered; what the load answered. Absent, the fault refuses.
+   */
+  againWithGhSlow?: (settled: Settled) => Promise<"ok" | { failed: string }>;
 }
+
+/**
+ * The commands under way, a load or a restart aside: settled once each has answered, whatever it answered; null when
+ * none is, so nothing is waited for.
+ */
+export type Settled = () => Promise<void> | null;
 
 /** Why a fault did nothing: the story has nothing left for it. */
 export type InjectRefusal =
@@ -95,7 +112,8 @@ export type InjectRefusal =
   | "no_sign_in"
   | "not_signed_in"
   | "no_organisation_reached"
-  | "nothing_asked";
+  | "nothing_asked"
+  | "no_load";
 
 export interface DemoRoom {
   /** The room now: another one once a fault restarted the service. */
@@ -105,9 +123,15 @@ export interface DemoRoom {
    * Makes a fault happen now, or says why it can't. One that restarts the service waits for `settled` (every
    * other command under way answered, from the room it reached) before that room stops.
    */
-  inject(fault: FaultId, settled?: () => Promise<void>): Promise<"ok" | InjectRefusal>;
+  inject(fault: FaultId, settled?: Settled): Promise<"ok" | InjectRefusal>;
   /** The restart under way, which commands refuse ("loading") as during a load; null when none is. */
   restarting(): Promise<void> | null;
+  /**
+   * Lets go of the first reads "first-read-slow" holds, which only the demo clock ends: what a load calls before it
+   * waits for commands under way, as one may wait on a held read while the load stands that clock still. What it
+   * answers holds again those the clock hasn't ended, for a load that failed and keeps this room.
+   */
+  letGo(): () => void;
   /**
    * GitHub's pages, faked on this world's host (ADR 0053): the answer to a request for one of them under
    * `DEMO_API.github`, null for any other: the device page a sign-in's code is entered on, the shared App's install
@@ -160,6 +184,10 @@ const FETCH_WALL_MS = 10 * 60_000;
 const CONNECTION_LOST_MS = 20_000;
 /** How long GitHub takes to list the person's accounts when the drawer says it is slow ("accounts-slow"). */
 const ACCOUNTS_SLOW_MS = 30_000;
+/** How long the person's `gh` takes to name their organisations once the story started afresh ("gh-slow"). */
+const GH_SLOW_MS = 30_000;
+/** How long GitHub takes to answer a repository's first poll when the drawer says it is slow ("first-read-slow"). */
+const FIRST_READ_SLOW_MS = 30_000;
 /** Who suspends the shared App on an organisation when the drawer says so, as GitHub names them: an owner of it. */
 const SUSPENDED_BY = "mira";
 /** The repositories "A repository is added to the App" makes on the owner's account, in turn. */
@@ -260,6 +288,8 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
   // The owner's own `gh`, in memory (ADR 0059), as the world says it: it outlives a restart, as the owner's sign-in
   // would.
   const gh = ghOf(scenario.world, o.gh);
+  /** The room reads it slow under "gh-slow": what it names answers once the clock is 30 s past the seed's end. */
+  const roomGh = o.ghSlow ? heldUntil(gh, clock, start + scenario.seed + GH_SLOW_MS) : gh;
   let made = 0;
   const optionsOn = (store: Store, own: ReturnType<typeof roomClock>): RoomOptions => ({
     home: o.home,
@@ -315,7 +345,7 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     ...(o.eventsKept === undefined ? {} : { eventsKept: o.eventsKept }),
     ...(o.log === undefined ? {} : { log: o.log }),
     ...(o.secretsRemoved === undefined ? {} : { secretsRemoved: o.secretsRemoved }),
-    gh,
+    gh: roomGh,
     // Demo mode and `bun run proof` follow the machine they run on: the install commands are this machine's.
     platform: process.platform,
   });
@@ -323,7 +353,46 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
   const store = openStore({ home: o.home, durable: false, eventsFrom: o.eventsFrom ?? 0 });
   // The world's repositories switched off, through the store's switch before the room first reads it (ADR 0084).
   for (const repo of scenario.world.off ?? []) store.repos.setEnabled(repo, false);
-  let room = await buildRoom(optionsOn(store, own));
+  /** A hold "first-read-slow" made: what releases it, and whether the clock has ended it. */
+  type FirstRead = { release: () => void; ended: boolean };
+  /**
+   * The holds "first-read-slow" made and the clock hasn't ended yet, each dropped as it ends (`ended`). The rule:
+   * nothing waits on a held first read while the clock that alone ends it stands still. A poll waits on it, and every
+   * caller of the room that polls waits behind that poll (the poller lists one repository at a time). So whatever
+   * waits while that clock stands still lets go of them all first (`letGo`): a room's stop (it waits for the poll
+   * under way, on a clock proof's and tests' leave standing); a restart, which refuses that clock, before it waits
+   * for the commands under way (one, the app's Reconnect say, may wait on a held read); a load (`DemoRoom.letGo`),
+   * which stands it still, before it waits for them, when some are (with none, the holds stay until the old room's
+   * stop, so what they held lands once its events are silenced, never after where the load read it stopped); and a
+   * drawer command's listing, which the drawer's clock waits for, waits for nothing (`listing`). A restart then holds
+   * again those the clock hasn't ended, for the time they had left (`holdingFirstReads`): GitHub's slowness is the
+   * world's, which the restart keeps. It holds them once the new room has started, not before: the room's start reads
+   * every repository it has, and a hold there would wait on a clock refused while the room restarts. So the restarted
+   * room reads at once the repositories it had; only those granted after wait out the slowness.
+   */
+  const firstReads: FirstRead[] = [];
+  /** Holds a repository's first poll from now until the clock ends the hold, or `letGo` releases it. */
+  const holdingFirstReads = (hold: FirstRead) => {
+    hold.release = world.host.holdFirstPolls();
+    firstReads.push(hold);
+  };
+  /** Releases every hold; what it answers holds again those the clock hasn't ended since. */
+  const letGo = (): (() => void) => {
+    const held = firstReads.splice(0);
+    for (const hold of held) hold.release();
+    return () => {
+      for (const hold of held) if (!hold.ended) holdingFirstReads(hold);
+    };
+  };
+  /** The room as the driver hands it out: `built`, its stop letting go of the holds first; `built` left as it was. */
+  const releasingFirstReads = (built: Room): Room => ({
+    ...built,
+    stop: () => {
+      letGo();
+      return built.stop();
+    },
+  });
+  let room = releasingFirstReads(await buildRoom(optionsOn(store, own)));
   /**
    * The service stopped and started again on the same folder, as the owner's restart would: the room's timers
    * dropped, the script's and the world's kept; the new room reads its store, its sign-in store and GitHub as any start
@@ -332,18 +401,22 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
    * round under way is cut by the stop, and the new room runs its job again.
    */
   let restarting: Promise<void> | null = null;
-  const restart = async (settled: () => Promise<void>, before: () => Promise<void>): Promise<void> => {
+  const restart = async (settled: Settled, before: () => Promise<void>): Promise<void> => {
     let restarted = () => {};
     restarting = new Promise<void>((resolve) => {
       restarted = resolve;
     });
     try {
+      const holdAgain = letGo();
       await settled();
       await before();
       own.restarting();
       await room.stop();
       own = roomClock(clock);
-      room = await buildRoom(optionsOn(openStore({ home: o.home, durable: false }), own));
+      room = releasingFirstReads(
+        await buildRoom(optionsOn(openStore({ home: o.home, durable: false }), own)),
+      );
+      holdAgain();
       await room.demo?.advance(0);
     } finally {
       restarting = null;
@@ -351,7 +424,7 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     }
   };
   /** The room restarted as `npm install -g lookover` installed it (ADR 0061), npm's folder on the PATH or not. */
-  const asNpm = async (settled: () => Promise<void>, reach: "yes" | "no") => {
+  const asNpm = async (settled: Settled, reach: "yes" | "no") => {
     await restart(settled, async () => {
       offer = "npm";
       commandPath = memoryCommandPath({ folder: DEMO_NPM_FOLDER, reach });
@@ -390,14 +463,32 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
   for (const timed of script.filter((m) => m.at > scenario.seed)) schedule(timed);
   if (o.frozen === undefined) clock.set(true, 1);
 
+  /**
+   * A listing a drawer command makes (a poll, a reconnect), its refusal the connection's: waited for, unless
+   * "first-read-slow" holds a repository's first read. Then the command answers at once and the listing lands when
+   * the clock ends the hold: the drawer disables its clock while a command waits, so a command waiting on the held
+   * read would never answer. The hold delays only the repository's arrival in the state, never the drawer. A
+   * listing that fails after its command answered has no one to answer: its error goes to the log (`o.log`), and
+   * a driver given none drops it, as a test's does.
+   */
+  const listing = (work: () => Promise<void>): Promise<void> => {
+    const listed = work().catch(hostRefused);
+    if (firstReads.length === 0) return listed;
+    listed.catch((error: unknown) => o.log?.(`${scenario.id}: ${String(error)}`));
+    return Promise.resolve();
+  };
   const played = async (move: Move): Promise<"ok"> => {
-    await world.play(move, room);
+    await world.play(move, {
+      ...room,
+      refresh: () => listing(room.refresh),
+      reconnect: () => listing(room.reconnect),
+    });
     return "ok";
   };
   /** A move on GitHub the poll would see: a listing now, whose refusal the connection shows. */
   const onGitHubThen = async (move: () => void): Promise<"ok"> => {
     move();
-    await room.refresh().catch(hostRefused);
+    await listing(room.refresh);
     return "ok";
   };
   /**
@@ -406,7 +497,7 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
    */
   const discovered = async (move: () => void): Promise<"ok"> => {
     move();
-    if (room.snapshot().setup.github === "done") await room.reconnect().catch(hostRefused);
+    if (room.snapshot().setup.github === "done") await listing(room.reconnect);
     return "ok";
   };
   const installed = () => world.host.onGitHub().installation;
@@ -466,6 +557,20 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     // sign-in now shows who is signed in while Lookover is still looking for their accounts.
     "accounts-slow": () => {
       clock.after(ACCOUNTS_SLOW_MS, world.host.holdAccounts());
+      return Promise.resolve("ok" as const);
+    },
+    // GitHub slow to answer a repository's first poll (ADR 0091): for the next 30 s, a repository not polled before
+    // answers then, so an account granting it says it is being read, not "No repository yet.".
+    "first-read-slow": () => {
+      const hold: FirstRead = { release: () => {}, ended: false };
+      holdingFirstReads(hold);
+      clock.after(FIRST_READ_SLOW_MS, () => {
+        hold.ended = true;
+        const at = firstReads.indexOf(hold);
+        if (at === -1) return;
+        firstReads.splice(at, 1);
+        hold.release();
+      });
       return Promise.resolve("ok" as const);
     },
     // The person signed out on GitHub (ADR 0066): the sign-in no longer renews, every call refused as signed out until
@@ -588,7 +693,7 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     },
     // The registration removed outside Lookover, and the computer refusing a new one, until the next load: the
     // service, restarted, finds it chosen but not registered.
-    "login-refused": async (settled: () => Promise<void>) => {
+    "login-refused": async (settled: Settled) => {
       await restart(settled, async () => {
         await loginItem.unregister();
         loginItem.refuse("Access is denied.");
@@ -597,7 +702,7 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     },
     // Another install takes the computer's start at login while the service is stopped: the service, restarted, finds
     // it chosen but held by the other one, and leaves it (ADR 0068), until the owner takes it over.
-    "login-taken": async (settled: () => Promise<void>) => {
+    "login-taken": async (settled: Settled) => {
       await restart(settled, () => {
         loginItem.holdOther(DEMO_OTHER_AT_LOGIN);
         return Promise.resolve();
@@ -617,9 +722,9 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
       return "ok" as const;
     },
     // The program restarted as `npm install -g lookover` installed it: npm's shim first on the PATH, nothing offered.
-    "npm-install": (settled: () => Promise<void>) => asNpm(settled, "yes"),
+    "npm-install": (settled: Settled) => asNpm(settled, "yes"),
     // The same, npm's folder off the PATH (a Node installed without it): said with that folder, nothing offered.
-    "npm-off-path": (settled: () => Promise<void>) => asNpm(settled, "no"),
+    "npm-off-path": (settled: Settled) => asNpm(settled, "no"),
     "skill-refused": () => {
       skillFolders.refuse("Access is denied.");
       return Promise.resolve("ok" as const);
@@ -641,15 +746,24 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
       gh.signIn(null);
       return Promise.resolve("ok" as const);
     },
-  } satisfies Record<FaultId, (settled: () => Promise<void>) => Promise<"ok" | InjectRefusal>>;
+    // The story started afresh, the person's `gh` slow to name their organisations (ADR 0091, #655): a page opened on
+    // it lands first, then sees the accounts not reached arrive 30 s on, the card above growing.
+    "gh-slow": async (settled: Settled) => {
+      if (o.againWithGhSlow === undefined) return "no_load" as const;
+      const loaded = await o.againWithGhSlow(settled);
+      if (loaded !== "ok") throw new Error(loaded.failed);
+      return "ok" as const;
+    },
+  } satisfies Record<FaultId, (settled: Settled) => Promise<"ok" | InjectRefusal>>;
 
   return {
     get room() {
       return room;
     },
     scenario,
-    inject: (fault, settled = () => Promise.resolve()) => faults[fault](settled),
+    inject: (fault, settled = () => null) => faults[fault](settled),
     restarting: () => restarting,
+    letGo,
     github: fakeGitHubPages(world.host, DEMO_API.github, { gh }),
     listing: () => ({
       scenarios: (o.scenarios ?? SCENARIOS).map(({ id, title, what, steps, later, path }) => ({
@@ -664,6 +778,20 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
       clock: { now: clock.now(), running: clock.running, speed: clock.speed, nextIn: clock.next() },
       faults: FAULTS,
     }),
+  };
+}
+
+/** `gh` as `clock` reads it: what it names held until `until`, then answered as it is then; its sign-in at once. */
+function heldUntil(gh: Gh, clock: DemoClock, until: number): Gh {
+  return {
+    person: () => gh.person(),
+    memberships: () => {
+      const left = until - clock.now();
+      if (left <= 0) return gh.memberships();
+      return new Promise((answer) => {
+        clock.after(left, () => answer(gh.memberships()));
+      });
+    },
   };
 }
 

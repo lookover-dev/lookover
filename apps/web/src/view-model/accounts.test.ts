@@ -131,6 +131,7 @@ const own: ConnectionAccount = {
   installationId: 11,
   cause: null,
   owner: true,
+  granted: [],
 };
 
 const org = (
@@ -143,6 +144,7 @@ const org = (
   installationId,
   cause,
   owner,
+  granted: [],
 });
 
 const unreached = (

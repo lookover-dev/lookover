@@ -101,6 +101,7 @@ const account = (
   installationId: id,
   cause: null,
   owner: null,
+  granted: [],
 });
 
 /** sam signed in and connected, on `accounts`. */

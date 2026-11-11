@@ -36,7 +36,7 @@ import type { z } from "zod";
 import type { AgentOutcome } from "./coding-agent.ts";
 import { request } from "./commands.ts";
 import { CSP } from "./csp.ts";
-import type { DemoRoom, InjectRefusal } from "./demo/driver.ts";
+import type { DemoRoom, InjectRefusal, Settled } from "./demo/driver.ts";
 
 import type { LogReader } from "./log-sink.ts";
 import type { Room, SettingsAnswer } from "./room.ts";
@@ -122,10 +122,10 @@ export interface Loader {
   loading(): Promise<void> | null;
   /**
    * Builds the scenario's room, plays its seed and swaps it in, the old room stopped; or says why not. `settled`
-   * resolves once every command already under way when the load began has answered: what they send is the old
-   * room's, numbered before the next room starts.
+   * resolves once every command already under way when the load began has answered (null when none was): what they
+   * send is the old room's, numbered before the next room starts.
    */
-  load(id: string, settled: () => Promise<void>): Promise<Loaded>;
+  load(id: string, settled: Settled): Promise<Loaded>;
 }
 
 /** Why a fault did nothing, for the console. */
@@ -141,6 +141,7 @@ const NOTHING_TO_INJECT = {
   not_signed_in: "nobody is signed in to the shared App",
   no_organisation_reached: "no organisation is reached through the shared App",
   nothing_asked: "no organisation waits for an owner",
+  no_load: "no story to start afresh here",
 } as const satisfies Record<InjectRefusal, string>;
 
 /** What the commands endpoint parses: the app's commands and the developer drawer's verbs. */
@@ -166,10 +167,18 @@ interface Reach {
   room: Room;
   demo: DemoRoom | null;
   load: ((id: string) => Promise<Loaded>) | null;
-  /** Every open stream told to reload: the service restarted under them (the drawer's "npm-install", say). */
+  /**
+   * The room serving now, read again: a fault may swap it under the command, the service restarted (the drawer's
+   * "npm-install", say) or the story started afresh ("gh-slow", a load of its own).
+   */
+  current(): Room;
+  /** Every open stream told to reload: the room they follow was swapped out under them. */
   restarted(): void;
-  /** Settles once every other command under way has answered: what a restart waits for before the room stops. */
-  others(): Promise<void>;
+  /**
+   * Settles once every other command under way has answered, null when none is: what a restart waits for before the
+   * room stops.
+   */
+  others: Settled;
 }
 /** A row of `COMMANDS`: what the room (or the demo driver) does with one command, given in its own shape. */
 type Row<K extends Parsed["type"]> = (at: Reach, command: Extract<Parsed, { type: K }>) => Promise<Answer>;
@@ -271,7 +280,8 @@ const NO_CLOCK: Answer = [{ error: "no demo clock in live mode" }, 501];
  * keeps the ask, refused (409, why in `askToInstall`) before a sign-in, for an account Lookover doesn't name as not
  * reached, or for one the person owns, and starts an install look (ADR 0088) once kept. `connection.look` starts one,
  * or moves the one running on, the installations' listing queued, never waited for; refused (409, why in `look`)
- * before a sign-in.
+ * before a sign-in. `connection.returned`, the tab's return (ADR 0091), only lists while one runs, always answered
+ * success.
  * The developer drawer's fault (ADR 0046) happens on the demo driver: 501 in live mode, where nothing scripted
  * touches a real repository, 409 when the story has nothing left for it. A load is the room swap: 404 for an id the
  * catalogue hasn't, 500 with the fixture's error when the seed fails (the old room still answers).
@@ -333,6 +343,10 @@ const COMMANDS: { [K in Parsed["type"]]?: Row<K> } = {
     const answer = await room.github.askToInstall(account);
     if (answer === "ok") return OK;
     return [{ error: ASK_REFUSED[answer.refused], askToInstall: answer.refused }, 409];
+  },
+  "connection.returned": async ({ room }) => {
+    room.github.returned();
+    return OK;
   },
   "connection.look": async ({ room }) => {
     const answer = await room.github.look();
@@ -400,12 +414,13 @@ const COMMANDS: { [K in Parsed["type"]]?: Row<K> } = {
     room.setup.setEnabled(repoIds, enabled) === "ok" ? OK : [{ error: "no such repository" }, 404],
   "repos.dismiss": async ({ room }, { repoIds }) =>
     room.dismissDeparted(repoIds) === "ok" ? OK : [{ error: "no such departed repository" }, 404],
-  "demo.inject": async ({ demo, restarted, others }, { fault }) => {
+  "demo.inject": async ({ demo, current, restarted, others }, { fault }) => {
     if (demo === null) return [{ error: "nothing scripted in live mode" }, 501];
-    const before = demo.room;
+    const before = current();
     const answer = await demo.inject(fault, others);
-    // A fault that restarted the service: the open streams follow the old room's log, and reload instead.
-    if (demo.room !== before) restarted();
+    // A fault that swapped the room (a restart, a fresh story): the open streams follow the old room's log, and
+    // reload instead.
+    if (current() !== before) restarted();
     return answer === "ok" ? OK : [{ error: NOTHING_TO_INJECT[answer] }, 409];
   },
   "demo.load": async ({ load }, { id }) => {
@@ -474,9 +489,10 @@ export function createApi(deps: ApiDeps) {
   };
   /** The commands under way, a load aside: a load waits for them before it reads where the old room stopped. */
   const underWay = new Set<Promise<unknown>>();
-  const settled = async () => {
-    await Promise.allSettled([...underWay]);
-  };
+  /** `commands` settled, each answered whatever it answered; null when there are none. */
+  const settledOf = (commands: Promise<unknown>[]): Promise<void> | null =>
+    commands.length === 0 ? null : Promise.allSettled(commands).then(() => {});
+  const settled: Settled = () => settledOf([...underWay]);
   /** The load as a command reaches it: the swap, then every open stream told to reload. Null in live mode. */
   const load =
     loader === null
@@ -643,11 +659,9 @@ export function createApi(deps: ApiDeps) {
     work = (async () => {
       const row = rowOf(command.type);
       if (row === undefined) return c.json({ error: "not available yet" }, 501);
-      const others = async () => {
-        await Promise.allSettled([...underWay].filter((w) => w !== work));
-      };
+      const others: Settled = () => settledOf([...underWay].filter((w) => w !== work));
       const [body, status] = await row(
-        { room: room(), demo: demo(), load, restarted: reloadAll, others },
+        { room: room(), current: room, demo: demo(), load, restarted: reloadAll, others },
         command,
       );
       return c.json(body, status);

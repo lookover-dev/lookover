@@ -42,16 +42,18 @@
 // in the pull request's description (`statusBlock(change, status, room)`, pure, given to `HostWriter.upsertStatus`'s
 // render): a heading (the wordmark at 26 px and the state: "Looking over <commit>" and "again" on the same commit, "N
 // things to fix", "One thing to fix", "Nothing to fix", "Needs your look", "Waiting to look over <commit>", "Couldn't look
-// over <commit>"), one line (the round, the commit as a link, "n fixed, m withdrawn" counted over every round, dismissed
-// as withdrawn; or why it waits, its reset in the machine's time, with the day when not today; or why it failed, then
-// how to try again only where another try can help, else what would change it, ADR 0081), then the last posted round's
-// open findings (none while a round runs): escalated first, then by severity, then by id, none kept in the app; each
-// with a link to its thread, an escalated one's why the owner decides, one with no line comment "Not in the diff: …"
-// and its permalink on the commit its lines are on. Cut to the room left: items from the end, then the permalinks;
-// null when the heading and its line don't fit. It is rendered as it is written, from where the change stands then
-// (`status`, the caller's reader: its newest job and the ledger of its last posted round, with the threads just read;
-// without it, the round or the dismissal being posted), never from a text kept: a block sent again, or late, never
-// puts back an older one. A reader's null writes no block (a pull request Lookover skips).
+// over <commit>", "Didn't look over <commit>"), one line (the round, the commit as a link, "n fixed, m withdrawn"
+// counted over every round, dismissed as withdrawn; or why it waits, its reset in the machine's time, with the day when
+// not today; or why it failed, then how to try again only where another try can help, else what would change it, ADR
+// 0081; or, for a fork's request a newer push ended with no round posted, that push and how to ask for the newest
+// commit, ADR 0092), then the last posted round's open findings (none while a round runs, nor for that request):
+// escalated first, then by severity, then by id, none kept in the app; each with a link to its thread, an
+// escalated one's why the owner decides, one with no line comment "Not in the diff: …" and its permalink on the
+// commit its lines are on. Cut to the room left: items from the end, then the permalinks; null when the heading and
+// its line don't fit. It is rendered as it is written, from where the change stands then (`status`, the caller's
+// reader: its newest job and the ledger of its last posted round, with the threads just read; without it, the round
+// or the dismissal being posted), never from a text kept: a block sent again, or late, never puts back an older one.
+// A reader's null writes no block (a pull request Lookover skips).
 // Claims (ADR 0052): a finding the round kept against its author's claim is answered on its thread (the replies
 // below); the status block says why an escalated one is the owner's. The result gives each finding its claim (its
 // kind, text, author, time, and `count`: how many times a round kept it against one), and its `resolution` `kept`
@@ -65,8 +67,8 @@
 // status block, under the thread's root, ending with a hidden reply marker (contracts' `replyMarker`: the run, the
 // finding and the claim it answers, so a claim written while the round ran is read next) within `COMMENT_MAX_BYTES`:
 // only its reason is cut, at a line, so its opening and its closing line ("If it is kept again, the owner decides.")
-// are always said. A reply whose send began before is looked for by its marker among the bot's replies in the threads (`threads`)
-// before it is sent again, so it is sent once. A reply on a finding with no thread read is not sent, nor an answer with
+// are always said. A reply whose send began before is looked for by its marker among the bot's replies in the
+// threads (`threads`) before it is sent again, so it is sent once. A reply on a finding with no thread read is not sent, nor an answer with
 // no words. A reply refused for good (`not_found`: its thread's root deleted; `invalid`) never fails the round: it goes
 // to `log`, and the rest go on. Once the check completed, the request comments the round answers (`requests`) and the
 // root comment of each finding it withdrew are minimized as `resolved`, one post each; a refusal that stands, after the
@@ -114,8 +116,8 @@
 // that owes none is never looked for); the status block is written whole between its markers either way; the check
 // created on an answer that was lost is looked for by its external id (the job's id, the pull request's number and
 // the person's, `checkExternalId`, ADR 0066, 0077: the `person` the options give) through `findCheck`; the check
-// completed is a write by id. `findReview(round)` answers whether the host holds a round's review, for a caller that gave a round up with its
-// review begun and never marked sent. A round that owes no review lands its ledger as its status block's send begins
+// completed is a write by id. `findReview(round)` answers whether the host holds a round's review, for a caller
+// that gave a round up with its review begun and never marked sent. A round that owes no review lands its ledger as its status block's send begins
 // (the caller's store), so a block refused, or not written at all, never sends its findings again.
 // Refusals (ADR 0044): given the caller's `time`, a transient refusal (`unavailable`: a 5xx, GitHub's 422 "An internal
 // error occurred", a network failure; `rate_limited`, waiting at least a minute, else until the host's `retryAt`) is

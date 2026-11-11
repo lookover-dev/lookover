@@ -408,6 +408,26 @@ test("a fork's request ended by a push says a newer commit came after it, and to
   expect(result?.loop.next_action).toBe("stop");
 });
 
+test("a job cancelled as the sign-in changed has its words: the service never sends it, the table has them all the same (ADR 0090)", async () => {
+  const github = host();
+  const id = await createPublisher({ writer: github, person }).check({
+    ...waiting,
+    standing: { kind: "ended", ended: { kind: "skipped", why: "sign-in-changed" } },
+  });
+  const check = github.view(change).checks.find((c) => c.id === id);
+  expect(check).toMatchObject({
+    conclusion: "skipped",
+    output: {
+      title: "The sign-in changed",
+      summary:
+        "Lookover did not look over a1b2c3d: whoever signs in now chooses the repositories before anything is reviewed.",
+    },
+  });
+  const result = readResult(check?.output.text ?? "");
+  expect(result?.run).toMatchObject({ state: "skipped", state_reason: "sign_in_changed" });
+  expect(result?.loop.next_action).toBe("stop");
+});
+
 test("an ended job's check never created is created, and its id given before it is completed: a refused completion completes that one next time", async () => {
   const github = new RefusedCompletion();
   const publisher = createPublisher({ writer: github, person });

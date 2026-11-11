@@ -27,6 +27,7 @@ const org = (login: string, cause: ConnectionAccount["cause"] = null): Connectio
   installationId: 40 + login.length,
   cause,
   owner: true,
+  granted: [],
 });
 
 const unreached = (

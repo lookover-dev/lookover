@@ -36,6 +36,9 @@ import m33 from "./migrations/20261103100000-findings-suggestion.sql" with { typ
 import m34 from "./migrations/20261107090000-jobs-asked-by.sql" with { type: "text" };
 import m35 from "./migrations/20261107120000-jobs-failure-cause.sql" with { type: "text" };
 import m36 from "./migrations/20261109090000-runs-planned.sql" with { type: "text" };
+import m37 from "./migrations/20261111093200-setup-person.sql" with { type: "text" };
+import m38 from "./migrations/20261111100000-kept-requests.sql" with { type: "text" };
+import m39 from "./migrations/20261111130000-jobs-settled-by-sign-in.sql" with { type: "text" };
 
 /** Every migration of `src/migrations/`, in name order, its SQL bundled with the code. */
 export const EMBEDDED: { name: string; sql: string }[] = [
@@ -76,4 +79,7 @@ export const EMBEDDED: { name: string; sql: string }[] = [
   { name: "20261107090000-jobs-asked-by", sql: m34 },
   { name: "20261107120000-jobs-failure-cause", sql: m35 },
   { name: "20261109090000-runs-planned", sql: m36 },
+  { name: "20261111093200-setup-person", sql: m37 },
+  { name: "20261111100000-kept-requests", sql: m38 },
+  { name: "20261111130000-jobs-settled-by-sign-in", sql: m39 },
 ];

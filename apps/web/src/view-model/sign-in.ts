@@ -8,7 +8,14 @@
 // Settings › GitHub (`githubSettings`) says who is signed in, with Sign in again and its code in place, also while
 // connected, and the same accounts list. Every link is built on `Connection.web`, so demo mode stays on GitHub's fake.
 import type { Connection, DeviceCode, SignInStartRefusal, State } from "@lookover/contracts";
-import { type AccountsList, accountRows, readingRepositories, saidSignedOut, signedIn } from "./accounts.ts";
+import {
+  type AccountsList,
+  accountRows,
+  listsRepositories,
+  readingRepositories,
+  saidSignedOut,
+  signedIn,
+} from "./accounts.ts";
 import { until, type WithCommand } from "./format.ts";
 import { LONGEST_LOOK_LINES, type LookLineView, type LookWords, lookLine } from "./look-line.ts";
 
@@ -168,16 +175,24 @@ function accountsRow(state: State, timeZone: string | undefined): AccountsRowVie
   if (!signedIn(state.connection)) return { state: "later", text: ACCOUNTS_TEXT.later, list, look: null };
   const look = lookLine(state, zoned(timeZone));
   // Listed, a look begun says where it is in place of the step's own line (ADR 0088): not before, when the step
-  // still looks for the accounts or reads their repositories for the first time.
-  const said = (text: string) =>
-    state.connection.listed && !readingRepositories(state) && look.state !== "idle" ? look.words : text;
+  // still looks for the accounts.
+  const said = (text: string) => (state.connection.listed && look.state !== "idle" ? look.words : text);
   const row = (rowState: RowState, text: string): AccountsRowView => ({
     state: rowState,
     text: said(text),
     list,
     look,
   });
-  switch (state.setup.github) {
+  /** Nothing granted's line, whatever its accounts' causes: the one rule for the step and the frame before it. */
+  const nothingGranted = () => row("current", ACCOUNTS_TEXT.nothing);
+  const { github } = state.setup;
+  // An account being read says so whatever the step (ADR 0091), the look's words giving way to it (an arrival is
+  // still toasted): the rows and the line agree. While the step waits on what is granted, it moves on only once
+  // every first read is over (ADR 0083), so the last one's answer still reads until it does.
+  const waits = github === "waiting-for-install" && listsRepositories(state);
+  if (waits || readingRepositories(state))
+    return { state: github === "done" ? "done" : "busy", text: ACCOUNTS_TEXT.reading, list, look };
+  switch (github) {
     case "done":
       // An account with a fix still needs the person (installing, SSO, an owner): the rest can wait, said so.
       return row(
@@ -185,9 +200,13 @@ function accountsRow(state: State, timeZone: string | undefined): AccountsRowVie
         list.rows.some((r) => r.account !== null && r.fix !== null) ? ACCOUNTS_TEXT.rest : ACCOUNTS_TEXT.done,
       );
     case "nothing-granted":
-      return row("current", ACCOUNTS_TEXT.nothing);
+      return nothingGranted();
     default:
-      return row("busy", readingRepositories(state) ? ACCOUNTS_TEXT.reading : ACCOUNTS_TEXT.looking);
+      // Listed with accounts, none read, the step turns nothing-granted next: what that step says for the same
+      // accounts (causes and all) is said now, as the rows show.
+      return state.connection.listed && state.connection.accounts.length > 0
+        ? nothingGranted()
+        : row("busy", ACCOUNTS_TEXT.looking);
   }
 }
 

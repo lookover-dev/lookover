@@ -2,7 +2,7 @@
 // who is signed in, the accounts their sign-in reaches and those it doesn't, and why GitHub can't be used when it
 // can't.
 import type { AccountCause, HostAccount, HostLogin } from "./github-app.ts";
-import type { ConnectionId } from "./ids.ts";
+import type { ConnectionId, RepositoryId } from "./ids.ts";
 import type { DeviceCode } from "./sign-in.ts";
 
 /**
@@ -40,6 +40,13 @@ export interface ConnectionAccount {
    * person's, or one that couldn't answer). The app shows a member's fix for null.
    */
   owner: boolean | null;
+  /**
+   * The repositories the account's installation grants (ADR 0091), as Lookover uses them: its last answered listing's,
+   * cut to a live run's allow-list, named as `Repository.id` names them. Only a listing that gives the account a cause
+   * empties it: a cause the poller sets later (a repository refused) keeps the last listing's, so read `cause` first.
+   * One granted, with no cause, and not in the state yet is being read: its first poll hasn't answered.
+   */
+  granted: RepositoryId[];
 }
 
 /**

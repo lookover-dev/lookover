@@ -33,14 +33,16 @@
 //   reached) listed again with none (what arrived: the accounts' logins, those back, how many repositories) or
 //   3 minutes pass with nothing new. Begun while nothing is listed under the sign-in (refused at start), it measures
 //   from the repositories the room watches and their accounts, an account its first answer lists with no repository
-//   beyond them taken as already there; under a new sign-in, or with nothing watched, from its first answer. Asked again while it runs, listed at once and its end moved 3 minutes on. One look
-//   at a time, kept as `Connection.look` and sent as it moves: when it began, when it ends, when a listing during it
-//   last answered, when it ended and what arrived; ended with nothing new and not stopped by GitHub's wait, the first
-//   later listing that finds something beyond what it began with (an owner approving later) is said as what arrived,
-//   within 15 minutes of its end, or later when an account awaiting an owner's approval as it ended is among it (a
-//   find dropped as too late is taken as there: a later arrival never counts it). A
-//   refused listing doesn't end it: it goes on at its pace, the connection showing the cause. Every listing counts,
-//   whoever asks; a new sign-in drops it. Nobody signed in, it is refused.
+//   beyond them taken as already there; under a new sign-in, or with nothing watched, from its first answer. Asked
+//   again while it runs, listed at once and its end moved 3 minutes on; the tab coming back (`returned`,
+//   `connection.returned`, ADR 0091) lists at once only while one runs, its end unmoved, and does nothing else.
+//   One look at a time, kept as `Connection.look` and sent as it moves: when it began, when it ends, when a listing
+//   during it last answered, when it ended and what arrived; ended with nothing new and not stopped by GitHub's wait,
+//   the first later listing that finds something beyond what it began with (an owner approving later) is said as what
+//   arrived, within 15 minutes of its end, or later when an account awaiting an owner's approval as it ended is among
+//   it (a find dropped as too late is taken as there: a later arrival never counts it). A refused listing doesn't end
+//   it: it goes on at its pace, the connection showing the cause. Every listing counts, whoever asks; a new sign-in
+//   drops it. Nobody signed in, it is refused.
 // - GitHub's wait (ADR 0088): a listing refused as rate limited keeps the time GitHub gave as `Connection.limitUntil`
 //   (`limited`, the poller's too: one limit for the person's sign-in, a minute when GitHub gave none; the start's,
 //   `limitedAtStart`, given to the poller by the room once it runs) and stops the look running (`stopped:
@@ -57,16 +59,18 @@
 //   (and the accounts gone, when the person is another: theirs are never the last one's). A listing refused while not
 //   listed keeps its cause (`listingCause`), sent as it moves, whatever the repositories' polls say meanwhile (one
 //   watched answering keeps the connection connected); a listing answered or another sign-in held clears it.
-// - The accounts (`accounts`, ADR 0066): each account reached, its installation and its own cause, sent as
-//   `connection.changed` when they move: the one `accounts()` gives (suspended, SSO asked) or the poller's (`refused`:
-//   an act on one of its repositories refused `uninstalled` or `sso`, the rule by kind), cleared once one of its
-//   repositories answers (`answered`) or a listing gives none. An account with a cause lists no repositories, yet those
-//   of its repositories the room watches stay watched, refused until the cause is mended: what their reviews waited for
-//   is kept, and nothing departs for a suspension or an SSO session run out. An account no longer reached at all is
-//   gone, its repositories with it; with none reached any more, every one goes, and the connection shows the shared
-//   App uninstalled until a listing finds one again. A cause cleared, by a listing or the poller, is told
-//   (`accountBack`): what waited on that account starts. A repository whose owner is no account listed takes no cause:
-//   its refusal is the connection's.
+// - The accounts (`accounts`, ADR 0066): each account reached, its installation, what it grants (ADR 0091: the ids
+//   of the repositories its listing names, cut to the allow-list, as the room names them; none when that listing gave
+//   a cause) and its own cause: the one `accounts()` gives (suspended, SSO asked) or the poller's (`refused`: an act on
+//   one of its repositories refused `uninstalled` or `sso`, the rule by kind), cleared once one of its repositories
+//   answers (`answered`) or a listing gives none. They are sent as `connection.changed` when they move, so before
+//   their repositories are watched. They know nothing of what the room has read. An account with a cause lists no
+//   repositories, yet those of its repositories the room watches stay watched, refused until the cause is mended: what
+//   their reviews waited for is kept, and nothing departs for a suspension or an SSO session run out. An account no
+//   longer reached at all is gone, its repositories with it; with none reached any more, every one goes, and the
+//   connection shows the shared App uninstalled until a listing finds one again. A cause cleared, by a listing or the
+//   poller, is told (`accountBack`): what waited on that account starts. A repository whose owner is no account listed
+//   takes no cause: its refusal is the connection's.
 // Ordering: listings, the install's checks and the holding of another sign-in (`signedIn`) run one at a time, in one
 // turn (`serially`, `inTurn`), so two never add the same repository twice and no work of one holding runs once another
 // is held. Each holding is numbered (`holding`): the number moves as another is asked to be held, which ends the work
@@ -112,7 +116,7 @@ import { installationLines } from "./log-lines.ts";
 import { isRateLimit } from "./rate-limit.ts";
 import { said } from "./said.ts";
 import type { SignInStore } from "./sign-in-store.ts";
-import { connectionIdOf } from "./snapshot.ts";
+import { connectionIdOf, repoIdOf } from "./snapshot.ts";
 import type { Timers } from "./timers.ts";
 
 // The installations are listed every 2 minutes while nobody looks (`DISCOVERY_MS`, the contracts', which the app says):
@@ -316,6 +320,11 @@ export interface Installation {
    * look going on). Refused with nobody signed in.
    */
   look(): Promise<"ok" | { refused: LookRefusal }>;
+  /**
+   * The tab coming back (ADR 0091): while a look runs and GitHub asks no wait, the installations' listing queued now,
+   * the look's end unmoved (a return is not the person asking); else, or nobody signed in, nothing.
+   */
+  returned(): void;
   /** Nothing armed any more; a listing under way changes nothing once it answers. */
   stop(): void;
 }
@@ -383,14 +392,19 @@ function following(current: () => HostPorts): HostPorts {
 }
 
 /**
- * A reached account as the connection keeps it: the account, its installation's id, its cause; whether the person
- * owns it unknown (null) here.
+ * A reached account as the connection keeps it: the account, its installation's id, its cause, and what it grants
+ * (ADR 0091): its repositories as `cut` leaves them (the allow-list), named as the room names them, none when it is
+ * listed with a cause; whether the person owns it unknown (null) here.
  */
-const accountOfReached = ({ installation, cause }: ReachedAccount): ConnectionAccount => ({
+const accountOfReached = (
+  { installation, cause, repositories }: ReachedAccount,
+  cut: (repos: readonly RepositoryRef[]) => RepositoryRef[],
+): ConnectionAccount => ({
   account: { ...installation.account },
   installationId: installation.id,
   owner: null,
   cause,
+  granted: cause === null ? cut(repositories).map(repoIdOf) : [],
 });
 
 /** A holding's work ended: another sign-in is held now, or the service stops. Nothing it read is applied. */
@@ -550,7 +564,7 @@ export function createInstallation(d: InstallationDeps): Installation {
   const list = async (now: Listable): Promise<Listed | null> => {
     const reached = await now.accounts.accounts();
     if (reached.length === 0) return null;
-    const found = reached.map(accountOfReached);
+    const found = reached.map((a) => accountOfReached(a, allowedOf));
     const kept = d.watched().filter((repo) => (accountOf(found, repo.owner)?.cause ?? null) !== null);
     return { accounts: found, repos: [...allowedOf(reached.flatMap((a) => a.repositories)), ...kept] };
   };
@@ -1090,6 +1104,15 @@ export function createInstallation(d: InstallationDeps): Installation {
     timer = null;
     void check();
   };
+  /** Whether a look may list: someone signed in, the room not stopping. */
+  const mayLook = (): boolean => held.state !== "none" && !stopping;
+  /**
+   * The installations listed now, in the one turn, without waiting on GitHub to answer (what it throws logged): the
+   * install's wait's check while it runs, which then keeps its own pace, else a discovery, the look's pace after it.
+   */
+  const listNow = (): void => {
+    void logged(waiting ? check() : discover());
+  };
 
   return {
     ports: following(() => current),
@@ -1162,7 +1185,7 @@ export function createInstallation(d: InstallationDeps): Installation {
     discover,
     waitForInstall,
     look: async () => {
-      if (held.state === "none" || stopping) return { refused: "signed-out" };
+      if (!mayLook()) return { refused: "signed-out" };
       const at = d.now();
       const running = looking();
       if (running !== null) lookMoved({ ...running, until: at + LOOK_MS });
@@ -1184,10 +1207,11 @@ export function createInstallation(d: InstallationDeps): Installation {
         if (!waiting) armDiscovery(limitLeft());
         return "ok";
       }
-      // Listed now, in the one turn, without waiting on GitHub to answer; the install's wait then keeps its own pace,
-      // else the look's comes after this.
-      void logged(waiting ? check() : discover());
+      listNow();
       return "ok";
+    },
+    returned: () => {
+      if (mayLook() && looking() !== null && limitLeft() <= 0) listNow();
     },
     stop: () => {
       stopping = true;

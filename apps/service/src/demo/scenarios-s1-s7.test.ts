@@ -486,7 +486,7 @@ test("S7, too noisy: #148's round 1 counted at load; turning F2's rule off, then
   ]);
 });
 
-test("S5, skipped on purpose: dependabot's #150 and Mira's #152 from her fork not asked, the owner's #153 from a fork skipped, nothing run", async () => {
+test("S5, skipped on purpose: dependabot's #150 and Mira's #152 from her fork not asked, the owner's #153 from a fork skipped, then Review now on each runs one Claude round (#574)", async () => {
   await loaded("S5");
   const first = await after(30_000);
   expect(first.changes[id(150)]).toMatchObject({ author: "other", openedBy: "dependabot[bot]", fork: false });
@@ -505,9 +505,14 @@ test("S5, skipped on purpose: dependabot's #150 and Mira's #152 from her fork no
     expect(all.reviews[id(n)]?.run).toBeNull();
   }
 
-  // Asked for by hand, the fork is reviewed by Claude alone (ADR 0048).
-  expect(await sent({ type: "review.request", changeId: id(152) })).toBe(200);
-  const reviewed = await after(3 * MIN);
-  expect(reviewed.reviews[id(152)]?.job).toMatchObject({ trigger: "manual", state: "done" });
-  expect(reviewed.reviews[id(152)]?.rounds.map((r) => [r.n, r.reviewer])).toEqual([[1, "claude"]]);
+  // Review now runs on each (#574): the forks by Claude alone (ADR 0048), dependabot's bump too.
+  for (const n of [150, 152, 153]) expect(await sent({ type: "review.request", changeId: id(n) })).toBe(200);
+  // One review at a time, each a short find.
+  const reviewed = await after(6 * MIN);
+  expect(
+    [150, 152, 153].map((n) => {
+      const review = reviewed.reviews[id(n)];
+      return [n, review?.job?.trigger, review?.job?.state, review?.rounds.map((r) => [r.n, r.reviewer])];
+    }),
+  ).toEqual([150, 152, 153].map((n) => [n, "manual", "done", [[1, "claude"]]]));
 });

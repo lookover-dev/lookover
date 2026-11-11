@@ -4,7 +4,9 @@
 // nothing done. The furthest step reached is kept with the step: a step gone on to past it is the furthest now,
 // and going back to a step never loses it (the same rule as `apply`'s, so a UI that follows the events and one
 // that loads the snapshot agree). A patch naming `reached` sets it: a start with the sign-in gone sends it back
-// to the GitHub step, so whoever signs in next chooses the repositories again (ADR 0079). In live mode the service writes "done" at the first start of a data folder; in demo mode the
+// to the GitHub step, so whoever signs in next chooses the repositories again (ADR 0079). Beside the setup, never in
+// it, the person it belongs to (ADR 0090): "whose is it" (a GitHub id, none until recorded), "it is this person's",
+// left as it is by every write of the setup. In live mode the service writes "done" at the first start of a data folder; in demo mode the
 // scenario decides. Beside it, start at login (ADR 0049): the owner's choice, the machine's, off until chosen, kept
 // in its own row so choosing it never makes the setup kept. Nothing registers it before row 8.
 import type { Database } from "bun:sqlite";
@@ -28,6 +30,13 @@ export interface Setup {
    * is the furthest now; a patch naming `reached` sets it, as a start with the sign-in gone does (ADR 0079).
    */
   write(patch: Partial<SetupState>): SetupState;
+  /** The GitHub id of the person the setup belongs to (ADR 0090); null until one is recorded. */
+  person(): number | null;
+  /**
+   * The setup is this person's now, or nobody's (null): kept beside it, the setup itself as it was. Before the setup
+   * was ever written, it is written at its first step, so the person has a row to be kept in.
+   */
+  keepPerson(id: number | null): void;
   /** Whether the owner chose to start Lookover at login: on until chosen (ADR 0054). */
   startAtLogin(): boolean;
   /** The owner chose to start Lookover at login, or not: kept; the service registers it with the machine. */
@@ -48,6 +57,7 @@ const STEP = z.enum(SETUP_ORDER);
 const GITHUB = enumOf<SetupGitHub>()(["start", "waiting-for-install", "nothing-granted", "done"]);
 const flag = z.union([z.literal(0), z.literal(1)]).transform((f) => f === 1);
 const startRow = z.object({ enabled: flag });
+const personRow = z.object({ person_id: z.number().int().nullable() });
 const row = z.object({
   done: flag,
   step: STEP,
@@ -88,6 +98,12 @@ export function setup(db: Database): Setup {
     upsert.run(next.done ? 1 : 0, next.step, next.reached, next.github, next.firstReviewChange);
     return next;
   });
+  const selectPerson = db.query("SELECT person_id FROM setup WHERE id = 1");
+  const updatePerson = db.query("UPDATE setup SET person_id = ? WHERE id = 1");
+  const keepPerson = db.transaction((id: number | null): void => {
+    if (select.get() === null) write(START);
+    updatePerson.run(id);
+  });
   const selectStart = db.query("SELECT enabled FROM start_at_login WHERE id = 1");
   const upsertStart = db.query(
     "INSERT INTO start_at_login (id, enabled) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET enabled = excluded.enabled",
@@ -96,6 +112,11 @@ export function setup(db: Database): Setup {
     read,
     kept: () => select.get() !== null,
     write: (patch) => write.immediate(patch),
+    person: () => {
+      const found = selectPerson.get();
+      return found === null ? null : personRow.parse(found).person_id;
+    },
+    keepPerson: (id) => keepPerson.immediate(id),
     startAtLogin: () => {
       const found = selectStart.get();
       return found === null || startRow.parse(found).enabled;

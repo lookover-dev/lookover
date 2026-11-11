@@ -10,7 +10,10 @@
 // yet expired is renewed once and the call made again; a 401 on a token just renewed, a refresh GitHub refuses, or
 // no sign-in kept is the connection's `signed-out`, and it stays so, with no refresh, until the keeper holds another
 // sign-in: one kept later is taken with no restart. An act refused (403) with no cause GitHub names is the person's
-// own permission, not the connection's: it is `invalid`, the act alone failing.
+// own permission, not the connection's: it is `invalid`, the act alone failing. A session is one person's, the first
+// its keeper names (ADR 0090): once the keeper holds another person's sign-in, every call on it is `signed-out`, never
+// made, renewed or made again with their token (read, renewed, or their renewal another session failed to keep), so a
+// write begun as one person never lands as another; the service holds the new person on sessions of their own.
 import {
   type Clock,
   connectionCauseOf,
@@ -83,6 +86,8 @@ export class UserSession implements Session {
   /** The sign-in GitHub refused: while the keeper holds it, the person is signed out, nothing refreshed. */
   private refused: SignIn | null = null;
   private renewing: Promise<SignIn> | null = null;
+  /** Whose session this is: the person of the first sign-in read; null before. */
+  private person: SignIn["person"] | null = null;
 
   constructor(signIn: HostSignIn, keeper: SignInKeeper, clock: Clock, secret: (value: string) => void) {
     this.signIn = signIn;
@@ -131,8 +136,7 @@ export class UserSession implements Session {
   /** The sign-in to use now: one renewed but unkept written first, renewed when its token expires within the margin. */
   private async current(): Promise<{ signIn: SignIn; renewed: boolean }> {
     if (this.share.unkept !== null) await inTurn(this.share, () => this.keepUnkept());
-    this.held ??= await this.read();
-    const held = this.held;
+    const held = this.held ?? this.hold(await this.read());
     if (this.fresh(held)) return { signIn: held, renewed: false };
     return { signIn: await this.renew(held), renewed: true };
   }
@@ -163,10 +167,7 @@ export class UserSession implements Session {
    */
   private async refresh(stale: SignIn): Promise<SignIn> {
     const kept = await this.read();
-    if (kept.token !== stale.token && this.fresh(kept)) {
-      this.held = kept;
-      return kept;
-    }
+    if (kept.token !== stale.token && this.fresh(kept)) return this.hold(kept);
     let renewed: SignIn;
     try {
       renewed = await this.signIn.refreshSignIn(kept);
@@ -190,14 +191,14 @@ export class UserSession implements Session {
 
   /** The sign-in kept in place of the one renewed: used as it is while fresh, else renewed in turn. */
   private async replacement(): Promise<SignIn> {
-    const now = await this.read();
-    this.held = now;
+    const now = this.hold(await this.read());
     return this.fresh(now) ? now : this.refresh(now);
   }
 
   /**
    * `renewed` written to the keeper in place of `from`, then held: false, nothing held, when another sign-in replaced
-   * `from` meanwhile. A write that fails keeps it as unkept and is `unavailable`.
+   * `from` meanwhile. A write that fails keeps it as unkept and is `unavailable`. Another person's renewal (one their
+   * session failed to keep) is written all the same, the only one GitHub still takes, but never held here.
    */
   private async keep(renewed: SignIn, from: SignIn): Promise<boolean> {
     let written: boolean;
@@ -208,7 +209,8 @@ export class UserSession implements Session {
       throw new HostError("unavailable", `The renewed sign-in could not be kept: ${message(error)}`);
     }
     this.share.unkept = null;
-    this.held = written ? renewed : null;
+    this.held = null;
+    if (written) this.hold(renewed);
     return written;
   }
 
@@ -219,10 +221,29 @@ export class UserSession implements Session {
     return signedOut(error.message);
   }
 
-  /** The kept sign-in; none, or the one GitHub refused, is signed out. */
+  /**
+   * `signIn` held, the one sign-in whose token the session uses: every one it holds passes here, read, renewed or
+   * kept by another session on the keeper.
+   */
+  private hold(signIn: SignIn): SignIn {
+    this.held = null;
+    this.ownOrSignedOut(signIn);
+    this.held = signIn;
+    return signIn;
+  }
+
+  /** `signIn` is the session's person's (the first one it met is): another person's is signed out (ADR 0090). */
+  private ownOrSignedOut(signIn: SignIn): void {
+    if (this.person !== null && signIn.person.id !== this.person.id)
+      throw signedOut(`Another person signed in: this session was ${this.person.login}'s`);
+    this.person ??= { ...signIn.person };
+  }
+
+  /** The kept sign-in; none, the one GitHub refused, or another person's than the session's, is signed out. */
   private async read(): Promise<SignIn> {
     const kept = await this.keeper.read();
     if (kept === null) throw signedOut("Nobody is signed in to the shared App");
+    this.ownOrSignedOut(kept);
     if (this.refused !== null && sameSignIn(kept, this.refused))
       throw signedOut("GitHub refused this sign-in: the person must sign in again");
     this.refused = null;

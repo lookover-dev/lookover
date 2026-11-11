@@ -58,6 +58,7 @@ function world(repos: Repository[], departed: DepartedRepository[] = []): State 
     installationId: id + 10,
     cause: null,
     owner: true,
+    granted: [],
   });
   return {
     seq: 0,

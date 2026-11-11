@@ -5,6 +5,7 @@ import {
   apply,
   type Change,
   type Connection,
+  type ConnectionAccount,
   changeId,
   commitSha,
   connectionId,
@@ -25,6 +26,7 @@ import {
   repositoryId,
   runId,
   type State,
+  stateSchema,
   type Turn,
   UnknownEvent,
 } from "./index.ts";
@@ -54,7 +56,13 @@ const CONNECTED: Connection = {
   state: "connected",
   cause: null,
   accounts: [
-    { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
+    {
+      account: { id: 7, login: "sam", type: "User" },
+      installationId: 77,
+      cause: null,
+      owner: null,
+      granted: [],
+    },
   ],
   listed: true,
   listingCause: null,
@@ -68,20 +76,22 @@ const CONNECTED: Connection = {
 };
 
 /** sam's own account, the one `CONNECTED` reaches. */
-const SAM = {
+const SAM: ConnectionAccount = {
   account: { id: 7, login: "sam", type: "User" },
   installationId: 77,
   cause: null,
   owner: null,
-} as const;
+  granted: [],
+};
 /** The shared App on sam's account and on the organisation acme's. */
 const ON_SAM = { ...SAM, installationId: 91 };
-const ON_ACME = {
+const ON_ACME: ConnectionAccount = {
   account: { id: 80, login: "acme", type: "Organization" },
   installationId: 92,
   cause: null,
   owner: null,
-} as const;
+  granted: [],
+};
 
 function snapshot(review: Partial<Review> = {}, change: Partial<Change> = {}): State {
   return {
@@ -249,6 +259,128 @@ test("a new job is recorded, and the timeline keeps what asked for it, and who",
   expect(reviewOf(onOpening).timeline).toEqual([
     { at: NOW, sha: null, kind: "queued", trigger: "opened", by: null },
   ]);
+});
+
+test("the job the status block says is the newest, but a fork's skips never hide the request their push ended (ADR 0092)", () => {
+  const skippedFirst = job("skipped", { id: jobId("j0"), trigger: "opened", skip: "fork" });
+  let after = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: skippedFirst });
+  expect(reviewOf(after).described).toEqual(skippedFirst);
+  const ended = job("cancelled", { cancel: "pushed" });
+  after = apply(after, { type: "job.changed", at: NOW + 1_000, seq: 2, changeId: ID, job: ended });
+  const skip = job("skipped", { id: jobId("j2"), trigger: "push", skip: "fork", sha: commitSha("b2c3d4e") });
+  after = apply(after, { type: "job.changed", at: NOW + 1_000, seq: 3, changeId: ID, job: skip });
+  expect(reviewOf(after).job).toEqual(skip);
+  expect(reviewOf(after).described).toEqual(ended);
+  // A later push on the fork, skipped again: still the request it ended.
+  const again = job("skipped", { id: jobId("j3"), trigger: "push", skip: "fork", sha: commitSha("c3d4e5f") });
+  after = apply(after, { type: "job.changed", at: NOW + 2_000, seq: 4, changeId: ID, job: again });
+  expect(reviewOf(after).described).toEqual(ended);
+});
+
+test("a fork's request a push ended behind a running review: the review's block while it runs, the ended one once it fails (ADR 0092)", () => {
+  const running = job("running", { id: jobId("j1") });
+  let after = apply(snapshot(), {
+    type: "run.started",
+    at: NOW,
+    seq: 1,
+    changeId: ID,
+    job: running,
+    run: RUN,
+  });
+  // Heard while the review runs (the service holds it back, `queue.ts`): the running review's block stands.
+  const ended = job("cancelled", { id: jobId("j2"), cancel: "pushed" });
+  after = apply(after, { type: "job.changed", at: NOW + 1_000, seq: 2, changeId: ID, job: ended });
+  expect(reviewOf(after).described).toEqual(running);
+  // As the service sends it: the review fails, then the request behind it, then a later push's fork skip.
+  const failed = job("failed", {
+    id: jobId("j1"),
+    failure: { kind: "review_failed", detail: "exit 1", engine: "claude", cause: null, limitMs: null },
+  });
+  after = apply(after, { type: "job.changed", at: NOW + 2_000, seq: 3, changeId: ID, job: failed });
+  // The request heard already, newer than the review: once the review ends, it decides, as GitHub's block says.
+  expect(reviewOf(after)).toMatchObject({ job: ended, described: ended });
+  after = apply(after, { type: "job.changed", at: NOW + 2_000, seq: 4, changeId: ID, job: ended });
+  expect(reviewOf(after).described).toEqual(ended);
+  const skip = job("skipped", { id: jobId("j3"), trigger: "push", skip: "fork", sha: commitSha("b2c3d4e") });
+  after = apply(after, { type: "job.changed", at: NOW + 3_000, seq: 5, changeId: ID, job: skip });
+  expect(reviewOf(after).described).toEqual(ended);
+});
+
+test("a fork's request a push ended behind a review deferred, or back in the queue: the review still due keeps its block (ADR 0092)", () => {
+  const ended = job("cancelled", { id: jobId("j2"), cancel: "pushed" });
+  for (const due of [
+    job("deferred", { id: jobId("j1"), deferral: { reason: "engine-limit", engine: "claude" } }),
+    job("queued", { id: jobId("j1") }),
+  ]) {
+    // As the service sends it: the review ends deferred (or a restart puts it back in the queue), then the request.
+    let after = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: due });
+    after = apply(after, { type: "job.changed", at: NOW + 1_000, seq: 2, changeId: ID, job: ended });
+    expect(reviewOf(after).job).toEqual(ended);
+    expect(reviewOf(after).described).toEqual(due);
+  }
+});
+
+test("a review deferred behind a request a push ended, then ended by a second push: the newer request's block, the review's change heard (ADR 0092)", () => {
+  const due = job("deferred", { id: jobId("j1"), deferral: { reason: "engine-limit", engine: "claude" } });
+  const ended = job("cancelled", { id: jobId("j2"), cancel: "pushed" });
+  let after = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: due });
+  after = apply(after, { type: "job.changed", at: NOW + 1_000, seq: 2, changeId: ID, job: ended });
+  // Still due, back in the queue: its block stands, the newer request still the review's job.
+  const queued = job("queued", { id: jobId("j1") });
+  after = apply(after, { type: "job.changed", at: NOW + 2_000, seq: 3, changeId: ID, job: queued });
+  expect(reviewOf(after)).toMatchObject({ job: ended, described: queued });
+  const cancelled = job("cancelled", { id: jobId("j1"), cancel: "pushed" });
+  after = apply(after, { type: "job.changed", at: NOW + 3_000, seq: 4, changeId: ID, job: cancelled });
+  expect(reviewOf(after)).toMatchObject({ job: ended, described: ended });
+  const skip = job("skipped", { id: jobId("j3"), trigger: "push", skip: "fork", sha: commitSha("b2c3d4e") });
+  after = apply(after, { type: "job.changed", at: NOW + 4_000, seq: 5, changeId: ID, job: skip });
+  expect(reviewOf(after).described).toEqual(ended);
+});
+
+test("a review deferred behind a request a push ended, started again then ended by a second push: its block while it runs, the newer request's once the service shows it again (ADR 0092)", () => {
+  const due = job("deferred", { id: jobId("j1"), deferral: { reason: "engine-limit", engine: "claude" } });
+  const ended = job("cancelled", { id: jobId("j2"), cancel: "pushed" });
+  let after = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: due });
+  after = apply(after, { type: "job.changed", at: NOW + 1_000, seq: 2, changeId: ID, job: ended });
+  const running = job("running", { id: jobId("j1") });
+  after = apply(after, {
+    type: "run.started",
+    at: NOW + 2_000,
+    seq: 3,
+    changeId: ID,
+    job: running,
+    run: RUN,
+  });
+  expect(reviewOf(after).described).toEqual(running);
+  const cancelled = job("cancelled", { id: jobId("j1"), cancel: "pushed" });
+  after = apply(after, { type: "job.changed", at: NOW + 3_000, seq: 4, changeId: ID, job: cancelled });
+  // The run's end shows the change's latest job, the request (queue.ts `followUpOf`).
+  after = apply(after, { type: "job.changed", at: NOW + 3_000, seq: 5, changeId: ID, job: ended });
+  expect(reviewOf(after)).toMatchObject({ job: ended, described: ended });
+});
+
+test("any other skip decides the status block as the newest job: one skipped at the take, or after a failure (ADR 0092)", () => {
+  const failed = job("failed", {
+    failure: { kind: "review_failed", detail: "exit 1", engine: "claude", cause: null, limitMs: null },
+  });
+  let after = apply(snapshot(), { type: "job.changed", at: NOW, seq: 1, changeId: ID, job: failed });
+  expect(reviewOf(after).described).toEqual(failed);
+  // A new request waits, then the take skips it (only Codex reviews, and it isn't the person's change).
+  const waiting = job("queued", { id: jobId("j2") });
+  after = apply(after, { type: "job.changed", at: NOW + 1_000, seq: 2, changeId: ID, job: waiting });
+  const taken = { ...waiting, state: "skipped" as const, skip: "codex-not-yours" as const };
+  after = apply(after, { type: "job.changed", at: NOW + 2_000, seq: 3, changeId: ID, job: taken });
+  expect(reviewOf(after).described).toEqual(taken);
+  // A failure, then the repository switched off: the skip.
+  after = apply(after, { type: "job.changed", at: NOW + 3_000, seq: 4, changeId: ID, job: failed });
+  const off = job("skipped", { id: jobId("j3"), trigger: "push", skip: "repo-off" });
+  after = apply(after, { type: "job.changed", at: NOW + 4_000, seq: 5, changeId: ID, job: off });
+  expect(reviewOf(after).described).toEqual(off);
+  // A fork's skip after a failure, not a request a push ended: the skip.
+  after = apply(after, { type: "job.changed", at: NOW + 5_000, seq: 6, changeId: ID, job: failed });
+  const fork = job("skipped", { id: jobId("j4"), trigger: "push", skip: "fork" });
+  after = apply(after, { type: "job.changed", at: NOW + 6_000, seq: 7, changeId: ID, job: fork });
+  expect(reviewOf(after).described).toEqual(fork);
 });
 
 test("a request joining a waiting job says who asked, once; another request on it adds nothing (ADR 0081)", () => {
@@ -1240,6 +1372,22 @@ test("a sign-in makes the accounts not listed; a listing that answers makes them
   expect(listed.connection).toEqual({ ...CONNECTED, accounts: [ON_SAM], listed: true });
 });
 
+test("each account says what it grants as the listing sent it, and the state still reads (ADR 0091)", () => {
+  const shared = { ...snapshot(), connection: { ...CONNECTED, accounts: [ON_SAM] } };
+  const granting = { ...ON_ACME, granted: [repositoryId("acme/api"), repositoryId("acme/web")] };
+  const listed = apply(shared, {
+    type: "connection.changed",
+    at: NOW,
+    seq: 1,
+    patch: { accounts: [ON_SAM, granting] },
+  });
+  expect(listed.connection.accounts).toEqual([ON_SAM, granting]);
+  expect(stateSchema.parse(JSON.parse(JSON.stringify(listed))).connection.accounts).toEqual([
+    ON_SAM,
+    granting,
+  ]);
+});
+
 test("the accounts the shared App doesn't reach follow the service: named, asked, then reached and gone from the list", () => {
   const ledger = { id: 338, login: "ledger-dev" };
   const shared = { ...snapshot(), connection: { ...CONNECTED, accounts: [ON_SAM] } };
@@ -1263,6 +1411,7 @@ test("the accounts the shared App doesn't reach follow the service: named, asked
     account: { ...ledger, type: "Organization" as const },
     installationId: 93,
     cause: null,
+    granted: [],
   };
   const reached = apply(asked, {
     type: "connection.changed",

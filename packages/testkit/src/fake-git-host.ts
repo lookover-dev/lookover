@@ -16,8 +16,9 @@
 // It is brought to refuse as GitHub does on a bad day: every call (`refuse`), the check writes (`refuseChecks`), the
 // compare, merge base included (`refuseCounts`), or the next post once (`refuseNext`), kept on the host or not:
 // GitHub answered a review it had saved "422 An internal error occurred". It is slow to list the accounts on demand
-// (`holdAccounts`: the listing answers once released). The compare answers from the commits'
-// lineage: the nearest commit both hold is the merge base; two with none in common are `not_found`, as on GitHub.
+// (`holdAccounts`: the listing answers once released), and slow to answer a repository's first listing
+// (`holdFirstPolls`). The compare answers from the commits' lineage: the nearest commit both hold is the merge base;
+// two with none in common are `not_found`, as on GitHub.
 // The repository ports post as the person signed in to the shared App (ADR 0066, ADR 0073), as spike 20 saw GitHub
 // do it: the review, its line comments, the replies, the reactions and the description's status block are theirs,
 // with no bot flag; the checks are the App's. Lookover's threads are the person's roots holding a finding
@@ -447,6 +448,10 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
   private readonly held: RepositoryRef[] = [];
   /** While GitHub is slow to list the accounts (`holdAccounts`): what `accounts` waits for. */
   private accountsHeld: Promise<void> | null = null;
+  /** While GitHub is slow to answer a repository's first listing (`holdFirstPolls`): what that listing waits for. */
+  private firstPollsHeld: Promise<void> | null = null;
+  /** The repositories whose open changes GitHub was asked for once, answered or refused, by their lowercased names. */
+  private readonly listedOnce = new Set<string>();
   /** The shared App's bot: its login names the App's slug. */
   private readonly bot: { id: number; login: string };
   /** The person signed in to the shared App, whom the ports post as. */
@@ -788,6 +793,23 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
     this.accountsHeld = held;
     return () => {
       if (this.accountsHeld === held) this.accountsHeld = null;
+      release();
+    };
+  }
+
+  /**
+   * GitHub slow to answer a repository it never listed before (ADR 0091): from now on, the first listing of the open
+   * changes of a repository not asked for yet answers only once the function returned is called, then as it would
+   * have; a repository asked for before (answered or refused), and every other call, answers as before.
+   */
+  holdFirstPolls(): () => void {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.firstPollsHeld = held;
+    return () => {
+      if (this.firstPollsHeld === held) this.firstPollsHeld = null;
       release();
     };
   }
@@ -1164,6 +1186,11 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
   // HostIntake
 
   listOpenChanges(repo: RepositoryRef): Promise<Listing<HostChange>> {
+    const key = repositoryName(repo).toLowerCase();
+    const held = this.firstPollsHeld;
+    if (held !== null && !this.listedOnce.has(key)) return held.then(() => this.listOpenChanges(repo));
+    // GitHub has been asked once, whatever it answers: a refused first listing ends the slowness for it too.
+    this.listedOnce.add(key);
     return this.answer(repo, () => {
       this.ownRepo(repo);
       return this.listing(

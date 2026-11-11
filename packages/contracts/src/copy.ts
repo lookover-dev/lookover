@@ -281,6 +281,7 @@ const CANCELLED: Record<CancelReason, string> = {
   closed: "the pull request was closed",
   replaced: "a newer review took its place",
   pushed: "a newer commit was pushed after the request",
+  "sign-in-changed": "the sign-in changed",
 };
 
 /** What Codex reviews while its reads aren't confined (ADR 0044, ADR 0048). */
@@ -558,6 +559,17 @@ export function lookingOverHead<C>(commit: C, again: boolean): (string | C)[] {
 export function waitingHead<C>(commit: C): (string | C)[] {
   return ["Waiting to look over ", commit];
 }
+
+/**
+ * The block's heading once a fork's request on `commit` ended as a newer commit was pushed before it began (ADR
+ * 0092), as its pieces.
+ */
+export function endedHead<C>(commit: C): (string | C)[] {
+  return ["Didn't look over ", commit];
+}
+
+/** The line under that heading: the words of its check, then how to ask for the newest commit (ADR 0092). */
+export const ENDED_LINE = `${cancelText("pushed")}. Comment \`/lookover review\` to look over the newest one.`;
 
 /** The block's heading once a job on `commit` failed, as its pieces. */
 export function failedHead<C>(commit: C): (string | C)[] {

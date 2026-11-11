@@ -61,6 +61,7 @@ const account = (id: number, login: string, type: "User" | "Organization"): Conn
   installationId: id + 10,
   cause: null,
   owner: true,
+  granted: [],
 });
 
 /** sasensi signed in, its own account and fernhill reached; by default fernhill's web is off, so fernhill is mixed. */

@@ -2,7 +2,8 @@
 // the owner asks (ADR 0016, ADR 0078), and never a fork's by itself (ADR 0048). Twenty seconds after the load
 // dependabot opens #150, a version bump; twenty seconds later the owner opens #153 from their fork; a minute after
 // #150 Mira, a colleague, opens #152 from her fork. #150 and #152 get nothing: no job, no check, nothing posted. #153
-// is skipped as a fork as it opens, its check saying why. Nothing runs: no engine is asked.
+// is skipped as a fork as it opens, its check saying why. Nothing runs: no engine is asked. Review now on any of the
+// three runs a short scripted review with nothing found (#574).
 import { commitSha } from "@lookover/contracts";
 import { on, type Scenario, type ScenarioChange } from "../scenario.ts";
 import { DEPENDABOT, LEDGER_API, MIN, MIRA, OWNER, SHORT_FIND_MS, unified } from "./ledger-api.ts";
@@ -29,6 +30,13 @@ const BUMP: ScenarioChange = {
         "   },",
         '   "devDependencies": {',
       ),
+      // Asked for by hand ("Review now"), Claude reviews the bump (ADR 0078).
+      find: {
+        notes: "Express moves from 4.19.2 to 4.21.0, a minor version.",
+        findings: [],
+        emptyReason: "A minor bump of one dependency, with no change to the code that calls it.",
+        tookMs: SHORT_FIND_MS,
+      },
     },
   ],
 };
@@ -57,7 +65,7 @@ const RETRIES: ScenarioChange = {
         "   return res.ok;",
         " }",
       ),
-      // Asked for by hand ("Review again"), Claude alone reviews the fork (ADR 0048).
+      // Asked for by hand ("Review now"), Claude alone reviews the fork (ADR 0048).
       find: {
         notes: "A failed delivery is scheduled again.",
         findings: [],
@@ -89,6 +97,13 @@ const PINNED: ScenarioChange = {
         "+          node-version: 22.11.0",
         "       - run: npm ci",
       ),
+      // Asked for by hand ("Review now"), Claude alone reviews the fork (ADR 0048).
+      find: {
+        notes: "CI runs on Node 22.11.0 instead of the latest LTS.",
+        findings: [],
+        emptyReason: "One pinned version in the workflow, and nothing else changes.",
+        tookMs: SHORT_FIND_MS,
+      },
     },
   ],
 };

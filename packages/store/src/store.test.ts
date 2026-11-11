@@ -447,6 +447,45 @@ test("the setup starts at its first step, keeps each write across a restart, and
   });
 });
 
+test("the setup keeps the person it belongs to beside it, across a restart and every write, until forgotten (ADR 0090)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  store.setup.write({ step: "github" });
+  // Nobody recorded yet: a folder set up before, or at once.
+  expect(store.setup.person()).toBeNull();
+  store.setup.keepPerson(1234);
+  expect(store.setup.person()).toBe(1234);
+  // A write of the setup leaves the person as kept, and the setup itself never names them.
+  expect(store.setup.write({ github: "waiting-for-install" })).toEqual({
+    done: false,
+    step: "github",
+    reached: "github",
+    github: "waiting-for-install",
+    firstReviewChange: null,
+  });
+  store.close();
+  const again = open(dir);
+  expect(again.setup.person()).toBe(1234);
+  again.setup.keepPerson(5678);
+  expect(again.setup.person()).toBe(5678);
+  again.setup.keepPerson(null);
+  expect(again.setup.person()).toBeNull();
+});
+
+test("the setup's person kept before the setup was ever written keeps the setup at its first step (ADR 0090)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  store.setup.keepPerson(1234);
+  expect(store.setup.person()).toBe(1234);
+  expect(store.setup.read()).toEqual({
+    done: false,
+    step: "ai",
+    reached: "ai",
+    github: "start",
+    firstReviewChange: null,
+  });
+});
+
 test("the setup's table refuses a GitHub step the contracts don't name, the wait for an own App among them (ADR 0073)", () => {
   const dir = migrated();
   open(dir).setup.write({ step: "github" });
@@ -668,6 +707,72 @@ test("a review asked for as a preview is offered to the take as one, joined or r
   expect([again.jobs.previewOf(first.id), again.jobs.previewOf(jobId("j2"))]).toEqual([true, false]);
 });
 
+test("the job the status block says is the change's newest, but a fork's skips never hide the request their push ended (ADR 0092)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  expect(store.jobs.described(CHANGE)).toBeNull();
+  store.jobs.skipped(CHANGE, { sha: job.sha, trigger: "opened", id: () => jobId("j0"), skip: "fork" });
+  expect(store.jobs.described(CHANGE)?.job).toMatchObject({ id: "j0", state: "skipped" });
+  asked(store, CHANGE, job);
+  const cancelled: ReviewJob = { ...job, state: "cancelled", cancel: "pushed" };
+  expect(store.jobs.forkPushed(CHANGE, pr2.head.sha)).toEqual([cancelled]);
+  store.jobs.skipped(CHANGE, { sha: pr2.head.sha, trigger: "push", id: () => jobId("j2"), skip: "fork" });
+  expect(store.jobs.latest(CHANGE)?.job).toMatchObject({ id: "j2", state: "skipped" });
+  expect(store.jobs.described(CHANGE)).toEqual({ changeId: CHANGE, job: cancelled });
+  store.jobs.skipped(CHANGE, { sha: job.sha, trigger: "push", id: () => jobId("j3"), skip: "fork" });
+  expect(store.jobs.described(CHANGE)).toEqual({ changeId: CHANGE, job: cancelled });
+  store.close();
+  expect(open(dir).jobs.described(CHANGE)).toEqual({ changeId: CHANGE, job: cancelled });
+});
+
+test("a fork's request a push ended behind a review still running leaves the block to that review until it ends (ADR 0092)", () => {
+  const store = open(migrated());
+  asked(store, CHANGE, job);
+  started(store, job.id, run);
+  store.jobs.asked(CHANGE, {
+    sha: job.sha,
+    trigger: "comment",
+    id: () => jobId("j2"),
+    request: request("c2"),
+  });
+  expect(store.jobs.forkPushed(CHANGE, pr2.head.sha)).toMatchObject([{ id: "j2", cancel: "pushed" }]);
+  store.jobs.skipped(CHANGE, { sha: pr2.head.sha, trigger: "push", id: () => jobId("j3"), skip: "fork" });
+  expect(store.jobs.described(CHANGE)).toMatchObject({
+    changeId: CHANGE,
+    job: { id: job.id, state: "running" },
+  });
+  const failure = { kind: "review_failed", detail: "invalid_output", cause: null, limitMs: null } as const;
+  store.jobs.runEnded(run.id, { kind: "failed", failure }, T2);
+  expect(store.jobs.described(CHANGE)?.job).toMatchObject({ id: "j2", state: "cancelled", cancel: "pushed" });
+});
+
+test("any other skip is the job the status block says, as the newest: one skipped at the take, one after a failure (ADR 0092)", () => {
+  const store = open(migrated());
+  asked(store, CHANGE, job);
+  started(store, job.id, run);
+  const failure = { kind: "review_failed", detail: "invalid_output", cause: null, limitMs: null } as const;
+  const failed = store.jobs.runEnded(run.id, { kind: "failed", failure }, T2);
+  expect(store.jobs.described(CHANGE)?.job).toEqual(failed);
+  // A new request waits, and the take skips it: the skip, not the failure.
+  store.jobs.asked(CHANGE, {
+    sha: job.sha,
+    trigger: "comment",
+    id: () => jobId("j2"),
+    request: request("c2"),
+  });
+  store.jobs.take(() => ({ kind: "skip", reason: "codex-not-yours" }));
+  expect(store.jobs.described(CHANGE)?.job).toMatchObject({
+    id: "j2",
+    state: "skipped",
+    skip: "codex-not-yours",
+  });
+  // A push skipped as the repository is switched off, and a fork's push skipped: the skip each time.
+  store.jobs.skipped(CHANGE, { sha: pr2.head.sha, trigger: "push", id: () => jobId("j3"), skip: "repo-off" });
+  expect(store.jobs.described(CHANGE)?.job).toMatchObject({ id: "j3", skip: "repo-off" });
+  store.jobs.skipped(CHANGE, { sha: pr2.head.sha, trigger: "push", id: () => jobId("j4"), skip: "fork" });
+  expect(store.jobs.described(CHANGE)?.job).toMatchObject({ id: "j4", skip: "fork" });
+});
+
 test("a job an ordinary ask made and a preview joined is a preview, its trigger kept", () => {
   const store = open(migrated());
   asked(store, CHANGE, job);
@@ -771,6 +876,44 @@ test("a preview's job moved to a newer commit lets its check go and makes none: 
   store.jobs.checked(jobId("j3"), { id: "c2", sha: job.sha });
   store.jobs.checked(jobId("j3"), null);
   expect(store.jobs.checkOf(jobId("j3"))).toEqual({ ref: null, completed: false });
+});
+
+test("a check made late for a preview's job cancelled as the sign-in changed owes nothing: it is never ended", () => {
+  const store = open(migrated());
+  // The check's creation in flight as the preview joins, then the sign-in changes before it lands.
+  asked(store, CHANGE, job);
+  store.jobs.asked(CHANGE, { sha: job.sha, trigger: "first-review", id: () => jobId("j2"), preview: true });
+  store.repos.signInChanged(T2);
+  store.jobs.checked(job.id, { id: "c1", sha: job.sha });
+  expect(store.jobs.checkOf(job.id)).toEqual({ ref: { id: "c1", sha: job.sha }, completed: true });
+  expect(store.jobs.checksEnding()).toEqual([]);
+});
+
+test("every job there was as the sign-in changed is settled by it, finished or not: a check made late for a preview done is never ended, nor any other check of theirs", () => {
+  const store = open(migrated());
+  // A preview joins an ordinary job whose check is being created, and is done before the check lands.
+  asked(store, CHANGE, job);
+  store.jobs.asked(CHANGE, { sha: job.sha, trigger: "first-review", id: () => jobId("j2"), preview: true });
+  started(store, job.id, run);
+  roundEnded(store, run.id, 1, [], T2, "preview");
+  // A job skipped, its check not made yet either.
+  store.jobs.skipped(OTHER, { sha: job.sha, trigger: "opened", id: () => jobId("j3"), skip: "repo-off" });
+  expect(store.jobs.settledBySignIn(job.id)).toBe(false);
+  store.repos.signInChanged(T2);
+  // The checks land after the switch: neither is owed an end, whoever is signed in now.
+  store.jobs.checked(job.id, { id: "c1", sha: job.sha });
+  store.jobs.checked(jobId("j3"), { id: "c2", sha: job.sha });
+  expect(store.jobs.checkOf(job.id)).toEqual({ ref: { id: "c1", sha: job.sha }, completed: true });
+  expect(store.jobs.checkOf(jobId("j3"))).toEqual({ ref: { id: "c2", sha: job.sha }, completed: true });
+  expect(store.jobs.previewsEnding()).toEqual([]);
+  expect(store.jobs.checksEnding()).toEqual([]);
+  expect(store.jobs.settledBySignIn(job.id)).toBe(true);
+  expect(store.jobs.settledBySignIn(jobId("j3"))).toBe(true);
+  // A job asked after it is not: its check is followed as ever.
+  asked(store, THIRD, { ...job, id: jobId("j4") });
+  expect(store.jobs.settledBySignIn(jobId("j4"))).toBe(false);
+  store.jobs.checked(jobId("j4"), { id: "c3", sha: job.sha });
+  expect(store.jobs.checkOf(jobId("j4"))).toEqual({ ref: { id: "c3", sha: job.sha }, completed: false });
 });
 
 test("a preview done whose check the host shows owes that check's end until it is completed, after a restart too", () => {
@@ -1238,6 +1381,9 @@ test("a request is handled with the job it led to: 👀 waits once recorded, �
     { repo: REPO, commentId: "c1", reaction: "eyes" },
     { repo: REPO, commentId: "c2", reaction: "eyes" },
   ]);
+  expect(store.requests.owes(REPO, "c1", "eyes")).toBe(true);
+  expect(store.requests.owes(REPO, "c1", "rocket")).toBe(false);
+  expect(store.requests.owes(REPO, "c9", "eyes")).toBe(false);
   store.requests.reacted(REPO, "c1", "eyes");
   store.requests.reacted(REPO, "c2", "eyes");
   expect(store.requests.unreacted()).toEqual([]);
@@ -1251,6 +1397,8 @@ test("a request is handled with the job it led to: 👀 waits once recorded, �
     { repo: REPO, commentId: "c1", reaction: "rocket" },
     { repo: REPO, commentId: "c2", reaction: "rocket" },
   ]);
+  expect(again.requests.owes(REPO, "c1", "rocket")).toBe(true);
+  expect(again.requests.owes(REPO, "c1", "eyes")).toBe(false);
   again.requests.reacted(REPO, "c1", "rocket");
   again.requests.reacted(REPO, "c2", "rocket");
   expect(again.requests.unreacted()).toEqual([]);
@@ -2901,6 +3049,110 @@ test("a repository gone from the installation: its jobs cancelled, what it owes 
   expect(again.rounds.of(CHANGE)).toEqual([{ n: 1, sha: pr1.head.sha }]);
   expect(again.inbox.replace(REPO, [pr1]).repositoryAdded).toBe(true);
   expect(again.inbox.open(ledger).map((c) => c.number)).toEqual([1]);
+});
+
+test("the sign-in changed: every job not ended cancelled, nothing owed to the host, no reaction owed, every listing kept (ADR 0090)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  const ledger = { owner: "sasensi", name: "ledger-api" };
+  const ledgerChange = changeId("sasensi/ledger-api#1");
+  store.inbox.replace(REPO, [pr1, pr2]);
+  store.inbox.replace(ledger, [pr1]);
+  store.repos.setEnabled(REPO, false);
+  store.requests.seen(REPO, [], at(T1));
+  // #3's job was done, its round posted: its request's 🚀 is owed.
+  const third: ReviewJob = { ...job, id: jobId("j3") };
+  store.jobs.asked(THIRD, { sha: job.sha, trigger: "comment", id: () => third.id, request: request("c3") });
+  store.requests.reacted(REPO, "c3", "eyes");
+  started(store, third.id, { ...run, id: runId("r3") });
+  roundEnded(store, runId("r3"), 1, [], T1);
+  // #1's job runs, at publishing: its check posted, its review and the rest owed; its request waits for its 👀.
+  store.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
+  started(store, job.id, run);
+  store.posts.saved(run.id, { n: 1, held: [], ledger: [], plan: PLAN, posts: POSTS }, T1 + 1);
+  store.posts.sent(run.id, "check", "111");
+  // #2's job waits, its check made; another repository's job waits too.
+  const other: ReviewJob = { ...job, id: jobId("j2") };
+  asked(store, OTHER, other);
+  store.jobs.checked(other.id, { id: "222", sha: other.sha });
+  const elsewhere: ReviewJob = { ...job, id: jobId("j9") };
+  asked(store, ledgerChange, elsewhere);
+  expect(store.requests.unreacted()).toHaveLength(2);
+
+  store.repos.signInChanged(T2);
+  store.close();
+
+  const again = open(dir);
+  for (const [id, j] of [
+    [CHANGE, job],
+    [OTHER, other],
+    [ledgerChange, elsewhere],
+  ] as const)
+    expect(again.jobs.latest(id)?.job).toMatchObject({
+      id: j.id,
+      state: "cancelled",
+      cancel: "sign-in-changed",
+    });
+  expect(again.jobs.latest(THIRD)?.job).toMatchObject({ id: third.id, state: "done" });
+  expect(again.jobs.leftRunning()).toEqual([]);
+  expect(again.jobs.waiting().jobs).toEqual([]);
+  // Nothing more is written to GitHub for them: no check's end, no post, no reaction, the 👀 nor the 🚀.
+  expect(again.jobs.checksEnding()).toEqual([]);
+  expect(again.posts.of(run.id)?.posts).toEqual([{ kind: "check", hostId: "111", tries: 0 }]);
+  expect(again.requests.unreacted()).toEqual([]);
+  // Every listing stays: the changes, the comments handled, the switches and the poll's place.
+  expect(again.inbox.open(REPO).map((c) => c.number)).toEqual([1, 2]);
+  expect(again.requests.handled(REPO, ["c1", "c3"])).toEqual(new Set(["c1", "c3"]));
+  expect(again.requests.place(REPO)).toEqual({ newest: T1, floor: T1 });
+  expect(again.repos.listed()).toEqual([REPO, ledger]);
+  expect(again.repos.enabled(REPO)).toBe(false);
+});
+
+test("the coding agent's request before the choice is kept across a restart, until answered, then asked as any request (ADR 0090)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  store.inbox.replace(REPO, [pr1, pr2]);
+  // As the poll does: kept, then the comments seen.
+  store.requests.keep(CHANGE, request("c1"), false);
+  store.requests.keep(OTHER, request("c2", T2), true);
+  store.requests.seen(REPO, [request("c1").comment, request("c2", T2).comment], at(T2));
+  expect(store.requests.unreacted()).toEqual([]);
+  store.close();
+
+  const again = open(dir);
+  expect(again.requests.kept()).toEqual([
+    { changeId: CHANGE, request: request("c1"), full: false },
+    { changeId: OTHER, request: request("c2", T2), full: true },
+  ]);
+  // The comment seen takes its job, kept no more in the same transaction: its 👀 owed, handled still.
+  again.jobs.asked(CHANGE, { sha: job.sha, trigger: "comment", id: () => job.id, request: request("c1") });
+  expect(again.requests.kept().map((k) => k.request.comment.id)).toEqual(["c2"]);
+  expect(again.requests.unreacted()).toEqual([{ repo: REPO, commentId: "c1", reaction: "eyes" }]);
+  expect(again.requests.of(job.id)).toEqual(["IC_c1"]);
+  expect(again.requests.handled(REPO, ["c1", "c2"])).toEqual(new Set(["c1", "c2"]));
+  again.close();
+
+  // The one left unanswered (the service stopped before the choice answered it) is kept still, until unkept.
+  const last = open(dir);
+  expect(last.requests.kept().map((k) => k.request.comment.id)).toEqual(["c2"]);
+  last.requests.unkeep(request("c2", T2));
+  last.requests.unkeep(request("c2", T2));
+  expect(last.requests.kept()).toEqual([]);
+});
+
+test("kept requests are dropped when the sign-in changes, and with their repository when it leaves (ADR 0090)", () => {
+  const store = open(migrated());
+  const ledger = { owner: "sasensi", name: "ledger-api" };
+  const ledgerChange = changeId("sasensi/ledger-api#1");
+  store.inbox.replace(REPO, [pr1]);
+  store.inbox.replace(ledger, [pr1]);
+  store.requests.keep(CHANGE, request("c1"), false);
+  store.requests.keep(ledgerChange, { ...request("c9"), repo: ledger }, false);
+  store.repos.removed(REPO, "sasensi/lookover-sandbox#", T2);
+  expect(store.requests.kept().map((k) => k.changeId)).toEqual([ledgerChange]);
+
+  store.repos.signInChanged(T2);
+  expect(store.requests.kept()).toEqual([]);
 });
 
 /** The migration that names each change by its repository's owner too (ADR 0066). */

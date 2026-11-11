@@ -228,3 +228,12 @@ test("--files-from runs the files its list names instead of the folders, the oth
   ).toEqual(["--parallel", "--timings=t.json", "./packages/core/src/a.test.ts", "./apps/web/src/b.test.tsx"]);
   expect(testArgs(["./packages", "--parallel"])).toEqual(["./packages", "--parallel"]);
 });
+
+test("test:scripts' ./scripts with a list runs only the listed files, as check runs the readers (ADR 0089)", () => {
+  const list = join(scratch, "readers.txt");
+  writeFileSync(list, "scripts/gates.test.ts\nscripts/public-tree.test.ts\n");
+  expect(testArgs(["./scripts", `--files-from=${list}`])).toEqual([
+    "./scripts/gates.test.ts",
+    "./scripts/public-tree.test.ts",
+  ]);
+});

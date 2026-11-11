@@ -404,8 +404,9 @@ export function createPublisher({
   };
   /** The status block for `status` within `room`, the findings' words as the round's posts show them (ADR 0056). */
   const blockOf = (change: ChangeRef, status: Status, room: number): string | null => {
-    // A running round lists nothing; the others list a posted round's findings, filtered.
-    if (status.kind === "running") return statusBlock(change, status, room, offset);
+    // A running round, or a request a push ended, lists nothing; the others list a posted round's findings, filtered.
+    if (status.kind === "running" || status.kind === "ended")
+      return statusBlock(change, status, room, offset);
     const finding = findingsFiltered();
     const filtered = (posted: StatusRound): StatusRound => ({
       ...posted,
@@ -596,8 +597,9 @@ export function createPublisher({
     async status(change) {
       const now = current?.(change, []) ?? null;
       if (now === null) return;
-      // The threads only for a block that lists findings: a running round's lists none.
-      const listed = now.kind === "posted" || (now.kind !== "running" && now.posted !== null);
+      // The threads only for a block that lists findings: a running round's, or a request a push ended, lists none.
+      const listed =
+        now.kind === "posted" || ((now.kind === "waiting" || now.kind === "failed") && now.posted !== null);
       // A read refused leaves the findings unlinked: the block is written all the same.
       const read =
         listed && threads

@@ -941,11 +941,13 @@ export const blockOn = (host: FakeGitHost, change: ChangeRef): string =>
 
 /**
  * Whether a write of the status block says a round posted (ADR 0074), not where a job stands (Looking over, Waiting
- * to look over, Couldn't look over: the check follower's).
+ * to look over, Couldn't look over, Didn't look over: the check follower's).
  */
 export const roundWritten = (post: { kind: string; description?: string }): boolean =>
   post.kind === "status.written" &&
-  !/ · (Looking over|Waiting to look over|Couldn't look over) \[/.test(post.description ?? "");
+  !/ · (Looking over|Waiting to look over|Couldn't look over|Didn't look over) \[/.test(
+    post.description ?? "",
+  );
 
 /** "Review now" on the planted pull request. */
 export const review = (service: RunningService, cookie: string) =>

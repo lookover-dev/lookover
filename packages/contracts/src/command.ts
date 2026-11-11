@@ -37,12 +37,18 @@ export type Command =
    */
   | { type: "connection.askToInstall"; account: string }
   /**
-   * An install look (ADR 0088), asked as a link to GitHub's install page or an installation's settings opens, as the
-   * app's window comes back while one runs, and by "Check again": the installations listed at once, then every 4 s
-   * for 3 minutes or until something new arrives (`Connection.look`); while one runs, listed at once and its end moved
-   * 3 minutes on. Refused as `LookRefusal` says.
+   * An install look (ADR 0088), asked as a link to GitHub's install page or an installation's settings opens and by
+   * "Check again": the installations listed at once, then every 4 s for 3 minutes or until something new arrives
+   * (`Connection.look`); while one runs, listed at once and its end moved 3 minutes on. Refused as `LookRefusal`
+   * says.
    */
   | { type: "connection.look" }
+  /**
+   * The tab come back (ADR 0091), which can't tell from its copy whether a look runs (a hidden tab's events wait):
+   * while one runs, the installations listed at once, its end unmoved; with none running, or nobody signed in,
+   * nothing done. Never refused: the person did nothing.
+   */
+  | { type: "connection.returned" }
   | { type: "connection.reconnect" }
   | { type: "setup.goto"; step: SetupStep }
   | { type: "setup.chooseRepos"; enabled: RepositoryId[] }

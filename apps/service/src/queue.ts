@@ -28,7 +28,9 @@
 //   now"); the store records the request with that job, which answers it (its 👀 now, its 🚀 once its round is
 //   posted; a run's end sends what is owed). The owner's `/lookover review full` makes that job a full round (ADR
 //   0052), whatever joins it. A request on a commit already reviewed asks all the same: a new job, a new round (the
-//   agent asks again after replying on a thread). The poll's caller takes.
+//   agent asks again after replying on a thread). The poll's caller takes. Before the repositories are chosen, the
+//   coding agent's request (`lookover wait`'s marker) asks nothing either (ADR 0090): the store keeps it, and the
+//   choice (`chosen`) asks each kept request still on an open change in a repository switched on, then takes.
 // - A request while the change's job runs is a follow-up: a job for the newest head commit, waiting behind the run,
 //   which is never cut. The UI goes on showing the run: nothing of another job of the change (joined, moved,
 //   deferred, cancelled) is sent while it goes; once it has ended, the UI is sent the change's latest job, which
@@ -70,7 +72,9 @@
 // engine is given to `core` with what holds it, the change whose run holds it, its self-test, or an older job.
 // Each change is sent as the UI's event; a deferral whose reason didn't change, or a turn that didn't move, is no
 // write and no event. The first start ends a take, its run starts, and the queue takes again, until a take starts
-// nothing.
+// nothing. While the room says no take may run (`mayTake`), a take writes nothing owed and starts nothing: the room
+// takes again once one may. An ask from the app ("Review now", the setup's first review) is the sign-in's it began
+// under (`signInTurn`, ADR 0090): another person's begun while its listing was under way, it asks nothing.
 // When the take runs: after a job is recorded (a request), after a poll that saw something, after a run ends, after
 // a repository's settings moved (`settingsMoved`, ADR 0049: when its reviewers moved, each job deferred on an engine
 // is first sent again with who may step in for it now; a run under way keeps the settings it started with), after
@@ -202,6 +206,16 @@ export interface QueueDeps {
    * opening or a push asks nothing.
    */
   reposChosen(): boolean;
+  /**
+   * Whether a take may run now: when not, it sends nothing owed again and starts nothing (read before and after the
+   * engines' health is asked), and the room takes once one may.
+   */
+  mayTake(): boolean;
+  /**
+   * Whose sign-in an ask from the app is made under (ADR 0090): a number that moves as another person's sign-in
+   * begins to be held, null until it is. An ask begun under one asks nothing once another is.
+   */
+  signInTurn(): number | null;
   emit(body: EventBody): void;
   /** Lists the open changes of the change's repository again, so a request reviews the newest head commit. */
   list(changeId: ChangeId): Promise<void>;
@@ -217,6 +231,12 @@ export interface QueueDeps {
   log?(line: string): void;
 }
 
+/**
+ * What an ask from the app comes to: asked; no such change open (or none it may ask); or nothing, another person's
+ * sign-in begun while it was under way (ADR 0090), the ask the last person's.
+ */
+export type OwnerAnswer = "ok" | "no_such_change" | "signed-in-since";
+
 export interface Queue {
   /**
    * At start: the jobs a stopped service left running resume their posts, go back to the queue or fail, a line in
@@ -227,16 +247,17 @@ export interface Queue {
    * "Review now": the change's waiting job for its newest head commit, recorded; the take then runs. While the host
    * is down (a listing refused as a disconnection), for the head of the last listing: the job waits on the connection.
    * In a repository switched off, a job skipped "repo-off", unless the change has a job waiting or running, which it
-   * joins (ADR 0047).
+   * joins (ADR 0047). Nothing, `signed-in-since`, when another person's sign-in began while its listing was under
+   * way (`signInTurn`, ADR 0090): the person signed in now didn't ask.
    */
-  request(changeId: ChangeId): Promise<"ok" | "no_such_change">;
+  request(changeId: ChangeId): Promise<OwnerAnswer>;
   /**
    * The setup's first review of the change (ADR 0047): "Review now" with trigger "first-review", its job a preview
    * when `preview` says so, whose run posts nothing. `no_such_change` for a change no longer open, and for an open
    * one another author opened too: `core.intake` says setup's first review doesn't ask there (ADR 0078), and setup
-   * never offers one.
+   * never offers one. `signed-in-since` as for `request`.
    */
-  firstReview(changeId: ChangeId, preview: boolean): Promise<"ok" | "no_such_change">;
+  firstReview(changeId: ChangeId, preview: boolean): Promise<OwnerAnswer>;
   /**
    * The poll saw the change opened, or a draft marked ready: a review of its head commit, trigger "opened", as
    * `core.intake` says with the repository's switches. Skipped, the job is recorded so with its reason (its check
@@ -258,6 +279,12 @@ export interface Queue {
    * asked `/lookover review full` (ADR 0052), which sticks to the job the request leads to.
    */
   requested(changeId: ChangeId, request: RequestComment, full: boolean): void;
+  /**
+   * The person chose the repositories (ADR 0090): each request the coding agent made before, kept since, is asked as
+   * `requested` would, if its change is still open and its repository on; dropped without a word otherwise; each kept
+   * until then. Then the take runs. With none kept, or the repositories not chosen yet, nothing: the room calls it at every start.
+   */
+  chosen(): void;
   /**
    * The UI's review of the change was made anew (an older version's, dropped at start, ADR 0085): the change's job
    * running, else its latest one waiting (queued or deferred), is sent again as the record holds it. Its change, if
@@ -320,9 +347,10 @@ export interface Queue {
    */
   ranInto(engine: EngineId, state: RanInto, met?: LimitMet): void;
   /**
-   * The repository whose changes' ids start with `changes` left the installation (ADR 0053): its runs under way are
-   * cut now (nothing of them recorded: the caller records their jobs' end), and nothing follows their end, no
-   * follow-up shown and no take; settles once they have ended.
+   * The repository whose changes' ids start with `changes` left the installation (ADR 0053), or, for `""`, every
+   * change, as the choice of repositories is made again (ADR 0090): its runs under way are cut now (nothing of them
+   * recorded: the caller records their jobs' end), and nothing follows their end, no follow-up shown and no take;
+   * settles once they have ended.
    */
   leave(changes: string): Promise<void>;
   /** Takes no more jobs, cuts the runs in progress (nothing of them recorded) and waits for them. */
@@ -652,9 +680,12 @@ export function createQueue(d: QueueDeps): Queue {
    * when nothing more can start now, or the service is stopping.
    */
   async function takeOnce(): Promise<boolean> {
+    // No take may run: nothing starts, nothing is asked.
+    if (!d.mayTake()) return false;
     // Paused, nothing can start: no engine's health is asked.
     const health = pausedNow() ? new Map<EngineId, Health>() : await askHealthTwice();
-    if (health === null) return false;
+    // Read again too: the room may have said no while the health was asked.
+    if (health === null || !d.mayTake()) return false;
     // Read again: a pause may have come while the health was asked.
     const paused = pausedNow();
     const open = d.openChanges();
@@ -793,7 +824,7 @@ export function createQueue(d: QueueDeps): Queue {
 
   /** Runs the take until nothing more starts; asked for while it runs, it goes round once more. */
   function take(): void {
-    if (stopping) return;
+    if (stopping || !d.mayTake()) return;
     // A check's end the host refused is sent again at every take, the first after a restart too.
     d.checks.resend();
     if (taking !== null) {
@@ -818,12 +849,20 @@ export function createQueue(d: QueueDeps): Queue {
     if (asked.changed) changed({ changeId, job: asked.job });
   }
 
-  /** What `core.intake` says the trigger asks of the open change, with its repository's switches now. */
-  function decided(change: ChangeFacts, trigger: Trigger): Intake {
+  /**
+   * What `core.intake` says the trigger asks of the open change, with its repository's switches now; `asking`'s
+   * request says who wrote it (ADR 0081).
+   */
+  function decided(change: ChangeFacts, trigger: Trigger, asking: Asking): Intake {
     const repository = d.settings(change.repoId);
-    return intake(change, { enabled: repository.enabled, settings: repository.values }, trigger, {
-      reposChosen: d.reposChosen(),
-    });
+    const settings = { enabled: repository.enabled, settings: repository.values };
+    return intake(
+      change,
+      settings,
+      trigger,
+      { reposChosen: d.reposChosen() },
+      asking.request?.askedBy ?? null,
+    );
   }
 
   /**
@@ -837,8 +876,11 @@ export function createQueue(d: QueueDeps): Queue {
   function intakeOf(changeId: ChangeId, trigger: Trigger, asking: Asking = {}): void {
     const change = d.openChanges().get(changeId);
     if (!change) return;
-    const decision = decided(change, trigger);
+    const decision = decided(change, trigger, asking);
     if (decision.kind === "job") ask(changeId, change.headSha, trigger, asking);
+    // A request not asked is the coding agent's, before the repositories are chosen: kept for the choice (ADR 0090).
+    if (decision.kind === "not-asked" && asking.request !== undefined)
+      d.store.requests.keep(changeId, asking.request, asking.full ?? false);
     if (decision.kind !== "skipped") return;
     // A request beside a pending job joins it, as a review would; never a skip that hides it (ADR 0047).
     const outcome = skipOutcome(trigger, decision.reason, d.store.jobs.pending(changeId));
@@ -889,16 +931,20 @@ export function createQueue(d: QueueDeps): Queue {
     changeId: ChangeId,
     trigger: "manual" | "first-review",
     asking: Asking = {},
-  ): Promise<"ok" | "no_such_change"> {
+  ): Promise<OwnerAnswer> {
+    const turn = d.signInTurn();
     // A listing refused while the host is down is no answer to "Review now" (ADR 0047): the review is asked on
     // the head of the last listing, and the take defers it on the connection.
     await d.list(changeId).catch((error: unknown) => {
       if (!disconnects(error)) throw error;
     });
+    // Another person signed in meanwhile (ADR 0090): the ask was the last one's, and whoever is signed in now hasn't
+    // asked; the choice made again cancelled whatever it would join, and the switch takes once it is held.
+    if (turn === null || d.signInTurn() !== turn) return "signed-in-since";
     const change = d.openChanges().get(changeId);
     // Closed since: the take cancels the job it may have left waiting. Another author's change is none setup's first
     // review could ask (ADR 0078): setup never offers one.
-    if (!change || decided(change, trigger).kind === "not-asked") {
+    if (!change || decided(change, trigger, asking).kind === "not-asked") {
       take();
       return "no_such_change";
     }
@@ -1021,6 +1067,20 @@ export function createQueue(d: QueueDeps): Queue {
     requested(changeId, request, full) {
       if (stopping) return;
       intakeOf(changeId, "comment", { request, full });
+    },
+    chosen() {
+      if (stopping || !d.reposChosen()) return;
+      const kept = d.store.requests.kept();
+      if (kept.length === 0) return;
+      for (const { changeId, request, full } of kept) {
+        const change = d.openChanges().get(changeId);
+        // Switched off, or no longer open: nobody asked in person since, so nothing at all, not even a told skip.
+        if (change !== undefined && d.settings(change.repoId).enabled)
+          intakeOf(changeId, "comment", { request, full });
+        // Kept no more once answered or dropped, not before: one a throw left unanswered waits for the next start.
+        d.store.requests.unkeep(request);
+      }
+      take();
     },
     rebuilt(changeId) {
       if (stopping) return;

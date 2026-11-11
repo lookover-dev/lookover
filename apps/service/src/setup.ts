@@ -9,7 +9,10 @@
 // The first review is the queue's request (trigger
 // "first-review", a preview when the owner said "preview here only"); the setup keeps the change it was asked for,
 // once the queue knows it. Moving the furthest step reached past Repositories (`chooseRepos`, or a `goto` beyond it)
-// is the choice of the repositories: until then nothing asks a review by itself (ADR 0079, `reposChosen`).
+// is the choice of the repositories: until then nothing asks a review by itself (ADR 0079, `reposChosen`), and the
+// queue answers the coding agent's requests kept until then (`chosen`, ADR 0090). Making the
+// choice again (`again`, ADR 0090) sends the setup back to the GitHub step, the furthest reached too; the room cancels
+// the unfinished reviews first (`choice-again.ts`).
 // It must never know: the host (the installations are read by `installation.ts`), or
 // what a switch turned off does to a review (`core.intake`'s, through the queue).
 import type {
@@ -22,9 +25,10 @@ import type {
   Setup as SetupState,
   SetupStep,
 } from "@lookover/contracts";
-import { furthestReached } from "@lookover/contracts";
+import { furthestReached, reposChosen } from "@lookover/contracts";
 import type { Store } from "@lookover/store";
 import type { Installation } from "./installation.ts";
+import type { OwnerAnswer } from "./queue.ts";
 import { appInstalled, repoIdOf } from "./snapshot.ts";
 
 export interface SetupDeps {
@@ -35,8 +39,13 @@ export interface SetupDeps {
   repos(): readonly RepositoryRef[];
   /** The connection's id and the installation as the service holds them, and the install's wait. */
   github: Pick<Installation, "connectionId" | "accounts" | "waitForInstall">;
-  /** The queue's first review of the change: a request, a preview when said. */
-  review(changeId: ChangeId, preview: boolean): Promise<"ok" | "no_such_change">;
+  /**
+   * The queue's first review of the change: a request, a preview when said; `signed-in-since` when another person's
+   * sign-in began meanwhile (ADR 0090), nothing asked.
+   */
+  review(changeId: ChangeId, preview: boolean): Promise<OwnerAnswer>;
+  /** The repositories were just chosen: the queue answers the coding agent's requests kept until then (ADR 0090). */
+  chosen(): void;
 }
 
 export interface SetupFlow {
@@ -61,6 +70,19 @@ export interface SetupFlow {
    */
   signedIn(): void;
   /**
+   * The sign-in held at start, the choice of repositories made again (ADR 0090): unless it is installed already, the
+   * GitHub step waits for its install, a wait the installation's own loop begins (`Installation.begin` reads the
+   * setup), so none is begun here and none twice.
+   */
+  heldAtStart(): void;
+  /**
+   * The choice of repositories made again (ADR 0090): the setup back at the GitHub step's start, the furthest reached
+   * too, not done, the first review forgotten, so the repositories are no longer chosen. The install of whoever signs
+   * in is waited for by `signedIn`, once the service holds that sign-in. The repositories' switches stay, as the
+   * Repositories step's starting ticks.
+   */
+  again(): void;
+  /**
    * The shared App's installation found (ADR 0053), granting repositories or none: the connection shown connected (once),
    * with the installation; the GitHub step done, the repositories reached but not gone to (ADR 0058), or "nothing
    * granted". Nothing when the setup says so already.
@@ -68,7 +90,8 @@ export interface SetupFlow {
   installed(granted: boolean): void;
   /**
    * The first review of the change, asked of the queue (a preview posts nothing), and the change kept as the
-   * setup's; refused for a change the service doesn't see open.
+   * setup's; refused for a change the service doesn't see open. Asked before another person's sign-in made the
+   * choice again (ADR 0090): nothing asked, nothing kept.
    */
   firstReview(changeId: ChangeId, preview: boolean): Promise<"ok" | "no_such_change">;
 }
@@ -77,7 +100,10 @@ export function createSetup(d: SetupDeps): SetupFlow {
   const now = () => d.clock.now();
   /** The setup changed as `patch` says, kept, and the UI sent the whole of it. */
   const write = (patch: Partial<SetupState>): void => {
-    d.emit({ type: "setup.changed", at: now(), setup: d.store.setup.write(patch) });
+    const before = reposChosen(d.store.setup.read());
+    const setup = d.store.setup.write(patch);
+    d.emit({ type: "setup.changed", at: now(), setup });
+    if (!before && reposChosen(setup)) d.chosen();
   };
   /** A watched repository's switch, kept, and sent when it moved. */
   const switched = (repo: RepositoryRef, enabled: boolean): void => {
@@ -103,6 +129,11 @@ export function createSetup(d: SetupDeps): SetupFlow {
       write({ github: "waiting-for-install" });
       d.github.waitForInstall();
     },
+    heldAtStart: () => {
+      if (!appInstalled(d.store.setup.read())) write({ github: "waiting-for-install" });
+    },
+    again: () =>
+      write({ done: false, step: "github", reached: "github", github: "start", firstReviewChange: null }),
     installed: (granted) => {
       const kept = d.store.setup.read();
       const github: SetupGitHub = granted ? "done" : "nothing-granted";
@@ -129,7 +160,9 @@ export function createSetup(d: SetupDeps): SetupFlow {
     firstReview: async (changeId, preview) => {
       const answer = await d.review(changeId, preview);
       if (answer === "ok") write({ firstReviewChange: changeId });
-      return answer;
+      // Asked by the last person, before another's sign-in made the choice again (ADR 0090): this setup is theirs now,
+      // and keeps no first review; the ask was answered, by the cancel.
+      return answer === "signed-in-since" ? "ok" : answer;
     },
   };
 }

@@ -7,8 +7,11 @@ import {
   type CommitSha,
   type Connection,
   type Deferral,
+  ENDED_LINE,
   type Engine,
   type EngineId,
+  endedByPush,
+  endedHead,
   escalationText,
   type Finding,
   failedHead,
@@ -186,16 +189,26 @@ const lookingOver = (review: Review, sha: CommitSha): StatusBlock => ({
   items: [],
 });
 
+/** The block of a fork's request on `sha` a newer push ended, with no round posted (ADR 0092). */
+const ended = (sha: CommitSha): StatusBlock => ({
+  head: endedHead({ commit: sha }),
+  line: [ENDED_LINE],
+  items: [],
+});
+
 /**
  * The status block Lookover keeps in the pull request's description, as it stands, or null where it writes none:
  * before any job, on a pull request it skipped from the start, and after a preview, which posts nothing. It follows
  * the job, not the app's status: while a round runs, its commit and its round; once posted, what is left to fix;
  * waiting or failed, why, over the last posted round's list (a failure after a round included, which the app shows
- * as the loop's state).
+ * as the loop's state); a fork's request a newer push ended with no round posted, "Didn't look over" its commit (ADR
+ * 0092), which the fork's skips that push records after it never hide. It says the job `apply` keeps as the one the
+ * block says (`Review.described`, `blockJob`), the rule GitHub's block follows.
  */
 export function statusBlock(it: ChangeReview, around: Around): StatusBlock | null {
   const { review } = it;
-  const { job, run } = review;
+  const { run } = review;
+  const job = review.described;
   const last = review.preview ? undefined : review.rounds.at(-1);
   const posted = (): StatusBlock | null =>
     last === undefined
@@ -232,8 +245,10 @@ export function statusBlock(it: ChangeReview, around: Around): StatusBlock | nul
         items: posted()?.items ?? [],
       };
     }
-    case "done":
     case "cancelled":
+      // A fork's request a newer push ended before it began, with no round to put back, says so (ADR 0092).
+      return posted() ?? (endedByPush(job) ? ended(job.sha) : null);
+    case "done":
     case "skipped":
       return posted();
   }

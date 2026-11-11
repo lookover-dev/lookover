@@ -6,7 +6,8 @@
 // the body read included; a read (a GET, or a POST its caller says is one: a GraphQL query) is tried 3 times in all,
 // 1 s then 3 s apart, after any failure of the connection or GitHub's 502, 503 or 504; a write only after a failure
 // that means nothing was sent (`NOTHING_SENT`). A limit or a refusal GitHub answers is never tried again here, nor a
-// 502, 503 or 504 that carries a limit's headers (`retry-after`, `x-ratelimit-remaining: 0`).
+// 502, 503 or 504 that carries a limit's headers (`retry-after`, `x-ratelimit-remaining: 0`). The sign-in's OAuth
+// calls, writes, go by the same rules (`exchange`, ADR 0092).
 import { type Clock, HostError } from "@lookover/contracts";
 import { refusal as refusalBody } from "./schemas.ts";
 
@@ -84,10 +85,64 @@ const limitHeaders = (headers: Headers): boolean =>
  * Whether a try calls for another: a read after GitHub's 502, 503 or 504 without the headers of a limit (its wait is
  * GitHub's to say) or any failure of the connection, a write only after a failure that sent nothing.
  */
-const tryAgain = (outcome: Answer | Failed, read: boolean): boolean =>
+const tryAgain = (outcome: Reply | Failed, read: boolean): boolean =>
   "status" in outcome
     ? read && GATEWAY_FAILED.has(outcome.status) && !limitHeaders(outcome.headers)
     : read || outcome.nothingSent;
+
+/** GitHub's answer to a try, its body read whole as text. */
+interface Reply {
+  status: number;
+  text: string;
+  headers: Headers;
+}
+
+/** A request as `exchange` sends it: where, `fetch`'s init but the signal, and whether it only reads. */
+interface Exchange {
+  url: string;
+  init: Omit<RequestInit, "signal">;
+  read: boolean;
+  /** Called with every answer's headers, whether or not it is tried again. */
+  seen?: (headers: Headers) => void;
+}
+
+/**
+ * A request sent as ADR 0080 says, the rules of `GitHubApi` and of the sign-in's OAuth calls (ADR 0092): GitHub's
+ * answer, whatever its status, once one is final; a failure of the connection on the last try, or on a write that may
+ * have reached GitHub, is `unavailable`.
+ */
+export async function exchange(fetch: Fetch, waits: Waits, request: Exchange): Promise<Reply> {
+  const limitMs = request.read ? READ_LIMIT_MS : WRITE_LIMIT_MS;
+  for (let tries = 1; ; tries++) {
+    const outcome = await once(fetch, waits, request, limitMs);
+    if (tries === TRIES || !tryAgain(outcome, request.read)) {
+      if ("status" in outcome) return outcome;
+      const after = tries === 1 ? "" : ` after ${tries} tries`;
+      throw new HostError("unavailable", `GitHub could not be reached${after}: ${outcome.words}`);
+    }
+    await waits.sleep(PAUSES_MS[tries - 1] ?? 0);
+  }
+}
+
+/** One try, within its time limit (`limitMs`): GitHub's answer, or why none came. */
+async function once(fetch: Fetch, waits: Waits, request: Exchange, limitMs: number): Promise<Reply | Failed> {
+  const deadline = waits.deadline(limitMs);
+  // The answer is read whole inside the guard and the time limit: a connection that breaks off mid-body, or a body
+  // that never ends, is GitHub unreachable too.
+  try {
+    const response = await fetch(request.url, { ...request.init, signal: deadline.signal });
+    const text = await response.text();
+    request.seen?.(response.headers);
+    return { status: response.status, text, headers: response.headers };
+  } catch (error) {
+    // A try past its time limit may have reached GitHub: only a read is tried again after it.
+    if (deadline.signal.aborted) return { words: `no answer within ${limitMs / 1000} s`, nothingSent: false };
+    const code = codeOf(error);
+    return { words: message(error), nothingSent: code !== undefined && NOTHING_SENT.has(code) };
+  } finally {
+    deadline.clear();
+  }
+}
 
 /** The last rate-limit headers read, as GitHub sends them (ADR 0022). */
 export interface RateLimit {
@@ -195,31 +250,10 @@ export class GitHubApi {
   }
 
   /**
-   * The request, tried again as ADR 0080 says: GitHub's answer, whatever its status, once one is final; a failure of
-   * the connection on the last try, or on a write that may have reached GitHub, is `unavailable`.
+   * The request, tried again as ADR 0080 says (`exchange`), its rate-limit headers read on every answer, whether or
+   * not it is tried again.
    */
   private async send(request: HostRequest, etag?: string): Promise<Answer> {
-    const read = (request.method ?? "GET") === "GET" || request.read === true;
-    for (let tries = 1; ; tries++) {
-      const outcome = await this.once(request, etag, read ? READ_LIMIT_MS : WRITE_LIMIT_MS);
-      if (tries === TRIES || !tryAgain(outcome, read)) {
-        if ("status" in outcome) return outcome;
-        const after = tries === 1 ? "" : ` after ${tries} tries`;
-        throw new HostError("unavailable", `GitHub could not be reached${after}: ${outcome.words}`);
-      }
-      await this.waits.sleep(PAUSES_MS[tries - 1] ?? 0);
-    }
-  }
-
-  /**
-   * One try, within its time limit (`limitMs`): GitHub's answer, its rate-limit headers read whether or not it is
-   * tried again, or why none came.
-   */
-  private async once(
-    request: HostRequest,
-    etag: string | undefined,
-    limitMs: number,
-  ): Promise<Answer | Failed> {
     const { method, path, bearer, body } = request;
     const headers: Record<string, string> = {
       accept: "application/vnd.github+json",
@@ -229,28 +263,13 @@ export class GitHubApi {
     headers.authorization = `Bearer ${bearer}`;
     if (body !== undefined) headers["content-type"] = "application/json";
     if (etag !== undefined) headers["if-none-match"] = etag;
-    const deadline = this.waits.deadline(limitMs);
-    // The answer is read whole inside the guard and the time limit: a connection that breaks off mid-body, or a body
-    // that never ends, is GitHub unreachable too.
-    try {
-      const response = await this.fetch(path.startsWith("http") ? path : `${this.base}${path}`, {
-        method: method ?? "GET",
-        headers,
-        body: body === undefined ? null : JSON.stringify(body),
-        signal: deadline.signal,
-      });
-      const text = await response.text();
-      this.readRateLimit(response.headers);
-      return { status: response.status, body: parseJson(text), headers: response.headers };
-    } catch (error) {
-      // A try past its time limit may have reached GitHub: only a read is tried again after it.
-      if (deadline.signal.aborted)
-        return { words: `no answer within ${limitMs / 1000} s`, nothingSent: false };
-      const code = codeOf(error);
-      return { words: message(error), nothingSent: code !== undefined && NOTHING_SENT.has(code) };
-    } finally {
-      deadline.clear();
-    }
+    const reply = await exchange(this.fetch, this.waits, {
+      url: path.startsWith("http") ? path : `${this.base}${path}`,
+      init: { method: method ?? "GET", headers, body: body === undefined ? null : JSON.stringify(body) },
+      read: (method ?? "GET") === "GET" || request.read === true,
+      seen: (answered) => this.readRateLimit(answered),
+    });
+    return { status: reply.status, body: parseJson(reply.text), headers: reply.headers };
   }
 
   private readRateLimit(headers: Headers): void {

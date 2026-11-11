@@ -20,6 +20,12 @@
 //   time, `scripts/check*`, a file the graph doesn't hold), no merge base, or another Bun than the last green run's,
 //   runs every test file and says why. One line says what ran: "ran N of M test files (the change reaches these)".
 //   `--full` (`check:full`: CI) runs every test file, whatever the change.
+// - Beside them, the `scripts/` tests that read what changed (ADR 0089, `check-reach.ts`'s readers table): a new
+//   `scripts/x.ts` in no list of the public tree fails here, not in CI. They run through `test:scripts`' runner
+//   with their list (no timings flags: `test` writes the timings file), in doubt too, and every one the tree holds
+//   when the change can't be told; red in either run fails the `test` step. The line gains a clause naming them:
+//   "…, and 1 scripts test that reads what changed: scripts/public-tree.test.ts". `--full` runs them once, in
+//   `test:scripts`.
 // - What a run checks, its key, is the working tree's git tree (every tracked file hashed again from its content,
 //   about half a second a key here), Bun's version and what is installed in
 //   `node_modules` (the package folders Bun installed and each workspace's links to them). The key is taken again
@@ -42,7 +48,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { spawn, spawnSync } from "bun";
 import { preCommit } from "./check-pre-commit.ts";
-import { changeOf, selectTests } from "./check-reach.ts";
+import { changeOf, everyReader, reachInDoubt, readersClause, selectTests, testRuns } from "./check-reach.ts";
 import { isCode } from "./check-scope.ts";
 
 const root = process.cwd();
@@ -197,17 +203,46 @@ const FULL_STEPS = ["site:check", "test:scripts"];
 // `bun test` writes each file's duration here, for the over-budget line.
 const EXTRA_ARGS: Record<string, string[]> = { test: [`--timings=${TIMINGS}`, "--update-timings"] };
 
-/** The test files this run takes: the line that says so, why all of them when in doubt, and `bun run test`'s list. */
-type Reach = { line: string; doubt?: string; list?: string; none: boolean };
+/**
+ * The test files this run takes: the line that says so, why all of them when in doubt, `bun run test`'s list, and
+ * the `scripts/` tests that read what changed (ADR 0089), with their list for `test:scripts`.
+ */
+type Reach = {
+  line: string;
+  doubt?: string;
+  list?: string;
+  none: boolean;
+  readersList?: string;
+};
+
+/** Every list this run started writing, whole or not: each is removed after the run. */
+const lists: string[] = [];
+
+/** One list per run, removed after it: two checks at once in this worktree don't take each other's. */
+function listOf(name: string, files: readonly string[]): string {
+  const list = join(CACHE, `${name}-${process.pid}.txt`);
+  lists.push(list);
+  mkdirSync(CACHE, { recursive: true });
+  writeFileSync(list, files.map((t) => `${t}\n`).join(""));
+  return list;
+}
+
+/** `reach` with its readers: ADR 0071's line, then a clause naming them; their list. */
+function withReaders(reach: Reach, readers: string[]): Reach {
+  if (readers.length === 0) return reach;
+  const line = `${reach.line}${readersClause(readers)}`;
+  return { ...reach, line, readersList: listOf("reached-readers", readers) };
+}
 
 /** What the fast check's tests run (ADR 0071; the rules are `check-reach.ts`'s); every test file if that fails. */
 function reach(): Reach {
   try {
     return reachOrThrow();
   } catch (error) {
-    // A half-edited package.json, a file that can't be read: doubt, never a crash.
+    // A half-edited package.json, a file that can't be read, a list that can't be written: doubt, never a crash.
+    // Every reader runs, unless their list can't be written either. A list written before the failure goes after.
     const message = error instanceof Error ? error.message : String(error);
-    return { line: "ran every test file", doubt: `the selection failed: ${message}`, none: false };
+    return reachInDoubt(message, everyReader(root), (readers) => listOf("reached-readers", readers));
   }
 }
 
@@ -231,12 +266,37 @@ function reachOrThrow(): Reach {
           : selection.doubt;
   const count = doubt === undefined ? selection.tests.length : selection.total;
   const line = `ran ${count} of ${selection.total} test files (the change reaches these)`;
-  if (doubt !== undefined) return { line, doubt, none: false };
-  // One list per run, removed after it: two checks at once in this worktree don't take each other's.
-  const list = join(CACHE, `reached-tests-${process.pid}.txt`);
-  mkdirSync(CACHE, { recursive: true });
-  writeFileSync(list, selection.tests.map((t) => `${t}\n`).join(""));
-  return { line, list, none: selection.tests.length === 0 };
+  // The change can't be told: every reader.
+  const readers = "doubt" in change ? everyReader(root) : selection.readers;
+  if (doubt !== undefined) return withReaders({ line, doubt, none: false }, readers);
+  const list = listOf("reached-tests", selection.tests);
+  return withReaders({ line, list, none: selection.tests.length === 0 }, readers);
+}
+
+/** Runs one package script; whether it passed, and what it printed. */
+async function runScript(step: string, args: string[]) {
+  const proc = spawn([process.execPath, "run", step, ...args], { stdout: "pipe", stderr: "pipe" });
+  const [out, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { ok: code === 0, output: `${out}${err}`.trim() };
+}
+
+/**
+ * The fast check's test step: the `packages/` and `apps/` tests the change reaches (with the timings), and beside
+ * them the readers through `test:scripts`' runner (no timings: `test` is the timings file's one writer). Only the
+ * runs with something to run are started; red in either is red.
+ */
+async function testStep(reached: Reach) {
+  const runs = testRuns(reached, EXTRA_ARGS.test ?? []);
+  const done = await Promise.all(runs.map(({ step, args }) => runScript(step, args)));
+  const output = done
+    .map((r) => r.output)
+    .filter((o) => o !== "")
+    .join("\n\n");
+  return { ok: done.every((r) => r.ok), output };
 }
 
 const started = performance.now();
@@ -245,27 +305,17 @@ let reached: Reach | undefined;
 const results = await Promise.all(
   steps.map(async (step) => {
     const begun = performance.now();
-    const extra = [...(EXTRA_ARGS[step] ?? [])];
     // The other steps are started by now: the selection reads the graph while they run.
-    if (step === "test" && !full) {
-      reached = reach();
-      if (reached.none) return { step, ok: true, output: "", ms: performance.now() - begun };
-      if (reached.list !== undefined) extra.push(`--files-from=${reached.list}`);
-    }
-    const proc = spawn([process.execPath, "run", step, ...extra], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [out, err, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    return { step, ok: code === 0, output: `${out}${err}`.trim(), ms: performance.now() - begun };
+    if (step === "test" && !full) reached = reach();
+    const { ok, output } =
+      reached !== undefined && step === "test"
+        ? await testStep(reached)
+        : await runScript(step, EXTRA_ARGS[step] ?? []);
+    return { step, ok, output, ms: performance.now() - begun };
   }),
 );
 const took = performance.now() - started;
-if (reached?.list !== undefined) rmSync(reached.list, { force: true });
+for (const list of lists) rmSync(list, { force: true });
 
 /** The three slowest test files of the last run, as `name 6.1 s`. */
 function slowestTests(): string[] {

@@ -2,7 +2,8 @@
 // posted, and no other. What is owed is the store's (`requests.unreacted`), so a reaction refused, or owed when the
 // service stopped, is sent at the next `send`, and one sent is never sent again, after a restart too.
 // Ordering: one send at a time; a send asked for while one goes makes it go round once more. A request's 👀 goes
-// before its 🚀: a 👀 refused holds back that request's 🚀 until the next send.
+// before its 🚀: a 👀 refused holds back that request's 🚀 until the next send. Each reaction is checked against the
+// store right before it goes: one settled meanwhile (another person signed in, ADR 0090) is not sent.
 // Errors: a reaction the host refuses goes to the log and is sent again at the next send (the poll's, a run's end);
 // one on a comment the host no longer has (deleted) is given up, logged. Never throws.
 // It must never know: which comments are requests, or when a job is done (the poller's, the queue's, the store's).
@@ -20,6 +21,8 @@ export interface ReactionsDeps {
 export interface Reactions {
   /** Sends every reaction owed and not yet sent. Never throws. */
   send(): void;
+  /** Waits for the send under way, and the one asked meanwhile, if any; settles at once with none. */
+  idle(): Promise<void>;
   /** Sends nothing more, and waits for the send under way. */
   stop(): Promise<void>;
 }
@@ -48,7 +51,8 @@ export function createReactions(d: ReactionsDeps): Reactions {
     /** The requests whose 👀 was refused in this send: their 🚀 waits. */
     const held = new Set<string>();
     for (const owed of d.store.requests.unreacted()) {
-      if (held.has(owed.commentId)) continue;
+      if (held.has(owed.commentId) || !d.store.requests.owes(owed.repo, owed.commentId, owed.reaction))
+        continue;
       const settled = await react(owed);
       // Stopping: the store may be closed.
       if (stopping) return;
@@ -76,6 +80,9 @@ export function createReactions(d: ReactionsDeps): Reactions {
         .finally(() => {
           sending = null;
         });
+    },
+    async idle() {
+      await sending;
     },
     async stop() {
       stopping = true;

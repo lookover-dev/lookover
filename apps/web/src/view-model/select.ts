@@ -540,12 +540,13 @@ function askable(it: ChangeReview): boolean {
 }
 
 /**
- * "Review a pull request…": of `items`, what can be asked for now (nothing that runs or waits), the person's first,
- * then others' a request would review (`askable`, as their rows' Review now), each in the order given.
+ * "Review a pull request…": of `items`, only those whose review page offers Review now or Review again
+ * (`canReviewAgain`: nothing that runs or waits, no skip a request would skip again), the person's first, then those
+ * nobody asked about, each in the order given (ADR 0092).
  */
 export function reviewList(items: readonly ChangeReview[]): ChangeReview[] {
-  const free = items.filter((i) => !isPending(i));
-  return [...free.filter(isMine), ...free.filter((i) => neverAsked(i) && askable(i))];
+  const offered = items.filter(canReviewAgain);
+  return [...offered.filter(isMine), ...offered.filter(neverAsked)];
 }
 
 /** What the palette opens on: every command (`all`), or "Review a pull request…" (`review`). */

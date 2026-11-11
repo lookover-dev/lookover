@@ -2,6 +2,23 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.15.0](https://github.com/lookover-dev/lookover/compare/v0.14.0...v0.15.0) (2026-11-11)
+
+### Features
+
+- **setup:** the choice of repositories belongs to the person signed in. When someone else signs in, at start or while Lookover runs, setup asks them to choose again, and every review not finished yet is cancelled, with nothing written to GitHub.
+- **setup:** a review your coding agent asks for with `lookover wait` before you have chosen your repositories waits for your choice, even across a restart, and runs once you choose, if its repository is still on.
+- **cli:** when `lookover wait` sees no review in time (exit 9), its message names both reasons: Lookover not running, or the repositories not chosen yet in setup.
+- **github:** when a push ends a review asked on a fork's pull request before it started, the status block says "Didn't look over" that commit and how to ask again, instead of still waiting. A review still running or due keeps its block.
+
+### Bug Fixes
+
+- **setup:** an account whose repositories Lookover is still reading says so, at every step of setup and after it, instead of "No repository yet."
+- **setup:** coming back to the app after a look for a new install has ended no longer starts another one.
+- **settings:** Settings opened at Your coding agent stays there while the page fills in, until you scroll.
+- **github:** signing in to GitHub no longer hangs on a slow answer: each call has a time limit, and is sent again only when nothing reached GitHub.
+- **reviews:** "Review a pull request…" in the palette lists only the pull requests whose page offers Review now or Review again.
+
 ## [0.14.0](https://github.com/lookover-dev/lookover/compare/v0.13.0...v0.14.0) (2026-11-10)
 
 ### Features

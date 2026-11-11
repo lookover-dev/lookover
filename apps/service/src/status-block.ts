@@ -1,18 +1,21 @@
 // Where a change's review stands, as its status block in the pull request's description says it (ADR 0074): read
 // from the store each time a block is written, never from a text kept, so a block sent again, or late, never puts
-// back an older one. The change's newest job decides: running, "Looking over" its commit ("again" on the last round's
-// commit), with no list; waiting (queued, or deferred and why, with the reset of the engine's limit it waits on and
-// the time it is written), or failed and how, each listing the last posted round's open findings, if there is one;
-// else (no job, or one done, skipped, cancelled or a preview's) the last posted round. A round lists its number, its
-// commit, every round's commit (where a finding's lines are), its own ledger as it stands now (a dismissal since
-// included; never a preview's round's after it, which posts nothing) and where the loop stands, with the thread
-// `publish` just read for each finding. A pull request no round ever posted on and no job of its waits, runs or failed
-// on (one Lookover skips) gets no block: null.
+// back an older one. The change's newest job decides (`jobs.described`: a fork's request a push cancelled is never
+// hidden by the fork skips that push and the later ones record on the new head, nor shown while the review it waited
+// behind still runs, ADR 0092): running, "Looking over" its commit ("again" on the last round's commit), with no
+// list; waiting (queued, or deferred and why, with the reset of the engine's limit it waits on and the time it is
+// written), or failed and how, each listing the last posted round's open findings, if there is one; a fork's
+// request a newer push cancelled (`pushed`) with no round posted, "Didn't look over" its commit (ADR 0092); else
+// (no job, or one done, skipped, cancelled or a preview's)
+// the last posted round. A round lists its number, its commit, every round's commit (where a finding's lines are),
+// its own ledger as it stands now (a dismissal since included; never a preview's round's after it, which posts
+// nothing) and where the loop stands, with the thread `publish` just read for each finding. A pull request no round
+// ever posted on and no job of its waits, runs or failed on (one Lookover skips) gets no block: null.
 // Two traps it holds: while a round posts, its own job is still running and the block says the round posted (the job
 // saved the change's latest plan), whatever job waits behind it; and a block written late, for an older job, renders
 // the newest job's standing, so it never puts back an older one over a newer job's running block.
 // It must never know: the words of the block (`publish`), or the loop's rules (`core`).
-import type { ChangeId, EngineId, ReviewJob, RunId } from "@lookover/contracts";
+import { type ChangeId, type EngineId, endedByPush, type ReviewJob, type RunId } from "@lookover/contracts";
 import { loopState } from "@lookover/core";
 import { type RoundToPost, type Status, type StatusRound, shownFailure } from "@lookover/publish";
 import type { Store } from "@lookover/store";
@@ -63,8 +66,9 @@ function savedRound(store: Store, latest: Latest): { n: number; job: ReviewJob }
 /**
  * The change's status as its block says it now, with `threads` (each finding's thread, as just read on the host):
  * from its newest job's standing, else its last posted round; null when neither says anything, so a pull request
- * Lookover never reviewed gets no block. A job skipped or cancelled since leaves the last posted round standing: a
- * dismissal after it still rewrites the block.
+ * Lookover never reviewed gets no block. The newest job decides, skipped included, but the fork's skips never hide
+ * the fork's request their push cancelled (ADR 0092). A job skipped or cancelled since leaves the last posted round
+ * standing: a dismissal after it still rewrites the block.
  */
 export function statusNow(
   store: Store,
@@ -78,7 +82,9 @@ export function statusNow(
   const saved = savedRound(store, latest);
   // A round posting (its job still running, its round saved) says the round, whatever job waits behind it.
   if (saved?.job.state === "running") return asPosted;
-  const newest = store.jobs.latest(changeId)?.job ?? null;
+  // Its newest job, or the fork's request the fork's skips after it never hide, unless a job of the change still runs
+  // (the review that request waited behind): that one's (ADR 0092).
+  const newest = store.jobs.described(changeId)?.job ?? null;
   if (newest === null || store.jobs.previewOf(newest.id)) return asPosted;
   const rounds = store.rounds.of(changeId);
   // A job's round: the one it saved, else the one after the change's last.
@@ -103,9 +109,11 @@ export function statusNow(
         engine: newest.failure?.engine ?? null,
         posted,
       };
+    case "cancelled":
+      // A fork's request a newer push ended before it began, with no round to put back, says so (ADR 0092).
+      return endedByPush(newest) && posted === null ? { kind: "ended", sha } : asPosted;
     case "done":
     case "skipped":
-    case "cancelled":
       return asPosted;
   }
 }

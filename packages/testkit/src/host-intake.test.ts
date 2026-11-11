@@ -254,6 +254,22 @@ describe("FakeGitHost intake on its own", () => {
     expect(await fake.getChange(repo, 1)).toEqual(change);
   });
 
+  test("slow to read a new repository, a first listing refused still counts as GitHub's first: the next one is not held", async () => {
+    const fake = host();
+    const first = fake.holdFirstPolls();
+    fake.refuse("unavailable");
+    const refused = fake.listOpenChanges(repo);
+    first();
+    await expect(refused).rejects.toMatchObject({ failure: "unavailable" });
+    fake.holdFirstPolls();
+    fake.refuse(null);
+    const again = await Promise.race([
+      fake.listOpenChanges(repo).then((l) => l.items.map((c) => c.number)),
+      Bun.sleep(100).then(() => "held"),
+    ]);
+    expect(again).toEqual([1]);
+  });
+
   test("rate-limited until a time, every call says when it may be asked again", async () => {
     const fake = host();
     fake.refuse("rate_limited", { retryAt: T0 + 60_000 });

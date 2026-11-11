@@ -52,6 +52,7 @@ const command = z.discriminatedUnion("type", [
   // The account is taken only once it is one `Connection.unreached` names (ADR 0067): any login parses.
   z.object({ type: z.literal("connection.askToInstall"), account: z.string().min(1) }),
   z.object({ type: z.literal("connection.look") }),
+  z.object({ type: z.literal("connection.returned") }),
   z.object({ type: z.literal("connection.reconnect") }),
   z.object({
     type: z.literal("setup.goto"),
@@ -112,6 +113,7 @@ const demoInject = z.object({
     "sign-in-entered",
     "sign-in-denied",
     "accounts-slow",
+    "first-read-slow",
     "github-signed-out",
     "sso-asked",
     "organisation-suspended",
@@ -144,6 +146,7 @@ const demoInject = z.object({
     "gh-signed-in",
     "gh-uninstalled",
     "gh-signed-out",
+    "gh-slow",
   ]),
 }) satisfies z.ZodType<Extract<DemoCommand, { type: "demo.inject" }>>;
 

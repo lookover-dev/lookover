@@ -1,7 +1,8 @@
 // proof's motion (ADR 0087): the loops it keeps still are every loop the app's CSS has, a frames shot's times run from
-// its motion's start to its end, a strip lays its frames side by side, and settle sees what starts while it waits (on
-// stubs). What a motion does in the page is proved in the browser each time `bun run proof` runs (the frames strips,
-// the reduced-motion pass and its bite): no test here runs a real animation.
+// its motion's start to its end, its clip holds the whole motion (ADR 0089), a strip lays its frames side by side, and
+// settle sees what starts while it waits (on stubs). What a motion does in the page is proved in the browser each
+// time `bun run proof` runs (the frames strips, the reduced-motion pass and its bite): no test here runs a real
+// animation.
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,10 +11,12 @@ import {
   LOOPS,
   MOTION_BITE_PAGE,
   MOTION_BITES,
+  motionClip,
   motionSeen,
   STILL,
   settle,
   stripPage,
+  unionOf,
   watchMotion,
 } from "./proof-motion.ts";
 import { SHOTS } from "./proof-shots.ts";
@@ -48,6 +51,52 @@ test("a frames shot's times run from its motion's start to its end, evenly", () 
   // Whole milliseconds, the last its end.
   expect(frameTimes(100)).toEqual([0, 20, 40, 60, 80, 100]);
   expect(frameTimes(7).at(-1)).toBe(7);
+});
+
+test("a frames shot's clip holds its subject's box at every frame: a folding group shrinks inside it", () => {
+  const window = { width: 1440, height: 900 };
+  // A group folding from 400 px tall at 0 ms to 60 px at its end: the clip is the start's box, not the end's.
+  const folding = [
+    { x: 200, y: 100, width: 600, height: 400 },
+    { x: 200, y: 100, width: 600, height: 240 },
+    { x: 200, y: 100, width: 600, height: 60 },
+  ];
+  expect(motionClip(folding, 24, window)).toEqual({ x: 176, y: 76, width: 648, height: 448 });
+  // A frame where the subject was absent leaves the clip to those it was measured in.
+  expect(motionClip([null, { x: 200, y: 100, width: 600, height: 60 }, null], 24, window)).toEqual({
+    x: 176,
+    y: 76,
+    width: 648,
+    height: 108,
+  });
+  // Boxes apart: the clip runs from the leftmost top to the rightmost bottom.
+  const apart = [
+    { x: 300, y: 200, width: 100, height: 50 },
+    { x: 100, y: 400, width: 50, height: 100 },
+  ];
+  expect(motionClip(apart, 0, window)).toEqual({ x: 100, y: 200, width: 300, height: 300 });
+  // Within the window: the margin never runs past its edges.
+  const edge = [{ x: 10, y: 5, width: 1420, height: 890 }];
+  expect(motionClip(edge, 24, window)).toEqual({ x: 0, y: 0, width: 1440, height: 900 });
+});
+
+test("the union of boxes holds each one present, and is nothing when none is", () => {
+  const start = { x: 200, y: 100, width: 600, height: 400 };
+  const end = { x: 220, y: 120, width: 300, height: 60 };
+  expect(unionOf([start, end])).toEqual(start);
+  expect(unionOf([end, null, { x: 900, y: 50, width: 10, height: 10 }])).toEqual({
+    x: 220,
+    y: 50,
+    width: 690,
+    height: 130,
+  });
+  expect(unionOf([null])).toBeNull();
+  expect(unionOf([])).toBeNull();
+});
+
+test("a frames shot whose subject is in no frame has no clip", () => {
+  expect(motionClip([null, null], 24, { width: 1440, height: 900 })).toBeNull();
+  expect(motionClip([], 24, { width: 1440, height: 900 })).toBeNull();
 });
 
 test("a strip lays its frames side by side, each named by its time, the settled page last", () => {

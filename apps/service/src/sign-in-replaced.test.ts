@@ -20,9 +20,10 @@ import {
   sameRepository,
 } from "@lookover/contracts";
 import { DemoClock, FakeGitHost } from "@lookover/testkit";
-import { type GitHubSide, memoryKeychain, signInStore } from "./index.ts";
+import { type GitHubSide, memoryKeychain, type SignInStore, signInStore } from "./index.ts";
 import {
   eventually,
+  fakeEngines,
   home,
   OWNER,
   openApp,
@@ -69,11 +70,17 @@ interface HeldListing<T = HostChange> {
   refuse(error: HostError): void;
 }
 
+/** A keeping of a sign-in held until the test lets it be written. */
+interface HeldWrite {
+  write(): void;
+}
+
 /**
  * The shared App on the fake, signed in as the owner in `dir`; the device flow's next sign-in names Bob. With `hold`,
  * every listing of the accounts waits for the test to answer it (`held`, in the order they were asked); with
- * `holdListings` on, every listing of the pull requests of `o.listing` waits for the test (`listings`), and with
- * `holdComments` on, every listing of its comments (`comments`).
+ * `holdListings` on, every listing of the pull requests of `o.listing` waits for the test (`listings`), with
+ * `holdComments` on, every listing of its comments (`comments`), and with `holdWrites` on, every sign-in kept waits
+ * for the test before the store writes it (`writes`).
  */
 async function sharedFor(host: FakeGitHost, dir: string, o: { hold: boolean; listing?: RepositoryRef }) {
   const signIns = signInStore({ home: dir, keychain: memoryKeychain(), userOnly });
@@ -115,8 +122,18 @@ async function sharedFor(host: FakeGitHost, dir: string, o: { hold: boolean; lis
     countCommits: (...a) => host.countCommits(...a),
     fetchSpec: (...a) => host.fetchSpec(...a),
   };
+  const writes: HeldWrite[] = [];
+  let holdingWrites = false;
+  const kept: SignInStore = {
+    read: () => signIns.read(),
+    write: async (made) => {
+      if (holdingWrites) await new Promise<void>((resolve) => writes.push({ write: resolve }));
+      return signIns.write(made);
+    },
+    keeper: signIns.keeper,
+  };
   const github: GitHubSide = {
-    shared: { signIn, signIns, accounts, connect: () => ({ intake, writer: host }) },
+    shared: { signIn, signIns: kept, accounts, connect: () => ({ intake, writer: host }) },
   };
   return {
     github,
@@ -127,6 +144,8 @@ async function sharedFor(host: FakeGitHost, dir: string, o: { hold: boolean; lis
     holdListings: (on: boolean) => (holdingListings = on),
     comments,
     holdComments: (on: boolean) => (holdingComments = on),
+    writes,
+    holdWrites: (on: boolean) => (holdingWrites = on),
   };
 }
 
@@ -134,6 +153,18 @@ async function sharedFor(host: FakeGitHost, dir: string, o: { hold: boolean; lis
 async function until(holds: () => boolean): Promise<void> {
   for (let i = 0; i < 300 && !holds(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
   expect(holds()).toBe(true);
+}
+
+/**
+ * Bob's installation found, after his sign-in made the choice of repositories again (ADR 0090), then the minute's
+ * poll come: his own.
+ */
+async function bobsInstallFound(service: Parameters<typeof post>[0], cookie: string, time: DemoClock) {
+  await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.setup.github === "done",
+  );
+  await time.advance(MIN);
 }
 
 /** Bob signs in from the app in place of the owner: the code entered, the poll answered. */
@@ -180,12 +211,13 @@ test("a discovery begun under the last sign-in that answers once another person 
   shared.held[0]?.answer([]);
   await until(() => shared.held.length === 2);
   const after: State = await snapshot(service, cookie);
-  expect(after.connection).toMatchObject({ id: "github:bob", person: BOB });
+  // Named for nobody's installation until Bob's is found (ADR 0090: his sign-in made the choice of repositories again).
+  expect(after.connection).toMatchObject({ id: null, person: BOB });
   expect(after.connection.cause).toBeNull();
   expect(after.repos.map((r) => String(r.id))).toEqual(["sasensi/lookover-sandbox"]);
   expect(Object.keys(after.changes)).toEqual([PLANTED]);
 
-  // Bob's own listing, behind it, is the one followed.
+  // Bob's own listing, behind it (his install's check), is the one followed.
   shared.hold(false);
   shared.held[1]?.answer(await host.accounts());
   const listed = await eventually(
@@ -193,6 +225,63 @@ test("a discovery begun under the last sign-in that answers once another person 
     (s) => s.connection.accounts.length === 1,
   );
   expect(listed.repos.map((r) => String(r.id))).toEqual(["sasensi/lookover-sandbox"]);
+  expect(String(listed.connection.id)).toBe("github:bob");
+});
+
+test("a request a poll reads while another person's sign-in waits to be held, the choice made again, is neither handed over nor taken", async () => {
+  const dir = home();
+  const time = new DemoClock({ at: T0 });
+  const host = new FakeGitHost({
+    repo: SANDBOX,
+    bot: SHARED_BOT,
+    person: OWNER,
+    changes: [pr1],
+    clock: time,
+  });
+  const engines = fakeEngines({ time, reviews: 3 });
+  const shared = await sharedFor(host, dir, { hold: true });
+  const { service } = await start({ home: dir, host, time, engines, github: shared.github });
+  const cookie = await openApp(service);
+  const mark = host.posts.length;
+
+  // The 5 minutes' discovery asks the accounts as the owner, and GitHub hasn't answered yet.
+  shared.hold(true);
+  await time.advance(5 * MIN);
+  await until(() => shared.held.length === 1);
+
+  // Bob's sign-in comes: the choice is made again, and his sign-in waits to be held while the store keeps it (held
+  // here, so the gap lasts as long as the test needs, not a disk write's few milliseconds).
+  shared.holdWrites(true);
+  expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
+  host.enterCode("D054-61DC");
+  await time.advance(5_000);
+  await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.setup.step === "github" && !s.setup.done,
+  );
+  await until(() => shared.writes.length === 1);
+
+  // A person's request (answered before the choice, ADR 0079), read by the minute's poll in that gap: not handed over.
+  host.seedComment({ repo: SANDBOX, number: 1 }, { author: OWNER, body: "/lookover review" });
+  await time.advance(MIN);
+  await time.advance(MIN);
+  const between: State = await snapshot(service, cookie);
+  expect(between.connection.person).toEqual(OWNER);
+  expect(between.reviews[PLANTED]?.job ?? null).toBeNull();
+
+  // The discovery answers late, and Bob's sign-in is kept and held: nothing of the owner's poll runs or posts as him.
+  shared.held[0]?.answer(await host.accounts());
+  shared.holdWrites(false);
+  shared.writes[0]?.write();
+  await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.connection.person?.id === BOB.id,
+  );
+  expect(engines.runs).toEqual([]);
+  expect(host.posts.slice(mark)).toEqual([]);
+  shared.hold(false);
+  await until(() => shared.held.length === 2);
+  shared.held[1]?.answer(await host.accounts());
 });
 
 test("another person signed in on a repository both reach: the pull requests shown are theirs or another's as they see it", async () => {
@@ -247,7 +336,7 @@ test("a sign-in replaced while the service was stopped: the connection names the
   expect(restarted.connection).toMatchObject({ id: "github:sasensi", person: OWNER });
 });
 
-test("another person signing in during the last one's rate-limit wait is not held by it: listed and polled at once", async () => {
+test("another person signing in during the last one's rate-limit wait is not held by it: listed at once, polled at the minute's", async () => {
   const dir = home();
   const time = new DemoClock({ at: T0 });
   const host = new FakeGitHost({
@@ -271,7 +360,8 @@ test("another person signing in during the last one's rate-limit wait is not hel
   );
   host.refuse(null);
 
-  // Bob signs in: the wait is not his, so the connection asks none, and his listing and poll come at once.
+  // Bob signs in: the wait is not his, so the connection asks none, his listing comes at once, and his poll at the
+  // minute's, not at the end of the owner's wait.
   shared.holdListings(true);
   const asBob: State = await bobSignsIn(service, cookie, host, time);
   expect(asBob.connection.limitUntil).toBeNull();
@@ -279,6 +369,7 @@ test("another person signing in during the last one's rate-limit wait is not hel
     () => stateOf(service, cookie),
     (s) => s.connection.listed,
   );
+  await bobsInstallFound(service, cookie, time);
   await until(() => shared.listings.length === 1);
   shared.holdListings(false);
   shared.listings[0]?.answer(await host.listOpenChanges(SANDBOX));
@@ -318,6 +409,7 @@ test("a poll begun under the last sign-in that GitHub refuses for SSO once anoth
     }),
   );
   // Bob's own poll of it, behind it, stays unanswered while the snapshot is read.
+  await bobsInstallFound(service, cookie, time);
   await until(() => shared.listings.length === 2);
   const after: State = await stateOf(service, cookie);
   expect(after.connection).toMatchObject({ id: "github:bob", state: "connected", cause: null });
@@ -458,16 +550,17 @@ async function pollHeldThenBob() {
   await time.advance(MIN);
   await until(() => shared.listings.length === 1);
   await bobSignsIn(service, cookie, host, time);
-  return { host, shared, service, cookie };
+  return { host, shared, service, cookie, time };
 }
 
 test("a poll begun under the last sign-in that GitHub refuses as signed out once another person is signed in leaves them connected", async () => {
-  const { host, shared, service, cookie } = await pollHeldThenBob();
+  const { host, shared, service, cookie, time } = await pollHeldThenBob();
 
   // The owner's sign-in is refused now: it says nothing of Bob's.
   shared.listings[0]?.refuse(
     new HostError("unauthorized", "Bad credentials (401)", { connectionCause: { kind: "signed-out" } }),
   );
+  await bobsInstallFound(service, cookie, time);
   await until(() => shared.listings.length === 2);
   const after: State = await stateOf(service, cookie);
   expect(after.connection).toMatchObject({ id: "github:bob", state: "connected", cause: null });
@@ -477,10 +570,11 @@ test("a poll begun under the last sign-in that GitHub refuses as signed out once
 });
 
 test("a poll begun under the last sign-in that lists nothing once another person is signed in closes nothing", async () => {
-  const { host, shared, service, cookie } = await pollHeldThenBob();
+  const { host, shared, service, cookie, time } = await pollHeldThenBob();
 
   // The owner's listing answers empty now: it is not what Bob sees, and the pull request stays open.
   shared.listings[0]?.answer({ unchanged: false, items: [], at: T0 + MIN });
+  await bobsInstallFound(service, cookie, time);
   await until(() => shared.listings.length === 2);
   const after: State = await stateOf(service, cookie);
   expect(Object.keys(after.changes)).toEqual([PLANTED]);
@@ -511,6 +605,7 @@ test("a poll whose comments were read under the last sign-in, answered once anot
 
   // The owner's read answers now, Bob's request in it: it is the last sign-in's, and nothing is handed over.
   shared.comments[0]?.answer(await host.listComments(SANDBOX, T0));
+  await bobsInstallFound(service, cookie, time);
   await until(() => shared.comments.length === 2);
   const after: State = await stateOf(service, cookie);
   expect(after.reviews[PLANTED]?.job ?? null).toBeNull();

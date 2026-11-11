@@ -244,6 +244,12 @@ describe("the status block, as the prototype words each state", () => {
       `### ${mark(26)} · Couldn't look over ${at(SHA_1)}\n\nClaude stopped before it finished. Push again, or comment \`/lookover review\`, to try again.`,
     );
   });
+
+  test("a fork's request a push ended before it began: Didn't look over, and how to ask for the newest commit (ADR 0092)", () => {
+    expect(block({ kind: "ended", sha: SHA_1 })).toBe(
+      `### ${mark(26)} · Didn't look over ${at(SHA_1)}\n\nA newer commit was pushed after the request. Comment \`/lookover review\` to look over the newest one.`,
+    );
+  });
 });
 
 const signedIn = { bot: { id: 9001, login: "lookover[bot]" }, person: { id: 1, login: "sasensi" } };

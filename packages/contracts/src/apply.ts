@@ -8,7 +8,7 @@ import { RUN_ACTIVITIES_KEPT } from "./activity.ts";
 import type { Change } from "./change.ts";
 import type { Event } from "./event.ts";
 import type { ChangeId } from "./ids.ts";
-import { type ReviewJob, sameDeferral } from "./job.ts";
+import { blockJob, isPending, type ReviewJob, sameDeferral } from "./job.ts";
 import type { Review, TimelineEntry } from "./review.ts";
 import { type Run, stepsDone } from "./run.ts";
 import { furthestReached } from "./setup.ts";
@@ -31,6 +31,7 @@ export function emptyReview(changeId: ChangeId, at: number): Review {
   return {
     changeId,
     job: null,
+    described: null,
     run: null,
     loop: null,
     rounds: [],
@@ -79,19 +80,55 @@ function jobEntries(before: ReviewJob | null, job: ReviewJob, at: number): Timel
 
 type Of<T extends Event["type"]> = Extract<Event, { type: T }>;
 
+/**
+ * The job the status block says once `job` is the latest (`blockJob`, ADR 0092): the one said before stands for the
+ * newest that is not a fork's skip, and the review's job, while it is still due and `job` is another, for the pending one.
+ */
+const describedAfter = (r: Review, job: ReviewJob): ReviewJob | null =>
+  blockJob({
+    newest: job,
+    beforeForkSkips: r.described,
+    pending: isPending(r.job) && r.job.id !== job.id ? r.job : null,
+  });
+
+/**
+ * Whether `job` is the older job the block says in place of the review's newer one (a review still due, the request a
+ * push ended behind it heard after it, ADR 0092): its change, but for its start, leaves the newer job the review's.
+ */
+const standsIn = (r: Review, job: ReviewJob): r is Review & { job: ReviewJob } =>
+  r.job !== null && r.job.id !== job.id && r.described?.id === job.id && job.state !== "running";
+
 function jobChanged(s: State, event: Of<"job.changed">): State {
-  return withReview(s, event.changeId, event.at, (r) => ({
-    ...r,
-    job: event.job,
-    run: event.job.state === "running" ? (event.run ?? r.run) : null,
-    timeline: [...r.timeline, ...jobEntries(r.job, event.job, event.at)],
-  }));
+  return withReview(s, event.changeId, event.at, (r) => {
+    // The review still due changes behind the newer request: once it ends (a second push, say), the request decides.
+    // Its run's end shows the newer job again itself (the service's follow-up).
+    if (standsIn(r, event.job)) {
+      return {
+        ...r,
+        described: blockJob({
+          newest: r.job,
+          beforeForkSkips: r.job,
+          pending: isPending(event.job) ? event.job : null,
+        }),
+        run: null,
+        timeline: [...r.timeline, ...jobEntries(r.described, event.job, event.at)],
+      };
+    }
+    return {
+      ...r,
+      job: event.job,
+      described: describedAfter(r, event.job),
+      run: event.job.state === "running" ? (event.run ?? r.run) : null,
+      timeline: [...r.timeline, ...jobEntries(r.job, event.job, event.at)],
+    };
+  });
 }
 
 function runStarted(s: State, event: Of<"run.started">): State {
   return withReview(s, event.changeId, event.at, (r) => ({
     ...r,
     job: event.job,
+    described: describedAfter(r, event.job),
     run: event.run,
     preview: event.run.preview,
     timeline: [
@@ -123,6 +160,7 @@ function roundFinished(s: State, event: Of<"round.finished">): State {
   const next = withReview(s, event.changeId, event.at, (r) => ({
     ...r,
     job: event.job,
+    described: describedAfter(r, event.job),
     run: null,
     rounds: [...r.rounds, round],
     findings: event.findings,

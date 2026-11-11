@@ -39,8 +39,10 @@ export type SkipReason = "not-yours" | "draft" | "repo-off" | "on-open-off" | "c
  * Why a waiting job was cancelled (ADR 0043): its change was closed, or a newer review of its change took its place
  * (the follow-up asked for while it ran, which reviews the newest commit). `pushed`: a change from a fork was pushed
  * while the owner's request for it waited (ADR 0048): nobody asked for the new head, so the owner asks again.
+ * `sign-in-changed`: the choice of repositories is made again (ADR 0090), the sign-in gone or another person's: every
+ * review not finished ends so, with nothing written to GitHub for it.
  */
-export type CancelReason = "closed" | "replaced" | "pushed";
+export type CancelReason = "closed" | "replaced" | "pushed" | "sign-in-changed";
 
 /**
  * Why a deferred job waits. An engine reason names the engine it waits for, one per engine state but `ready`;
@@ -192,6 +194,41 @@ export interface ReviewJob {
    * start then drops the review that job is still on (ADR 0085).
    */
   askedBy: AskedBy | null;
+}
+
+/** What decides the job a change's status block says (`blockJob`). */
+export interface BlockJobs {
+  /** The change's newest job; null before any. */
+  newest: ReviewJob | null;
+  /** The newest job that is not a fork's skip: the newest itself when it is none. */
+  beforeForkSkips: ReviewJob | null;
+  /** The change's job still due now (queued, deferred or running), if any: the newest when there are several. */
+  pending: ReviewJob | null;
+}
+
+/**
+ * The job a change's status block says (ADR 0074), one rule for GitHub's block (the store's `jobs.described`) and the
+ * app's page (`apply`, `Review.described`): the newest, except that the fork skips a push records on the new head
+ * never hide the fork's request that push cancelled (`pushed`), whose block says it ended (ADR 0092), and that a review
+ * still due (running, back in the queue after a restart, or deferred) keeps its block over such a request behind it
+ * until it ends. Any other skip decides as the newest job.
+ */
+export function blockJob(jobs: BlockJobs & { newest: ReviewJob }): ReviewJob;
+export function blockJob(jobs: BlockJobs): ReviewJob | null;
+export function blockJob({ newest, beforeForkSkips, pending }: BlockJobs): ReviewJob | null {
+  const forkSkip = newest?.state === "skipped" && newest.skip === "fork";
+  const said = forkSkip && endedByPush(beforeForkSkips) ? beforeForkSkips : newest;
+  return endedByPush(said) && pending !== null ? pending : said;
+}
+
+/** A fork's request a push cancelled before it began (ADR 0092): its block says it ended, when no round posted. */
+export function endedByPush(job: ReviewJob | null | undefined): job is ReviewJob {
+  return job?.state === "cancelled" && job.cancel === "pushed";
+}
+
+/** A job still due: waiting its turn (queued), deferred, or running. */
+export function isPending(job: ReviewJob | null | undefined): job is ReviewJob {
+  return job?.state === "queued" || job?.state === "deferred" || job?.state === "running";
 }
 
 /** A job that has not started: waiting its turn (queued) or deferred. */

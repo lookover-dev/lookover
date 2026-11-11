@@ -367,6 +367,10 @@ const SKIPPED: Record<SkipWhy, { title: string; more: string }> = {
     more: ": the owner asked for this commit, and a newer one was pushed before its review began. Ask again to review the newer commit.",
   },
   closed: { title: cancelText("closed"), more: "." },
+  "sign-in-changed": {
+    title: cancelText("sign-in-changed"),
+    more: ": whoever signs in now chooses the repositories before anything is reviewed.",
+  },
   "not-yours": {
     title: "Not your pull request",
     more: ": it reviews the owner's pull requests, and those the owner asks for.",

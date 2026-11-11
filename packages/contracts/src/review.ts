@@ -40,6 +40,13 @@ export interface Review {
   changeId: ChangeId;
   /** The latest review job; null until one is asked for. */
   job: ReviewJob | null;
+  /**
+   * The job the status block says (ADR 0074, `blockJob`): the latest, but the fork's request a push ended
+   * (`pushed`) while only that fork's skips followed it, so they never hide its block, and the review still due
+   * (running, deferred or back in the queue) over such a request (ADR 0092): the rule GitHub's block follows. Null
+   * until one is asked for.
+   */
+  described: ReviewJob | null;
   /** The run in progress; null when none is. */
   run: Run | null;
   /** Null until the first round. */

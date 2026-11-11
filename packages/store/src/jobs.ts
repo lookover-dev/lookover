@@ -54,6 +54,7 @@
 import type { Database } from "bun:sqlite";
 import {
   type AskedBy,
+  blockJob,
   type CancelReason,
   type ChangeId,
   type CommitSha,
@@ -292,6 +293,13 @@ export interface Jobs {
   /** The job the change has now: the last one asked for, or null. */
   latest(changeId: ChangeId): StoredJob | null;
   /**
+   * The job the change's status block says (ADR 0074, `blockJob`), or null: its newest, but the fork's request a push
+   * cancelled (`pushed`), when only the fork's skips that push and the later ones record on the new head follow it,
+   * so they never hide its block (ADR 0092); while a job of the change is still due (the review that request waited
+   * behind, running, deferred or back in the queue), that job, until it ends.
+   */
+  described(changeId: ChangeId): StoredJob | null;
+  /**
    * Whether the job's run posts nothing (ADR 0047): asked as a preview, or joined by one while it waited, whatever
    * its trigger.
    */
@@ -324,6 +332,11 @@ export interface Jobs {
    * oldest first: each owes that check's end, "a preview", to send again until it is completed.
    */
   previewsEnding(): StoredJob[];
+  /**
+   * Whether the job was there when the sign-in changed (ADR 0090), finished or not: the switch settled what it owed
+   * the host, so nothing is written for it again, its check never reopened, resent or ended, its block never written.
+   */
+  settledBySignIn(id: JobId): boolean;
 }
 
 /** The check following a job on the host (ADR 0043): the host's id for it, and the commit it is on. */
@@ -399,7 +412,7 @@ const SKIP = enumOf<SkipReason>()([
   "codex-not-yours",
   "fork",
 ]);
-const CANCEL = enumOf<CancelReason>()(["closed", "replaced", "pushed"]);
+const CANCEL = enumOf<CancelReason>()(["closed", "replaced", "pushed", "sign-in-changed"]);
 const ASKED_BY = enumOf<AskedBy>()(["agent", "person"]);
 
 export const jobRow = z.object({
@@ -420,6 +433,9 @@ export const jobRow = z.object({
   failure_limit_ms: z.int().nullable(),
   turn: z.string().nullable(),
   asked_by: ASKED_BY.nullable(),
+});
+const settledRow = z.object({
+  settled_by_sign_in: z.union([z.literal(0), z.literal(1)]).transform((s) => s === 1),
 });
 const previewRow = z.object({ preview: z.union([z.literal(0), z.literal(1)]).transform((p) => p === 1) });
 const leftRow = jobRow.extend({ run_id: z.string().transform(runId), run_step: STEP, retries: z.int() });
@@ -642,6 +658,12 @@ export function jobs(db: Database): Jobs {
   const selectPreviewOf = db.query("SELECT preview FROM jobs WHERE id = ?");
   const selectRunningOf = db.query("SELECT 1 FROM jobs WHERE change_id = ? AND state = 'running' LIMIT 1");
   const selectLatest = db.query("SELECT * FROM jobs WHERE change_id = ? ORDER BY rowid DESC LIMIT 1");
+  const selectPendingJobOf = db.query(
+    "SELECT * FROM jobs WHERE change_id = ? AND state IN ('queued', 'deferred', 'running') ORDER BY rowid DESC LIMIT 1",
+  );
+  const selectBeforeForkSkips = db.query(
+    "SELECT * FROM jobs WHERE change_id = ? AND NOT (state = 'skipped' AND skip IS 'fork') ORDER BY rowid DESC LIMIT 1",
+  );
   const selectPendingIn = db.query(
     "SELECT 1 FROM jobs WHERE change_id >= ?1 AND change_id < ?2 AND state IN ('queued', 'deferred', 'running') LIMIT 1",
   );
@@ -666,20 +688,29 @@ export function jobs(db: Database): Jobs {
   const retried = db.query("UPDATE jobs SET retries = retries + 1 WHERE id = ?");
   const selectCheck = db.query("SELECT check_id, check_sha, check_completed FROM jobs WHERE id = ?");
   // A check the host made after a preview joined its job (its creation in flight then) is followed to its end too;
-  // one a preview's job let go (moved to a newer commit) is its last: a preview makes none.
+  // one a preview's job let go (moved to a newer commit) is its last: a preview makes none. A job the sign-in change
+  // settled owes its check nothing, made late or not, finished or not (ADR 0090): whoever is signed in never ends it.
   const updateCheck = db.query(`
     UPDATE jobs SET check_id = ?1, check_sha = ?2,
-      check_completed = CASE WHEN preview = 1 THEN ?1 IS NULL ELSE check_completed END
+      check_completed = CASE
+        WHEN settled_by_sign_in = 1 THEN 1
+        WHEN preview = 1 THEN ?1 IS NULL
+        ELSE check_completed
+      END
     WHERE id = ?3
   `);
   const completeCheck = db.query("UPDATE jobs SET check_completed = 1 WHERE id = ?");
   const selectEnding = db.query(`
-    SELECT * FROM jobs WHERE check_completed = 0 AND state IN ('skipped', 'cancelled', 'failed') ORDER BY rowid
-  `);
-  const selectPreviewsEnding = db.query(`
-    SELECT * FROM jobs WHERE check_completed = 0 AND check_id IS NOT NULL AND state = 'done' AND preview = 1
+    SELECT * FROM jobs WHERE check_completed = 0 AND settled_by_sign_in = 0
+      AND state IN ('skipped', 'cancelled', 'failed')
     ORDER BY rowid
   `);
+  const selectPreviewsEnding = db.query(`
+    SELECT * FROM jobs WHERE check_completed = 0 AND settled_by_sign_in = 0 AND check_id IS NOT NULL
+      AND state = 'done' AND preview = 1
+    ORDER BY rowid
+  `);
+  const selectSettled = db.query("SELECT settled_by_sign_in FROM jobs WHERE id = ?");
   /** Runs a write on one job; a job the record doesn't hold is a programming error. */
   const onJob = (verb: string, id: JobId, changes: number): void => {
     if (changes === 0) throw new Error(`${verb}: no job ${id}`);
@@ -973,6 +1004,18 @@ export function jobs(db: Database): Jobs {
       const row = selectLatest.get(changeId);
       return row === null ? null : jobOf(jobRow.parse(row));
     },
+    described: (changeId) => {
+      const row = selectLatest.get(changeId);
+      if (row === null) return null;
+      const newest = jobOf(jobRow.parse(row));
+      const jobAt = (found: unknown) => (found === null ? null : jobOf(jobRow.parse(found)).job);
+      const job = blockJob({
+        newest: newest.job,
+        beforeForkSkips: jobAt(selectBeforeForkSkips.get(changeId)),
+        pending: jobAt(selectPendingJobOf.get(changeId)),
+      });
+      return job === newest.job ? newest : { changeId, job };
+    },
     previewOf: (id) => {
       const row = selectPreviewOf.get(id);
       if (row === null) throw new Error(`previewOf: no job ${id}`);
@@ -986,5 +1029,10 @@ export function jobs(db: Database): Jobs {
     checkCompleted: (id) => onJob("checkCompleted", id, completeCheck.run(id).changes),
     checksEnding: () => endingRows.parse(selectEnding.all()).map((r) => ({ ...jobOf(r), check: checkOf(r) })),
     previewsEnding: () => jobRows.parse(selectPreviewsEnding.all()).map((r) => jobOf(r)),
+    settledBySignIn: (id) => {
+      const row = selectSettled.get(id);
+      if (row === null) throw new Error(`settledBySignIn: no job ${id}`);
+      return settledRow.parse(row).settled_by_sign_in;
+    },
   };
 }

@@ -9,10 +9,17 @@
 // whatever its job does (never a preview: `jobs.asked` never lets one hold a request); 🚀 once its job's round is
 // posted, as the run's end says, in its own transaction: done, or failed after the round was posted when its end as a
 // round could not be recorded. A job that ends without a round (skipped, cancelled, failed before posting) settles its
-// requests' 🚀 as never, so it is not read again. A request is kept with its global id on the host, which the round
+// requests' 🚀 as never, so it is not read again; the sign-in changed (ADR 0090) settles every reaction still owed or
+// to come, the 👀 as if sent, the 🚀 as never. A request is kept with its global id on the host, which the round
 // that answers it minimizes once its check completes (ADR 0052): `of(job)` gives those of a job's requests.
 import type { Database } from "bun:sqlite";
-import type { AskedBy, Reaction, RepositoryRef } from "@lookover/contracts";
+import {
+  type AskedBy,
+  type ChangeId,
+  changeId,
+  type Reaction,
+  type RepositoryRef,
+} from "@lookover/contracts";
 import { z } from "zod";
 
 /** A comment as the poll handles it: the host's id for it, and when it was written. */
@@ -58,6 +65,8 @@ export interface Requests {
   seen(repo: RepositoryRef, comments: readonly SeenComment[], at: { newest: number; keepFrom: number }): void;
   /** The reactions owed and not yet sent, oldest request first; a request's 👀 before its 🚀. */
   unreacted(): Unreacted[];
+  /** Whether `reaction` on `repo`'s comment `commentId` is still owed: one of `unreacted`, read alone. */
+  owes(repo: RepositoryRef, commentId: string, reaction: Reaction): boolean;
   /** The reaction was put on the request's comment. */
   reacted(repo: RepositoryRef, commentId: string, reaction: Reaction): void;
   /**
@@ -65,15 +74,69 @@ export interface Requests {
    * what its round minimizes once its check completes (ADR 0052).
    */
   of(jobId: string): string[];
+  /**
+   * The coding agent's request on change `changeId`, made before the repositories were chosen (ADR 0090), kept until
+   * the choice, across a restart; `full`: it asked for a full round (ADR 0052). Its comment is the poll's to mark seen.
+   * Kept again, a request already kept is left as it was. Only the agent's are kept, so who wrote it is not: `kept`
+   * gives it back as the agent's.
+   */
+  keep(changeId: ChangeId, request: Omit<RequestComment, "askedBy">, full: boolean): void;
+  /**
+   * The kept requests, oldest first: the repositories are chosen, and the caller answers each or drops it, then
+   * `unkeep`s it, so one left unanswered (a stop or a throw on the way) is kept for the next choice or start. A request
+   * recorded with a job (`jobs.asked`, `jobs.skipped`) is kept no more in that job's transaction. Dropped too when the
+   * sign-in changes (`repos.signInChanged`) and with a repository that leaves (`repos.removed`).
+   */
+  kept(): KeptRequest[];
+  /** The kept request answered or dropped: kept no more. One not kept is left as it is. */
+  unkeep(request: RequestComment): void;
 }
 
-/** Records a request with the job it led to; for `jobs`' transaction. A comment already handled is a programming error. */
+/** A request kept until the repositories are chosen (ADR 0090): its change, the request, whether it asked a full round. */
+export interface KeptRequest {
+  changeId: ChangeId;
+  request: RequestComment;
+  full: boolean;
+}
+
+/**
+ * Records a request with the job it led to; for `jobs`' transaction. A comment the poll only saw (a kept request,
+ * answered once the repositories are chosen, ADR 0090) takes the job, and is kept no more; one recorded with a job
+ * already is a programming error.
+ */
 export function requestWriter(db: Database): (request: RequestComment, jobId: string) => void {
-  const insert = db.query(
-    "INSERT INTO comments (repo_owner, repo_name, id, created_at, job_id, node_id) VALUES (?, ?, ?, ?, ?, ?)",
-  );
-  return ({ repo, comment, nodeId }, jobId) => {
-    insert.run(repo.owner, repo.name, comment.id, comment.createdAt, jobId, nodeId);
+  const insert = db.query(`
+    INSERT INTO comments (repo_owner, repo_name, id, created_at, job_id, node_id) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT (repo_owner, repo_name, id) DO UPDATE SET job_id = excluded.job_id, node_id = excluded.node_id
+    WHERE comments.job_id IS NULL
+  `);
+  const unkeep = keptAnswered(db);
+  return (request, jobId) => {
+    const { repo, comment, nodeId } = request;
+    const { changes } = insert.run(repo.owner, repo.name, comment.id, comment.createdAt, jobId, nodeId);
+    if (changes === 0) throw new Error(`the request ${comment.id} is recorded with a job already`);
+    unkeep(request);
+  };
+}
+
+/** The kept request answered or dropped (ADR 0090): kept no more. */
+function keptAnswered(db: Database): (request: RequestComment) => void {
+  const remove = db.query("DELETE FROM kept_requests WHERE repo_owner = ? AND repo_name = ? AND id = ?");
+  return ({ repo, comment }) => {
+    remove.run(repo.owner, repo.name, comment.id);
+  };
+}
+
+/**
+ * The kept requests dropped (ADR 0090), every one, or `repo`'s only; for `repos`' transaction: the sign-in changed, or
+ * the repository left the installation.
+ */
+export function keptDropped(db: Database): (repo?: RepositoryRef) => void {
+  const all = db.query("DELETE FROM kept_requests");
+  const ofRepo = db.query("DELETE FROM kept_requests WHERE repo_owner = ? AND repo_name = ?");
+  return (repo) => {
+    if (repo === undefined) all.run();
+    else ofRepo.run(repo.owner, repo.name);
   };
 }
 
@@ -115,6 +178,33 @@ export function requestsUnanswered(db: Database): (jobId: string) => void {
   };
 }
 
+/**
+ * Every reaction owed or still to come is owed no more (ADR 0090): the 👀 counted as settled, the 🚀 never owed; for
+ * `repos`' transaction.
+ */
+export function requestsSettled(db: Database): () => void {
+  const eyes = db.query("UPDATE comments SET eyes = 1 WHERE job_id IS NOT NULL AND eyes = 0");
+  const rocket = db.query(`
+    UPDATE comments SET rocket = ${ROCKET.never}
+    WHERE job_id IS NOT NULL AND rocket IN (${ROCKET.waits}, ${ROCKET.owed})
+  `);
+  return () => {
+    eyes.run();
+    rocket.run();
+  };
+}
+
+const keptRows = z.array(
+  z.object({
+    repo_owner: z.string(),
+    repo_name: z.string(),
+    id: z.string(),
+    change_id: z.string().transform(changeId),
+    created_at: z.int(),
+    node_id: z.string(),
+    full: z.union([z.literal(0), z.literal(1)]),
+  }),
+);
 const placeRow = z.object({ newest: z.int(), floor: z.int() });
 const nodeRows = z.array(z.object({ node_id: z.string() }));
 const flag = z.union([z.literal(0), z.literal(1)]);
@@ -153,6 +243,13 @@ export function requests(db: Database): Requests {
     WHERE job_id IS NOT NULL AND (eyes = 0 OR rocket = ${ROCKET.owed})
     ORDER BY rowid
   `);
+  const owesEyes = db.query(
+    "SELECT 1 FROM comments WHERE repo_owner = ? AND repo_name = ? AND id = ? AND job_id IS NOT NULL AND eyes = 0",
+  );
+  const owesRocket = db.query(`
+    SELECT 1 FROM comments WHERE repo_owner = ? AND repo_name = ? AND id = ? AND job_id IS NOT NULL
+      AND rocket = ${ROCKET.owed}
+  `);
   const markEyes = db.query("UPDATE comments SET eyes = 1 WHERE repo_owner = ? AND repo_name = ? AND id = ?");
   const markRocket = db.query(
     `UPDATE comments SET rocket = ${ROCKET.sent} WHERE repo_owner = ? AND repo_name = ? AND id = ?`,
@@ -170,6 +267,16 @@ export function requests(db: Database): Requests {
     },
   );
 
+  const insertKept = db.query(`
+    INSERT OR IGNORE INTO kept_requests (repo_owner, repo_name, id, change_id, created_at, node_id, full)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const selectKept = db.query(`
+    SELECT repo_owner, repo_name, id, change_id, created_at, node_id, full FROM kept_requests
+    ORDER BY created_at, rowid
+  `);
+  const unkeep = keptAnswered(db);
+
   return {
     place: (repo) => {
       const row = selectPlace.get(repo.owner, repo.name);
@@ -186,9 +293,28 @@ export function requests(db: Database): Requests {
         if (r.rocket === ROCKET.owed) owed.push({ repo, commentId: r.id, reaction: "rocket" });
         return owed;
       }),
+    owes: (repo, commentId, reaction) =>
+      (reaction === "eyes" ? owesEyes : owesRocket).get(repo.owner, repo.name, commentId) !== null,
     reacted: (repo, commentId, reaction) => {
       (reaction === "eyes" ? markEyes : markRocket).run(repo.owner, repo.name, commentId);
     },
     of: (jobId) => nodeRows.parse(selectNodes.all(jobId)).map((r) => r.node_id),
+    keep: (id, { repo, comment, nodeId }, full) => {
+      insertKept.run(repo.owner, repo.name, comment.id, id, comment.createdAt, nodeId, full ? 1 : 0);
+    },
+    kept: () =>
+      keptRows.parse(selectKept.all()).map(
+        (r): KeptRequest => ({
+          changeId: r.change_id,
+          request: {
+            repo: { owner: r.repo_owner, name: r.repo_name },
+            comment: { id: r.id, createdAt: r.created_at },
+            nodeId: r.node_id,
+            askedBy: "agent",
+          },
+          full: r.full === 1,
+        }),
+      ),
+    unkeep,
   };
 }

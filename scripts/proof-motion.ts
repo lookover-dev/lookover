@@ -9,8 +9,10 @@
 // - A frames shot's motion: `motionStarted` waits for the motion its act started (the page's timeline stood still by
 //   proof before the act, so it can't run away from it), `pauseMotion` pauses every animation and gives the motion's
 //   end, `seekMotion` sets every one to a time (`currentTime`, never the clock), `frameTimes` the times shot, from 0 to
-//   the end, `unpausedMotion` what started after the pause (frozen in the frames, so the shot fails); `stripPage` lays the frames side by side, a page the browser shoots into the strip (site:strip's way, no
-//   image library).
+//   the end, `regionOf` the subject's raw box at one, `motionClip` the box of the whole motion every frame is shot in
+//   (the union of those boxes, `unionOf`, with a margin, within the window: ADR 0089), `unpausedMotion` what started
+//   after the pause (frozen in the frames, so the shot fails); `stripPage` lays the frames side by side, a page the
+//   browser shoots into the strip (site:strip's way, no image library).
 // - The reduced-motion pass: `watchMotion` records, from before the page's first script, every animation and
 //   transition that starts (`animationstart`, `transitionrun`, and a script's `animate` or `play`), `motionSeen` those
 //   and any still running. `MOTION_BITES` are its self-test, run through the service pass's lifecycle (settled, acted
@@ -39,6 +41,43 @@ export const FRAMES = 6;
 /** The times a motion ending at `end` ms is shot at: evenly from 0 to its end, in whole milliseconds. */
 export function frameTimes(end: number, count = FRAMES): number[] {
   return Array.from({ length: count }, (_, i) => Math.round((end * i) / (count - 1)));
+}
+
+/** A box on the page, in CSS px from the window's top left. */
+export interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** The smallest box holding every box present (a missing measure is null), or null when none is. */
+export function unionOf(boxes: readonly (Box | null)[]): Box | null {
+  const present = boxes.filter((b): b is Box => b !== null);
+  if (present.length === 0) return null;
+  const x = Math.min(...present.map((b) => b.x));
+  const y = Math.min(...present.map((b) => b.y));
+  const right = Math.max(...present.map((b) => b.x + b.width));
+  const bottom = Math.max(...present.map((b) => b.y + b.height));
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+/**
+ * A frames shot's clip (ADR 0089): the union of its subject's box at each frame time, `margin` px wider each side,
+ * within the window; null when the subject was in no frame. Kept for every frame, so a shrinking thing shrinks inside it.
+ */
+export function motionClip(
+  boxes: readonly (Box | null)[],
+  margin: number,
+  window: { width: number; height: number },
+): Box | null {
+  const union = unionOf(boxes);
+  if (union === null) return null;
+  const x = Math.max(0, union.x - margin);
+  const y = Math.max(0, union.y - margin);
+  const right = Math.min(window.width, union.x + union.width + margin);
+  const bottom = Math.min(window.height, union.y + union.height + margin);
+  return { x, y, width: right - x, height: bottom - y };
 }
 
 /** One frame of a strip: its caption, and the PNG's bytes in base64. */
@@ -164,15 +203,20 @@ export function unpausedMotion(): string[] {
     });
 }
 
-/** The page's box around every element `selector` matches, `margin` px wider each side, within the window. */
-export function regionOf({ selector, margin }: { selector: string; margin: number }) {
+/**
+ * The page's raw box around every element `selector` matches, with the window's size (what `motionClip` keeps it
+ * within); the box null when nothing matches.
+ */
+export function regionOf(selector: string) {
   const boxes = [...document.querySelectorAll(selector)].map((el) => el.getBoundingClientRect());
-  if (boxes.length === 0) return null;
-  const x = Math.max(0, Math.min(...boxes.map((b) => b.left)) - margin);
-  const y = Math.max(0, Math.min(...boxes.map((b) => b.top)) - margin);
-  const right = Math.min(innerWidth, Math.max(...boxes.map((b) => b.right)) + margin);
-  const bottom = Math.min(innerHeight, Math.max(...boxes.map((b) => b.bottom)) + margin);
-  return { x, y, width: right - x, height: bottom - y };
+  const viewport = { width: innerWidth, height: innerHeight };
+  if (boxes.length === 0) return { box: null, window: viewport };
+  // Inline, not `unionOf`: Playwright sends this function's source to the page, where nothing else of this file is.
+  const x = Math.min(...boxes.map((b) => b.left));
+  const y = Math.min(...boxes.map((b) => b.top));
+  const right = Math.max(...boxes.map((b) => b.right));
+  const bottom = Math.max(...boxes.map((b) => b.bottom));
+  return { box: { x, y, width: right - x, height: bottom - y }, window: viewport };
 }
 
 /**

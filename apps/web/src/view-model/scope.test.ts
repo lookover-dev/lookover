@@ -193,3 +193,22 @@ test("Review a pull request…: not another's a request wouldn't review, as its 
   ];
   expect(numbers(reviewList(items))).toEqual([5, 6]);
 });
+
+test("Review a pull request…: only what its review page offers a button for (ADR 0092)", () => {
+  const codex = {
+    ...REPO,
+    settings: { ...DEFAULTS, reviewers: { ...DEFAULTS.reviewers, value: "codex" as const } },
+  };
+  const items = [
+    // An asked teammate's pull request where only Codex reviews: skipped again, so its page has no button.
+    item(1, "other", { job: job("skipped", "comment", "codex-not-yours") }, codex),
+    // Skipped while its repository was off, the repository now on: its page waits for a new commit.
+    item(2, "you", { job: job("skipped", "opened", "repo-off") }),
+    // The person's own draft: its page waits for it to be marked ready.
+    item(3, "you", { job: job("skipped", "opened", "draft") }),
+    item(4, "you", { job: job("done", "opened"), rounds: [ROUND], loop: "settled" }),
+    item(5, "other", { job: job("skipped", "comment", "not-yours") }),
+    item(6, "other"),
+  ];
+  expect(numbers(reviewList(items))).toEqual([4, 5, 6]);
+});

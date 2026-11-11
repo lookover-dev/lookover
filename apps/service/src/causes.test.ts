@@ -288,8 +288,16 @@ test("a repository's token refused (it left the installation): the installation 
   events.stop();
   expect(events.sent.filter((e) => e.type === "repo.removed")).toMatchObject([{ repoId: idOf(LEDGER) }]);
   expect(room.snapshot().repos.map((r: Repository) => r.id)).toEqual([idOf(SANDBOX)]);
-  // The connection is the installation's: one repository refused never shows it down.
-  expect(events.sent.filter((e) => e.type === "connection.changed")).toEqual([]);
+  // The connection is the installation's: one repository refused never shows it down. Its account only grants one
+  // repository fewer (ADR 0091).
+  expect(events.sent.filter((e) => e.type === "connection.changed")).toEqual([
+    {
+      type: "connection.changed",
+      at: expect.any(Number),
+      seq: expect.any(Number),
+      patch: { accounts: [expect.objectContaining({ granted: [idOf(SANDBOX)] })] },
+    },
+  ]);
 
   // Gone: never asked again.
   const asked = host.lists.get(LEDGER.name);

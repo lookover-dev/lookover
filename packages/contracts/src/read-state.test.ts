@@ -123,7 +123,13 @@ function state(version: string): State {
       state: "connected",
       cause: null,
       accounts: [
-        { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
+        {
+          account: { id: 7, login: "sam", type: "User" },
+          installationId: 77,
+          cause: null,
+          owner: null,
+          granted: [],
+        },
       ],
       listed: true,
       listingCause: null,

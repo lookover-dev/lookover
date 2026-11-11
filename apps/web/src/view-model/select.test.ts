@@ -61,6 +61,7 @@ import {
   reviewButton,
   reviewButtonPrimary,
   reviewLabel,
+  reviewList,
   reviewMeta,
   rowAction,
   rowMeta,
@@ -409,7 +410,13 @@ function down(cause: ConnectionCause, web: string = GITHUB_WEB): State {
       since: NOW - 5 * MIN,
       web,
       accounts: [
-        { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
+        {
+          account: { id: 7, login: "sam", type: "User" },
+          installationId: 77,
+          cause: null,
+          owner: null,
+          granted: [],
+        },
       ],
     },
   };
@@ -588,12 +595,19 @@ function onAccounts(cause: ConnectionAccount["cause"], owner: boolean | null = f
     connection: {
       ...st.connection,
       accounts: [
-        { account: { id: 7, login: "sam", type: "User" }, installationId: 77, cause: null, owner: null },
+        {
+          account: { id: 7, login: "sam", type: "User" },
+          installationId: 77,
+          cause: null,
+          owner: null,
+          granted: [],
+        },
         {
           account: { id: 338, login: "ledger-dev", type: "Organization" },
           installationId: 78,
           cause,
           owner,
+          granted: [],
         },
       ],
     },
@@ -1040,6 +1054,7 @@ test("a fix that opens GitHub's install page or an installation's settings is bu
           installationId: 99,
           cause: uninstalled,
           owner: true,
+          granted: [],
         },
       ],
     },
@@ -2038,6 +2053,44 @@ test("where only Codex reviews, a fork or another author's change points to Sett
   expect(skipWhy(other, "not-yours").ask).toBeNull();
   expect(skipWhy(other, "not-yours").text).toContain("let Claude review too, in Settings.");
   expect(canReviewAgain(other)).toBe(false);
+});
+
+test("Review a pull request… offers a skip exactly where its review page has a button (ADR 0092)", () => {
+  const reasons: SkipReason[] = ["not-yours", "fork", "draft", "repo-off", "on-open-off", "codex-not-yours"];
+  const reviewers = ["both", "codex"] as const;
+  const authors = ["you", "other"] as const;
+  const kept: string[] = [];
+  for (const reason of reasons)
+    for (const value of reviewers)
+      for (const author of authors) {
+        const base = skippedFor(reason);
+        const it: ChangeReview = {
+          change: { ...base.change, author },
+          review: base.review.job
+            ? { ...base.review, job: { ...base.review.job, trigger: "comment" } }
+            : base.review,
+          repo: {
+            ...base.repo,
+            settings: {
+              ...base.repo.settings,
+              reviewers: { value, origin: "owner-repository", overrode: null },
+            },
+          },
+        };
+        if (reviewList([it]).length > 0) kept.push(`${reason} ${value} ${author}`);
+      }
+  // A request has Claude review someone else's or a fork's pull request; Codex alone never does.
+  // A draft, a repository off and Codex's own-only rule offer no button, whoever asks.
+  expect(kept).toEqual([
+    "not-yours both you",
+    "not-yours both other",
+    "fork both you",
+    "fork both other",
+    "on-open-off both you",
+    "on-open-off both other",
+    "on-open-off codex you",
+    "on-open-off codex other",
+  ]);
 });
 
 test("each skip explains itself, and only a skip a request reviews offers “Review now”", () => {

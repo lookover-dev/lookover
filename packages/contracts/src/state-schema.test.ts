@@ -1,7 +1,7 @@
 // The state's schema (ADR 0085) on the pieces #671 met: what this version writes reads back equal, and the shape an
 // older version stored is refused. Every demo scenario's whole state is read in the service's scenario tests.
 import { expect, test } from "bun:test";
-import { type Repository, repositoryId, type Service, stateSchema } from "./index.ts";
+import { type ConnectionAccount, type Repository, repositoryId, type Service, stateSchema } from "./index.ts";
 
 const serviceSchema = stateSchema.shape.service;
 const repositorySchema = stateSchema.shape.repos.element;
@@ -71,4 +71,19 @@ test("a repository keeps its optional counts when it has them, and reads without
   expect(repositorySchema.parse(repo)).toEqual(repo);
   expect(repositorySchema.parse(counted)).toEqual(counted);
   expect(repositorySchema.safeParse({ ...repo, id: " " }).success).toBe(false);
+});
+
+test("an account keeps the repositories it grants (ADR 0091); one stored without them is refused", () => {
+  const accountSchema = stateSchema.shape.connection.shape.accounts.element;
+  const account: ConnectionAccount = {
+    account: { id: 7, login: "sam", type: "User" },
+    installationId: 77,
+    cause: null,
+    owner: null,
+    granted: [repositoryId("sam/app"), repositoryId("sam/web")],
+  };
+  const { granted: _gone, ...before } = account;
+  expect(accountSchema.parse(account)).toEqual(account);
+  expect(accountSchema.safeParse(before).success).toBe(false);
+  expect(accountSchema.safeParse({ ...account, granted: [" "] }).success).toBe(false);
 });

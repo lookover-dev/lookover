@@ -21,21 +21,26 @@
 // check the host showed before the preview joined (ADR 0047). A check created is kept before anything
 // else is sent for it, so an end refused after its check was created completes that check, never a second one.
 // The status block follows too (ADR 0074): after each change of a job is sent to its check, the change's block is
-// written (`publish`'s `status`), rendered from where the change stands then (`status`, the change's newest job), while
-// the job is the change's newest and waits (deferred, or queued behind busy engines: one taken at once is never said
-// waiting, and one behind its change's own round leaves that round's block), runs or failed; a job skipped or done
-// writes none, nor an older job's late change, nor a change the job has left since (its next change writes, after
-// its check), nor a round posting (it writes its own, after its review). A preview's job, and a job cancelled while
-// it is the change's newest (a fork pushed, the change closed), put the last posted round back over a block the job
-// wrote as it waited, after a restart too (`publish` writes nothing when the description already holds it), with
-// that round's own ledger (`status`); with no round posted, the block stays as written: no block is ever taken off
-// (I-229). It is written only when it renders other than the block the follower last sent to the change: the
+// written (`publish`'s `status`), rendered from where the change stands then (`status`, the change's newest job, but
+// never a fork's skip over the fork's request its push cancelled, ADR 0092), while the job is that newest and waits
+// (deferred, or queued behind busy engines: one taken at once is never said waiting, and one behind its change's own
+// round leaves that round's block), runs or failed; a job skipped or done writes none, nor an older job's late
+// change, nor a change the job has left since (its next change writes, after its check), nor a round posting (it
+// writes its own, after its review). A preview's job, and a job cancelled while it is the change's newest (a fork
+// pushed, the change closed), put the last posted round back over a block the job wrote as it waited, after a restart
+// too (`publish` writes nothing when the description already holds it), with that round's own ledger (`status`), but
+// never one cancelled as the sign-in changed (ADR 0090), whose block stays as the earlier session left it. With no
+// round posted, a fork's request a push ended says so, "Didn't look over <commit>" (ADR 0092), the fork skip that
+// push records on the new head included; any other cancelled job's block stays as written: no block is ever taken
+// off (I-229). It is written only when it renders other than the block the follower last sent to the change: the
 // de-duplication compares the rendered block (in the description's whole room, with no thread read), so a block
 // written unlinked (a thread read refused) or cut is not corrected while the status renders the same; each write
 // moves the listing's ETag. A round posted forgets that block, since the round wrote its own. A refused block goes
 // to the log, like a check's; one the host refused for a moment (a `HostError` thrown: `publish` only says a standing
 // refusal) is owed, in memory, and written again at every take where the change's newest job stands then, until a
-// write lands or there is none to write (a round posted owes none).
+// write lands or there is none to write (a round posted owes none), or until the sign-in changes (`dropOwed`, ADR
+// 0090): its reviews cancelled with nothing written, nothing is owed for them, a resend already asked writes none, and
+// a write under way the host refuses afterwards owes none.
 // It must never know: the words on the check or the block (`publish`'s), or the rules that change a job (the
 // queue's, `core`).
 
@@ -125,6 +130,12 @@ export interface Checks {
    * a round, and a preview's; then each status block the host refused for a moment (in memory). Never throws.
    */
   resend(): void;
+  /**
+   * The sign-in changed (ADR 0090): every status block owed is owed no more, a resend already asked included, and a
+   * block write under way that the host then refuses owes none either, since the reviews they were for are cancelled
+   * with nothing written to GitHub (the store completes their checks). Never throws.
+   */
+  dropOwed(): void;
   /** Waits until every change sent so far is settled. */
   idle(): Promise<void>;
 }
@@ -212,6 +223,8 @@ export function createChecks(d: ChecksDeps): Checks {
   const blocks = new Map<ChangeId, string | null>();
   /** The changes whose block GitHub refused for a moment: written again at every take until one write lands. */
   const owed = new Set<ChangeId>();
+  /** How many times the owed blocks were dropped (`dropOwed`): a write begun before the last drop owes nothing. */
+  let drops = 0;
 
   /** What every check of the change carries. */
   const facts = (
@@ -304,10 +317,13 @@ export function createChecks(d: ChecksDeps): Checks {
 
   /**
    * Whether the job only puts the last posted round back over a block it wrote as it waited: a preview's, which posts
-   * nothing (ADR 0047), or one cancelled (a fork pushed, its change closed), which never reaches a round. A restart
+   * nothing (ADR 0047), or one cancelled (a fork pushed, its change closed), which never reaches a round (a fork's
+   * request a push ended with no round posted says so instead, ADR 0092). A restart
    * forgets which blocks it wrote: `publish` writes nothing when the description already holds that round's block.
+   * Never one cancelled as the sign-in changed (ADR 0090): nothing is written to GitHub for it, whoever is signed in.
    */
-  const restores = (job: ReviewJob): boolean => job.state === "cancelled" || d.store.jobs.previewOf(job.id);
+  const restores = (job: ReviewJob): boolean =>
+    job.cancel !== "sign-in-changed" && (job.state === "cancelled" || d.store.jobs.previewOf(job.id));
 
   /** Whether the job's change is to say where the job stands, in the job's standing as the store holds it now. */
   const describes = (job: ReviewJob): boolean => {
@@ -319,12 +335,17 @@ export function createChecks(d: ChecksDeps): Checks {
 
   /**
    * Where the change stands, for its block to say, when the job is still its newest, in the standing it was followed
-   * in, and is described (`describes`); null when the job's change writes nothing.
+   * in, and is described (`describes`); null when the job's change writes nothing, as for a job there was as the
+   * sign-in changed, finished or not (ADR 0090): the switch settled what it owed the host.
    */
   function toDescribe({ changeId, job }: StoredJob): Status | null {
-    // A change sent late (an older job's, or one the job has left since) writes nothing: the newest one's does.
-    const newest = d.store.jobs.latest(changeId)?.job;
-    if (newest?.id !== job.id || newest.state !== job.state || !describes(newest)) return null;
+    const newest = d.store.jobs.described(changeId)?.job;
+    if (newest === undefined || !describes(newest)) return null;
+    // A change the job has left since writes nothing: the one it is in now does. Another job's change writes the
+    // described job's block, as it stands now: it may be the change that made the block say that job (a review still
+    // due ending, the request a push ended before it decides, ADR 0092), whose own change wrote nothing then.
+    if (newest.id === job.id && newest.state !== job.state) return null;
+    if (d.store.jobs.settledBySignIn(job.id) || d.store.jobs.settledBySignIn(newest.id)) return null;
     const status = d.status(changeId);
     // A round posting writes its own block, after its review: never before it (but a job putting it back).
     if (status?.kind === "posted" && !restores(newest)) return null;
@@ -342,11 +363,13 @@ export function createChecks(d: ChecksDeps): Checks {
     const change = d.changeRef(changeId);
     const block = d.publisher.statusBlock(change, status, DESCRIPTION_MAX_CHARACTERS);
     if (blocks.get(changeId) === block) return;
+    const begun = drops;
     try {
       await d.publisher.status(change);
     } catch (error) {
-      // A standing refusal is `publish`'s to say, never thrown: what the host refused here may pass at the next take.
-      if (error instanceof HostError) owed.add(changeId);
+      // A standing refusal is `publish`'s to say, never thrown: what the host refused here may pass at the next take,
+      // unless the sign-in changed meanwhile (`dropOwed`).
+      if (error instanceof HostError && begun === drops) owed.add(changeId);
       throw error;
     }
     owed.delete(changeId);
@@ -358,7 +381,9 @@ export function createChecks(d: ChecksDeps): Checks {
    * block written or none to write. A refusal propagates, still owed.
    */
   async function owing(changeId: ChangeId): Promise<void> {
-    const newest = d.store.jobs.latest(changeId);
+    // Owed no more since it was asked: written meanwhile, or dropped as the sign-in changed.
+    if (!owed.has(changeId)) return;
+    const newest = d.store.jobs.described(changeId);
     if (newest) await describe(newest);
     owed.delete(changeId);
   }
@@ -394,11 +419,14 @@ export function createChecks(d: ChecksDeps): Checks {
     }
   }
 
-  /** Writes the change's owed block again, after its newest job's changes still being sent (which may write it). */
+  /**
+   * Writes the change's owed block again, after the changes still being sent of the job its block says
+   * (`jobs.described`), which may write it.
+   */
   function resendBlock(changeId: ChangeId): void {
     try {
-      const newest = d.store.jobs.latest(changeId);
-      if (newest) void queue(newest.job.id, () => owing(changeId), "the status block");
+      const described = d.store.jobs.described(changeId);
+      if (described) void queue(described.job.id, () => owing(changeId), "the status block");
       else owed.delete(changeId);
     } catch (error) {
       log(`the status block owed to ${changeId} could not be read: ${said(error)}`);
@@ -447,6 +475,10 @@ export function createChecks(d: ChecksDeps): Checks {
     resend() {
       resendEnds();
       for (const changeId of owed) resendBlock(changeId);
+    },
+    dropOwed() {
+      drops++;
+      owed.clear();
     },
     async idle() {
       while (sending.size > 0) await Promise.all(sending.values());

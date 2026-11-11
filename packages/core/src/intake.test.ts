@@ -1,6 +1,6 @@
 // Whether a change that asks for a review gets a review job, or is skipped and why (ADR 0016, ADR 0026).
 import { describe, expect, test } from "bun:test";
-import type { Change, SettingValues, SkipReason, Trigger } from "@lookover/contracts";
+import type { AskedBy, Change, SettingValues, SkipReason, Trigger } from "@lookover/contracts";
 import { endUnsent, type Intake, intake, skipOutcome } from "./index.ts";
 
 /** Lookover's defaults (ADR 0025, ADR 0026), as `settings` resolves them with nothing set. */
@@ -17,12 +17,14 @@ function ask(
   change: Partial<Pick<Change, "author" | "draft" | "fork">> = {},
   repository: { enabled?: boolean; settings?: Partial<SettingValues> } = {},
   reposChosen = true,
+  askedBy: AskedBy | null = null,
 ): Intake {
   return intake(
     { author: change.author ?? "you", draft: change.draft ?? false, fork: change.fork ?? false },
     { enabled: repository.enabled ?? true, settings: { ...DEFAULTS, ...repository.settings } },
     trigger,
     { reposChosen },
+    askedBy,
   );
 }
 
@@ -229,5 +231,26 @@ describe("before the repositories are chosen, nothing asks by itself (ADR 0079)"
     expect(ask("manual", {}, { enabled: false }, false)).toEqual({ kind: "skipped", reason: "repo-off" });
     expect(ask("first-review", { author: "you" }, {}, false)).toEqual({ kind: "job" });
     expect(ask("first-review", { author: "other" }, {}, false)).toEqual({ kind: "not-asked" });
+  });
+
+  test("a request written by the person is a job; one the coding agent wrote is not asked (ADR 0090)", () => {
+    expect(ask("comment", { author: "you" }, {}, false, "person")).toEqual({ kind: "job" });
+    expect(ask("comment", { author: "other" }, {}, false, "person")).toEqual({ kind: "job" });
+    for (const [name, change, repository] of cases) {
+      expect([name, ask("comment", change, repository, false, "agent")]).toEqual([
+        name,
+        { kind: "not-asked" },
+      ]);
+    }
+  });
+
+  test("once chosen, the agent's request is answered as the person's", () => {
+    expect(ask("comment", { author: "you" }, {}, true, "agent")).toEqual({ kind: "job" });
+    expect(ask("comment", { author: "other" }, {}, true, "agent")).toEqual({ kind: "job" });
+    expect(ask("comment", {}, { enabled: false }, true, "agent")).toEqual({
+      kind: "skipped",
+      reason: "repo-off",
+    });
+    expect(ask("comment", { author: "you" }, {}, true, "person")).toEqual({ kind: "job" });
   });
 });

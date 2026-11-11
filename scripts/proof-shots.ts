@@ -54,8 +54,9 @@ export interface Shot {
    * from just before it. proof pauses every animation, seeks each with `currentTime` to fixed times from 0 to the
    * motion's end, then finishes it and settles the page, shooting each, and lays the frames side by side into one
    * strip per theme, `.proof/frames/<name>-<theme>.png`: listed in the index, never compared by `--diff`. `around`:
-   * the elements whose box at the motion's end the frames show, a margin round it; the window when absent. The
-   * reduced-motion pass replays its act under `reduce`, where nothing may start.
+   * the elements whose box of the whole motion every frame shows, the settled one too (ADR 0089): the union of their
+   * box at each frame time, a margin round it, so a shrinking thing shrinks inside a fixed frame; the window when
+   * absent. The reduced-motion pass replays its act under `reduce`, where nothing may start.
    */
   frames?: { around?: string };
   /**
@@ -624,15 +625,23 @@ async function scrollAtRest(page: Page) {
 }
 
 /**
- * Fails unless what is above the section `#id` opened ends at or above the top bar's bottom (`--h-top`), nothing of it
- * showing under the bar. A window taller than the page below the section can't scroll its label that far up; the
- * proof's windows aren't.
+ * Fails unless the section `#id` opened has landed: its label at the top bar's line (`--h-top` + `--s-5`, the group's
+ * scroll margin, to the pixel), and what is above it ending at or above the top bar's bottom, nothing of it showing
+ * under the bar. A window taller than the page below the section can't scroll its label that far up; the proof's
+ * windows aren't.
  */
 async function landedUnderTopBar(page: Page, id: string) {
   const over = await page.evaluate((id) => {
-    const above = document.getElementById(id)?.closest("[data-landing]")?.previousElementSibling;
-    if (!above) return `#${id} is in no section opened by link, or nothing is above it`;
-    const bar = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--h-top"));
+    const section = document.getElementById(id)?.closest("[data-landing]");
+    const above = section?.previousElementSibling;
+    const label = section?.querySelector(":scope > h4");
+    if (!above || !label) return `#${id} is in no section opened by link, or nothing is above it`;
+    const token = (name: string) =>
+      Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+    const bar = token("--h-top");
+    const line = bar + token("--s-5");
+    const top = label.getBoundingClientRect().top;
+    if (Math.abs(top - line) > 1) return `#${id}'s label is ${top - line} px off the top bar's line`;
     const bottom = above.getBoundingClientRect().bottom;
     return bottom > bar + 0.5 ? `what is above #${id} ends ${bottom - bar} px under the top bar` : null;
   }, id);
@@ -665,15 +674,17 @@ const toNamesGitHub = async (page: Page) => {
 
 /**
  * Settings › Your coding agent, opened by link (`/settings#agent`) as the app scrolls to it, its label under the top
- * bar, once GitHub's list above it is whole (the owner's account says its repositories), so it moves it no more.
+ * bar, once every account of GitHub's list above it is read (the owner's says how many repositories, none still
+ * "Reading its repositories…"), so it grows no more by its reads.
  */
 const toAgent = async (page: Page) => {
   await page
     .locator(".accounts-list .account-row")
     .first()
     .locator(".account-detail")
-    .getByText(/repositor/)
+    .getByText(/\d+ repositor/)
     .waitFor();
+  await page.locator('.accounts-list .account-row[data-state="reading"]').waitFor({ state: "detached" });
   await scrollAtRest(page);
   await landedUnderTopBar(page, "agent");
 };
@@ -2173,6 +2184,36 @@ const LISTED: Shot[] = [
       await p.mouse.move(0, 0);
     },
   },
+  // An owner approves the ask later and the look finds it (ADR 0091), GitHub slow to read its repositories the first
+  // time: ledger-hq is being read, with no action, never "No repository yet." with Choose repositories, and the
+  // step's line says so in place of the look's arrival.
+  {
+    name: "setup-github-owner-installed-reading",
+    scenario: "S17",
+    screen: ".setup",
+    fullPage: true,
+    alone: true,
+    act: async (p, demo) => {
+      await askToInstallOnLedgerHq(p);
+      await demo.inject("first-read-slow");
+      await demo.inject("owner-approves");
+      await demo.advance(4 * SEC);
+      const row = p.locator('.account-row[data-state="reading"]', { hasText: "ledger-hq" });
+      await row.getByText("Reading its repositories…").waitFor();
+      await p.getByText("Reading your accounts' repositories…", { exact: true }).waitFor();
+      // Its place holds its hidden labels' width, never a button shown.
+      if (
+        (await row
+          .locator(".account-actions a, .account-actions button")
+          .filter({ visible: true })
+          .count()) !== 0
+      )
+        throw new Error("ledger-hq's row offers an action while its repositories are read");
+      if ((await p.getByText("No repository yet.", { exact: true }).count()) !== 0)
+        throw new Error("Setup says No repository yet. while ledger-hq's repositories are read");
+      await p.mouse.move(0, 0);
+    },
+  },
   { name: "github-device", scenario: "S1", path: `${DEMO_API.github}/login/device`, screen: "main" },
   {
     name: "setup-3-repositories",
@@ -2817,6 +2858,66 @@ const LISTED: Shot[] = [
     scenario: "S10",
     path: "/settings#agent",
     act: toAgent,
+  },
+  // Opened at Your coding agent while `gh` is slow (ADR 0091, #655): the label lands at the top bar's line, then the
+  // organisations arrive 30 s on and the GitHub card above grows by their rows; the label is still on that line. Then
+  // a wheel gives the page back: shot 120 px up from the line, where the person left it.
+  {
+    name: "settings-agent-gh-slow",
+    scenario: "S16",
+    path: "/settings#agent",
+    alone: true,
+    inject: ["gh-slow"],
+    act: async (p, demo) => {
+      await toAgent(p);
+      const list = p.locator(".accounts-list");
+      if (await list.getByText("ledger-hq", { exact: true }).isVisible())
+        throw new Error("gh named the organisations before the page landed");
+      // Chromium anchors the scroll to what is under the bar, which would hide a landing not kept; not every browser
+      // does (ADR 0091), so the shot proves the app's own.
+      await p.evaluate(() => {
+        document.documentElement.style.overflowAnchor = "none";
+        document.body.style.overflowAnchor = "none";
+      });
+      const before = await list.boundingBox();
+      await demo.advance(30_000);
+      await list.getByText("ledger-hq", { exact: true }).waitFor();
+      const after = await list.boundingBox();
+      if (!before || !after || after.height <= before.height)
+        throw new Error(`GitHub's list didn't grow as gh answered: ${JSON.stringify({ before, after })}`);
+      await scrollAtRest(p);
+      await landedUnderTopBar(p, "agent");
+      // The person's wheel gives the page back: the page growing again above the label (a block put in by hand, as
+      // the hold is over) moves it down with what is above, no landing again.
+      await p.mouse.move(640, 400);
+      await p.mouse.wheel(0, -120);
+      await scrollAtRest(p);
+      const labelTop = () =>
+        p.evaluate(
+          () =>
+            document
+              .getElementById("agent")
+              ?.closest("[data-landing]")
+              ?.querySelector(":scope > h4")
+              ?.getBoundingClientRect().top ?? Number.NaN,
+        );
+      const wheeled = await labelTop();
+      await p.evaluate(() => {
+        const grown = document.createElement("div");
+        grown.id = "proof-grown";
+        grown.style.height = "200px";
+        document.querySelector("main")?.prepend(grown);
+      });
+      await scrollAtRest(p);
+      const grown = await labelTop();
+      await p.evaluate(() => document.getElementById("proof-grown")?.remove());
+      await scrollAtRest(p);
+      // Down by the block and the page's gap before it; landed again, it would be back up on the top bar's line.
+      if (grown - wheeled < 200)
+        throw new Error(
+          `After the wheel, the page growing moved the label ${grown - wheeled} px, not 200 or more: landed again`,
+        );
+    },
   },
   {
     name: "settings-agent-done",

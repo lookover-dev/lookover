@@ -3,6 +3,7 @@
 // It must tell the same story GitHub would (ADR 0021, ADR 0029), so the demo never shows what cannot happen.
 import { expect, test } from "bun:test";
 import {
+  apply,
   type Change,
   type CommitSha,
   changeId,
@@ -21,8 +22,10 @@ import {
   type Run,
   repositoryId,
   runId,
+  type State,
   shortSha,
 } from "@lookover/contracts";
+import { world } from "../screens/repositories.test-support.tsx";
 import type { Words } from "./format.ts";
 import {
   type Around,
@@ -95,6 +98,21 @@ function finding(id: string, status: FindingStatus, extra: Partial<Finding> = {}
   };
 }
 
+/** The job of the round `item` posted. */
+const JOB: ReviewJob = {
+  id: jobId("job-1"),
+  sha: ROUND_SHA,
+  trigger: "opened",
+  state: "done",
+  deferral: null,
+  stepIn: null,
+  askedBy: null,
+  skip: null,
+  cancel: null,
+  failure: null,
+  turn: null,
+};
+
 /** A change after one finished, posted round on `ROUND_SHA`, with `findings` and the loop they give. */
 function item(findings: Finding[], change: Partial<Change> = {}, review: Partial<Review> = {}): ChangeReview {
   const id = changeId("sam/app#7");
@@ -122,19 +140,7 @@ function item(findings: Finding[], change: Partial<Change> = {}, review: Partial
     },
     review: {
       ...emptyReview(id, NOW - 10 * MIN),
-      job: {
-        id: jobId("job-1"),
-        sha: ROUND_SHA,
-        trigger: "opened",
-        state: "done",
-        deferral: null,
-        stepIn: null,
-        askedBy: null,
-        skip: null,
-        cancel: null,
-        failure: null,
-        turn: null,
-      },
+      job: JOB,
       loop,
       findings,
       rounds: [
@@ -158,8 +164,31 @@ function item(findings: Finding[], change: Partial<Change> = {}, review: Partial
         },
       ],
       ...review,
+      // The job alone given: the block says it, as `apply` keeps a newest job that is no fork's skip.
+      described: review.described === undefined ? (review.job ?? JOB) : review.described,
     },
   };
+}
+
+/**
+ * `it` once the app has heard `jobs` in turn, each as the service sends it (`job.changed`, with its run when it
+ * runs): its review as `apply` keeps it.
+ */
+function heard(it: ChangeReview, ...jobs: ReviewJob[]): ChangeReview {
+  const changeId = it.change.id;
+  let state: State = { ...world([]), reviews: { [changeId]: it.review } };
+  jobs.forEach((job, i) => {
+    const at = NOW + i;
+    state = apply(
+      state,
+      job.state === "running"
+        ? { type: "job.changed", seq: i + 1, at, changeId, job, run: running(job.sha) }
+        : { type: "job.changed", seq: i + 1, at, changeId, job },
+    );
+  });
+  const review = state.reviews[changeId];
+  if (review === undefined) throw new Error("heard: the review is gone");
+  return { ...it, review };
 }
 
 // ---- the check ----
@@ -432,12 +461,91 @@ test("a finding with no line comment says it is not in the diff, and shows its l
 });
 
 test("while a round runs the block names its commit and its round, with no list", () => {
-  const done = item([finding("Key in the log", "open", { commented: true })]);
-  const next = { ...done, review: { ...done.review, job: job("running"), run: running(NEXT_SHA) } };
+  const findings = [finding("Key in the log", "open", { commented: true })];
+  const next = item(findings, {}, { job: job("running"), run: running(NEXT_SHA) });
   expect(block(next)).toEqual({ head: "Looking over `2f6d9e3`", line: "Round 2", items: [] });
   // The same commit as the last round: looked over again.
-  const again = { ...done, review: { ...done.review, job: job("running"), run: running(ROUND_SHA) } };
+  const again = item(findings, {}, { job: job("running"), run: running(ROUND_SHA) });
   expect(block(again)?.head).toBe("Looking over `a1f9c2e` again");
+});
+
+test("a fork's request a push ended before it began says so with no round posted; a fork skip after it doesn't hide it (ADR 0092)", () => {
+  const ended = job("cancelled", { trigger: "comment", cancel: "pushed" });
+  const ENDED = {
+    head: "Didn't look over `2f6d9e3`",
+    line: "A newer commit was pushed after the request. Comment `/lookover review` to look over the newest one.",
+    items: [],
+  };
+  const fork = { fork: true };
+  const unposted = item([], fork, { rounds: [], loop: null, job: null, described: null });
+  expect(block(heard(unposted, ended))).toEqual(ENDED);
+  // The same push skipped on the new head, the person's own fork reviewed after every push: the newest job.
+  const skip = job("skipped", { id: jobId("job-3"), sha: ROUND_SHA, skip: "fork" });
+  expect(block(heard(unposted, ended, skip))).toEqual(ENDED);
+  // A fork skipped and nothing asked: no block.
+  expect(block(heard(unposted, skip))).toBeNull();
+  // With a round posted, its block comes back.
+  const posted = item([finding("Key in the log", "open", { commented: true })], fork);
+  expect(block(heard(posted, ended, skip))?.head).toBe("One thing to fix");
+  // Cancelled as the sign-in changed, or as the pull request closed: nothing new.
+  for (const cancel of ["sign-in-changed", "closed"] as const) {
+    expect(block(heard(unposted, job("cancelled", { trigger: "comment", cancel })))).toBeNull();
+  }
+});
+
+test("a fork's review still running keeps its block over the request a push ended behind it; once it fails, the ended block (ADR 0092)", () => {
+  const unposted = item([], { fork: true }, { rounds: [], loop: null, job: null, described: null });
+  const first = job("running", { id: jobId("job-1"), trigger: "comment" });
+  const ended = job("cancelled", { trigger: "comment", cancel: "pushed" });
+  // Heard while the review runs (the service holds it back until it ends): Looking over still.
+  expect(block(heard(unposted, first, ended))?.head).toBe("Looking over `2f6d9e3`");
+  // The review fails, then the service sends the request behind it, then a later push's fork skip.
+  const failure = {
+    kind: "review_failed",
+    detail: "",
+    engine: "claude",
+    cause: null,
+    limitMs: null,
+  } as const;
+  const failed = { ...first, state: "failed" as const, failure };
+  const skip = job("skipped", { id: jobId("job-3"), sha: ROUND_SHA, skip: "fork" });
+  expect(block(heard(unposted, first, failed, ended, skip))?.head).toBe("Didn't look over `2f6d9e3`");
+});
+
+test("a fork's review deferred, or back in the queue after a restart, keeps its waiting block over the request a push ended behind it (ADR 0092)", () => {
+  const unposted = item([], { fork: true }, { rounds: [], loop: null, job: null, described: null });
+  const first = job("running", { id: jobId("job-1"), trigger: "comment" });
+  const ended = job("cancelled", { trigger: "comment", cancel: "pushed" });
+  const deferred = {
+    ...first,
+    state: "deferred" as const,
+    deferral: { reason: "engine-limit", engine: "claude" } as const,
+  };
+  const requeued = { ...first, state: "queued" as const };
+  for (const due of [deferred, requeued]) {
+    expect(block(heard(unposted, first, due, ended))?.head).toBe("Waiting to look over `2f6d9e3`");
+  }
+});
+
+test("any other skip decides the block as the newest job: one skipped at the take, or after a failure (ADR 0092)", () => {
+  const failure = {
+    kind: "review_failed",
+    detail: "",
+    engine: "claude",
+    cause: null,
+    limitMs: null,
+  } as const;
+  const failed = job("failed", { failure });
+  const posted = (...jobs: ReviewJob[]) =>
+    block(heard(item([finding("Key in the log", "open", { commented: true })]), ...jobs))?.head;
+  // A request waited, then the take skipped it (only Codex reviews another's change): the posted round, not waiting.
+  const waited = job("queued", { trigger: "comment" });
+  const taken = { ...waited, state: "skipped" as const, skip: "codex-not-yours" as const };
+  expect(posted(waited, taken)).toBe("One thing to fix");
+  // A failure, then a skip (the repository switched off, a fork's push): the posted round, not the failure.
+  for (const skip of ["repo-off", "fork"] as const) {
+    expect(posted(failed, job("skipped", { id: jobId("job-3"), skip }))).toBe("One thing to fix");
+  }
 });
 
 test("a waiting review says why and when it starts, in the machine's time; past round 1 under its round", () => {

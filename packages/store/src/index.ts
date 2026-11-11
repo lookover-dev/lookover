@@ -31,10 +31,10 @@
 //   failing the waiting jobs before it as the caller decides), a change pushed (its waiting job moved to the new
 //   head, as it waits; no job made), a run stepped and ended (its job with it: as its round, once `posts` saved it;
 //   interrupted by a restart, back in the queue with the retry counted), the jobs left running with the step each
-//   run reached and its retries, the latest job of a change (why it waits, was skipped, cancelled or failed), the
-//   check following a job on the
-//   host (its id and commit, whether it is completed) and the ends owed (jobs that ended without a round whose check
-//   is not completed yet: the end is the job's own);
+//   run reached and its retries, the latest job of a change (why it waits, was skipped, cancelled or failed) and the
+//   one its status block says (the newest, but never a fork skip over the request its push ended, ADR 0092), the
+//   check following a job on the host (its id and commit, whether it is completed) and the ends owed (jobs that
+//   ended without a round whose check is not completed yet: the end is the job's own);
 // - `rounds`: "the ledger to reconcile against", "the rounds so far, with the commit each reviewed", "when was
 //   the last round posted", and "Too noisy?"'s counts over a repository's last 30 reviewed changes (ADR 0049);
 // - `posts`: the outbox (ADR 0044), in the run's and `publish`'s verbs: "this run reached publishing: save its round,
@@ -59,10 +59,15 @@
 //   global ids of the requests this job answers" (what its round minimizes, ADR 0052). A
 //   request is recorded by `jobs.asked` or `jobs.skipped`, with its job, in that job's transaction; a job that yields
 //   to its change's follow-up hands its requests to it; a job that ends without a round settles their 🚀 as never;
+//   and the coding agent's requests made before the repositories were chosen (ADR 0090): "keep this one", "the kept
+//   ones" (oldest first; the choice answers them), "this one kept no more" (answered or dropped, or recorded with a
+//   job), dropped with the sign-in changed or their repository
+//   leaving;
 // - `selfTests`: the engines' self-tests (ADR 0044): "did this program, at this version, pass", "it ran, and passed
 //   or not" (the last result kept), so a version that passed isn't tested again after a restart;
 // - `setup`: how far the owner got in the first-run setup (ADR 0047): "where is it" (at its first step, nothing
-//   done, until written), "was it ever written" (`kept`), "this changed" (a patch; the furthest step reached is kept, going back never loses it);
+//   done, until written), "was it ever written" (`kept`), "this changed" (a patch; the furthest step reached is
+//   kept, going back never loses it); "whose is it", "it is this person's" (ADR 0090: a GitHub id or none, beside the setup, never in it);
 //   beside it, start at login (ADR 0049): "did the owner choose it" (off until chosen), "the owner chose", in its own
 //   row, so it never makes the setup kept;
 // - `rules`: each repository's rules (ADR 0048): "these were just read from its default branch" (they replace the
@@ -73,7 +78,8 @@
 //   repositories were listed", "this one left the installation" (in one transaction: its jobs not ended cancelled
 //   as closed, a running one's run ended; no check's end, round post, dismissal post or reaction owed for its
 //   changes any more; its listing, switch and comment place forgotten, so it is new if it comes back; its jobs,
-//   rounds and rules kept as history);
+//   rounds and rules kept as history); and "the sign-in changed" (ADR 0090: the same ends for every repository's
+//   jobs, cancelled `sign-in-changed`, and no reaction owed any more, every listing kept);
 // - `installAsks`: the shared App's asks to install (ADR 0067): "which accounts did this person ask to install it
 //   on, and when", "they asked on this one" (one ask per account, by GitHub's id for it, the last winning, with its
 //   login as last asked), "this one is reached" (forgotten), "this person signed in" (every other person's forgotten).
@@ -187,7 +193,14 @@ export type {
 export type { Pause, Paused } from "./pause.ts";
 export type { Posting, PostKind, Posts, RoundSaved, StoredPost } from "./posts.ts";
 export type { Repos } from "./repos.ts";
-export type { CommentPlace, RequestComment, Requests, SeenComment, Unreacted } from "./requests.ts";
+export type {
+  CommentPlace,
+  KeptRequest,
+  RequestComment,
+  Requests,
+  SeenComment,
+  Unreacted,
+} from "./requests.ts";
 export type { Rounds } from "./rounds.ts";
 export type { KeptRule, ReadRule, Rules } from "./rules.ts";
 export type { SelfTestResults, TestedProgram } from "./self-tests.ts";

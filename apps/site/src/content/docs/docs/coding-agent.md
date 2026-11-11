@@ -43,7 +43,7 @@ Then `wait` resolves the threads of the findings it verified fixed or withdrew. 
 | 5 | Timed out | Runs `wait` again, or tells you. |
 | 6 | Skipped | Stops and says why. A pull request from a fork is reviewed only when you ask: the agent never asks for it. |
 | 7 | The review failed | Stops and tells you what `wait` printed; it doesn't ask again. |
-| 9 | No review appeared | Lookover is probably not running: `lookover status` says. |
+| 9 | No review appeared | Lookover is probably not running (`lookover status` says), or its repositories are not chosen yet in setup (`lookover open`). |
 | 10 | A newer commit was pushed | Runs `wait` again, on the new head. |
 | 1, 2 | An error, or a wrong call | Reads the message, fixes the call or tells you. |
 

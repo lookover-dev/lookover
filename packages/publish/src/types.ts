@@ -202,11 +202,13 @@ export interface StatusRound {
  * Where the change's review stands, as its status block says it (ADR 0074): a round running on `sha` (`again`: the
  * same commit as the last round), the last round posted, or a job waiting (why, until when an engine's limit holds,
  * and the time the block is written) or failed on `sha`; those two list the last posted round's open findings, if
- * there is one.
+ * there is one. Or a fork's request on `sha` that a newer push ended before it began, with no round posted to put
+ * back (`ended`, ADR 0092): it lists nothing.
  */
 export type Status =
   | { kind: "running"; sha: CommitSha; round: number; again: boolean }
   | { kind: "posted"; posted: StatusRound }
+  | { kind: "ended"; sha: CommitSha }
   | {
       kind: "waiting";
       sha: CommitSha;

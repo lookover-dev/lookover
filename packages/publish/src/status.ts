@@ -1,14 +1,17 @@
 // The status block in the pull request's description (ADR 0074), in the owner's prototype's words: a heading with the
 // wordmark and where the review stands, one line under it (the round, the commit, what was fixed or withdrawn; why it
-// waits or failed), then the open findings, each linking to its thread, one with no line comment showing its lines
-// through a permalink GitHub embeds. Cut to the room the description leaves: list items from the end (the least
-// urgent), then the permalinks; nothing when even the heading and its line don't fit.
+// waits or failed; a fork's request a push ended before it began, ADR 0092), then the open findings, each linking
+// to its thread, one with no line comment showing its lines through a permalink GitHub embeds. Cut to the room
+// the description leaves: list items from the end (the least urgent), then the permalinks; nothing when even the
+// heading and its line don't fit.
 import {
   bySeverity,
   type ChangeRef,
   type CommitSha,
   characterCount,
   dayText,
+  ENDED_LINE,
+  endedHead,
   escalationText,
   type Finding,
   failedHead,
@@ -113,6 +116,8 @@ function partsOf(
         ),
         posted: status.posted,
       };
+    case "ended":
+      return { head: endedHead(commitLink(change, status.sha)).join(""), line: ENDED_LINE, posted: null };
     case "failed":
       return {
         head: failedHead(commitLink(change, status.sha)).join(""),

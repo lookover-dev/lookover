@@ -241,6 +241,7 @@ test("a failed review says its cause, and what would change it where another try
 test("why a review was cancelled is said as its check says it", () => {
   expect(cancelSentence("closed")).toBe("The pull request was closed.");
   expect(cancelSentence("replaced")).toBe("A newer review took its place.");
+  expect(cancelSentence("sign-in-changed")).toBe("The sign-in changed.");
   expect(cancelSentence(null)).toBe("");
 });
 

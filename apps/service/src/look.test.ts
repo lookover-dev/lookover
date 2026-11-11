@@ -251,6 +251,93 @@ test("a second command while a look runs lists at once and moves its end on; one
   expect(await lookOf(service, cookie)).toMatchObject({ ended: T0 + 2 * SEC + 3 * MIN, arrived: null });
 });
 
+/** `connection.returned`, as a return to the tab sends it (ADR 0091): never the person asking. */
+const returned = (service: RunningService, cookie: string) =>
+  post(service, cookie, { type: "connection.returned" });
+
+test("a return after a look ended lists nothing and starts none, answered as done", async () => {
+  const { host, time, service, cookie } = await running();
+  await looked(service, cookie, time);
+  await time.advance(3 * MIN);
+  const ended = await lookOf(service, cookie);
+  expect(ended?.ended).toBe(T0 + 3 * MIN);
+  const before = host.reads;
+
+  expect((await returned(service, cookie)).status).toBe(200);
+  expect(await lookOf(service, cookie)).toEqual(ended);
+  // A look asked next lists once: the return queued no listing before it.
+  await looked(service, cookie, time);
+  expect(host.reads).toBe(before + 1);
+});
+
+test("a return during a look lists at once, its end unmoved", async () => {
+  const { host, time, service, cookie } = await running();
+  await looked(service, cookie, time);
+  await time.advance(2 * SEC);
+  const before = host.reads;
+
+  expect((await returned(service, cookie)).status).toBe(200);
+  const back = await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.connection.look?.lookedAt === T0 + 2 * SEC,
+  );
+  expect(host.reads).toBe(before + 1);
+  expect(back.connection.look).toMatchObject({ since: T0, until: T0 + 3 * MIN, ended: null });
+
+  // The look still ends where the command put it.
+  await time.advance(3 * MIN - 2 * SEC);
+  expect(await lookOf(service, cookie)).toMatchObject({ ended: T0 + 3 * MIN, arrived: null });
+});
+
+test("a return during a look beside the setup's install wait lists once, by the wait's check, its end unmoved", async () => {
+  const { host, time, service, cookie } = await running({ installed: false, setup: WAITING });
+  await time.advance(2 * SEC);
+  await looked(service, cookie, time);
+  await time.advance(SEC);
+  const before = host.reads;
+
+  expect((await returned(service, cookie)).status).toBe(200);
+  const back = await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.connection.look?.lookedAt === T0 + 3 * SEC,
+  );
+  expect(host.reads).toBe(before + 1);
+  expect(back.connection.look).toMatchObject({
+    since: T0 + 2 * SEC,
+    until: T0 + 2 * SEC + 3 * MIN,
+    ended: null,
+  });
+});
+
+test("a return during a look while GitHub asks to wait lists nothing and leaves the look as it was", async () => {
+  const { host, time, service, cookie } = await running();
+  // The look lists at 2 s and every 4 s on (58 s, 62 s); the repositories' poll comes at a minute.
+  await time.advance(2 * SEC);
+  await looked(service, cookie, time);
+  await time.advance(56 * SEC);
+  const before = host.reads;
+
+  // The poll meets a 20-second wait, the look's next listing not come yet: the look still runs.
+  const resetAt = T0 + MIN + 20 * SEC;
+  host.refuse("rate_limited", { retryAt: resetAt });
+  await time.advance(2 * SEC);
+  await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.connection.limitUntil === resetAt,
+  );
+  host.refuse(null);
+  const runningLook = await lookOf(service, cookie);
+  expect(runningLook).toMatchObject({ ended: null, stopped: null });
+
+  expect((await returned(service, cookie)).status).toBe(200);
+  expect(await lookOf(service, cookie)).toEqual(runningLook);
+  // Nothing listed before GitHub's reset, the return's listing neither: one at it.
+  await time.advance(resetAt - time.now() - SEC);
+  expect(host.reads).toBe(before);
+  await time.advance(SEC);
+  expect(host.reads).toBe(before + 1);
+});
+
 test("an account installed during a look ends it with what arrived, its repositories listed", async () => {
   const { host, time, service, cookie } = await running();
   await looked(service, cookie, time);
@@ -1094,6 +1181,17 @@ test("with nobody signed in, a look is refused as an ask is", async () => {
   const res = await look(service, cookie);
   expect(res.status).toBe(409);
   expect(await res.json()).toMatchObject({ look: "signed-out" });
+  expect(host.reads).toBe(0);
+  expect(await lookOf(service, cookie)).toBeNull();
+});
+
+test("with nobody signed in, a return is answered as done, nothing listed", async () => {
+  const time = new DemoClock({ at: T0 });
+  const host = new Counting({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1], clock: time });
+  const dir = home();
+  const { service } = await start({ home: dir, host, time, github: signedOutOn(host, dir) });
+  const cookie = await openApp(service);
+  expect((await returned(service, cookie)).status).toBe(200);
   expect(host.reads).toBe(0);
   expect(await lookOf(service, cookie)).toBeNull();
 });

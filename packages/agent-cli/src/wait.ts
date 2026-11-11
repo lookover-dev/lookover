@@ -363,7 +363,7 @@ async function judge(host: AgentHost, w: World, now: Read, since: Since, f: Foll
     return {
       end: end(
         "no_review",
-        `No review appeared for ${at} in ${span(appearing)}: is Lookover running? Run lookover status.`,
+        `No review appeared for ${at} in ${span(appearing)}: Lookover may not be running (run lookover status), or its repositories may not be chosen yet in setup (run lookover open).`,
       ),
       threads: null,
     };

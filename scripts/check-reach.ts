@@ -1,5 +1,6 @@
 // Which test files `bun run check` runs (ADR 0071, the owner's answer on #440): those the change can reach through their
-// imports, and every one when in doubt. `check:full`, in CI, runs them all, whatever this says.
+// imports, and every one when in doubt; and the `scripts/` tests that read what changed (ADR 0089). `check:full`, in
+// CI, runs them all, whatever this says.
 //
 // - The change (`changeOf`): every file that differs between the tree of the last green check and the tree checked
 //   now (both git tree objects, untracked files and deletions included), else, with no such tree (no green run
@@ -26,21 +27,144 @@
 //   `scripts/check*`), to a file other than source code that a test reaches (a fixture, a recording, a doc read at
 //   run time), to a file the change deleted, or to any file the graph doesn't hold, `docs/` and `scripts/` included
 //   (the owner's rule on #454). The pre-commit hook runs no test at all (ADR 0076): this is the push's check.
+// - **The readers** (ADR 0089, `READERS`): the `scripts/` tests that read or run a path at run time rather than
+//   import it (the allow-list test reads `scripts/` and `.github/`, the gate test `lint/` and runs `scripts/check*`,
+//   …), or take it from outside `scripts/` by an import or a build (the web build's test: the service's CSP,
+//   `contracts`). Any change under a row's path, added, changed, renamed (both paths) or removed, selects its
+//   tests, gathered from every changed file, in doubt too; a reader the tree doesn't hold is left out. When the
+//   change can't be told, `check` runs `everyReader`. A new `scripts/` test that reads a folder adds its row.
 //
 // `bun scripts/check-reach.ts <file>…`: prints, for those changed files, each test file picked and why, one line
-// each (`  <test>: the change to <file> reaches it`), or why everything runs; the gate test runs it on
-// `lint/fixtures` (ADR 0036).
+// each (`  <test>: the change to <file> reaches it`), or why everything runs, then the check's line with its
+// readers' clause; the gate test runs it on `lint/fixtures` (ADR 0036).
 import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
-/** What `check` runs: `tests`, of the `total` test files; `doubt` says why when it is all of them. */
+/**
+ * What `check` runs: `tests`, of the `total` test files; `doubt` says why when it is all of them; `readers`, the
+ * `scripts/` tests that read what changed (ADR 0089), in doubt too.
+ */
 type Selection = {
   tests: string[];
   total: number;
   doubt?: string;
   /** Each test picked, and why: the changed files that reach it, or why it runs whatever changes. */
   why: Map<string, string[]>;
+  readers: string[];
 };
+
+const PUBLIC_TREE = "scripts/public-tree.test.ts";
+const GATES = "scripts/gates.test.ts";
+const RELEASE_PLEASE = "scripts/release-please.test.ts";
+const EVAL = "scripts/eval.test.ts";
+const MIGRATIONS = "scripts/migrations.test.ts";
+const WEB_BUILD = "scripts/web-build.test.ts";
+const TEST_PRELOAD = "scripts/test-preload.test.ts";
+/** The one row whose `reads` is a name's start rather than a folder or a file: every `scripts/check*`. */
+export const CHECK_TOOLS = "scripts/check";
+/**
+ * The `scripts/` tests that read or run a path at run time, or take it from outside `scripts/` by an import or a
+ * build (ADR 0089): a change to a path under `reads` (a folder ends in `/`, else a file, or `CHECK_TOOLS`) selects
+ * its `tests`. A new `scripts/` test that reads a folder adds its row here.
+ */
+export const READERS: readonly { reads: string; tests: readonly string[] }[] = [
+  { reads: "scripts/", tests: [PUBLIC_TREE] },
+  { reads: ".github/", tests: ["scripts/check-workflows.test.ts", PUBLIC_TREE] },
+  { reads: "lint/", tests: [GATES] },
+  { reads: "biome.jsonc", tests: [GATES] },
+  { reads: "tsconfig.json", tests: [GATES] },
+  { reads: CHECK_TOOLS, tests: [GATES] },
+  { reads: ".githooks/", tests: ["scripts/githooks.test.ts"] },
+  { reads: "release-please-config.json", tests: [RELEASE_PLEASE] },
+  { reads: ".release-please-manifest.json", tests: [RELEASE_PLEASE] },
+  { reads: "package.json", tests: [PUBLIC_TREE, RELEASE_PLEASE] },
+  { reads: "docs/releases/CHANGELOG.md", tests: [RELEASE_PLEASE] },
+  { reads: "apps/web/", tests: [WEB_BUILD] },
+  // The test imports the CSP through the service's entry and its faults from a script; the build bundles contracts.
+  { reads: "apps/service/src/csp.ts", tests: [WEB_BUILD] },
+  { reads: "apps/service/src/index.ts", tests: [WEB_BUILD, "scripts/proof-shots.test.ts"] },
+  { reads: "scripts/csp-faults.ts", tests: [WEB_BUILD] },
+  { reads: "packages/contracts/", tests: [WEB_BUILD] },
+  { reads: "apps/web/src/styles/", tests: ["scripts/proof-motion.test.ts"] },
+  { reads: "apps/web/src/app.tsx", tests: ["scripts/proof-shots.test.ts"] },
+  { reads: "apps/service/src/demo/scenarios.ts", tests: ["scripts/proof-shots.test.ts"] },
+  { reads: "apps/service/src/demo/scenarios/", tests: ["scripts/proof-shots.test.ts"] },
+  { reads: "docs/product/visual-score.md", tests: ["scripts/visual-score.test.ts"] },
+  { reads: "apps/evals/fixtures/replay/", tests: [EVAL] },
+  { reads: "apps/evals/cases/", tests: [EVAL] },
+  { reads: "packages/store/src/migrations/", tests: [MIGRATIONS] },
+  { reads: "packages/store/src/embedded-migrations.ts", tests: [MIGRATIONS] },
+  // The preload's test checks bunfig.toml's `[test] preload` and the preload, and starts `bun test` on this test.
+  { reads: "apps/service/src/login-item.test.ts", tests: [TEST_PRELOAD] },
+  { reads: "bunfig.toml", tests: [TEST_PRELOAD] },
+  { reads: "scripts/test-preload.ts", tests: [TEST_PRELOAD] },
+];
+
+const isUnder = (file: string, reads: string) =>
+  reads.endsWith("/") || reads === CHECK_TOOLS ? file.startsWith(reads) : file === reads;
+
+/** The readers of `changed`'s paths (relative to `root`, with `/`) that the tree at `root` holds, sorted. */
+function readersOf(root: string, changed: readonly string[]): string[] {
+  const rows = READERS.filter((row) => changed.some((file) => isUnder(file, row.reads)));
+  return [...new Set(rows.flatMap((row) => row.tests))].filter((t) => existsSync(join(root, t))).sort();
+}
+
+/** Every reader the tree at `root` holds, sorted: what runs when the change can't be told. */
+export const everyReader = (root: string): string[] =>
+  readersOf(
+    root,
+    READERS.map((row) => row.reads),
+  );
+
+/** The clause ADR 0071's line gains for `readers` (none: none): "…, and 1 scripts test that reads what changed: …". */
+export function readersClause(readers: readonly string[]): string {
+  if (readers.length === 0) return "";
+  const count =
+    readers.length === 1 ? "1 scripts test that reads" : `${readers.length} scripts tests that read`;
+  return `, and ${count} what changed: ${readers.join(", ")}`;
+}
+
+/**
+ * The fast check's reach when the selection failed (`failure`, its message): every `packages/` and `apps/` test,
+ * no list, and `readers` through the list `write` returns. It never throws: when that list can't be written either
+ * (a full disk, a locked file), no reader runs, since `test:scripts` without its list would run every scripts test,
+ * and the doubt says so.
+ */
+export function reachInDoubt(
+  failure: string,
+  readers: readonly string[],
+  write: (files: readonly string[]) => string,
+): { line: string; doubt: string; none: false; readersList?: string } {
+  const line = "ran every test file";
+  const doubt = `the selection failed: ${failure}`;
+  if (readers.length === 0) return { line, doubt, none: false };
+  try {
+    return { line: `${line}${readersClause(readers)}`, doubt, none: false, readersList: write(readers) };
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    const none = `the readers' list couldn't be written (${why}), so no scripts test that reads what changed runs`;
+    return { line, doubt: `${doubt}; ${none}`, none: false };
+  }
+}
+
+/**
+ * The fast check's test runs, one per run with something to run: the `packages/` and `apps/` tests the change
+ * reaches (unless none is, with `timings`, then `list` when there is one), and the readers through
+ * `test:scripts`' runner with their list, without timings (`test` is the timings file's one writer).
+ */
+export function testRuns(
+  reached: { none: boolean; list?: string; readersList?: string },
+  timings: readonly string[],
+): { step: string; args: string[] }[] {
+  const runs: { step: string; args: string[] }[] = [];
+  if (!reached.none) {
+    const list = reached.list === undefined ? [] : [`--files-from=${reached.list}`];
+    runs.push({ step: "test", args: [...timings, ...list] });
+  }
+  if (reached.readersList !== undefined)
+    runs.push({ step: "test:scripts", args: [`--files-from=${reached.readersList}`] });
+  return runs;
+}
 
 /** What `bun run test` passes `bun test`: the folders whose test files it runs. */
 const TEST_ROOTS = ["packages", "apps"];
@@ -498,10 +622,14 @@ export function selectTests(root: string, changed: readonly string[]): Selection
       RUNNER.filter((f) => existsSync(join(root, f))),
     ).graph.keys(),
   );
+  // From every changed file: the loop below stops at the first one in doubt.
+  const readers = readersOf(root, changed);
   for (const file of changed) {
     const doubt = doubtOf(root, file, graph, setup);
-    if (doubt !== undefined)
-      return { tests, total: tests.length, doubt, why: new Map(tests.map((t) => [t, [doubt]])) };
+    if (doubt !== undefined) {
+      const why = new Map(tests.map((t) => [t, [doubt]]));
+      return { tests, total: tests.length, doubt, why, readers };
+    }
   }
   const back = backwards(graph);
   const testSet = new Set(tests);
@@ -512,7 +640,7 @@ export function selectTests(root: string, changed: readonly string[]): Selection
   };
   for (const file of changed) note(file, `the change to ${file} reaches it`);
   for (const [file, reason] of lost) note(file, `it runs whatever changes: ${reason}`);
-  return { tests: tests.filter((t) => why.has(t)), total: tests.length, why };
+  return { tests: tests.filter((t) => why.has(t)), total: tests.length, why, readers };
 }
 
 /** The files the change holds (see the header), relative to `root` with `/`, sorted; or why it can't be told. */
@@ -559,5 +687,6 @@ if (import.meta.main) {
   for (const test of selection.doubt === undefined ? selection.tests : []) {
     for (const why of selection.why.get(test) ?? []) console.log(`  ${test}: ${why}`);
   }
-  console.log(`ran ${selection.tests.length} of ${selection.total} test files (the change reaches these)`);
+  const ran = `ran ${selection.tests.length} of ${selection.total} test files (the change reaches these)`;
+  console.log(`${ran}${readersClause(selection.readers)}`);
 }

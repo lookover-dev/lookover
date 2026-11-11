@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { API } from "@lookover/contracts";
 import { openStore } from "@lookover/store";
 import { type ApiDeps, createApi, type Loaded, type Loader, randomToken } from "./api.ts";
-import { buildDemoRoom, type DemoRoomOptions } from "./demo/driver.ts";
+import { buildDemoRoom, type DemoRoomOptions, type Settled } from "./demo/driver.ts";
 import type { Scenario } from "./demo/scenario.ts";
 import { SCENARIOS } from "./demo/scenarios.ts";
 import type { LogReader, LogSink } from "./log-sink.ts";
@@ -218,6 +218,9 @@ function lastEventOf(dir: string): number {
   }
 }
 
+/** How a room is built for a load: a plain one, or the story afresh with its `gh` slow ("gh-slow", ADR 0091). */
+type LoadOptions = Pick<DemoRoomOptions, "ghSlow">;
+
 /**
  * Demo mode: the server over the scenario's room, its seed played before the first request is answered. The
  * room's folder is a fresh one under `home/rooms`, its events numbered after the last room's. A load (ADR 0046)
@@ -230,7 +233,7 @@ export async function startDemoService(o: DemoServiceOptions): Promise<RunningSe
    * A room for `scenario` on a fresh folder, its events numbered after `eventsFrom`; the folder, to sweep it once
    * it is stopped. A seed that fails has stopped its room: its folder is swept here.
    */
-  const build = async (scenario: Scenario, eventsFrom: number) => {
+  const build = async (scenario: Scenario, eventsFrom: number, how: LoadOptions = {}) => {
     const folder = roomFolder(o.home, scenario.id);
     try {
       const demo = await (o.driver ?? buildDemoRoom)({
@@ -245,6 +248,12 @@ export async function startDemoService(o: DemoServiceOptions): Promise<RunningSe
         ...(o.scenarios === undefined ? {} : { scenarios: o.scenarios }),
         ...(o.userOnly === undefined ? {} : { userOnly: o.userOnly }),
         ...(o.gh === undefined ? {} : { gh: o.gh }),
+        ...how,
+        // "gh-slow" (ADR 0091): this story loaded again, its `gh` slow from the start.
+        againWithGhSlow: async (settled: Settled) => {
+          const loaded = await load(scenario.id, settled, { ghSlow: true });
+          return loaded === "no_such_scenario" ? { failed: `no scenario ${scenario.id}` } : loaded;
+        },
       });
       // The room now, read through the driver: a fault may restart it (ADR 0053's lost key).
       return {
@@ -272,7 +281,7 @@ export async function startDemoService(o: DemoServiceOptions): Promise<RunningSe
    * as it stops reaches no stream), is stopped and swept, and the next one swapped in, with one `clock` event
    * ending the load so the UI's `now` follows.
    */
-  const load = async (id: string, settled: () => Promise<void>): Promise<Loaded> => {
+  const load = async (id: string, settled: Settled, how: LoadOptions = {}): Promise<Loaded> => {
     const scenario = (o.scenarios ?? SCENARIOS).find((s) => s.id === id);
     if (scenario === undefined) return "no_such_scenario";
     let loaded = () => {};
@@ -283,11 +292,15 @@ export async function startDemoService(o: DemoServiceOptions): Promise<RunningSe
     const was = { running: old.room.demo?.running ?? false, speed: old.room.demo?.speed ?? 1 };
     old.room.demo?.set(false, was.speed);
     let next: Built | null = null;
+    // The commands under way waited for, the held first reads let go first: one may wait on a read only the clock
+    // just stood still would end. With none under way, they stay held until the old room stops, silenced.
+    const underWay = settled();
+    const holdAgain = underWay === null ? () => {} : old.demo.letGo();
     try {
       try {
-        await settled();
+        await underWay;
         const eventsFrom = old.room.events.last();
-        next = await build(scenario, eventsFrom);
+        next = await build(scenario, eventsFrom, how);
         // Moves no time: an advance sends the one `clock` event that ends the load, at the next room's `now`.
         await next.room.demo?.advance(0);
         const moved = old.room.events.last();
@@ -301,6 +314,7 @@ export async function startDemoService(o: DemoServiceOptions): Promise<RunningSe
           await next.room.stop().catch((stopped: unknown) => log(`${id}: ${said(stopped)}`));
           sweep(next.folder, log);
         }
+        holdAgain();
         old.room.demo?.set(was.running, was.speed);
         return { failed: said(error) };
       }

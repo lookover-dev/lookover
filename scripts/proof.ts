@@ -23,7 +23,8 @@
 // settled: finite animations finished, then nothing left leaving (`[data-leaving]`), no scroll moving, two animation
 // frames on; a page that doesn't settle in 5 s fails its shot. A frames shot (`Shot.frames`) stands the page's
 // timeline still before its act, pauses the motion the act started, seeks it with `currentTime` to fixed times from 0
-// to its end, finishes it and settles the page, shooting each, and lays the frames side by side into one strip per
+// to its end, measuring its subject at each, then seeks it again, finishes it and settles the page, shooting each in
+// the box of the whole motion (the measures' union, ADR 0089), and lays the frames side by side into one strip per
 // theme, .proof/frames/<name>-<theme>.png, shot by the browser from a page of the frames (site:strip's way): listed in
 // the index, never compared by `--diff`, never shot on a diff's base. Then the reduced-motion pass replays every frames
 // shot's act under `reducedMotion: "reduce"` and fails on any `animationstart`, `transitionrun`, script animation
@@ -79,6 +80,7 @@ import {
 } from "./proof-layout.ts";
 import {
   BITE_MOTION,
+  type Box,
   biteAct,
   type Frame,
   finishMotion,
@@ -86,6 +88,7 @@ import {
   MOTION_BITE_PAGE,
   MOTION_BITES,
   type MotionBite,
+  motionClip,
   motionSeen,
   motionStarted,
   pauseMotion,
@@ -615,24 +618,40 @@ async function standStill(page: Page): Promise<() => Promise<void>> {
 }
 
 /**
- * The motion the act started, shot at each of `frameTimes` in the box `around` names, then finished, the timeline let
- * go (`letGo`) and the page settled, shot last.
+ * The box of the whole motion (ADR 0089): what `around` names, measured at each of `times`, its union with a margin,
+ * within the window; null for the whole window. Throws when nothing is `around` at any of them.
+ */
+async function motionBox(page: Page, around: string | undefined, times: readonly number[]) {
+  if (!around) return null;
+  const boxes: (Box | null)[] = [];
+  let window = { width: 0, height: 0 };
+  for (const ms of times) {
+    await page.evaluate(seekMotion, ms);
+    const measured = await page.evaluate(regionOf, around);
+    boxes.push(measured.box);
+    window = measured.window;
+  }
+  const clip = motionClip(boxes, 24, window);
+  if (clip === null) throw new Error(`Nothing on the page is ${around}`);
+  return clip;
+}
+
+/**
+ * The motion the act started, measured at each of `frameTimes` then shot at each in the box of the whole motion
+ * `around` names, then finished, the timeline let go (`letGo`) and the page settled, shot last in the same box.
  */
 async function framesOf(page: Page, shot: Shot, letGo: () => Promise<void>): Promise<Frame[]> {
   if (!(await page.evaluate(motionStarted, 2_000))) throw new Error("Its act started no motion");
   const end = await page.evaluate(pauseMotion);
-  // The box at the motion's end: what it grows to.
-  await page.evaluate(seekMotion, end);
-  const around = shot.frames?.around;
-  const clip = around ? await page.evaluate(regionOf, { selector: around, margin: 24 }) : null;
-  if (around && clip === null) throw new Error(`Nothing on the page is ${around}`);
+  const times = frameTimes(end);
+  const clip = await motionBox(page, shot.frames?.around, times);
   const frames: Frame[] = [];
   const take = async (label: string) => {
     await nextFrame(page);
     const png = await page.screenshot({ animations: "allow", ...(clip ? { clip } : {}) });
     frames.push({ label, png: png.toString("base64") });
   };
-  for (const ms of frameTimes(end)) {
+  for (const ms of times) {
     await page.evaluate(seekMotion, ms);
     await take(`${ms} ms`);
   }
@@ -648,9 +667,9 @@ async function framesOf(page: Page, shot: Shot, letGo: () => Promise<void>): Pro
 }
 
 /**
- * A frames shot (scripts/proof-motion.ts): its page settled, its timeline stood still, its act run; the motion paused
- * and sought to each of `frameTimes`, then finished, the timeline let go and the page settled, each shot; the frames
- * laid side by side into `file`.
+ * A frames shot (scripts/proof-motion.ts): its page settled, its timeline stood still, its act run; the motion paused,
+ * measured at each of `frameTimes`, then sought to each again and shot in the box of the whole motion, then finished,
+ * the timeline let go and the page settled, shot last in the same box; the frames laid side by side into `file`.
  */
 async function shootFrames(browser: Browser, visit: Visit, theme: Theme, shot: Shot, file: string) {
   let frames: Frame[] = [];

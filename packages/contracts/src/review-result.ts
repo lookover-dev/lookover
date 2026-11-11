@@ -252,7 +252,7 @@ export const reviewResultV1 = z.object({
     /**
      * A machine code, in snake_case, when the job ended without a round (ADR 0043): why it was skipped
      * (`newer_commit`, `replaced`, `closed`, `not_yours`, `draft`, `repo_off`, `on_open_off`,
-     * `codex_not_yours`, `fork`, `pushed`: a fork pushed after the owner's request, `preview`) or how it failed
+     * `codex_not_yours`, `fork`, `pushed`: a fork pushed after the owner's request, `sign_in_changed`, `preview`) or how it failed
      * (`prepare_failed`, `review_failed`, `service_stopped`…). A plain string, so a new code is no `v2`.
      */
     state_reason: z.string().optional(),

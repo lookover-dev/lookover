@@ -106,16 +106,17 @@ function apiOf(options: HostOptions): { api: GitHubApi; clock: Clock; waits: Wai
 
 /** Signing a person in to the shared App (contracts' `HostSignIn`): the device flow and the refresh. */
 export function createHostSignIn(options: HostOptions): HostSignIn {
-  const { api, clock } = apiOf(options);
-  return signInOf(options, api, clock);
+  const { api, clock, waits } = apiOf(options);
+  return signInOf(options, api, clock, waits);
 }
 
-function signInOf(options: HostOptions, api: GitHubApi, clock: Clock): HostSignIn {
+function signInOf(options: HostOptions, api: GitHubApi, clock: Clock, waits: Waits): HostSignIn {
   return createSignIn({
     api,
     fetch: options.fetch ?? ((input, init) => fetch(input, init)),
     web: options.web ?? GITHUB_WEB,
     clock,
+    waits,
     secret: options.secret ?? (() => {}),
   });
 }
@@ -125,9 +126,9 @@ function signInOf(options: HostOptions, api: GitHubApi, clock: Clock): HostSignI
  * their sign-in read and renewed as the person's session does it.
  */
 export function createHostAccounts(options: HostOptions & { keeper: SignInKeeper }): HostAccounts {
-  const { api, clock } = apiOf(options);
+  const { api, clock, waits } = apiOf(options);
   const secret = options.secret ?? (() => {});
-  const session = new UserSession(signInOf(options, api, clock), options.keeper, clock, secret);
+  const session = new UserSession(signInOf(options, api, clock, waits), options.keeper, clock, secret);
   return createAccounts(api, session, options.repositories);
 }
 
@@ -136,7 +137,7 @@ export function createGitHub(options: GitHubOptions): GitHub {
   const secret = options.secret ?? (() => {});
   const session =
     "keeper" in options
-      ? new UserSession(signInOf(options, api, clock), options.keeper, clock, secret)
+      ? new UserSession(signInOf(options, api, clock, waits), options.keeper, clock, secret)
       : options.session;
   const allowed = allowedOnly(options.repositories);
   return {
