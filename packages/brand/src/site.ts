@@ -1,8 +1,10 @@
-// The site's copies of the eyes (ADR 0064, 4): its favicon, the module its pages and scripts draw the eyes from,
-// and the stylesheet that shows each drawing in its theme and moves the loader and the mark's states. The module
-// holds the drawings as SVG text with `{id}` where their masks' ids go and `{state}` where the mark's state goes,
-// and functions that fill them in, so it runs in Astro and in the browser alike and imports nothing. Both go
-// through Biome's formatter, unless a test gives one of its own.
+// The site's copies of the eyes (ADR 0064, 4): its favicon as SVG, full bleed (ADR 0098; its PNGs are with every
+// full-bleed picture, in `full-bleed.ts`), the module its pages and scripts draw the eyes from, and the stylesheet
+// that shows each drawing in its theme and moves the loader and the mark's states. The module holds the drawings as
+// SVG text with `{id}` where their masks' ids go and `{state}` where the mark's state goes, and functions that fill
+// them in, so it runs in Astro and in the browser alike and imports nothing; its `ICON`, the simulated GitHub
+// avatar, is the rounded icon. The module and the stylesheet go through Biome's formatter, unless a test gives one
+// of its own.
 import { addressableLoader, addressableWordmark, markText } from "./addressable.ts";
 import { rule } from "./css.ts";
 import { biome, constant, type Formatter } from "./format.ts";
@@ -11,7 +13,7 @@ import { loaderCss } from "./loader.ts";
 import { COLOURS } from "./numbers.ts";
 import { GAZE, MARK_STATES, markStatesCss } from "./states.ts";
 
-/** The site's favicon: the icon, as the app's is. */
+/** The site's favicon: the icon full bleed, since a search result crops it (ADR 0098); the app's stays rounded. */
 export const SITE_FAVICON = "apps/site/public/favicon.svg";
 /** The module the site's pages and scripts draw the eyes from. */
 export const SITE_MODULE = "apps/site/src/brand/eyes.generated.ts";
@@ -20,8 +22,8 @@ export const SITE_STYLESHEET = "apps/site/src/brand/eyes.generated.css";
 
 const { ink, paper, accent } = COLOURS;
 
-/** The icon as its file draws it: the favicon, the GitHub avatar and the check's icon. */
-export const siteIcon = () => icon(ink, paper, accent, true);
+/** The rounded icon, as the app's favicon draws it: the simulated GitHub avatar and the check's icon. */
+const siteIcon = () => icon(ink, paper, accent, true);
 
 const ID = "{id}";
 const STATE = "{state}";
@@ -50,7 +52,7 @@ export function siteModule(format: Formatter = biome): Promise<string> {
       text("The loader, reading.", "EYES", addressableLoader(ID, false)),
       text("The loader, still.", "EYES_STILL", addressableLoader(ID, true)),
       constant(
-        "The icon as its file draws it, in its own colours: the GitHub avatar and the check's icon.",
+        "The rounded icon, as Lookover draws its tile, in its own colours: the simulated GitHub avatar and the check's icon.",
         "ICON",
         siteIcon(),
       ),

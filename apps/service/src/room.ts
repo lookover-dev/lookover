@@ -222,6 +222,8 @@ export interface RoomOptions {
    * `demo.clock`, `demo.advance` and `demo.step` move the room's time. Absent in live mode, where they answer 501.
    */
   demoClock?: DemoClockControls;
+  /** The data folder's free space in whole gigabytes, for "Run all checks": the machine's by default; demo mode's own. */
+  freeGb?(): Promise<number>;
   /** Where what no request hears of goes (a refused check, a take that threw): the console unless a test reads it. */
   log?(line: string): void;
   /**
@@ -1051,7 +1053,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     const began = o.clock.now();
     emit({ type: "service.changed", at: began, patch: { checks: { at: began, running: true, items: [] } } });
     await Promise.race([queue.checkEngines(), stopAsked]);
-    const freeGb = await freeGbOf(o.home).catch((error: unknown) => {
+    const freeGb = await (o.freeGb?.() ?? freeGbOf(o.home)).catch((error: unknown) => {
       logLine(`the data folder's free space could not be read: ${said(error)}`);
       return null;
     });

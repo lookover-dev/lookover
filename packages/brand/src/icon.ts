@@ -1,5 +1,6 @@
-// The mark and the icon: two eyes and two plain lines on a 64 grid, centred, the icon on its tile.
-import { MARK, PAIR, PUPIL_REST, r2 } from "./numbers.ts";
+// The mark and the icon: two eyes and two plain lines on a 64 grid, centred, the icon on its tile, rounded or full
+// bleed.
+import { COLOURS, MARK, PAIR, PUPIL_REST, r2 } from "./numbers.ts";
 
 /** A circle or an ellipse as path data: two arcs. */
 function circle(cx: number, cy: number, rx: number, ry = rx): string {
@@ -76,10 +77,23 @@ export function markParts(solid: boolean): MarkParts {
 
 /** The icon as an SVG file's text: the mark on its tile, or the mark alone when `tile` is null. */
 export function icon(tile: string | null, ink: string, accent: string, solid: boolean): string {
+  return drawing(tile, MARK.tileRx, ink, accent, solid);
+}
+
+/**
+ * The icon full bleed as an SVG file's text (ADR 0098): the ink icon with its tile's corners square, so whoever
+ * crops it to a circle or a rounded square crops only ink.
+ */
+export function iconFullBleed(): string {
+  return drawing(COLOURS.ink, 0, COLOURS.paper, COLOURS.accent, true);
+}
+
+/** The icon's one SVG template: the tile's corner radius (`rx`, none drawn at 0) its only difference. */
+function drawing(tile: string | null, rx: number, ink: string, accent: string, solid: boolean): string {
   const p = markParts(solid);
   const g = MARK.grid;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${g} ${g}" role="img" aria-label="Lookover">
-${tile ? `<rect width="${g}" height="${g}" rx="${MARK.tileRx}" fill="${tile}"/>` : ""}
+${tile ? `<rect width="${g}" height="${g}"${rx > 0 ? ` rx="${rx}"` : ""} fill="${tile}"/>` : ""}
 <path fill-rule="evenodd" fill="${ink}" d="${p.eyes}"/>${p.pupils ? `<path fill="${ink}" d="${p.pupils}"/>` : ""}<rect x="${p.x0}" y="${p.y1}" width="${p.span}" height="${p.h}" fill="${accent}"/><rect x="${p.x0}" y="${p.y2}" width="${p.span2}" height="${p.h}" fill="${ink}"/>
 </svg>`;
 }

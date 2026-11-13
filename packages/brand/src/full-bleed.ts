@@ -1,17 +1,27 @@
-// The GitHub App's logo: the icon full bleed, the ink to every edge and no tile's corners, as a PNG. GitHub draws
-// an App's logo on its badge colour and crops it to a circle, so a rounded tile would sit in a disc of another
-// colour; on ink to the edges, the circle crops only ink. The mark is the icon's, at its place on the 64 grid: its
-// farthest point, the second line's outer corners, is `MARK_REACH` from the centre, inside the crop's radius of 32.
-// Drawn pixel by pixel from the mark's numbers, 16 samples a pixel, so no rasteriser is needed.
+// The icon full bleed as a picture (ADR 0098): the ink to every edge and no tile's corners, at a side in pixels.
+// Where a ground that is not ours crops the icon to a circle or a rounded square (GitHub's App badge, a search
+// result, a phone's home screen), a rounded tile would sit in a ring of another colour; on ink to the edges, the
+// crop takes only ink. The mark is the icon's, at its place on the 64 grid: its farthest point, the second line's
+// outer corners, is `MARK_REACH` from the centre, inside the crop's radius of 32. Drawn pixel by pixel from the
+// mark's numbers, 16 samples a pixel, so no rasteriser is needed.
 import { MARK_SHAPES } from "./icon.ts";
 import { COLOURS, MARK } from "./numbers.ts";
 import type { Image } from "./png.ts";
 
-/** Where `bun run brand` writes it, from the checkout's root. */
-export const APP_ICON = "docs/product/brand/lookover-app-icon.png";
-
-/** Its side in pixels: GitHub's recommended size for an App's logo. */
-export const APP_ICON_SIZE = 200;
+/**
+ * Every picture of the icon full bleed `bun run brand` writes, as its path from the checkout's root and its side in
+ * pixels: the GitHub App's logo at GitHub's recommended size, uploaded by hand on the App's page with its badge
+ * colour the ink (brand.md), and lookover.dev's favicon at multiples of 48 px and its apple-touch icon at 180.
+ */
+export const FULL_BLEED_PICTURES = {
+  app: { path: "docs/product/brand/lookover-app-icon.png", side: 200 },
+  site: [
+    { path: "apps/site/public/favicon-48.png", side: 48 },
+    { path: "apps/site/public/favicon-96.png", side: 96 },
+    { path: "apps/site/public/favicon-192.png", side: 192 },
+    { path: "apps/site/public/apple-touch-icon.png", side: 180 },
+  ],
+} as const;
 
 const SAMPLES = 4;
 const C = MARK.grid / 2;
@@ -43,15 +53,14 @@ function colourAt(gx: number, gy: number): number[] {
   return INK;
 }
 
-/** The App's logo, `APP_ICON_SIZE` square, every pixel opaque. */
-export function appIcon(): Image {
-  const size = APP_ICON_SIZE;
-  const scale = size / MARK.grid;
-  const rgba = new Uint8Array(size * size * 4);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) rgba.set([...pixelAt(x, y, scale), 255], (y * size + x) * 4);
+/** The icon full bleed, `side` pixels square, every pixel opaque. */
+export function iconFullBleedPicture(side: number): Image {
+  const scale = side / MARK.grid;
+  const rgba = new Uint8Array(side * side * 4);
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) rgba.set([...pixelAt(x, y, scale), 255], (y * side + x) * 4);
   }
-  return { width: size, height: size, rgba };
+  return { width: side, height: side, rgba };
 }
 
 /** The pixel at (x, y): the mean of its samples' colours, on a grid of `SAMPLES` × `SAMPLES` inside it. */

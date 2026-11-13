@@ -13,7 +13,13 @@ import {
   statusOf,
   withoutWordmark,
 } from "@lookover/contracts";
-import { DemoClock, type FakeChange, FakeGitHost, ScriptedRetrieval } from "@lookover/testkit";
+import {
+  DemoClock,
+  type FakeChange,
+  FakeGitHost,
+  ScriptedRetrieval,
+  type ScriptedRun,
+} from "@lookover/testkit";
 import { again, answered, CONFIRMED, FOUND, roundOne, STILL, TOTAL_ADDED } from "./claims.test-support.ts";
 import {
   fakeEngines,
@@ -365,6 +371,66 @@ const repliesOn = (host: FakeGitHost) =>
 
 /** A reply's words, as the agent reads them: without the wordmark that opens it, nor the hidden marker that ends it. */
 const said = (body: string) => withoutWordmark(body.slice(0, body.indexOf(`\n\n${REPLY_MARKER}`)));
+
+// #734's F4 (#736, ADR 0094): after a `Fixed` claim, the finder said in one answer that the fix holds and reported
+// the finding again on its line. `F4_GONE` is that gone verdict's text, as Codex's round 5 wrote it; `REPORTED_AGAIN`
+// is this fixture's own report of the total.ts finding, not #734's.
+const F4_GONE =
+  "You now abort and await dismissal sends before holding the new sign-in. An outstanding host write settles under the previous sign-in, and subsequent posts in that dismissal are aborted.";
+const REPORTED_AGAIN = "The loop still stops one short: the last invoice is never added to the total.";
+const CONTRADICTING: ScriptedRun = {
+  outcome: "ok",
+  text: [
+    "The claimed fix is in place: dismissal sends are aborted and awaited before the new sign-in is held.",
+    "",
+    "Looking at src/total.ts again, the loop's bound is still length - 1.",
+    "",
+    "```json",
+    JSON.stringify(
+      {
+        findings: [
+          {
+            path: "src/total.ts",
+            side: "head",
+            line: 12,
+            end_line: null,
+            line_text: "line 12",
+            severity: "blocking",
+            category: "correctness",
+            title: "The total skips the last invoice",
+            body: REPORTED_AGAIN,
+            defect_key: "total-skips-last-invoice",
+            suggestion: null,
+            pre_existing: false,
+          },
+        ],
+        earlier: [{ id: "F1", present: false, why: F4_GONE }],
+        empty_reason: null,
+      },
+      null,
+      2,
+    ),
+    "```",
+  ].join("\n"),
+};
+
+test("a fix claimed, said gone but reported again in one answer, is kept in the report's words, never the gone verdict's (#736)", async () => {
+  const w = await roundOne();
+  w.host.seedReply(PR1, w.root, { author: OWNER, body: "Fixed: dismissal sends are cut before the switch." });
+  await w.ask(CONTRADICTING);
+
+  const replies = repliesOn(w.host).map((r) => ({ ...r, body: said(r.body) }));
+  expect(replies).toEqual([
+    { commentId: w.root, body: `Kept\n\n${REPORTED_AGAIN}\n\nIf it is kept again, the owner decides.` },
+  ]);
+  expect(replies[0]?.body).not.toContain("You now abort");
+  expect(w.result().findings[0]).toMatchObject({
+    id: "F1",
+    status: "open",
+    claim: { kind: "claimed_fixed", count: 1 },
+    resolution: { kind: "kept", round: 2, explanation: REPORTED_AGAIN },
+  });
+});
 
 test("a claim kept, then escalated, is answered once each on its thread, after the review and before the status block", async () => {
   const w = await roundOne();

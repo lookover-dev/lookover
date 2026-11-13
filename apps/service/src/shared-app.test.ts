@@ -638,6 +638,194 @@ test("a code never entered ends at its expiry even while GitHub hasn't answered 
   expect((await stateOf(service, cookie)).connection).toMatchObject({ signIn: null, person: null });
 });
 
+/**
+ * A host whose next poll of the code can be lost (`loseNext`): it reaches GitHub, which answers it as ever (the tokens
+ * issued and the code spent, when entered), and the answer never comes back (`unavailable`, ADR 0095). GitHub can
+ * also answer the next poll `expired` (`expireNext`), as it says `expired_token`, or the next poll can throw an error
+ * that is no refusal of GitHub's (`breakNext`), as a bug would.
+ */
+class LostPoll extends FakeGitHost {
+  private losing = false;
+  private expiring = false;
+  private breaking: Error | null = null;
+
+  breakNext(error: Error): void {
+    this.breaking = error;
+  }
+
+  loseNext(): void {
+    this.losing = true;
+  }
+
+  expireNext(): void {
+    this.expiring = true;
+  }
+
+  override async pollSignIn(
+    grant: Parameters<FakeGitHost["pollSignIn"]>[0],
+  ): ReturnType<FakeGitHost["pollSignIn"]> {
+    if (this.expiring) {
+      this.expiring = false;
+      return { kind: "expired" };
+    }
+    if (this.breaking !== null) {
+      const error = this.breaking;
+      this.breaking = null;
+      throw error;
+    }
+    const answer = await super.pollSignIn(grant);
+    if (this.losing) {
+      this.losing = false;
+      throw new HostError("unavailable", "the connection to GitHub broke mid-answer");
+    }
+    return answer;
+  }
+}
+
+const ANSWER_LOST =
+  "the GitHub sign-in stopped: GitHub's answer to a poll was lost after it may have signed in; sign in again";
+const EXPIRED = "the GitHub sign-in code expired before it was entered";
+
+/** A sign-in started at the setup's GitHub step on a `LostPoll` host: polled every 5 s, its code out at 15 minutes. */
+async function lostPollRun() {
+  const dir = home();
+  const time = new DemoClock({ at: T0 });
+  const host = new LostPoll({ repo: SANDBOX, bot: SHARED_BOT, person: OWNER, changes: [pr1], clock: time });
+  const { service, logged } = await start({
+    home: dir,
+    host,
+    time,
+    github: onShared(host, dir, memoryKeychain()),
+    setup: AT_GITHUB,
+  });
+  const cookie = await openApp(service);
+  expect((await post(service, cookie, { type: "connection.signIn" })).status).toBe(200);
+  const ended = () =>
+    eventually(
+      () => snapshot(service, cookie),
+      (s) => s.connection.signIn === null,
+    );
+  /** The sign-in's ends logged: every line but the polls GitHub didn't answer. */
+  const ends = () => logged.filter((line) => line.includes("GitHub sign-in") || line.startsWith("signed in"));
+  return { host, time, service, cookie, ended, ends };
+}
+
+test("a poll answer lost after the code was entered, then the code refused: the sign-in says the answer was lost, the code gone (ADR 0095)", async () => {
+  const run = await lostPollRun();
+  run.host.enterCode("D054-61DC");
+  run.host.loseNext();
+  await run.time.advance(5_000);
+  expect((await stateOf(run.service, run.cookie)).connection.signIn?.userCode).toBe("D054-61DC");
+  await run.time.advance(5_000);
+  const after = await run.ended();
+  expect(after.connection).toMatchObject({ signIn: null, person: null });
+  expect(run.ends()).toEqual([ANSWER_LOST]);
+});
+
+test("a poll answer lost, then GitHub saying the code expired: the answer was lost, not a code never entered", async () => {
+  const run = await lostPollRun();
+  run.host.enterCode("D054-61DC");
+  run.host.loseNext();
+  await run.time.advance(5_000);
+  run.host.expireNext();
+  await run.time.advance(5_000);
+  await run.ended();
+  expect(run.ends()).toEqual([ANSWER_LOST]);
+});
+
+test("a poll answer lost, then GitHub saying the code waits: the code's expiry is an expiry again", async () => {
+  const run = await lostPollRun();
+  run.host.loseNext();
+  await run.time.advance(5_000);
+  await run.time.advance(5_000);
+  await run.time.advance(890_000);
+  await run.ended();
+  expect(run.ends()).toEqual([EXPIRED]);
+});
+
+test("a poll answer lost and GitHub unanswered until the code's expiry: the answer was lost", async () => {
+  const run = await lostPollRun();
+  run.host.enterCode("D054-61DC");
+  run.host.loseNext();
+  await run.time.advance(5_000);
+  run.host.refuse("unavailable");
+  await run.time.advance(895_000);
+  await run.ended();
+  expect(run.ends()).toEqual([ANSWER_LOST]);
+});
+
+test("a poll answer lost, then a rate limit, then the code refused: the limit leaves the mark as it was", async () => {
+  const run = await lostPollRun();
+  run.host.enterCode("D054-61DC");
+  run.host.loseNext();
+  await run.time.advance(5_000);
+  run.host.refuse("rate_limited");
+  await run.time.advance(5_000);
+  run.host.refuse(null);
+  await run.time.advance(5_000);
+  await run.ended();
+  expect(run.ends()).toEqual([ANSWER_LOST]);
+});
+
+test("a rate limit with no answer lost before, then the code's expiry: an expiry, the limit never setting the mark", async () => {
+  const run = await lostPollRun();
+  run.host.refuse("rate_limited");
+  await run.time.advance(5_000);
+  await run.time.advance(895_000);
+  await run.ended();
+  expect(run.ends()).toEqual([EXPIRED]);
+});
+
+test("each start begins clean: a sign-in ended by a lost answer, then a new one rate limited to its expiry, an expiry", async () => {
+  const run = await lostPollRun();
+  run.host.enterCode("D054-61DC");
+  run.host.loseNext();
+  await run.time.advance(5_000);
+  await run.time.advance(5_000);
+  await run.ended();
+  expect((await post(run.service, run.cookie, { type: "connection.signIn" })).status).toBe(200);
+  const second = (await stateOf(run.service, run.cookie)).connection.signIn?.userCode;
+  expect(second).toStartWith("D054-");
+  expect(second).not.toBe("D054-61DC");
+  // Rate limited to its expiry: GitHub never says the new code waits, so only the start can have cleared the mark.
+  run.host.refuse("rate_limited");
+  await run.time.advance(900_000);
+  await run.ended();
+  expect(run.ends()).toEqual([ANSWER_LOST, EXPIRED]);
+});
+
+test("a poll answer lost, then an error that is no refusal of GitHub's: the error's own words, not a lost answer", async () => {
+  const run = await lostPollRun();
+  run.host.enterCode("D054-61DC");
+  run.host.loseNext();
+  await run.time.advance(5_000);
+  run.host.breakNext(new TypeError("grant.interval is not a number"));
+  await run.time.advance(5_000);
+  await run.ended();
+  expect(run.ends()).toEqual(["the GitHub sign-in stopped: grant.interval is not a number"]);
+});
+
+test("a poll answer lost, then the person refusing on GitHub: denied, as ever", async () => {
+  const run = await lostPollRun();
+  run.host.loseNext();
+  await run.time.advance(5_000);
+  run.host.denyCode("D054-61DC");
+  await run.time.advance(5_000);
+  await run.ended();
+  expect(run.ends()).toEqual(["the GitHub sign-in was refused on GitHub"]);
+});
+
+test("a poll answer lost before the code was entered, then the tokens issued: signed in, as ever", async () => {
+  const run = await lostPollRun();
+  run.host.loseNext();
+  await run.time.advance(5_000);
+  run.host.enterCode("D054-61DC");
+  await run.time.advance(5_000);
+  const after = await run.ended();
+  expect(after.connection).toMatchObject({ person: OWNER });
+  expect(run.ends()).toEqual([`signed in to GitHub as ${OWNER.login}`]);
+});
+
 /** A host whose device code is asked of it and held until `letGo`: GitHub slow to give one. */
 class SlowCode extends FakeGitHost {
   private release = () => {};

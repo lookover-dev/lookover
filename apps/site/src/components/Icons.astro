@@ -1,0 +1,7 @@
+---
+// The icons full bleed (ADR 0098), for the landing page's head and the docs' (Head.astro): one link per entry of
+// icons.ts's `ICON_LINKS`, so the two heads can't differ, and `site:check` reads the same list.
+import { ICON_LINKS } from "./icons.ts";
+---
+
+{ICON_LINKS.map(({ href, rel, type, sizes }) => <link rel={rel} href={href} type={type} sizes={sizes} />)}

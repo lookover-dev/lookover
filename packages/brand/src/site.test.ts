@@ -1,7 +1,8 @@
-// The site's copies of the eyes: its favicon, the module its pages and scripts draw the eyes from, and the
-// stylesheet that shows each drawing in its theme and moves the loader and the mark's states. The module, run as
-// the site runs it, draws what the brand draws; a hand edit of any copy fails the check, naming the file. The
-// module and the stylesheet each have one test that runs the real Biome and compares with this checkout's copy.
+// The site's text copies of the eyes (its PNGs are `full-bleed.test.ts`'s): its favicon as SVG, the module its
+// pages and scripts draw the eyes from, and the stylesheet that shows each drawing in its theme and moves the
+// loader and the mark's states. The module, run as the site runs it, draws what the brand draws; a hand edit of
+// any copy fails the check, naming the file. The module and the stylesheet each have one test that runs the real
+// Biome and compares with this checkout's copy.
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +38,7 @@ function checkout(): string {
 
 const format = asWritten;
 
-test("the site's copies are its favicon, its module of the eyes and its stylesheet", () => {
+test("the site's text copies are its SVG favicon, its module of the eyes and its stylesheet", () => {
   expect([SITE_FAVICON, SITE_MODULE, SITE_STYLESHEET]).toEqual([
     "apps/site/public/favicon.svg",
     "apps/site/src/brand/eyes.generated.ts",
@@ -164,7 +165,8 @@ test("a hand edit of the site's module, stylesheet or favicon fails, naming the 
   await writeCopies(root, { format });
   expect(await driftedCopies(root, { format })).toEqual([]);
   for (const [path, from, to] of [
-    [SITE_FAVICON, 'rx="14.4"', 'rx="14"'],
+    // The full-bleed favicon rounded again by hand.
+    [SITE_FAVICON, 'height="64" fill', 'height="64" rx="14.4" fill'],
     [SITE_MODULE, "-174.05", "-174"],
     [SITE_STYLESHEET, "scaleY(0.84)", "scaleY(0.8)"],
   ] as const) {

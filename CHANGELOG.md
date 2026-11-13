@@ -2,6 +2,19 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.16.0](https://github.com/lookover-dev/lookover/compare/v0.15.0...v0.16.0) (2026-11-13)
+
+### Features
+
+- **review:** when Lookover replies on a finding's thread, the reason it gives is the one behind the verdict the round acted on, never one it overruled. A finding reported again and kept says the new report's words.
+
+### Bug Fixes
+
+- **review:** a finding you dispute is withdrawn when the reviewer agrees it was wrong, even if its answer leaves out whether the problem is still there. Before, that answer was read as no verdict and the finding stayed open.
+- **github:** when GitHub's answer to a sign-in was lost on the way and the code then ran out, Lookover says the answer was lost after you may have signed in, and to sign in again, instead of saying the code expired before it was entered.
+- **app:** the palette fits its rows again once its font has loaded, and keeps the row you are on in view.
+- **site:** lookover.dev's icon fills the circle a search result shows it in, with no ring around it, and phones get an icon at their own size.
+
 ## [0.15.0](https://github.com/lookover-dev/lookover/compare/v0.14.0...v0.15.0) (2026-11-11)
 
 ### Features

@@ -132,13 +132,32 @@ test("round 2 carries the earlier open findings and asks, for each, whether it i
   expect(prompt).toMatchSnapshot();
 });
 
-test("every earlier finding's `why` is written to the author about the code now, and one still there in another form is never listed again (ADR 0081)", async () => {
+test("every earlier finding's `why` is written to the author about the code now, and one gone or still there in another form is never listed again (ADR 0081, 0094)", async () => {
   const prompt = await promptOf({ ...policy, round: 2, earlier: EARLIER });
   // With no claim at all, `why` still goes to the author: Lookover posts it on a finding still present.
   expect(prompt).toContain("write it to the author, about the code as it is now");
-  expect(prompt).toContain("is answered in `earlier`, never listed again under `findings`");
-  expect(prompt).toContain('{ "id": "F1", "present": true, "why": "to the author, about the code now" }');
+  expect(prompt).toContain(
+    "`findings` holds only what is new: an earlier finding, whether gone (`present`: false)",
+  );
+  expect(prompt).toContain(
+    "or still there in another form, on other lines or with other words, is answered in `earlier` and never listed again under `findings`",
+  );
+  expect(prompt).toContain('{ "id": "F1", "why": "to the author, about the code now", "present": true }');
   expect(prompt).not.toContain("one sentence");
+});
+
+/** The block's example item for an earlier finding, as the prompt shows it. */
+const exampleItem = (prompt: string) =>
+  prompt.split("\n").find((line) => line.includes('{ "id": "F1"')) ?? "";
+
+test("the finder gives its reason before its answer on an earlier finding (ADR 0094)", async () => {
+  const prompt = await promptOf({ ...policy, round: 2, earlier: EARLIER });
+  expect(prompt).toContain(
+    "say first in `why` what the code at this commit shows of it, then in `present` (true or false) whether it is still there",
+  );
+  const item = exampleItem(prompt);
+  expect(item).toContain('"why"');
+  expect(item.indexOf('"why"')).toBeLessThan(item.indexOf('"present"'));
 });
 
 test("a claim is quoted under its finding as the author's words, with what is asked of it", async () => {
@@ -150,7 +169,7 @@ test("a claim is quoted under its finding as the author's words, with what is as
       "  ```text",
       "  Fixed in 4c1d2e0: the filter compares now.",
       "  ```",
-      "  Check on the code at this commit that it is fixed: their word is no proof.",
+      "  Check on the code at this commit that it is fixed: their word is no proof. A fix that holds is `present`: false, and is not listed under `findings`.",
       "- F2",
     ].join("\n"),
   );
@@ -164,19 +183,31 @@ test("a dispute is offered `wrong`, in the section and in the block's shape", as
   const prompt = await promptOf({ ...policy, round: 2, earlier });
   expect(prompt).toContain("Reply on its thread from @dana (disputed)");
   expect(prompt).toContain(
-    "  Judge the dispute on the code. Answer `wrong`: true only if the finding was a mistake, and say why in `why`; if it stands, `wrong`: false, `present` as for any finding, and say in `why` why it stands.",
+    "  Judge the dispute on the code. Say in `why` why the finding was a mistake, or why it stands; then answer `wrong`: true if it was a mistake or false if it stands, and in either case `present` as for any finding.",
   );
-  expect(prompt).toContain(
-    '{ "id": "F1", "present": true, "wrong": false, "why": "to the author, about the code now" }',
+  expect(exampleItem(prompt)).toBe(
+    '    { "id": "F1", "why": "to the author, about the code now", "wrong": false, "present": true }',
   );
   expect(prompt).toMatchSnapshot();
+});
+
+test("a won't fix is weighed in `why` before its answer", async () => {
+  const prompt = await promptOf({
+    ...policy,
+    round: 2,
+    earlier: claimed(0, "wont_fix", "Not worth it here."),
+  });
+  expect(prompt).toContain("Reply on its thread from @dana (won't fix)");
+  expect(prompt).toContain(
+    "  Say in `why` why it matters, or why it does not, then as for any finding whether it is still present.",
+  );
 });
 
 test("a question is to be answered in `why`", async () => {
   const prompt = await promptOf({ ...policy, round: 2, earlier: claimed(2, "question", "Which check?") });
   expect(prompt).toContain("Reply on its thread from @dana (a question)");
   expect(prompt).toContain(
-    "  Answer their question in `why`, and say as for any finding whether it is still present.",
+    "  Answer their question in `why`, then say as for any finding whether it is still present.",
   );
 });
 

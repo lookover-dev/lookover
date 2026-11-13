@@ -4,6 +4,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { scratchRepository } from "@lookover/testkit";
 import { spawnSync } from "bun";
 import { cleanEnv } from "./clean-env.ts";
 import { liveSignInFolder } from "./live-sign-in-folder.ts";
@@ -26,18 +27,7 @@ function cloneWithWorktree(): { main: string; worktree: string } {
   dirs.push(root);
   const main = join(root, "main");
   mkdirSync(main);
-  git(main, ["init", "-q", "-b", "main"]);
-  git(main, [
-    "-c",
-    "user.name=T",
-    "-c",
-    "user.email=t@example.com",
-    "commit",
-    "-q",
-    "--allow-empty",
-    "-m",
-    "one",
-  ]);
+  scratchRepository(main, { commit: "one", env: cleanEnv() });
   const worktree = join(root, "worktree");
   git(main, ["worktree", "add", "-q", "-b", "elsewhere", worktree]);
   return { main, worktree };

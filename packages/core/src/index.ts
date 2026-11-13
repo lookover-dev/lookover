@@ -48,7 +48,8 @@
 // acknowledged, kept on a blocking finding; a question answered, never counted; the second keep escalated; the newest
 // claim and the keep count stored on the finding; what to reply, never for verified fixed nor acknowledged; a claim the
 // finder said nothing about left unread; with no claim, after a push (the round's commit isn't `lastChecked`), a
-// finding open on its own thread and still present says the finder's reason, counted for nothing, ADR 0081), the
+// finding open on its own thread and still present says the finder's reason, counted for nothing, ADR 0081; a reply
+// says the reason of the verdict the round acted on, never one it overruled, ADR 0094), the
 // loop, the verdict, the agent's next action, who must act on each finding, the check's conclusion, what to post (a finding an earlier round withheld, its review never landed, posted now while
 // it is open), the counts over posted findings only and how many findings are kept in the app (unsettled, not posted);
 // `obsolete` waits), answered as contracts' `Reconciled`, which `publish` posts as it is; the claims on Lookover's

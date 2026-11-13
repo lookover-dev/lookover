@@ -751,6 +751,122 @@ test("a reply never goes out without a reason: the finder's, else the report it 
   ]);
 });
 
+// #734's F4 (#736, ADR 0094), F1 in this fixture: the finder answered the fix holds and reported the finding again in
+// the same block.
+const F4_GONE =
+  "You now abort and await dismissal sends before holding the new sign-in. An outstanding host write settles under the previous sign-in, and subsequent posts in that dismissal are aborted.";
+const F4_AGAIN =
+  "A dismissal post already underway still runs after the switch: its 401 retry renews under the new sign-in.";
+
+/** F1 reported again on its line, paired by meaning (no line text given), in the words `F4_AGAIN`. */
+const reportedAgain = (severity: Severity = "should_fix") => ({
+  ...candidate("a", severity, { line: 1 }),
+  body: F4_AGAIN,
+});
+
+test("a fix claimed, said gone but reported again: kept with the report's reason, never the gone verdict's (ADR 0094)", () => {
+  const prior = [earlier(1, "a", "open")];
+  const r = round(
+    prior,
+    outcome({
+      sha: SHA_2,
+      candidates: [reportedAgain()],
+      earlier: [{ id: findingId("F1"), verdict: "gone", why: F4_GONE }],
+    }),
+    { threads: { claims: [claim(1, "claimed_fixed", "Fixed: dismissal sends are cut before the switch.")] } },
+  );
+  expect(r.findings[0]).toMatchObject({ status: "open", kept: 1, claim: { kind: "claimed_fixed" } });
+  expect(r.replies).toEqual([{ findingId: findingId("F1"), kind: "kept", why: F4_AGAIN }]);
+});
+
+test("a fix claimed and said gone, not reported again: verified fixed, no reply (ADR 0094)", () => {
+  const r = round(
+    [earlier(1, "a", "open")],
+    outcome({ sha: SHA_2, earlier: [{ id: findingId("F1"), verdict: "gone", why: F4_GONE }] }),
+    { threads: { claims: [claim(1, "claimed_fixed")] } },
+  );
+  expect(r.findings[0]).toMatchObject({ status: "verified_fixed", closedIn: 2, verifiedSha: "b2c3d4e" });
+  expect(r.replies).toEqual([]);
+});
+
+test("a question on a finding said gone but reported again is answered with the report's reason (ADR 0094)", () => {
+  const r = round(
+    [earlier(1, "a", "open")],
+    outcome({
+      sha: SHA_2,
+      candidates: [reportedAgain()],
+      earlier: [{ id: findingId("F1"), verdict: "gone", why: F4_GONE }],
+    }),
+    { threads: { claims: [claim(1, "question")] } },
+  );
+  expect(r.replies).toEqual([{ findingId: findingId("F1"), kind: "answered", why: F4_AGAIN }]);
+});
+
+test("a dispute on a blocking finding said gone but reported again is kept with the report's reason; one said wrong keeps the verdict's (ADR 0094)", () => {
+  const prior = [earlier(1, "a", "open", "blocking"), earlier(2, "b", "open", "blocking")];
+  const r = round(
+    prior,
+    outcome({
+      sha: SHA_2,
+      candidates: [reportedAgain("blocking"), candidate("b", "blocking", { line: 2 })],
+      earlier: [{ id: findingId("F1"), verdict: "gone", why: F4_GONE }, said(2, "wrong")],
+    }),
+    { threads: { claims: [claim(1, "disputed"), claim(2, "disputed")] } },
+  );
+  expect(ledgerAs(r.findings)).toEqual([
+    ["F1", "open", true],
+    ["F2", "escalated", true],
+  ]);
+  expect(r.replies).toEqual([
+    { findingId: findingId("F1"), kind: "kept", why: F4_AGAIN },
+    { findingId: findingId("F2"), kind: "escalated", why: "Why of F2." },
+  ]);
+});
+
+test("a dispute said wrong on a should_fix finding reported again: withdrawn with the verdict's reason, in the reply and closedWhy (ADR 0094)", () => {
+  const r = round(
+    [earlier(1, "a", "open")],
+    outcome({ sha: SHA_2, candidates: [reportedAgain()], earlier: [said(1, "wrong")] }),
+    { threads: { claims: [claim(1, "disputed")] } },
+  );
+  expect(r.findings[0]).toMatchObject({ status: "withdrawn", closedIn: 2, closedWhy: "Why of F1.", kept: 0 });
+  expect(r.raised).toEqual([]);
+  expect(r.replies).toEqual([{ findingId: findingId("F1"), kind: "withdrawn", why: "Why of F1." }]);
+});
+
+test("a fix claimed, the verdict unknown but reported again: kept with the report's reason, never the unknown verdict's (ADR 0094)", () => {
+  const r = round(
+    [earlier(1, "a", "open")],
+    outcome({
+      sha: SHA_2,
+      candidates: [reportedAgain()],
+      earlier: [{ id: findingId("F1"), verdict: "unknown", why: "Could not tell from the diff." }],
+    }),
+    { threads: { claims: [claim(1, "claimed_fixed")] } },
+  );
+  expect(r.findings[0]).toMatchObject({ status: "open", kept: 1, claim: { kind: "claimed_fixed" } });
+  expect(r.replies).toEqual([{ findingId: findingId("F1"), kind: "kept", why: F4_AGAIN }]);
+});
+
+test("a second round contradicting itself on a claimed fix escalates the finding, with the report's reason (ADR 0094)", () => {
+  const contradicting = outcome({
+    sha: SHA_2,
+    candidates: [reportedAgain()],
+    earlier: [{ id: findingId("F1"), verdict: "gone", why: F4_GONE }],
+  });
+  const two = round([earlier(1, "a", "open")], contradicting, {
+    round: 2,
+    threads: { claims: [claim(1, "claimed_fixed")] },
+  });
+  const three = round(two.findings, contradicting, {
+    round: 3,
+    lastChecked: SHA_2,
+    threads: { claims: [{ ...claim(1, "claimed_fixed", "Fixed, really."), commentId: 201 }] },
+  });
+  expect(three.findings[0]).toMatchObject({ status: "escalated", kept: 2 });
+  expect(three.replies).toEqual([{ findingId: findingId("F1"), kind: "escalated", why: F4_AGAIN }]);
+});
+
 test("`full`: a round past the first posts a new Consider, as a first round would", () => {
   const prior = [earlier(1, "a", "open")];
   const found = { ...stillThereBecause(prior), candidates: [candidate("polish", "consider", { line: 9 })] };

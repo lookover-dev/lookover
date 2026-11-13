@@ -535,17 +535,21 @@ const disputedRound: ReviewPolicy = {
   ),
 };
 
-test("a disputed finding answered `wrong` gets the verdict wrong, its why the reason to reply with", async () => {
+/** The disputed round's review of `verdicts`, F2 the disputed finding, F1 not. */
+async function verdictsRead(verdicts: object[]) {
   const engines = new FakeEngines();
-  const block = JSON.stringify({
-    findings: [],
-    earlier: [
-      { id: "F1", present: true, why: "Still no initial value." },
-      { id: "F2", present: true, wrong: true, why: "total.spec.ts does test the empty list." },
-    ],
+  engines.answer({
+    outcome: "ok",
+    text: answer("Checked.", JSON.stringify({ findings: [], earlier: verdicts })),
   });
-  engines.answer({ outcome: "ok", text: answer("Checked.", block) });
-  const result = await createReview({ engines }).run(job, prepared, disputedRound, signal());
+  return createReview({ engines }).run(job, prepared, disputedRound, signal());
+}
+
+test("a disputed finding answered `wrong` gets the verdict wrong, its why the reason to reply with", async () => {
+  const result = await verdictsRead([
+    { id: "F1", present: true, why: "Still no initial value." },
+    { id: "F2", present: true, wrong: true, why: "total.spec.ts does test the empty list." },
+  ]);
   expect(result).toMatchObject({
     kind: "reviewed",
     round: {
@@ -559,16 +563,10 @@ test("a disputed finding answered `wrong` gets the verdict wrong, its why the re
 });
 
 test("a dispute rejected, `wrong` false, is read as present or gone", async () => {
-  const engines = new FakeEngines();
-  const block = JSON.stringify({
-    findings: [],
-    earlier: [
-      { id: "F1", present: false, why: "Fixed." },
-      { id: "F2", present: true, wrong: false, why: "total.spec.ts sums three numbers only." },
-    ],
-  });
-  engines.answer({ outcome: "ok", text: answer("Checked.", block) });
-  const result = await createReview({ engines }).run(job, prepared, disputedRound, signal());
+  const result = await verdictsRead([
+    { id: "F1", present: false, why: "Fixed." },
+    { id: "F2", present: true, wrong: false, why: "total.spec.ts sums three numbers only." },
+  ]);
   expect(result).toMatchObject({
     kind: "reviewed",
     round: {
@@ -581,17 +579,33 @@ test("a dispute rejected, `wrong` false, is read as present or gone", async () =
   });
 });
 
-test("`wrong` on a finding nobody disputed is not read: present or gone stands, with a problem line", async () => {
-  const engines = new FakeEngines();
-  const block = JSON.stringify({
-    findings: [],
-    earlier: [
-      { id: "F1", present: true, wrong: true, why: "Looks fine to me." },
-      { id: "F2", present: false, why: "Tested now." },
-    ],
+test("a verdict reads the same with its reason first or its answer first (ADR 0094)", async () => {
+  const reasonFirst = await verdictsRead([
+    { id: "F1", why: "The initial value is back.", present: false },
+    { id: "F2", why: "total.spec.ts does test the empty list.", present: true, wrong: true },
+  ]);
+  const answerFirst = await verdictsRead([
+    { id: "F1", present: false, why: "The initial value is back." },
+    { id: "F2", present: true, wrong: true, why: "total.spec.ts does test the empty list." },
+  ]);
+  expect(reasonFirst).toEqual(answerFirst);
+  expect(reasonFirst).toMatchObject({
+    kind: "reviewed",
+    round: {
+      problems: [],
+      earlier: [
+        { id: "F1", verdict: "gone", why: "The initial value is back." },
+        { id: "F2", verdict: "wrong", why: "total.spec.ts does test the empty list." },
+      ],
+    },
   });
-  engines.answer({ outcome: "ok", text: answer("Checked.", block) });
-  const result = await createReview({ engines }).run(job, prepared, disputedRound, signal());
+});
+
+test("`wrong` on a finding nobody disputed is not read: present or gone stands, with a problem line", async () => {
+  const result = await verdictsRead([
+    { id: "F1", present: true, wrong: true, why: "Looks fine to me." },
+    { id: "F2", present: false, why: "Tested now." },
+  ]);
   expect(result).toMatchObject({
     kind: "reviewed",
     round: {
@@ -605,17 +619,114 @@ test("`wrong` on a finding nobody disputed is not read: present or gone stands, 
 });
 
 test("`wrong` on a finding never asked about fails the run as invalid_block, as any verdict would", async () => {
-  const engines = new FakeEngines();
-  const block = JSON.stringify({
-    findings: [],
-    earlier: [
-      { id: "F1", present: true, why: "Still." },
-      { id: "F2", present: true, wrong: true, why: "It is tested." },
-      { id: "F9", present: true, wrong: true, why: "Never asked." },
-    ],
+  const result = await verdictsRead([
+    { id: "F1", present: true, why: "Still." },
+    { id: "F2", present: true, wrong: true, why: "It is tested." },
+    { id: "F9", present: true, wrong: true, why: "Never asked." },
+  ]);
+  expect(result).toMatchObject({
+    kind: "failed",
+    reason: "invalid_block",
+    problems: ["earlier: F9 was not asked about"],
   });
-  engines.answer({ outcome: "ok", text: answer("Checked.", block) });
-  const result = await createReview({ engines }).run(job, prepared, disputedRound, signal());
+});
+
+test("a dispute accepted, `wrong` true, needs no `present` (ADR 0097)", async () => {
+  const result = await verdictsRead([
+    { id: "F1", present: true, why: "Still no initial value." },
+    { id: "F2", why: "total.spec.ts does test the empty list.", wrong: true },
+  ]);
+  expect(result).toMatchObject({
+    kind: "reviewed",
+    round: {
+      problems: [],
+      earlier: [
+        { id: "F1", verdict: "present", why: "Still no initial value." },
+        { id: "F2", verdict: "wrong", why: "total.spec.ts does test the empty list." },
+      ],
+    },
+  });
+});
+
+test("a dispute rejected without `present` is a problem and no verdict", async () => {
+  const result = await verdictsRead([
+    { id: "F1", present: true, why: "Still no initial value." },
+    { id: "F2", why: "total.spec.ts sums three numbers only.", wrong: false },
+  ]);
+  expect(result).toMatchObject({
+    kind: "reviewed",
+    round: {
+      problems: ["earlier: F2 gives no present", "earlier: no verdict on F2"],
+      earlier: [
+        { id: "F1", verdict: "present", why: "Still no initial value." },
+        { id: "F2", verdict: "unknown", why: "" },
+      ],
+    },
+  });
+});
+
+test("a finding nobody disputed, answered without `present`, is a problem and no verdict", async () => {
+  const result = await verdictsRead([
+    { id: "F1", why: "Still no initial value." },
+    { id: "F2", present: true, why: "total.spec.ts sums three numbers only." },
+  ]);
+  expect(result).toMatchObject({
+    kind: "reviewed",
+    round: {
+      problems: ["earlier: F1 gives no present", "earlier: no verdict on F1"],
+      earlier: [
+        { id: "F2", verdict: "present", why: "total.spec.ts sums three numbers only." },
+        { id: "F1", verdict: "unknown", why: "" },
+      ],
+    },
+  });
+});
+
+test("`wrong` without `present` on a finding nobody disputed is two problems and no verdict", async () => {
+  const result = await verdictsRead([
+    { id: "F1", why: "Looks fine to me.", wrong: true },
+    { id: "F2", present: true, why: "total.spec.ts sums three numbers only." },
+  ]);
+  expect(result).toMatchObject({
+    kind: "reviewed",
+    round: {
+      problems: [
+        "earlier: F1 answered wrong, but nobody disputed it",
+        "earlier: F1 gives no present",
+        "earlier: no verdict on F1",
+      ],
+      earlier: [
+        { id: "F2", verdict: "present", why: "total.spec.ts sums three numbers only." },
+        { id: "F1", verdict: "unknown", why: "" },
+      ],
+    },
+  });
+});
+
+test("a verdict without `present`, then a valid one on the same finding: the valid one is read, not answered twice", async () => {
+  const result = await verdictsRead([
+    { id: "F1", why: "Still no initial value." },
+    { id: "F1", present: false, why: "The initial value is back." },
+    { id: "F2", present: true, why: "total.spec.ts sums three numbers only." },
+  ]);
+  expect(result).toMatchObject({
+    kind: "reviewed",
+    round: {
+      problems: ["earlier: F1 gives no present"],
+      earlier: [
+        { id: "F1", verdict: "gone", why: "The initial value is back." },
+        { id: "F2", verdict: "present", why: "total.spec.ts sums three numbers only." },
+      ],
+    },
+  });
+});
+
+test("a verdict without `present` on a finding never asked about fails the run as invalid_block", async () => {
+  const result = await verdictsRead([
+    { id: "F1", present: true, why: "Still." },
+    { id: "F2", present: true, why: "Still." },
+    { id: "F9", why: "Never asked." },
+  ]);
   expect(result).toMatchObject({
     kind: "failed",
     reason: "invalid_block",

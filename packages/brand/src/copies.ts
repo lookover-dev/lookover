@@ -2,14 +2,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { appStylesheet, EYES_MODULE, eyesModule, STYLESHEET } from "./app.ts";
-import { APP_ICON, appIcon } from "./app-icon.ts";
 import { ROOT } from "./checkout.ts";
 import { biome, type Formatter } from "./format.ts";
-import { icon } from "./icon.ts";
+import { FULL_BLEED_PICTURES, iconFullBleedPicture } from "./full-bleed.ts";
+import { icon, iconFullBleed } from "./icon.ts";
 import { COLOURS } from "./numbers.ts";
 import { decodePng, encodePng, type Image } from "./png.ts";
 import { SHEET, sheet } from "./sheet.ts";
-import { SITE_FAVICON, SITE_MODULE, SITE_STYLESHEET, siteIcon, siteModule, siteStylesheet } from "./site.ts";
+import { SITE_FAVICON, SITE_MODULE, SITE_STYLESHEET, siteModule, siteStylesheet } from "./site.ts";
 import { wordmark } from "./wordmark.ts";
 
 /**
@@ -32,6 +32,12 @@ export type CopiesOptions = {
 const { ink, paper, accent } = COLOURS;
 const BRAND = "docs/product/brand";
 
+/** The copy at `path`: the icon full bleed, `side` pixels square. */
+const fullBleed = ({ path, side }: { path: string; side: number }): Copy => ({
+  path,
+  picture: () => iconFullBleedPicture(side),
+});
+
 /** Every copy, in the order they are written. A new copy is one more line here. */
 export const COPIES: readonly Copy[] = [
   { path: `${BRAND}/lookover-wordmark.svg`, render: () => wordmark(ink, accent) },
@@ -45,8 +51,9 @@ export const COPIES: readonly Copy[] = [
   { path: `${BRAND}/lookover-mark.svg`, render: () => icon(null, ink, accent, false) },
   { path: `${BRAND}/lookover-mark-on-dark.svg`, render: () => icon(null, paper, accent, true) },
   { path: `${BRAND}/lookover-favicon.svg`, render: () => icon(ink, paper, accent, true) },
+  { path: `${BRAND}/lookover-icon-full-bleed.svg`, render: iconFullBleed },
   // The GitHub App's logo, full bleed: uploaded by hand on the App's page, its badge colour the ink (brand.md).
-  { path: APP_ICON, picture: appIcon },
+  fullBleed(FULL_BLEED_PICTURES.app),
   { path: "apps/web/public/favicon.svg", render: () => icon(ink, paper, accent, true) },
   { path: EYES_MODULE, render: (_, format) => eyesModule(format) },
   { path: STYLESHEET, render: appStylesheet },
@@ -57,7 +64,9 @@ export const COPIES: readonly Copy[] = [
     render: () => wordmark(paper, accent, true),
   },
   { path: SHEET, render: sheet },
-  { path: SITE_FAVICON, render: siteIcon },
+  // The site's icons, full bleed: a search result or a home screen crops them (ADR 0098).
+  { path: SITE_FAVICON, render: iconFullBleed },
+  ...FULL_BLEED_PICTURES.site.map(fullBleed),
   // Served at contracts' `WORDMARK_URLS`, which every post Lookover writes on GitHub draws (ADR 0074): they never
   // move, and the site's tests and `site:check` fail without them.
   { path: "apps/site/public/brand/lookover-wordmark.svg", render: () => wordmark(ink, accent) },

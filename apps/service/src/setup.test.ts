@@ -2,19 +2,22 @@
 // demo driver and its clock: the steps and the furthest reached, kept by the store; "Sign in with GitHub" followed
 // through GitHub's fake pages (the code entered, the shared App installed there, found by the next check, the
 // repository listed, the step moved on only if the owner is still on it); "choose repositories"; the switch; and in
-// live mode, a fresh data folder set up at its first start.
+// live mode, a fresh data folder set up at its first start. And the setup flow alone on a store: an install's answer
+// taken while it is waited for, none at the GitHub step's start (ADR 0095).
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   changeId,
   commitSha,
+  connectionId,
   DEMO_API,
+  type EventBody,
   githubLinks,
   repositoryId,
   type Setup,
   SHARED_APP,
   type State,
 } from "@lookover/contracts";
-import { openStore } from "@lookover/store";
+import { openStore, type Store } from "@lookover/store";
 import {
   advance,
   inject,
@@ -26,7 +29,7 @@ import {
   startScenario,
   stopAll as stopScenarios,
 } from "./demo/demo.test-support.ts";
-import { buildDemoRoom, type DemoRoom, type Scenario } from "./index.ts";
+import { buildDemoRoom, createSetup, type DemoRoom, type Scenario, type SetupFlow } from "./index.ts";
 import {
   eventually,
   home,
@@ -411,4 +414,50 @@ test("a setup kept in the data folder is what the next start shows, never writte
   const state = await snapshot(service, await openApp(service));
   expect(state.setup).toEqual(onRepos);
   expect(state.setup.done).toBe(false);
+});
+
+/** The setup flow on a store of its own, `setup` kept there, at a frozen time: what it sends, collected. */
+function setupOn(setup: Partial<Setup>): { flow: SetupFlow; store: Store; sent: EventBody[] } {
+  const store = openStore({ home: home(), durable: false });
+  store.setup.write(setup);
+  const sent: EventBody[] = [];
+  const flow = createSetup({
+    store,
+    clock: { now: () => 5 * MIN },
+    emit: (body) => sent.push(body),
+    repos: () => [SANDBOX],
+    github: {
+      connectionId: () => connectionId("github:sasensi"),
+      accounts: () => [],
+      waitForInstall: () => {},
+    },
+    review: async () => "ok",
+    chosen: () => {},
+  });
+  return { flow, store, sent };
+}
+
+test("the choice made again, the GitHub step back at its start takes no install's answer: it is nobody's (ADR 0095)", () => {
+  const { flow, store, sent } = setupOn({ step: "repos", reached: "first-review", github: "done" });
+  flow.again();
+  sent.length = 0;
+  flow.installed(true);
+  flow.installed(false);
+  const kept = store.setup.read();
+  store.close();
+  expect(kept).toMatchObject({ step: "github", reached: "github", github: "start" });
+  expect(sent).toEqual([]);
+});
+
+test("the install waited for takes its answer: nothing granted, the connection shown, then the repositories reached", () => {
+  const { flow, store, sent } = setupOn({ step: "github", reached: "github", github: "waiting-for-install" });
+  flow.installed(false);
+  const none = store.setup.read();
+  flow.installed(true);
+  const granted = store.setup.read();
+  store.close();
+  expect(none.github).toBe("nothing-granted");
+  expect(sent.map((e) => e.type)).toEqual(["connection.changed", "setup.changed", "setup.changed"]);
+  expect(sent[0]).toMatchObject({ patch: { id: "github:sasensi", state: "connected" } });
+  expect(granted).toMatchObject({ step: "github", reached: "repos", github: "done" });
 });

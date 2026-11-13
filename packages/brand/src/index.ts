@@ -3,11 +3,14 @@
 // mark's numbers on its 64 grid (`MARK`) are the source; the loader's (`LOADER`) are derived from them, as rounded
 // on that grid, by the pair's scale onto the loader's 64 × 44 box, never retyped. The wordmark's Figtree ExtraBold
 // outlines are kept here as path data, its shares in `WORDMARK`. `COLOURS` are ink, paper and the accent.
-// Interface: `wordmark`, `icon` (the mark alone when its tile is null), `markParts` and `loader` draw as SVG
-// text; `loaderCss` renders the loader's box, its rest transforms and its `read` / `read-solid` keyframes as CSS
-// text. `eyesModule` and `appStylesheet` render the app's two copies: the module its components draw from, and
-// its stylesheet with the loader's region, both through a `Formatter` (`(path, text) => Promise<text>`), Biome's
-// unless one is given (a test gives one that runs in its own process). `sheet` renders the brand sheet's marked
+// Interface: `wordmark`, `icon` (the mark alone when its tile is null), `iconFullBleed` (the ink icon with its
+// tile's corners square, from `icon`'s one template, ADR 0098), `markParts` and `loader` draw as SVG text;
+// `iconFullBleedPicture` draws the icon full bleed at a side in pixels, the mark within `MARK_REACH` of the
+// centre, and `FULL_BLEED_PICTURES` names each picture of it the copies hold, with its side; `loaderCss` renders
+// the loader's box, its rest transforms and its `read` / `read-solid` keyframes as CSS text. `eyesModule` and
+// `appStylesheet` render the app's two copies: the module its components draw from, and its stylesheet with the
+// loader's region, both through a `Formatter` (`(path, text) => Promise<text>`), Biome's unless one is given (a
+// test gives one that runs in its own process). `sheet` renders the brand sheet's marked
 // regions (its wordmarks, the drawings its script shows, the loader's CSS and the numbers) into its hand-written
 // rest.
 // For the site (ADR 0064, 4): `addressableWordmark`, `addressableMark` (in one of `MARK_STATES`) and
@@ -17,7 +20,8 @@
 // those drawings for its pages and scripts, and the stylesheet that shows each in its theme and moves the loader
 // and the mark's states, through the formatter as the app's are.
 // `COPIES` lists every copy of the eyes elsewhere in the checkout as `{path, render}`, or `{path, picture}` for
-// the one picture, the GitHub App's logo, full bleed (a PNG drawn pixel by pixel from the mark's numbers);
+// the pictures, the icon full bleed as PNGs drawn pixel by pixel from the mark's numbers (the GitHub App's logo,
+// the site's favicons at 48, 96 and 192 px and its apple-touch icon at 180);
 // `writeCopies` writes them (`bun run brand`, through the `./write` entry) and `driftedCopies` lists those on disk
 // that differ from what the source renders, one line each naming the file and saying to run `bun run brand`. Both
 // are async and take the formatter (Biome's unless given): a copy is compared with what the same formatter makes
@@ -40,10 +44,10 @@
 // It imports no other package; it is not pure (it reads and writes the copies).
 export { addressableLoader, addressableMark, addressableWordmark } from "./addressable.ts";
 export { appStylesheet, EYES_MODULE, eyesModule, STYLESHEET } from "./app.ts";
-export { APP_ICON, APP_ICON_SIZE, appIcon, MARK_REACH } from "./app-icon.ts";
 export { COPIES, type CopiesOptions, type Copy, driftedCopies, writeCopies } from "./copies.ts";
 export { type BiomeOptions, biomeFormatter, type Formatter } from "./format.ts";
-export { icon, type MarkParts, markParts } from "./icon.ts";
+export { FULL_BLEED_PICTURES, iconFullBleedPicture, MARK_REACH } from "./full-bleed.ts";
+export { icon, iconFullBleed, type MarkParts, markParts } from "./icon.ts";
 export { LOADER, loader, loaderCss } from "./loader.ts";
 export { COLOURS, MARK } from "./numbers.ts";
 export { SHEET, sheet } from "./sheet.ts";

@@ -39,9 +39,13 @@ const findingShape = (withRules: boolean) => `  "findings": [
 /** Whether an earlier finding carries a dispute: only then is the finder offered `wrong` (ADR 0052). */
 const disputed = (f: EarlierFinding) => f.claim?.kind === "disputed";
 
-/** One earlier verdict's shape; with a dispute to judge, its `wrong` too. */
+/**
+ * One earlier verdict's shape; with a dispute to judge, its `wrong` too, before `present` as the dispute's ask
+ * says them. Its `why` comes first, so the answer is written from its reasons (ADR 0094); the reader ignores the
+ * keys' order.
+ */
 const earlierShape = (withWrong: boolean) => `  "earlier": [
-    { "id": "F1", "present": true, ${withWrong ? '"wrong": false, ' : ""}"why": "to the author, about the code now" }
+    { "id": "F1", "why": "to the author, about the code now"${withWrong ? ', "wrong": false' : ""}, "present": true }
   ],`;
 
 /**
@@ -192,23 +196,23 @@ export function where(at: CandidateFinding["location"]): string {
 const CLAIMS = {
   claimed_fixed: {
     named: "claimed fixed",
-    ask: "Check on the code at this commit that it is fixed: their word is no proof.",
+    ask: "Check on the code at this commit that it is fixed: their word is no proof. A fix that holds is `present`: false, and is not listed under `findings`.",
   },
   disputed: {
     named: "disputed",
-    ask: "Judge the dispute on the code. Answer `wrong`: true only if the finding was a mistake, and say why in `why`; if it stands, `wrong`: false, `present` as for any finding, and say in `why` why it stands.",
+    ask: "Judge the dispute on the code. Say in `why` why the finding was a mistake, or why it stands; then answer `wrong`: true if it was a mistake or false if it stands, and in either case `present` as for any finding.",
   },
   wont_fix: {
     named: "won't fix",
-    ask: "Say as for any finding whether it is still present, and in `why` why it matters, or why it does not.",
+    ask: "Say in `why` why it matters, or why it does not, then as for any finding whether it is still present.",
   },
   deferred: {
     named: "deferred",
-    ask: "Say as for any finding whether it is still present, and in `why` why it matters, or why it does not.",
+    ask: "Say in `why` why it matters, or why it does not, then as for any finding whether it is still present.",
   },
   question: {
     named: "a question",
-    ask: "Answer their question in `why`, and say as for any finding whether it is still present.",
+    ask: "Answer their question in `why`, then say as for any finding whether it is still present.",
   },
 } satisfies Record<ClaimKind, { named: string; ask: string }>;
 
@@ -267,9 +271,9 @@ function earlierSection(earlier: EarlierFinding[]): string[] {
   return [
     "## Earlier findings",
     "",
-    "These findings from an earlier round are still open. Each names the file, the side and the lines where it was found then; lines may have moved since, so look for the defect, not the line. For each one, say in the block's `earlier` list whether it is still present at this commit (`present`: true or false), and why in `why`. Lookover can post your `why` on the finding's thread as its reply: write it to the author, about the code as it is now, not as the finding first said it, in a sentence or two.",
+    "These findings from an earlier round are still open. Each names the file, the side and the lines where it was found then; lines may have moved since, so look for the defect, not the line. For each one, in the block's `earlier` list, say first in `why` what the code at this commit shows of it, then in `present` (true or false) whether it is still there. Lookover can post your `why` on the finding's thread as its reply: write it to the author, about the code as it is now, not as the finding first said it, in a sentence or two.",
     "",
-    "An earlier finding still there in another form, on other lines or with other words, is answered in `earlier`, never listed again under `findings`, which holds only what is new.",
+    "`findings` holds only what is new: an earlier finding, whether gone (`present`: false) or still there in another form, on other lines or with other words, is answered in `earlier` and never listed again under `findings`.",
     ...claims,
     "",
     ...lines,

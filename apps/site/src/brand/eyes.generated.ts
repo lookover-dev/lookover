@@ -35,7 +35,7 @@ const EYES =
 const EYES_STILL =
   '<span class="eyes"><svg viewBox="0 0 64 44" aria-hidden="true" fill="currentColor"><g class="e-solid"><defs><mask id="{id}" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="44"><rect width="64" height="44" fill="#fff"/><g class="h" fill="#000"><ellipse cx="13.67" cy="22" rx="5.53" ry="6.15"/><ellipse cx="50.33" cy="22" rx="5.53" ry="6.15"/></g></mask></defs><g mask="url(#{id})"><circle cx="13.67" cy="22" r="13.67"/><circle cx="50.33" cy="22" r="13.67"/></g></g><g class="e-ring"><g fill="none" stroke="currentColor" stroke-width="5.24"><circle cx="13.67" cy="22" r="11.05"/><circle cx="50.33" cy="22" r="11.05"/></g><g class="p"><circle cx="13.67" cy="22" r="5.09"/><circle cx="50.33" cy="22" r="5.09"/></g></g></svg></span>';
 
-/** The icon as its file draws it, in its own colours: the GitHub avatar and the check's icon. */
+/** The rounded icon, as Lookover draws its tile, in its own colours: the simulated GitHub avatar and the check's icon. */
 export const ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Lookover">\n<rect width="64" height="64" rx="14.4" fill="#16130F"/>\n<path fill-rule="evenodd" fill="#F7F6F2" d="M10 21.25a9.4 9.4 0 1 0 18.8 0a9.4 9.4 0 1 0 -18.8 0zM15.6 23.48a3.8 4.23 0 1 0 7.6 0a3.8 4.23 0 1 0 -7.6 0zM35.2 21.25a9.4 9.4 0 1 0 18.8 0a9.4 9.4 0 1 0 -18.8 0zM40.8 23.48a3.8 4.23 0 1 0 7.6 0a3.8 4.23 0 1 0 -7.6 0z"/><rect x="10" y="38.15" width="44" height="5.1" fill="#E5347B"/><rect x="10" y="47.05" width="29.04" height="5.1" fill="#F7F6F2"/>\n</svg>' as const;
 

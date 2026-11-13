@@ -2,14 +2,23 @@
 // file or to no element of that id fails; a script, style or font from another host fails. No build: each test
 // writes the few pages it needs. The wordmark every post on GitHub opens with (ADR 0074) is served at the two URLs
 // contracts freezes: a build without either fails, and so does the site's `public/` folder, which Astro copies into
-// the build as it is.
+// the build as it is. Every page links the icons full bleed (ADR 0098), each PNG at the side its `sizes` says.
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WORDMARK_URLS } from "@lookover/contracts";
-import { brokenLinks, foreignLoads, unservedUrls } from "./site-checks.ts";
+import { ICON_LINKS } from "../src/components/icons.ts";
+import { brokenLinks, foreignLoads, iconProblems, unservedUrls } from "./site-checks.ts";
 
 const temps: string[] = [];
 afterAll(() => {
@@ -17,7 +26,7 @@ afterAll(() => {
 });
 
 /** A build folder holding these files. */
-function built(files: Readonly<Record<string, string>>): string {
+function built(files: Readonly<Record<string, string | Uint8Array>>): string {
   const dist = mkdtempSync(join(realpathSync.native(tmpdir()), "lookover-site-"));
   temps.push(dist);
   for (const [path, content] of Object.entries(files)) {
@@ -244,5 +253,140 @@ describe("the wordmark's URLs, proven to bite", () => {
 
   test("the site's public folder, which the build copies as it is, serves both", () => {
     expect(unservedUrls(fileURLToPath(new URL("../public", import.meta.url)), urls)).toEqual([]);
+  });
+});
+
+/** The first 24 bytes of a PNG: the signature, then the IHDR chunk's length, type, width and height. */
+function png(width: number, height = width): Uint8Array {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return bytes;
+}
+
+/** A PNG's 24 bytes under a JPEG's signature: long enough to read, not a PNG. */
+function notPng(side: number): Uint8Array {
+  const bytes = png(side);
+  bytes.set([0xff, 0xd8, 0xff, 0xe0]);
+  return bytes;
+}
+
+/** Every icon link, as the list says it; the SVG's in Starlight's `shortcut icon` form when `shortcut` is set. */
+const iconLinks = (shortcut = false): string =>
+  ICON_LINKS.map(({ href, rel, type, sizes }) =>
+    [
+      `<link rel="${shortcut && href === "/favicon.svg" ? "shortcut icon" : rel}" href="${href}"`,
+      type === undefined ? "" : ` type="${type}"`,
+      sizes === undefined ? "" : ` sizes="${sizes}"`,
+      ">",
+    ].join(""),
+  ).join("");
+
+const icons = {
+  "favicon.svg": "<svg/>",
+  "favicon-48.png": png(48),
+  "favicon-96.png": png(96),
+  "favicon-192.png": png(192),
+  "apple-touch-icon.png": png(180),
+};
+
+describe("the icons full bleed, proven to bite", () => {
+  test("the list links the five icons ADR 0098 fixes", () => {
+    expect(ICON_LINKS.map(({ href }) => href)).toEqual([
+      "/favicon.svg",
+      "/favicon-48.png",
+      "/favicon-96.png",
+      "/favicon-192.png",
+      "/apple-touch-icon.png",
+    ]);
+  });
+
+  test("names a page without the SVG link, written by hand", () => {
+    const dist = built({
+      ...icons,
+      "index.html": page(
+        [
+          '<link rel="icon" href="/favicon-48.png" type="image/png" sizes="48x48">',
+          '<link rel="icon" href="/favicon-96.png" type="image/png" sizes="96x96">',
+          '<link rel="icon" href="/favicon-192.png" type="image/png" sizes="192x192">',
+          '<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">',
+        ].join(""),
+      ),
+    });
+    expect(iconProblems(dist)).toEqual(["/: no icon link to /favicon.svg"]);
+  });
+
+  test("passes pages linking every icon, Starlight's shortcut icon and the 404 page included", () => {
+    const dist = built({
+      ...icons,
+      "index.html": page(iconLinks()),
+      "docs/index.html": page(iconLinks(true)),
+      "404.html": page(iconLinks(true)),
+    });
+    expect(iconProblems(dist)).toEqual([]);
+    expect(brokenLinks(dist)).toEqual([]);
+  });
+
+  test("names each link a page lacks, a link of another rel included", () => {
+    const dist = built({
+      ...icons,
+      "index.html": page(
+        iconLinks().replace('<link rel="icon" href="/favicon-96.png" type="image/png" sizes="96x96">', ""),
+      ),
+      "404.html": page(iconLinks().replace('rel="apple-touch-icon"', 'rel="icon"')),
+    });
+    expect(iconProblems(dist)).toEqual([
+      "/: no icon link to /favicon-96.png",
+      "/404.html: no apple-touch-icon link to /apple-touch-icon.png",
+    ]);
+  });
+
+  test("names a PNG linked at other sizes than the list says", () => {
+    const dist = built({
+      ...icons,
+      "index.html": page(iconLinks().replace('sizes="48x48"', 'sizes="32x32"')),
+    });
+    expect(iconProblems(dist)).toEqual(['/: /favicon-48.png linked at sizes "32x32", not 48x48']);
+  });
+
+  test("names a PNG of another side and a file that isn't a PNG", () => {
+    const dist = built({
+      ...icons,
+      "favicon-96.png": png(48),
+      "favicon-192.png": "<svg/>",
+      "index.html": page(iconLinks()),
+    });
+    expect(iconProblems(dist)).toEqual(["/favicon-96.png: 48x48, not 96x96", "/favicon-192.png: not a PNG"]);
+  });
+
+  test("names a PNG of the right width but another height", () => {
+    const dist = built({ ...icons, "favicon-96.png": png(96, 48), "index.html": page(iconLinks()) });
+    expect(iconProblems(dist)).toEqual(["/favicon-96.png: 96x48, not 96x96"]);
+  });
+
+  test("names a file long enough to read under another signature", () => {
+    const dist = built({ ...icons, "favicon-192.png": notPng(192), "index.html": page(iconLinks()) });
+    expect(iconProblems(dist)).toEqual(["/favicon-192.png: not a PNG"]);
+  });
+
+  test("leaves a missing file to the broken-link check, named once", () => {
+    const { "apple-touch-icon.png": _, ...rest } = icons;
+    const dist = built({ ...rest, "index.html": page(iconLinks()) });
+    expect(iconProblems(dist)).toEqual([]);
+    expect(brokenLinks(dist)).toEqual(["/: /apple-touch-icon.png"]);
+  });
+
+  test("the site's public folder, which the build copies as it is, holds each PNG at its side", () => {
+    expect(iconProblems(fileURLToPath(new URL("../public", import.meta.url)))).toEqual([]);
+  });
+
+  test("the site's public folder holds every listed icon, and every icon at its root is listed", () => {
+    const pub = fileURLToPath(new URL("../public", import.meta.url));
+    const listed = ICON_LINKS.map(({ href }) => href);
+    expect(listed.filter((href) => !existsSync(join(pub, href)))).toEqual([]);
+    const icons = readdirSync(pub).filter((name) => /^(favicon|apple-touch-icon)/.test(name));
+    expect(icons.map((name) => `/${name}`).filter((href) => !listed.includes(href))).toEqual([]);
   });
 });

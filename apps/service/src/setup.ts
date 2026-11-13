@@ -6,6 +6,9 @@
 // (`signedIn`), its install is waited for (`waiting-for-install`, the installation's wait reading it every few
 // seconds); the install found (`installed`) shows the connection, with the accounts reached, and marks the step
 // "nothing granted" or done, the repositories reached; the step itself moves only by the owner's `goto` (ADR 0058).
+// While the GitHub step is at its start (before a sign-in, or the choice made again for another person), no sign-in
+// is held for the setup, so an install's answer is nobody's and changes nothing (ADR 0095): an earlier person's check
+// answering in the room's switch never skips the new person's install wait.
 // The first review is the queue's request (trigger
 // "first-review", a preview when the owner said "preview here only"); the setup keeps the change it was asked for,
 // once the queue knows it. Moving the furthest step reached past Repositories (`chooseRepos`, or a `goto` beyond it)
@@ -85,7 +88,8 @@ export interface SetupFlow {
   /**
    * The shared App's installation found (ADR 0053), granting repositories or none: the connection shown connected (once),
    * with the installation; the GitHub step done, the repositories reached but not gone to (ADR 0058), or "nothing
-   * granted". Nothing when the setup says so already.
+   * granted". Nothing when the setup says so already, or while the GitHub step is at its start: no sign-in is held
+   * for the setup there, so the answer is nobody's (ADR 0095).
    */
   installed(granted: boolean): void;
   /**
@@ -137,7 +141,7 @@ export function createSetup(d: SetupDeps): SetupFlow {
     installed: (granted) => {
       const kept = d.store.setup.read();
       const github: SetupGitHub = granted ? "done" : "nothing-granted";
-      if (kept.github === github) return;
+      if (kept.github === github || kept.github === "start") return;
       const at = now();
       if (!appInstalled(kept)) {
         // The person's (ADR 0066).

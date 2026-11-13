@@ -1,8 +1,10 @@
 ---
-// Starlight's head, plus the site's styles: the app's fonts and tokens (Fonts), then Starlight on them (site.css).
-// Imported here, in the frontmatter, rather than through Starlight's `customCss`, so knip sees the packages the site
-// uses (it doesn't read imports inside CSS).
+// Starlight's head, plus the icons full bleed (Icons, beside Starlight's own `shortcut icon` link) and the site's
+// styles: the app's fonts and tokens (Fonts), then Starlight on them (site.css). Imported here, in the
+// frontmatter, rather than through Starlight's `customCss`, so knip sees the packages the site uses (it doesn't
+// read imports inside CSS).
 import Fonts from "./Fonts.astro";
+import Icons from "./Icons.astro";
 import "../brand/eyes.generated.css";
 import "../styles/header.css";
 import "../styles/site.css";
@@ -10,4 +12,5 @@ import Default from "@astrojs/starlight/components/Head.astro";
 ---
 
 <Default><slot /></Default>
+<Icons />
 <Fonts />

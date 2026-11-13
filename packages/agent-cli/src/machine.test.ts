@@ -6,6 +6,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitSha } from "@lookover/contracts";
+import { scratchRepository } from "@lookover/testkit";
 import { agentToken, realWorld } from "./index.ts";
 
 // A few git processes per test: Bun's 5 s fails them on a busy machine.
@@ -27,18 +28,9 @@ function checkout(url: string | null, branch = "feature/unpaid"): string {
     if (done.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${done.stderr.toString()}`);
     return done.stdout.toString().trim();
   };
-  git("init", "--quiet", "--initial-branch", branch);
-  git(
-    "-c",
-    "user.name=Test",
-    "-c",
-    "user.email=test@example.com",
-    "commit",
-    "--quiet",
-    "--allow-empty",
-    "-m",
-    "One",
-  );
+  scratchRepository(dir, { env });
+  git("checkout", "--quiet", "-b", branch);
+  git("commit", "--quiet", "--allow-empty", "-m", "One");
   if (url !== null) git("remote", "add", "origin", url);
   return dir;
 }

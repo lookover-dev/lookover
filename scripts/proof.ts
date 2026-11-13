@@ -5,7 +5,8 @@
 // network, on a data folder of its own in the temp folder, its clock standing still at one instant (`--frozen`).
 // The UI talks to it through its own Vite server. The shots are listed in scripts/proof-shots.ts: each names a
 // scenario, how far its clock moves on and the faults made to happen; proof loads it (`demo.load`), moves it
-// (`demo.advance`, `demo.inject`), then opens the page with the session, acts and shoots. A shot that lands on
+// (`demo.advance`, `demo.inject`), then opens the page with the session, acts and shoots; the act of a shot sharing
+// its world's load can't move the demo (`demoFor`, ADR 0093), it fails saying so. A shot that lands on
 // any screen but its own (the session screen, the setup) fails, and so does one whose page logs a console error or
 // throws an uncaught error (React's development warnings included, ADR 0085), but for the errors a shot is made to
 // log (`Shot.console`: a refusal its fault causes, a tab without the session), which it must then log. Before the
@@ -40,8 +41,10 @@
 // browser, so a second diff against the same base shoots only the current tree; otherwise the base is shot from a
 // temporary worktree, at the same time as the current tree.
 // Shots are deterministic: the service's clock stands still, the page's `Date` with it, the time zone fixed,
-// every motion settled before a shot, the loops still. Each worktree takes its own ports (scripts/port.ts), so
-// two can run proof at once. Proof never calls `claude`, `codex` or the network.
+// the fonts in before an act, every motion settled before a shot, the loops still. Just before a shot (ADR 0096) the
+// demo's listing reads are answered, a full page gets a window as tall as it, an open modal plays its entry again, and
+// Chrome lays the page's layers out afresh (`LayerTree.enable`). Each worktree takes its own
+// ports (scripts/port.ts), so two can run proof at once. Proof never calls `claude`, `codex` or the network.
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -100,7 +103,7 @@ import {
   unpausedMotion,
   watchMotion,
 } from "./proof-motion.ts";
-import { type Demo, SHOTS, type Shot, screenOf } from "./proof-shots.ts";
+import { demoFor, SHOTS, type Shot, screenOf } from "./proof-shots.ts";
 
 const root = resolve(import.meta.dir, "..");
 const out = join(root, ".proof");
@@ -510,6 +513,28 @@ async function atRest(page: Page): Promise<void> {
   if (left !== null) throw new Error(`The page didn't settle within ${SETTLE_MS} ms: ${left}`);
 }
 
+/** Counts the page's `method` requests to `path` not answered yet; `drained` waits for none (5 s, then throws `why`). */
+function inFlight(page: Page, method: string, path: string) {
+  let open = 0;
+  const ours = (request: Request) => request.method() === method && new URL(request.url()).pathname === path;
+  page.on("request", (request) => {
+    if (ours(request)) open += 1;
+  });
+  const answered = (request: Request) => {
+    if (ours(request)) open -= 1;
+  };
+  page.on("requestfinished", answered);
+  page.on("requestfailed", answered);
+  return {
+    async drained(why: string) {
+      for (let i = 0; open > 0; i++) {
+        if (i >= 100) throw new Error(why);
+        await Bun.sleep(50);
+      }
+    },
+  };
+}
+
 /**
  * Opens the shot's page in `theme`, settles it, acts on it, checks it is still on its screen, then runs `look` on it;
  * then judges what its console said (when the visit is judged).
@@ -529,39 +554,25 @@ async function visitShot(
   const page = await context.newPage();
   const said = watchConsole(page);
   // The commands the page sent and the service has not answered yet: an act moves the clock only once they are.
-  let unanswered = 0;
-  const isCommand = (request: Request) =>
-    request.method() === "POST" && new URL(request.url()).pathname === API.commands;
-  page.on("request", (request) => {
-    if (isCommand(request)) unanswered += 1;
-  });
-  const answered = (request: Request) => {
-    if (isCommand(request)) unanswered -= 1;
-  };
-  page.on("requestfinished", answered);
-  page.on("requestfailed", answered);
+  const commands = inFlight(page, "POST", API.commands);
+  // The demo's listing reads not answered yet: the drawer's tab ("Demo · S2") is drawn only once one is in, and under
+  // load it came after the shot on some runs (ADR 0096).
+  const listings = inFlight(page, "GET", DEMO_API.listing);
   /** Once every command the page sent has been answered. */
-  const settled = async () => {
-    for (let i = 0; unanswered > 0; i++) {
-      if (i >= 100) throw new Error("A command the page sent was not answered within 5 s");
-      await Bun.sleep(50);
-    }
-  };
-  const demo: Demo = {
-    advance: async (ms) => {
-      await settled();
-      await visit.demo.advance(ms);
-    },
-    inject: async (fault) => {
-      await settled();
-      await visit.demo.inject(fault);
-    },
-  };
+  const settled = () => commands.drained("A command the page sent was not answered within 5 s");
+  // A shared world's act can't move it (ADR 0093): its shots' pages run at once on the one load.
+  const demo = demoFor(shot, visit.demo, settled);
   const screen = screenOf(shot);
   try {
     await page.goto(`${visit.url}${shot.path ?? "/"}`);
     await page.waitForSelector(screen);
-    // The page as it lands, its entries played out: an act starts from rest.
+    // The page as it lands, its fonts in and its entries played out: an act starts from rest. An act that scrolls to
+    // a row while a font still loads lands a few pixels off once it comes in, on some runs and not others (ADR 0093).
+    // Laid out first: a font is asked for only once a layout uses it.
+    await page.evaluate(async () => {
+      document.body.getBoundingClientRect();
+      await document.fonts.ready;
+    });
     await atRest(page);
     await motion.beforeAct?.(page);
     await shot.act?.(page, demo);
@@ -570,6 +581,7 @@ async function visitShot(
     if (!shot.noSession && (await page.locator(".session").count()) > 0)
       throw new Error("The session screen showed: the service no longer knew the tab");
     await page.evaluate(() => document.fonts.ready);
+    await listings.drained("The demo's listing was not read within 5 s");
     await look(page);
     // What the shot's page logged that it isn't made to, and what it is made to log but didn't.
     const lines = said();
@@ -593,8 +605,70 @@ function shootOne(browser: Browser, visit: Visit, theme: Theme, shot: Shot, file
     await page.waitForTimeout(350);
     // Shot with its motion on, as it ships: settled first, so it lands where a person sees it come to rest.
     await atRest(page);
+    // A full page in a window as tall as the page, settled again: Chrome's own capture beyond the window lays the page
+    // out taller in the frame it shoots, and a sticky head drawn there landed a fraction of a pixel apart, run to run.
+    if (shot.fullPage) await growToPage(page);
+    await replayModals(page);
+    await fullCompositingUpdate(page);
     await page.screenshot({ path: file, fullPage: shot.fullPage ?? false, animations: "allow" });
   });
+}
+
+/** Makes the window as tall as the page, then settles it; again while the page grows with the window. */
+async function growToPage(page: Page): Promise<void> {
+  for (let i = 0; i < 4; i++) {
+    const size = page.viewportSize();
+    const height = await page.evaluate(() => document.documentElement.scrollHeight);
+    if (!size || height <= size.height) return;
+    if (i === 3)
+      throw new Error(`The page still grew with the window: ${height} px in a ${size.height} px window`);
+    await page.setViewportSize({ width: size.width, height });
+    await atRest(page);
+  }
+}
+
+/**
+ * Every element's style computed again (an unused property set on the root for a frame), and an open modal and its
+ * backdrop playing their entry again, as on any opening. An element whose animation ended in a frame that recomputed
+ * nothing kept the mark of a running opacity animation, so Chrome drew it through a surface of its own on some runs:
+ * the palette opened again during its own fade had its shadow, or the blurred page behind its backdrop, a level apart,
+ * and restyling them was not enough. A sheet of proof's own takes their animations off for a frame (the backdrop
+ * hidden; the dialog shown, so focus stays where it is), then the page settles. Their transitions stay off until the
+ * page closes after its shot: given back while the entry ran, they left the dialogs a level apart again.
+ */
+async function replayModals(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const frame = () => new Promise((done) => requestAnimationFrame(done));
+    const root = document.documentElement;
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(
+      ":modal, :modal::backdrop { transition: none !important; animation: none !important } :modal::backdrop { display: none !important }",
+    );
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    root.style.setProperty("--proof-restyle", "1");
+    getComputedStyle(root).getPropertyValue("--proof-restyle");
+    await frame();
+    sheet.replaceSync(":modal, :modal::backdrop { transition: none !important }");
+    root.style.removeProperty("--proof-restyle");
+  });
+  await atRest(page);
+}
+
+/**
+ * Has Chrome lay the page's layers out afresh from where everything rests, then draw a frame. Between two layouts
+ * Chrome updates only the layers repainted, each placed where the last full update put it: a layer that moved by a
+ * fraction of a pixel since (a dialog that scaled in, a sticky head whose row moved) was drawn at its old fraction on
+ * some runs and not others, its text and edges a pixel apart. DevTools' layer tree asks for that full update when it
+ * is turned on (`LayerTree.enable`); nothing on the page changes.
+ */
+async function fullCompositingUpdate(page: Page): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("LayerTree.enable");
+    await nextFrame(page);
+  } finally {
+    await cdp.detach();
+  }
 }
 
 /** Waits for the page's next frame to be drawn: what a seek changed is painted. */

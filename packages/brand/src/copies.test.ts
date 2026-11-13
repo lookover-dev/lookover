@@ -15,7 +15,16 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { asWritten, withPixels } from "./brand.test-support.ts";
-import { APP_ICON, COPIES, driftedCopies, type Formatter, writeCopies } from "./index.ts";
+import {
+  COPIES,
+  driftedCopies,
+  type Formatter,
+  FULL_BLEED_PICTURES,
+  iconFullBleed,
+  writeCopies,
+} from "./index.ts";
+
+const APP_ICON = FULL_BLEED_PICTURES.app.path;
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -41,7 +50,7 @@ test.each(COPIES.map((c) => [c.path, c] as const))(
   },
 );
 
-test("the copies are the eleven brand files and the App's logo, the app's favicon, module, stylesheet and two wordmarks, the sheet, and the site's five", () => {
+test("the copies are the twelve brand files and the App's logo, the app's favicon, module, stylesheet and two wordmarks, the sheet, and the site's nine", () => {
   expect(COPIES.map((c) => c.path)).toEqual([
     "docs/product/brand/lookover-wordmark.svg",
     "docs/product/brand/lookover-wordmark-on-dark.svg",
@@ -54,6 +63,7 @@ test("the copies are the eleven brand files and the App's logo, the app's favico
     "docs/product/brand/lookover-mark.svg",
     "docs/product/brand/lookover-mark-on-dark.svg",
     "docs/product/brand/lookover-favicon.svg",
+    "docs/product/brand/lookover-icon-full-bleed.svg",
     "docs/product/brand/lookover-app-icon.png",
     "apps/web/public/favicon.svg",
     "apps/web/src/ui/eyes.generated.ts",
@@ -62,11 +72,34 @@ test("the copies are the eleven brand files and the App's logo, the app's favico
     "apps/web/public/brand/lookover-wordmark-on-dark.svg",
     "docs/product/brand/sheet.html",
     "apps/site/public/favicon.svg",
+    "apps/site/public/favicon-48.png",
+    "apps/site/public/favicon-96.png",
+    "apps/site/public/favicon-192.png",
+    "apps/site/public/apple-touch-icon.png",
     "apps/site/public/brand/lookover-wordmark.svg",
     "apps/site/public/brand/lookover-wordmark-on-dark.svg",
     "apps/site/src/brand/eyes.generated.ts",
     "apps/site/src/brand/eyes.generated.css",
   ]);
+});
+
+test("where a ground not ours crops the icon, the copies are the icon full bleed; the app's favicon stays rounded", async () => {
+  const text = async (path: string) => {
+    const copy = COPIES.find((c) => c.path === path);
+    return copy && "render" in copy ? await copy.render("", format) : undefined;
+  };
+  const side = (path: string) => {
+    const copy = COPIES.find((c) => c.path === path);
+    return copy && "picture" in copy ? [copy.picture().width, copy.picture().height] : undefined;
+  };
+  expect(await text("apps/site/public/favicon.svg")).toBe(iconFullBleed());
+  expect(await text("docs/product/brand/lookover-icon-full-bleed.svg")).toBe(iconFullBleed());
+  expect(await text("apps/web/public/favicon.svg")).toContain('rx="14.4"');
+  expect(side("apps/site/public/favicon-48.png")).toEqual([48, 48]);
+  expect(side("apps/site/public/favicon-96.png")).toEqual([96, 96]);
+  expect(side("apps/site/public/favicon-192.png")).toEqual([192, 192]);
+  expect(side("apps/site/public/apple-touch-icon.png")).toEqual([180, 180]);
+  expect(side(APP_ICON)).toEqual([200, 200]);
 });
 
 test("the four copies Biome formats go through the formatter given, written and checked alike", async () => {

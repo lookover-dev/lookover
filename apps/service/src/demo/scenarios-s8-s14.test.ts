@@ -137,6 +137,8 @@ test("S8, pause and resume: two pull requests arrive while paused and wait; resu
     // Signed in to the shared App (ADR 0066).
     { check: "connection", state: "connected", cause: null },
   ]);
+  // The disk's free space is the demo's, never the machine's: the same tree shot twice says the same (#776).
+  expect(checked?.items.find((item) => item.check === "disk")).toEqual({ check: "disk", freeGb: 48 });
 });
 
 test("S10, a quiet day: six pull requests seen since early morning, more than Home lists without its search; the last hour's three, one clean, one settled after two rounds, one not asked; nothing waits", async () => {

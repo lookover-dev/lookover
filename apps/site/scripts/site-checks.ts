@@ -1,9 +1,10 @@
 // The site's checks that need no browser (ADR 0064, 8), run on a build folder by `bun run site:check`: no internal
-// link or asset leads nowhere, nothing is loaded from another host, and the URLs Lookover's posts point at are
-// served. Pure reads of the files; each finding is a line `<page or file>: <what>`, so the check prints them as they
-// are.
+// link or asset leads nowhere, nothing is loaded from another host, the URLs Lookover's posts point at are served,
+// and every page links the icons full bleed, each PNG at its side. Pure reads of the files; each finding is a
+// line `<page or file>: <what>`, so the check prints them as they are.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { ICON_LINKS } from "../src/components/icons.ts";
 
 /** Where the site is served: a link to it is a link inside the site. */
 const ORIGIN = "https://lookover.dev";
@@ -122,6 +123,48 @@ export function brokenLinks(dist: string): string[] {
       .filter((reference) => !leads(page, reference))
       .map((reference) => `${page}: ${reference}`);
   });
+}
+
+/** The width and height a PNG's header gives, big-endian at bytes 16 to 23, or undefined when it isn't a PNG. */
+function pngSide(bytes: Uint8Array): { width: number; height: number } | undefined {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (bytes.length < 24 || signature.some((byte, at) => bytes[at] !== byte)) return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { width: view.getUint32(16), height: view.getUint32(20) };
+}
+
+/**
+ * Where the icons full bleed (ADR 0098) are missing: each page (`/404.html` included) has, for each of the site's
+ * `ICON_LINKS`, a link to its href whose `rel` words include the entry's (Starlight's `shortcut icon` counts as
+ * `icon`) and, for a PNG, the same `sizes`; each listed PNG of the build is a PNG of the side its `sizes` says. A
+ * listed file the build lacks is the broken-link check's to name, not this one's. Each as `<page or file>: <what>`,
+ * pages sorted, then the files in the list's order.
+ */
+export function iconProblems(dist: string): string[] {
+  const pages = pageFiles(dist).flatMap((file) => {
+    const page = pageOf(file);
+    const links = tagsOf(readFileSync(join(dist, file), "utf8")).filter((tag) => /^<link\b/i.test(tag));
+    return ICON_LINKS.flatMap(({ href, rel, sizes }) => {
+      const linking = links.filter((tag) => {
+        const url = urlOf(attributeOf(tag, "href") ?? "", `${ORIGIN}${page}`);
+        return url !== undefined && isSite(url) && url.pathname === href && relsOf(tag).includes(rel);
+      });
+      if (linking.length === 0) return [`${page}: no ${rel} link to ${href}`];
+      const said = linking.map((tag) => attributeOf(tag, "sizes") ?? "");
+      return sizes === undefined || said.some((value) => value.toLowerCase() === sizes)
+        ? []
+        : [`${page}: ${href} linked at sizes "${said[0]}", not ${sizes}`];
+    });
+  });
+  const files = ICON_LINKS.flatMap(({ href, sizes }) => {
+    const file = servedFile(dist, href);
+    if (!href.endsWith(".png") || file === undefined) return [];
+    const side = pngSide(readFileSync(file));
+    if (side === undefined) return [`${href}: not a PNG`];
+    const found = `${side.width}x${side.height}`;
+    return found === sizes ? [] : [`${href}: ${found}, not ${sizes}`];
+  });
+  return [...pages, ...files];
 }
 
 /** What a page or a stylesheet loads, and from where. */

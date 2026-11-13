@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { type CommitSha, commitSha, type RepositoryRef } from "@lookover/contracts";
 import type { CommentableRange, FakeChange } from "./fake-git-host.ts";
+import { quietRepository } from "./scratch-repository.ts";
 
 export interface PlantedSandbox {
   /** The bare repository: what `FakeGitHost`'s `cloneUrl` takes. */
@@ -272,6 +273,8 @@ function plant(dir: string, git: string): PlantedSandbox {
   mkdirSync(dir, { recursive: true });
   const { bare, run, commit, shaOf } = gitIn(dir, git);
   run(dir, ["init", "-q", "--bare", "-b", "main", bare]);
+  // Before the first fast-import: no detached maintenance writes under the bare repository while a test reads it.
+  quietRepository(bare, { git, env: { HOME: dir, USERPROFILE: dir } });
   const shas = commit(DATE, [
     {
       mark: 1,

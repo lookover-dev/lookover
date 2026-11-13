@@ -206,6 +206,9 @@ export const installationLines = {
     `${SHARED_APP.slug} is installed on none of the accounts ${person} reaches: install it on GitHub`,
 } as const;
 
+/** The sign-in stopped, saying `why`. */
+const signInStopped = (why: string) => `the GitHub sign-in stopped: ${why}`;
+
 /** The sign-in to the shared App's lines (ADR 0066): how a device code ended; never the code or a token. */
 export const signInLines = {
   /** The code was entered: `person` is signed in. */
@@ -217,7 +220,9 @@ export const signInLines = {
   /** The sign-in was given up from the app. */
   cancelled: "the GitHub sign-in was cancelled",
   /** GitHub refused a poll for good, saying `why`. */
-  refused: (why: string) => `the GitHub sign-in stopped: ${why}`,
+  refused: signInStopped,
+  /** The code ended after a poll's answer was lost (ADR 0095): it may have signed the person in and spent the code. */
+  answerLost: signInStopped("GitHub's answer to a poll was lost after it may have signed in; sign in again"),
   /** A poll GitHub couldn't answer for now, saying `why`: polled again. */
   unanswered: (why: string) => `GitHub didn't answer the sign-in's poll, trying again: ${why}`,
   /** The sign-in was made and not kept, saying `why`. */

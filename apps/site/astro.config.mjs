@@ -16,7 +16,7 @@ export default defineConfig({
         "A second look before merge. Lookover reviews your GitHub pull requests with Claude and ChatGPT, on the subscriptions you already pay for.",
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/lookover-dev/lookover" }],
       // The theme switch: one round button, shared with the landing page (design-system.md, "The site").
-      // Head adds the fonts, the tokens and site.css (see there why not `customCss`).
+      // Head adds the fonts, the tokens and site.css (see there why not `customCss`), and the icons full bleed (ADR 0098).
       components: {
         Head: "./src/components/Head.astro",
         Header: "./src/components/DocsHeader.astro",

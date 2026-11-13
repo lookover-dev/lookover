@@ -46,10 +46,11 @@ const finding = z
   });
 
 // `wrong`: the finder's answer to a dispute, that the finding was a mistake (ADR 0052); read only on a finding whose
-// claim is a dispute, the one the prompt offers it to.
+// claim is a dispute, the one the prompt offers it to. `present` is optional here: a dispute answered `wrong` needs
+// none, every other verdict does (ADR 0097), which `said` checks once it knows the finding.
 const verdict = z.object({
   id: z.string().min(1),
-  present: z.boolean(),
+  present: z.boolean().optional(),
   wrong: z.boolean().default(false),
   why: z.string().default(""),
 });
@@ -139,17 +140,22 @@ export function answerValue(result: Pick<EngineRunResult, "text" | "json">) {
 }
 
 /**
- * What one verdict says of `finding`: `wrong` on a disputed finding; on any other `wrong` is not read, its `present`
- * stands, and it is a problem.
+ * What one verdict says of `finding`: `wrong` on a disputed finding, with or without `present` (ADR 0097); on any
+ * other `wrong` is not read, its `present` stands, and it is a problem. A verdict that must say `present` and does
+ * not is a problem and says nothing: null, set aside as if never given.
  */
 function said(
   finding: EarlierFinding,
   { present, wrong }: z.infer<typeof verdict>,
   problems: string[],
-): EarlierVerdict["verdict"] {
+): EarlierVerdict["verdict"] | null {
   const disputed = finding.claim?.kind === "disputed";
   if (wrong && disputed) return "wrong";
   if (wrong) problems.push(`earlier: ${finding.id} answered wrong, but nobody disputed it`);
+  if (present === undefined) {
+    problems.push(`earlier: ${finding.id} gives no present`);
+    return null;
+  }
   return present ? "present" : "gone";
 }
 
@@ -168,7 +174,10 @@ function readVerdicts(items: unknown[], asked: readonly EarlierFinding[], proble
     const finding = wanted.get(id);
     if (finding === undefined) unknownIds.push(id);
     else if (earlier.some((v) => v.id === id)) problems.push(`earlier: ${id} answered twice`);
-    else earlier.push({ id: findingId(id), verdict: said(finding, parsed.data, problems), why });
+    else {
+      const read = said(finding, parsed.data, problems);
+      if (read !== null) earlier.push({ id: findingId(id), verdict: read, why });
+    }
   });
   for (const { id } of asked.filter((f) => !earlier.some((v) => v.id === f.id))) {
     problems.push(`earlier: no verdict on ${id}`);

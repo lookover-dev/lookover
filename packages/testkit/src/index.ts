@@ -76,6 +76,11 @@
 // place whole, a failed build leaving nothing, and two builds of one content at once ending on the one folder.
 // A folder made once per test file and copied for each test (`templateFolder`: a migrated store), and the tests' one
 // deadline loop in real time (`waitUntil`: a child's file, an exit, a state read again, bounded by time, not looks).
+// A test's scratch git repository (ADR 0093): `scratchRepository` makes one in a folder (plain or bare, on `main`, the
+// test identity, optionally a first commit of the folder's files), `quietRepository` quiets a clone; both write
+// `maintenance.auto=false` and `gc.auto=0` into its config, so no detached maintenance writes under `.git` while the
+// test copies or walks it, and run git in the environment given without any of its `GIT_*` (a hook's `GIT_DIR`):
+// every one, even one a caller sets on purpose.
 // Invariants: a fake never calls the network, `claude` or `codex` (AGENTS.md rule 1); a fake with nothing
 // scripted fails rather than answering a default, with one exception: `ScriptedRetrieval` gives a commit nothing
 // is scripted for its default diff (`diff`, empty unless set) at a path of the job's, since the service's tests
@@ -178,6 +183,12 @@ export {
   SANDBOX_REPOSITORY,
   type SandboxPush,
 } from "./sandbox.ts";
+export {
+  quietRepository,
+  type ScratchGit,
+  type ScratchRepositoryOptions,
+  scratchRepository,
+} from "./scratch-repository.ts";
 export {
   type ScriptedConfirmAnswer,
   type ScriptedConfirmVerdict,

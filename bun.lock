@@ -9,6 +9,7 @@
         "@lookover/contracts": "workspace:*",
         "@lookover/service": "workspace:*",
         "@lookover/store": "workspace:*",
+        "@lookover/testkit": "workspace:*",
         "@types/bun": "^1.4.2",
         "knip": "6.39.0",
         "playwright": "^1.63.0",

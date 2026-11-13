@@ -283,7 +283,8 @@
 // `BackgroundPorts`, `Self`, `serveCommand`, `webBuildOf`, `cloneWebBuild`), `runService` and its pieces
 // (`readConfig`, `loginCommand`, `probeInstance`, `takeInstance`, `servingOf`, `openLogSink`, `logLineOf`, the login
 // items, the web files), and what holds `bun run live`'s service on its run folder and opens it (`heldService`,
-// `heldLines`, `mintLink`).
+// `heldLines`, `mintLink`), and the setup's flow on a store of its own (`createSetup`, its rule at the GitHub step's
+// start, ADR 0095).
 // The code inside uses each of them too, so none moves to test support (`*.test-support.ts`), which reaches nothing
 // past this entry either. `main.ts` and the binary's generated entry import their files directly.
 
@@ -374,6 +375,7 @@ export type { DemoServiceOptions, RunningService, ServiceOptions } from "./servi
 export { startDemoService, startService } from "./service.ts";
 export { settingsChanged } from "./settings-changed.ts";
 export { diskSettingsFiles, repositorySettingsFile, SettingsUnwritten } from "./settings-files.ts";
+export { createSetup, type SetupFlow } from "./setup.ts";
 export { skillCommandLine } from "./shell-line.ts";
 export type { SignInOpened, SignInOpener } from "./sign-in.ts";
 export { type SignInRead, type SignInStore, signInEntryOf, signInStore } from "./sign-in-store.ts";

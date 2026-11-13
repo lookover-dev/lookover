@@ -4,6 +4,7 @@
 // The styles are imported here, in the frontmatter, so knip sees the packages (it doesn't read CSS imports); the
 // fonts and the tokens come with Fonts, first.
 import Fonts from "../components/Fonts.astro";
+import Icons from "../components/Icons.astro";
 import "@lookover/web/github-colours.css";
 import "../brand/eyes.generated.css";
 import "../styles/header.css";
@@ -32,7 +33,7 @@ const description =
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Lookover: every pull request looked over</title>
     <meta name="description" content={description} />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <Icons />
     <link rel="canonical" href="https://lookover.dev/" />
     <Fonts />
     <script is:inline define:vars={{ storageKey }}>

@@ -5,15 +5,17 @@
 //   2. the build, Astro's telemetry off
 //   3. no internal link or fragment leads nowhere, and the wordmark Lookover's posts on GitHub draw is served at
 //      both of contracts' `WORDMARK_URLS`, which never move (ADR 0074) (`site-checks.ts`)
-//   4. no script, style or font from another host: in the files, and what the open pages request
-//   5. no page wider than the screen at 375 px
-//   6. the theme switch: the system followed (dark when it says nothing, unless the browser reports one all the
+//   4. every page links the icons full bleed, and each PNG of them is the side its link says (ADR 0098)
+//      (`site-checks.ts`)
+//   5. no script, style or font from another host: in the files, and what the open pages request
+//   6. no page wider than the screen at 375 px
+//   7. the theme switch: the system followed (dark when it says nothing, unless the browser reports one all the
 //      same, as Chrome on Linux reports light: its status line says which), by click and by keyboard, the choice
 //      carried between / and /docs/ (Back included), and kept on the page when the browser refuses to store it
-//   7. the landing page's wordmark in the theme's accent once its intro is over and the theme switched
-//   8. the landing page's story: its last frame and no "Play again" under reduced motion; with motion, "Play
+//   8. the landing page's wordmark in the theme's accent once its intro is over and the theme switched
+//   9. the landing page's story: its last frame and no "Play again" under reduced motion; with motion, "Play
 //      again" once it ends, and the focus kept in the story when it is pressed
-//   9. nothing moving under prefers-reduced-motion, a question opened and the theme switched included
+//  10. nothing moving under prefers-reduced-motion, a question opened and the theme switched included
 //
 // One line per finding, then one status line per check. Exit 0 when every check passed, 1 otherwise (no browser
 // included). Nothing is requested from another host: the browser refuses it.
@@ -32,7 +34,7 @@ import {
   widePages,
 } from "./browser-checks.ts";
 import { selfTest } from "./self-test.ts";
-import { brokenLinks, foreignLoads, pagesOf, unservedUrls } from "./site-checks.ts";
+import { brokenLinks, foreignLoads, iconProblems, pagesOf, unservedUrls } from "./site-checks.ts";
 
 const status = (findings: readonly string[], ok: string, failed: string): string =>
   findings.length === 0 ? `  ok  ${ok}` : `  ✗   ${findings.length} ${failed}`;
@@ -57,10 +59,11 @@ async function checked(browser: Browser): Promise<number> {
   const broken = brokenLinks(dist);
   const foreign = foreignLoads(dist);
   const unserved = unservedUrls(dist, Object.values(WORDMARK_URLS));
+  const icons = iconProblems(dist);
   const served = serve(dist);
   const site = { url: served.url, pages };
   try {
-    return report(pages, broken, foreign, unserved, {
+    return report(pages, broken, foreign, unserved, icons, {
       requested: await requestsElsewhere(browser, site),
       wide: await widePages(browser, site),
       theme: await themeProblems(browser, site),
@@ -80,6 +83,7 @@ function report(
   broken: readonly string[],
   foreign: readonly string[],
   unserved: readonly string[],
+  icons: readonly string[],
   {
     requested,
     wide,
@@ -98,8 +102,9 @@ function report(
       ? "dark when the system says nothing"
       : `${silent} when the system says nothing, as this browser reports it`;
   for (const line of broken) console.error(`broken link on ${line}`);
-  for (const line of [...foreign, ...requested]) console.error(`from another host: ${line}`);
   for (const line of unserved) console.error(`wordmark: ${line}`);
+  for (const line of icons) console.error(`icons: ${line}`);
+  for (const line of [...foreign, ...requested]) console.error(`from another host: ${line}`);
   for (const line of wide) console.error(`scrolls sideways: ${line}`);
   for (const line of theme) console.error(`theme switch: ${line}`);
   for (const line of accent) console.error(`accent: ${line}`);
@@ -109,8 +114,13 @@ function report(
   console.error(
     [
       status(broken, `internal links and fragments, ${pages.length} pages`, "broken link(s)"),
-      status(hosts, "nothing loaded from another host", "load(s) from another host"),
       status(unserved, "the wordmark Lookover posts, at both its URLs", "wordmark URL(s) not served"),
+      status(
+        icons,
+        `the icons full bleed, linked on ${pages.length} pages, each PNG at its side`,
+        "icon problem(s)",
+      ),
+      status(hosts, "nothing loaded from another host", "load(s) from another host"),
       status(wide, "every page fits 375 px", "page(s) too wide"),
       status(theme, `the theme switch (${quiet})`, `theme switch problem(s) (${quiet})`),
       status(accent, "the wordmark's accent follows the theme after the intro", "accent problem(s)"),
@@ -118,7 +128,7 @@ function report(
       status(moving, "nothing moves under reduced motion", "page(s) moving under reduced motion"),
     ].join("\n"),
   );
-  return [broken, hosts, unserved, wide, theme, accent, story, moving].every(
+  return [broken, unserved, icons, hosts, wide, theme, accent, story, moving].every(
     (findings) => findings.length === 0,
   )
     ? 0

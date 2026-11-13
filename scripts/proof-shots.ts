@@ -3,8 +3,10 @@
 // (`demo.load`, the clock standing still at the fixed instant once its seed is played), the clock moved on
 // (`demo.advance`), faults made to happen (`demo.inject`). Then the page opens, its act runs, and it is shot.
 // Shots of the same world share one load; a shot whose act changes what the service holds (`alone`) gets a load
-// of its own. Each shot lands on the screen its path routes to, or the one it names (`screen`): a shot that lands
-// elsewhere (the session screen, the setup in place of the app, "No such pull request") fails.
+// of its own. A shared world's act may not move the demo's clock or faults (`demoFor`, ADR 0093): time and faults
+// go into the world, and an act that scrolls waits for the page's entries to play out first. Each shot lands on the
+// screen its path routes to, or the one it names (`screen`): a shot that lands elsewhere (the session screen, the
+// setup in place of the app, "No such pull request") fails.
 import { API, type ConnectionCause, DEMO_API, type FaultId } from "@lookover/contracts";
 import type { Page } from "playwright";
 // Every line "Your accounts" can say, of which the page shows only the one its state picks: only the view model holds
@@ -64,6 +66,33 @@ export interface Shot {
    * every one must match a line, and every line one of them. Any other error fails the shot (ADR 0085).
    */
   console?: readonly RegExp[];
+}
+
+/** Why a shared world's act may not move the demo (ADR 0093), with the fix. */
+const SHARED_WORLD = "a shot sharing its world can't move the demo: use afterFaults, or mark it alone";
+
+/**
+ * The demo a shot's act gets (ADR 0093). An `alone` shot's moves `loaded` once the page's commands are answered
+ * (`settled`). A shot sharing its world shares its loaded demo with pages shot at once, so one that moved it would
+ * move theirs too, by however many acts had landed: its `advance` and `inject` throw, saying the fix.
+ */
+export function demoFor(shot: Shot, loaded: Demo, settled: () => Promise<void>): Demo {
+  if (!shot.alone) {
+    const refuse = async () => {
+      throw new Error(`${shot.name}: ${SHARED_WORLD}`);
+    };
+    return { advance: refuse, inject: refuse };
+  }
+  return {
+    advance: async (ms) => {
+      await settled();
+      await loaded.advance(ms);
+    },
+    inject: async (fault) => {
+      await settled();
+      await loaded.inject(fault);
+    },
+  };
 }
 
 /** The browser's line for an answer of `status` to a request at one of `paths`, proof naming the address after " at ". */
@@ -141,6 +170,8 @@ async function entriesPlayed(page: Page) {
 }
 /** Repositories scrolled to its search and filter, a little under the top bar, the pointer off the table. */
 async function reposBarAtTop(page: Page) {
+  // Measured once the rows that came in have played (ADR 0093): measured while one rises, the bar lands 2 px off.
+  await entriesPlayed(page);
   await page
     .getByRole("searchbox", { name: "Search repositories" })
     .evaluate((bar) => window.scrollTo(0, bar.getBoundingClientRect().top + window.scrollY - 120));
@@ -365,6 +396,9 @@ async function addToPathStays(page: Page, landed: () => Promise<void>, { refused
   if (desktop === null) throw new Error("The page has no viewport size");
   const boxes = async () => {
     const at: string[] = [];
+    // Wide again, the page is scrolled back where it was (ADR 0093): the narrow window moves the scroll, and where it
+    // lands once wide depends on when the page laid itself out, the next click's scroll and the shot with it.
+    const scrolled = await page.evaluate(() => window.scrollY);
     for (const width of [desktop.width, NARROW_PHONE]) {
       await page.setViewportSize({ width, height: desktop.height });
       await entriesPlayed(page);
@@ -382,6 +416,9 @@ async function addToPathStays(page: Page, landed: () => Promise<void>, { refused
       );
     }
     await page.setViewportSize(desktop);
+    await entriesPlayed(page);
+    await page.evaluate((y) => window.scrollTo(0, y), scrolled);
+    await scrollAtRest(page);
     return at;
   };
   const before = await boxes();
@@ -1092,7 +1129,12 @@ const LISTED: Shot[] = [
     path: "/reviews/sasensi/ledger-api/148",
     act: async (p) => {
       await tooNoisy(p, "The page size is not capped").click();
-      await p.getByRole("button", { name: /This finding is wrong/ }).click();
+      // Clicked once the menu has come in (ADR 0093): the click scrolls it into view, and scrolled while it rises,
+      // the page lands somewhere else each run.
+      const wrong = p.getByRole("button", { name: /This finding is wrong/ });
+      await wrong.waitFor();
+      await entriesPlayed(p);
+      await wrong.click();
     },
   },
   {
@@ -1104,13 +1146,15 @@ const LISTED: Shot[] = [
   },
   // GitHub's limit meets round 1 of #148 while Codex finds: once the round posts, its step says the outbox and the
   // wait (ADR 0055), in the two lines it holds.
+  // The clock moved on in the world, before the page opens (ADR 0093): an act would move the one load the other
+  // shots of this world share.
   {
     name: "review-posting-wait",
     scenario: "S2",
     path: "/reviews/sasensi/ledger-api/148",
     advance: MIN,
     inject: ["github-limit"],
-    act: (_p, demo) => demo.advance(3 * MIN),
+    afterFaults: 3 * MIN,
   },
   // The posting step saying the longest it can (`postingText`'s two-digit counts and a day named, run.test.ts): no
   // demo world waits on GitHub into another day with fourteen posts owed, so the waiting step's words are set to it.
@@ -1140,7 +1184,7 @@ const LISTED: Shot[] = [
     path: "/reviews/sasensi/ledger-api/148",
     advance: MIN,
     inject: ["github-limit"],
-    act: (_p, demo) => demo.advance(3 * MIN),
+    afterFaults: 3 * MIN,
   },
   { name: "review-running", scenario: "S3", path: "/reviews/sasensi/ledger-api/151" },
   // Details › Log open while Claude reads (ADR 0055): the live log under the review's history, newest last.
@@ -1159,6 +1203,9 @@ const LISTED: Shot[] = [
     // Scrolled to the live log: a phone's full page would draw the tab bar over the middle of it.
     act: async (p) => {
       await openLog(p);
+      // Scrolled once the Log has opened (ADR 0093): scrolled while it grows, it lands a pixel off.
+      await p.getByRole("log").first().waitFor();
+      await entriesPlayed(p);
       await p.getByRole("log").first().scrollIntoViewIfNeeded();
     },
   },
@@ -1701,6 +1748,10 @@ const LISTED: Shot[] = [
     act: async (p, demo) => {
       await setUpSignedIn(p, demo);
       await link(p, "Settings").click();
+      // Scrolled once Settings is on and has come in (ADR 0093): scrolled while the setup leaves or Settings rises,
+      // the row lands a pixel off.
+      await p.locator('[data-screen="settings"] .signed-in-row').waitFor();
+      await entriesPlayed(p);
       await centre(p.locator(".signed-in-row"));
     },
   },
@@ -1923,6 +1974,8 @@ const LISTED: Shot[] = [
       await demo.inject("codex-self-test-unfinished");
       await p.getByText("Couldn't finish Lookover's safety check", { exact: false }).waitFor();
       await button(p, "Try again").waitFor();
+      // The pointer off the step (ADR 0093): Try again comes under it, and its hover would be shot part way in.
+      await p.mouse.move(0, 0);
     },
   },
   // Sign in with GitHub, the one way in (ADR 0066, ADR 0073): the step's start; the code GitHub gave, with Copy code
@@ -1976,6 +2029,8 @@ const LISTED: Shot[] = [
         throw new Error("Setup's looking row offers an action");
       if ((await p.getByText("Not installed", { exact: false }).count()) !== 0)
         throw new Error("Setup says an account isn't installed while it is still looking");
+      // The pointer off the step (ADR 0093): the looking row comes under it, and its hover would be shot part way in.
+      await p.mouse.move(0, 0);
     },
   },
   // Signed in, the shared App installed on none of your accounts: GitHub has answered, so your own row says so, with
@@ -2244,12 +2299,16 @@ const LISTED: Shot[] = [
     act: async (p) => {
       const account = (login: string) => p.getByLabel(`Review every repository in ${login}`, { exact: true });
       await openFernhill(p);
+      // Clicked once the thirty have unfolded (ADR 0093): a click scrolls its box into view, and scrolled while the
+      // page grows, it lands elsewhere, and DEMO's badge, fixed, with it in the full page.
+      await entriesPlayed(p);
       await account("ledger-dev").click();
       await p
         .getByRole("group", { name: "fernhill", exact: true })
         .getByLabel(/^fernhill\/api,/)
         .click();
       await p.locator('input[aria-checked="mixed"]').waitFor();
+      await entriesPlayed(p);
       await p.mouse.move(0, 0);
     },
   },
@@ -2260,6 +2319,9 @@ const LISTED: Shot[] = [
     screen: ".setup",
     act: async (p) => {
       await openFernhill(p);
+      // Clicked once the thirty have unfolded, and left once they folded (ADR 0093): the page's height moving
+      // under the click or the shot lands it a pixel off.
+      await entriesPlayed(p);
       await p
         .getByRole("group", { name: "fernhill", exact: true })
         .getByLabel(/^fernhill\/api,/)
@@ -2268,6 +2330,7 @@ const LISTED: Shot[] = [
       await p.getByRole("button", { name: "fernhill's repositories", expanded: false }).waitFor();
       await p.locator('input[aria-checked="mixed"]').waitFor();
       await p.getByText("29 of 30 to review", { exact: true }).waitFor();
+      await entriesPlayed(p);
       await p.mouse.move(0, 0);
     },
   },
@@ -2638,10 +2701,15 @@ const LISTED: Shot[] = [
     act: async (p) => {
       await button(p, "How this review ran").click();
       await button(p, "Rounds").click();
+      // Scrolled once both have opened (ADR 0093): scrolled while they grow, the table lands a pixel off.
+      await p.locator(".tbl-wrap").waitFor();
+      await entriesPlayed(p);
       await p.locator(".tbl-wrap").evaluate((wrap) => {
         wrap.scrollIntoView({ block: "center" });
         wrap.scrollLeft = wrap.scrollWidth;
       });
+      // The pointer off the cards (ADR 0093): scrolled, another card comes under it, its hover shot part way in.
+      await p.mouse.move(0, 0);
     },
   },
   {
@@ -2929,6 +2997,8 @@ const LISTED: Shot[] = [
       await addToPathStays(p, () => button(p, "Remove from my PATH").waitFor());
       await button(p, "Install the skill").click();
       await button(p, "Remove the skill").waitFor();
+      // The pointer off the button that took Install's place (ADR 0093), or its hover is shot part way in.
+      await p.mouse.move(0, 0);
     },
   },
   {

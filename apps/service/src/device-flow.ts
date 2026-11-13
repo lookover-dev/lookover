@@ -1,18 +1,22 @@
 // "Sign in with GitHub", and Sign in again (ADR 0066): GitHub's device flow, run by the service. A start asks GitHub
 // for a device code and shows it on the connection (`signIn`: the code, GitHub's page, its expiry); then the code is
 // polled on the room's timers every `interval` GitHub gave; when GitHub asks to slow down, at the interval its answer
-// carries, or 5 s more when it carries none, until the
-// person enters it, refuses it, the code expires (it ends then, on a timer of its own, whatever a poll is doing; never
-// polled past it: a code still shown past its expiry was entered), or the sign-in is
-// cancelled. Entered, the code gives the tokens and is spent: it is never polled again. Whose they are is asked of
-// GitHub with the token (`person`), again after the interval when GitHub can't answer (or once its limit lifts), until
-// the token expires; only GitHub refusing the token (401) ends it there. The sign-in is then handed to `signedIn`,
-// which keeps it before the code goes. A poll GitHub can't answer for now (down, a rate limit) is polled again after
-// the interval, or once the limit lifts; any other refusal ends it. Each end clears the code shown and says why in the
-// log. One sign-in at a time: a second start while one waits is refused. A cancel while GitHub gives the code is
-// kept: the code is never shown. A cancel once the sign-in is being kept changes nothing: it ends as the keeping does.
-// Stopping drops the poll armed, sending nothing more; a code a stopped service left on the connection is cleared by
-// the next start (the room's).
+// carries, or 5 s more when it carries none, until the person enters it, refuses it, the code expires (it ends then,
+// on a timer of its own, whatever a poll is doing; never polled past it: a code still shown past its expiry was
+// entered), or the sign-in is cancelled. Entered, the code gives the tokens and is spent: it is never polled again.
+// Whose they are is asked of GitHub with the token (`person`), again after the interval when GitHub can't answer (or
+// once its limit lifts), until the token expires; only GitHub refusing the token (401) ends it there. The sign-in is
+// then handed to `signedIn`, which keeps it before the code goes. A poll GitHub can't answer for now (down, a rate
+// limit) is polled again after the interval, or once the limit lifts; any other refusal ends it. Each end clears the
+// code shown and says why in the log. A poll that failed `unavailable` may have reached GitHub and lost the tokens'
+// answer, spending the code (ADR 0095): the run remembers it until GitHub next says the code waits (`pending`,
+// `slow-down`; a rate limit neither sets nor clears it), and while it does, the code's end (GitHub's `expired`, its
+// refusal for good, its own expiry by the timer or the poll's guard) logs that the answer was lost, to sign in again,
+// in place of "expired" or "refused". `denied`, an error that is no refusal of GitHub's, and what ends a sign-in once
+// the tokens came keep their own words. The mark is the run's: each start begins clean. One sign-in at a time: a second start while one waits is refused. A
+// cancel while GitHub gives the code is kept: the code is never shown. A cancel once the sign-in is being kept changes
+// nothing: it ends as the keeping does. Stopping drops the poll armed, sending nothing more; a code a stopped service
+// left on the connection is cleared by the next start (the room's).
 // It must never know: where the sign-in is kept, the setup's steps, or how GitHub is reached (the `HostSignIn` port).
 // It never logs or sends the device code GitHub polls with, nor a token.
 import {
@@ -55,10 +59,13 @@ export interface DeviceFlow {
 
 /**
  * What one poll leads to: another after `ms` with the grant as it now is (`unanswered`: why GitHub didn't answer, for
- * the log), the end with the log's line, or the tokens, the code spent.
+ * the log; `mark`: whether the code may now be spent unseen, `set`, `clear` or `kept` as it was), the code's own end
+ * with the log's line (its expiry, GitHub refusing it: a lost answer may explain it), any other end with its line
+ * (`denied`, an error that is no refusal of GitHub's), or the tokens, the code spent.
  */
 type Next =
-  | { wait: DeviceGrant; ms: number; unanswered: string | null }
+  | { wait: DeviceGrant; ms: number; unanswered: string | null; mark: "set" | "clear" | "kept" }
+  | { codeEnd: string }
   | { end: string }
   | { issued: SignInTokens };
 
@@ -72,23 +79,30 @@ const waitAfter = (error: HostError, interval: number, now: number) =>
 
 /** One poll of `grant` at `now`: never past its expiry, and a poll GitHub can't answer for now is polled again. */
 async function polled(host: HostSignIn, grant: DeviceGrant, now: number): Promise<Next> {
-  if (now >= grant.expiresAt) return { end: signInLines.expired };
+  if (now >= grant.expiresAt) return { codeEnd: signInLines.expired };
   try {
     const answer = await host.pollSignIn(grant);
     switch (answer.kind) {
       case "pending":
       case "slow-down":
-        return { wait: answer.grant, ms: answer.grant.interval, unanswered: null };
+        return { wait: answer.grant, ms: answer.grant.interval, unanswered: null, mark: "clear" };
       case "expired":
-        return { end: signInLines.expired };
+        return { codeEnd: signInLines.expired };
       case "denied":
         return { end: signInLines.denied };
       case "issued":
         return { issued: answer.tokens };
     }
   } catch (error) {
-    if (!unanswered(error)) return { end: signInLines.refused(said(error)) };
-    return { wait: grant, ms: waitAfter(error, grant.interval, now), unanswered: said(error) };
+    if (!(error instanceof HostError)) return { end: signInLines.refused(said(error)) };
+    if (!unanswered(error)) return { codeEnd: signInLines.refused(said(error)) };
+    return {
+      wait: grant,
+      ms: waitAfter(error, grant.interval, now),
+      unanswered: said(error),
+      // Down may mean the poll reached GitHub and its answer was lost; a rate limit is GitHub answering.
+      mark: error.failure === "unavailable" ? "set" : "kept",
+    };
   }
 }
 
@@ -149,6 +163,10 @@ export function createDeviceFlow(d: DeviceFlowDeps): DeviceFlow {
       },
       keeping: false,
     };
+    /** A poll's answer may have been lost since GitHub last said the code waits: the code may be spent unseen. */
+    let answerLost = false;
+    /** The line for the code's own end, `line` unless a lost answer explains it. */
+    const codeEnd = (line: string) => (answerLost ? signInLines.answerLost : line);
     waiting = self;
     const live = () => waiting === self && !stopping;
     const end = (line: string) => {
@@ -163,8 +181,12 @@ export function createDeviceFlow(d: DeviceFlowDeps): DeviceFlow {
       if (d.clock.now() + ms >= grant.expiresAt) return;
       self.next = d.timers.after(ms, () => void poll(grant));
     };
+    /** The poll's end, a lost answer saying why the code ended when it is the code's own. */
+    const ended = (next: Extract<Next, { codeEnd: string }> | Extract<Next, { end: string }>) =>
+      end("codeEnd" in next ? codeEnd(next.codeEnd) : next.end);
     /** Polled again as `next` says, why GitHub didn't answer logged when it didn't. */
     const again = (next: Extract<Next, { wait: DeviceGrant }>) => {
+      if (next.mark !== "kept") answerLost = next.mark === "set";
       if (next.unanswered !== null) d.log(signInLines.unanswered(next.unanswered));
       arm(next.wait, next.ms);
     };
@@ -197,7 +219,7 @@ export function createDeviceFlow(d: DeviceFlowDeps): DeviceFlow {
       const next = await polled(host, grant, d.clock.now());
       if (!live()) return;
       if ("wait" in next) return again(next);
-      if ("end" in next) return end(next.end);
+      if (!("issued" in next)) return ended(next);
       // The code is spent: from now on only the token's expiry ends the sign-in.
       self.expiry();
       await ask(next.issued, grant.interval);
@@ -206,7 +228,7 @@ export function createDeviceFlow(d: DeviceFlowDeps): DeviceFlow {
     // Ended at its expiry whatever a poll is doing then (GitHub slow, a rate limit): a code still shown past its
     // expiry was entered, and the sign-in is being finished.
     self.expiry = d.timers.after(Math.max(0, first.expiresAt - d.clock.now()), () =>
-      end(signInLines.expired),
+      end(codeEnd(signInLines.expired)),
     );
     arm(first, first.interval);
   };

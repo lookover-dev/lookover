@@ -55,6 +55,10 @@ test("the sandbox is planted with the same commits everywhere, every branch in t
     "refs/heads/webhook-retry b4ce97d950e82ba750910f3fdd3b2b876b80a79d",
   ]);
   expect(inBare(sandbox.cloneUrl, "symbolic-ref", "HEAD")).toBe("refs/heads/main");
+  // No detached maintenance writes under it while a test clones it (ADR 0093).
+  expect(inBare(sandbox.cloneUrl, "config", "--local", "--get-regexp", "^(maintenance|gc)\\.auto$")).toBe(
+    "maintenance.auto false\ngc.auto 0",
+  );
   // Pull request #1 removes a file of the base and adds a binary one.
   expect(
     inBare(sandbox.cloneUrl, "diff", "--name-status", "--no-renames", BASE, PLANTED).split("\n"),

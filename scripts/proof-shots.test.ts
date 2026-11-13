@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { SCENARIOS } from "@lookover/service";
-import { ROUTES, SHOTS, screenOf } from "./proof-shots.ts";
+import { type Demo, demoFor, ROUTES, SHOTS, screenOf } from "./proof-shots.ts";
 
 test("every shot names a scenario the service can load", () => {
   const known = new Set(SCENARIOS.map((s) => s.id));
@@ -95,4 +95,30 @@ test("proof's ROUTES and the app's routes are the same list (apps/web/src/app.ts
   expect(
     ROUTES.filter(([pattern]) => !routes.some((r) => pattern.test(sample(r)))).map(([p]) => p.source),
   ).toEqual([]);
+});
+
+// ADR 0093: the shots of one world share its loaded demo, their pages at once, so an act that moved it moved every
+// shot's world by however many acts had landed (#735).
+test("an act on a shared world can't move the demo; an alone shot's act moves it once the page's commands are answered", async () => {
+  const said: string[] = [];
+  const loaded: Demo = {
+    advance: async (ms) => {
+      said.push(`advance ${ms}`);
+    },
+    inject: async (fault) => {
+      said.push(`inject ${fault}`);
+    },
+  };
+  const settled = async () => {
+    said.push("settled");
+  };
+  const refusal = "a shot sharing its world can't move the demo: use afterFaults, or mark it alone";
+  const shared = demoFor({ name: "a", scenario: "S2" }, loaded, settled);
+  await expect(shared.advance(1_000)).rejects.toThrow(refusal);
+  await expect(shared.inject("github-limit")).rejects.toThrow(refusal);
+  expect(said).toEqual([]);
+  const alone = demoFor({ name: "b", scenario: "S2", alone: true }, loaded, settled);
+  await alone.advance(1_000);
+  await alone.inject("github-limit");
+  expect(said).toEqual(["settled", "advance 1000", "settled", "inject github-limit"]);
 });

@@ -155,12 +155,12 @@ function remote(): Remote {
   // HOME in the folder: the user's own global git config stays out of the test.
   const env = { HOME: dir, USERPROFILE: dir };
   // Links checked out as links, on Windows too (git for Windows writes them as plain files by default). For
-  // repositories thrown away at the end: no maintenance after each fetch (a process of its own every time), and
-  // what a fetch or an import brings kept as the one pack it came in, never written out as a file per object
-  // (a quarter of the file's time on Windows).
+  // repositories thrown away at the end: no maintenance after each fetch or commit (a process of its own every
+  // time, writing under `.git` while the test reads it: ADR 0093), and what a fetch or an import brings kept as
+  // the one pack it came in, never written out as a file per object (a quarter of the file's time on Windows).
   writeFileSync(
     join(dir, ".gitconfig"),
-    "[core]\n\tsymlinks = true\n[maintenance]\n\tauto = false\n[transfer]\n\tunpackLimit = 1\n[fastimport]\n\tunpackLimit = 1\n",
+    "[core]\n\tsymlinks = true\n[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[transfer]\n\tunpackLimit = 1\n[fastimport]\n\tunpackLimit = 1\n",
   );
   const target = join(dir, "target.txt");
   writeFileSync(target, "the service's own file\n");

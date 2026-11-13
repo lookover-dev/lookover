@@ -8,7 +8,7 @@ import { Button, Chip, Icon, IconButton, type IconName, Kbd, Mark, Said } from "
 import { Boundary } from "./ui/boundary.tsx";
 import { Dialog, Layer, MenuItem, useToast } from "./ui/layers.tsx";
 import { arrivedProps, leavingProps, PresenceList, type Shown, useArrived } from "./ui/presence.tsx";
-import { fitWholeRows } from "./ui/whole-rows.ts";
+import { fitWholeRows, refitWhenRowsMove } from "./ui/whole-rows.ts";
 import { clock } from "./view-model/format.ts";
 import { checkLine } from "./view-model/health.ts";
 import { type Refusal, refusalText } from "./view-model/refusal.ts";
@@ -452,6 +452,13 @@ export function PaletteRow({ item }: { item: Pick<PaletteItem, "label" | "hint" 
   );
 }
 
+/** Fits the palette's list to whole rows and keeps its active row in view, which a shorter list may have hidden. */
+function fitPaletteList(list: HTMLElement | null): void {
+  if (!list) return;
+  fitWholeRows(list);
+  list.querySelector("[data-active='true']")?.scrollIntoView({ block: "nearest" });
+}
+
 /** Ctrl K: pull requests, actions, settings, in this order. Enter runs the first match. */
 export function Palette({ mode: asked, onClose }: { mode: PaletteMode | null; onClose: () => void }) {
   // What it shows is the last mode it was opened in: closed, it fades out showing what it showed (ADR 0087).
@@ -573,20 +580,10 @@ export function Palette({ mode: asked, onClose }: { mode: PaletteMode | null; on
   };
 
   // whole rows only: the list ends under the last row that fits (design-system.md "Command palette", round 6), fitted
-  // before the paint, so no frame shows a stale height, and again on every resize of the window, whose height its room is
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    fitWholeRows(list);
-    list.querySelector("[data-active='true']")?.scrollIntoView({ block: "nearest" });
-  });
-  useLayoutEffect(() => {
-    const refit = () => {
-      if (listRef.current) fitWholeRows(listRef.current);
-    };
-    window.addEventListener("resize", refit);
-    return () => window.removeEventListener("resize", refit);
-  }, []);
+  // before the paint, so no frame shows a stale height, and again on every resize of the window, whose height its room is,
+  // and when a font comes in, which sets the rows' height
+  useLayoutEffect(() => fitPaletteList(listRef.current));
+  useLayoutEffect(() => refitWhenRowsMove(() => fitPaletteList(listRef.current)), []);
 
   let lastGroup = "";
   return (

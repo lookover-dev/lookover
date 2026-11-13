@@ -142,6 +142,9 @@ export interface DemoRoom {
   listing(): DemoListing;
 }
 
+/** The data folder's free space "Run all checks" says: the demo's, never the machine's, so two shots say the same. */
+const DEMO_FREE_GB = 48;
+
 /**
  * The demo owner's home on Windows, where demo mode plays the program: the PATH's folder and the skills are under it,
  * and the program downloaded to it, a space in its path. Its command off the PATH is the binary's, which the skill
@@ -309,6 +312,7 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     clock,
     timers: own.timers,
     demoClock: own.controls,
+    freeGb: () => Promise.resolve(DEMO_FREE_GB),
     ids: { next: () => String(++made) },
     github: {
       // The shared App (ADR 0066): the fake's device flow, on its device page, the sign-in kept in the room's

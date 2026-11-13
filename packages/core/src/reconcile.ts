@@ -167,6 +167,14 @@ function saidOf(verdict: Said | undefined, reportedAgain: boolean, claim: ClaimK
   return verdict ?? "unknown";
 }
 
+/**
+ * The finder's reason, only when its verdict is what the round decided (`said`, ADR 0094), never one the round
+ * overruled, as a gone verdict on a finding reported again; else none (`""`).
+ */
+function verdictsWhy(verdict: EarlierVerdict | undefined, said: Said): string {
+  return verdict?.verdict === said ? verdict.why.trim() : "";
+}
+
 /** An earlier finding after the round, and what Lookover says on its thread (null: nothing). */
 interface Settled {
   finding: Finding;
@@ -186,7 +194,7 @@ function stillPresent(
   verdict: EarlierVerdict | undefined,
   pushed: boolean,
 ): ThreadReply | null {
-  const why = verdict?.verdict === "present" ? verdict.why.trim() : "";
+  const why = verdictsWhy(verdict, said);
   const threaded = finding.posted && finding.commented && finding.status === "open";
   return pushed && threaded && said === "present" && why !== ""
     ? { findingId: finding.id, kind: "still_present", why }
@@ -218,9 +226,12 @@ function movedBy(finding: Finding, again: CandidateFinding | undefined, round: n
  * again, so it is present whatever the verdict says; it is never verified fixed while the reviewer still sees it.
  * With its line's text, that candidate says where the finding is now: its line, range and text are taken (ADR 0044).
  * Gone, it is verified fixed, whatever its claim. With no claim read, a push may leave it still present
- * (`stillPresent`). Otherwise the claim read on its thread is answered (`ANSWERS`):
- * kept counts one more keep, and the second escalates it; withdrawn and escalated take the finder's why, as every reply
- * does (else the body it reported again, else the finding's); acknowledged takes the author's reply as why it settled. An answered claim is stored on the finding (`claim`), the one place its text lives.
+ * (`stillPresent`). Otherwise the claim read on its thread is answered (`ANSWERS`): kept counts one more keep, and the
+ * second escalates it; acknowledged takes the author's reply as why it settled. An answered claim is stored on the
+ * finding (`claim`), the one place its text lives. A reply, and a withdrawn finding's `closedWhy`, say the reason of
+ * the verdict the round acted on (ADR 0094): the finder's `why` only when its verdict is what the round decided
+ * (`said`, `verdictsWhy`), else the body of the candidate that reported it again, else the finding's own. A finding
+ * said gone but reported again is kept in the words of the report that still sees it, never those of the verdict overruled.
  */
 function settle(
   finding: Finding,
@@ -234,9 +245,12 @@ function settle(
   const verdict = outcome.earlier.find((v) => v.id === finding.id);
   const read = threads.claims.find((c) => c.findingId === finding.id);
   const said = saidOf(verdict?.verdict, again !== undefined, read?.kind);
-  // Never an empty reason: the finder's, else what it reported again this round, else the finding's own.
+  // Never an empty reason, nor one the round overruled: the finder's when its verdict is the round's, else what
+  // reported it again this round, else the finding's own.
   const why =
-    [verdict?.why, again?.body, finding.body].map((t) => t?.trim() ?? "").find((t) => t !== "") ?? "";
+    [verdictsWhy(verdict, said), again?.body, finding.body]
+      .map((t) => t?.trim() ?? "")
+      .find((t) => t !== "") ?? "";
   const base = movedBy(finding, again, round);
   const answered: Finding = read
     ? {
