@@ -6,7 +6,15 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { asWritten, checkedIn } from "./brand.test-support.ts";
-import { appStylesheet, driftedCopies, EYES_MODULE, eyesModule, STYLESHEET, writeCopies } from "./index.ts";
+import {
+  appStylesheet,
+  COPIES,
+  driftedCopies,
+  EYES_MODULE,
+  eyesModule,
+  STYLESHEET,
+  writeCopies,
+} from "./index.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -21,6 +29,8 @@ function checkout(): string {
 }
 
 const format = asWritten;
+/** The copies drawn as text: encoding the pictures, the tray's among them, is most of a full write's time. */
+const texts = { format, copies: COPIES.filter((c) => !("picture" in c)) };
 
 const BEGIN =
   "/* Written by `bun run brand` from @lookover/brand (ADR 0063): the loader's box, its rest and its";
@@ -78,13 +88,13 @@ test("a stylesheet without the region is refused, naming it", async () => {
 
 test("a hand edit of the module or of the stylesheet's region fails, naming the file", async () => {
   const root = checkout();
-  await writeCopies(root, { format });
-  expect(await driftedCopies(root, { format })).toEqual([]);
+  await writeCopies(root, texts);
+  expect(await driftedCopies(root, texts)).toEqual([]);
   const module = join(root, EYES_MODULE);
   writeFileSync(module, readFileSync(module, "utf8").replace('"rx":14.4,', '"rx":12,'));
   const css = join(root, STYLESHEET);
   writeFileSync(css, readFileSync(css, "utf8").replace("height: 0.825em;", "height: 1em;"));
-  expect(await driftedCopies(root, { format })).toEqual([
+  expect(await driftedCopies(root, texts)).toEqual([
     `${EYES_MODULE} is not what the source draws: run \`bun run brand\`.`,
     `${STYLESHEET} is not what the source draws: run \`bun run brand\`.`,
   ]);

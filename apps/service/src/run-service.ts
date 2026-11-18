@@ -4,12 +4,13 @@
 // ADR 0041, ADR 0053; its sign-in read from the folder `--sign-ins` names, who it runs as said once at start, ADR
 // 0073), under the machine-wide live lock. The program (ADR 0054) wires the same real ones, under the same lock, on
 // every repository the shared App's installations list, or, guarded by a live config, on its repositories only; it
-// makes no one-time link at start and serves this clone's web app when the program's build
-// made it. The compiled binary (`bun run build`) serves the web app it carries, in every mode. It opens the log first
-// (ADR 0054), which every line it prints, the service's log and an uncaught error go through; then it takes the data
-// folder's instance lock (one service per data folder, ADR 0054), then the live lock; the program unguarded registers
-// start at login on the machine (`osLoginItem`, ADR 0054), and reads and writes `lookover` on the machine's PATH for
-// the binary (`osCommandPath`, ADR 0058); every other wiring keeps both in memory; the program and live mode read the
+// makes no one-time link at start and serves this clone's web app when the program's build made it. The compiled
+// binary (`bun run build`) serves the web app it carries, in every mode. It opens the log first (ADR 0054), which
+// every line it prints, the service's log and an uncaught error go through; then it takes the data folder's instance
+// lock (one service per data folder, ADR 0054), then the live lock; the program unguarded registers start at login on
+// the machine (`osLoginItem`, ADR 0054), and reads and writes `lookover` on the machine's PATH for the binary
+// (`osCommandPath`, ADR 0058); every other wiring keeps both in memory; the program unguarded shows its tray (ADR
+// 0105: `lookover-tray`, `helperTray`), demo mode on a fake, live mode on the stand-in; the program and live mode read the
 // person's own `gh` (`osGh`, ADR 0059, read only), demo mode the scenario's on testkit's fake; it starts the service
 // on the port it served last when it can, says who serves the folder in `instance.json`, announces it to the dev
 // launcher when asked, prints the URL to open the app with (the program: the command that opens it, ADR 0058), and
@@ -24,6 +25,7 @@ import { type CommandPath, memoryCommandPath, osCommandPath } from "./command-pa
 import { type Config, realSystem, skillFor } from "./config.ts";
 import { scenarioOf } from "./demo/scenarios.ts";
 import { osGh } from "./gh.ts";
+import { helperTray, trayHelperPath } from "./helper-tray.ts";
 import { InstanceHeld, keptPort, takeInstance } from "./instance.ts";
 import { guarded, type LiveAdapters, type LiveOptions, type LiveStart, liveAdapters } from "./live.ts";
 import { type LiveConfig, WATCH_IGNORED } from "./live-config.ts";
@@ -39,6 +41,7 @@ import {
   type SkillFolders,
   userSkillFolders,
 } from "./skill-folders.ts";
+import type { Tray } from "./tray.ts";
 import { makeUserOnly } from "./user-only.ts";
 import { VERSION } from "./version.ts";
 import { diskWebFiles, type WebFiles } from "./web-files.ts";
@@ -91,6 +94,17 @@ export interface ProgramDeps {
    * `osLoginItem` on this machine by default, which refuses to run under `bun test`. A test gives a fake.
    */
   loginItem?: (command: string[]) => LoginItem;
+  /**
+   * Lookover in the tray, which only the program without a live config uses (ADR 0105 §8): `lookover-tray` from this
+   * clone's `dist/` or beside the binary by default (`helperTray`), which refuses to run under `bun test`. A test gives
+   * a fake.
+   */
+  tray?: Tray;
+  /**
+   * Opens the browser on the link the tray's Open mints (ADR 0105 §10), answering whether it did: `openInBrowser` in
+   * `main.ts`; none by default, where the log says to run `open` instead. A test gives a fake.
+   */
+  openBrowser?: (url: string) => Promise<boolean>;
   /**
    * The machine's `lookover` on the PATH for the binary at `executable`, installed by npm when `launcher` names its
    * launcher (ADR 0061), which only the unguarded program uses (ADR 0058): `osCommandPath` on this machine by
@@ -181,7 +195,7 @@ export async function runService(config: Config, given: ProgramDeps): Promise<Ru
         }),
       );
     agent = agentOn(config, deps);
-    service = await start(config, deps, sink, agent, () => stopAndExit("lookover stop"));
+    service = await start(config, deps, sink, agent, (by) => stopAndExit(by));
     await instance.announce({
       pid: deps.process.pid,
       port: service.port,
@@ -233,7 +247,7 @@ export async function runService(config: Config, given: ProgramDeps): Promise<Ru
 }
 
 /** What asked the program to stop, as its log line says it. */
-type StopAsker = "Ctrl+C" | "SIGTERM" | "lookover stop";
+type StopAsker = "Ctrl+C" | "SIGTERM" | "lookover stop" | "the tray";
 
 /** The line with the link to open the app with; none when the start made no link (the program, ADR 0054). */
 const opening = (service: RunningService): string =>
@@ -278,13 +292,16 @@ async function start(
   deps: ProgramDeps,
   logSink: FileLogSink,
   agent: AgentPorts,
-  stopAsked: () => void,
+  stopAsked: (by: StopAsker) => void,
 ): Promise<RunningService> {
   const { home, env, git } = config;
   const preferredPort = keptPort(home);
   const server = {
     port: config.port,
-    stopAsked,
+    // The tray's Quit is `lookover stop`'s graceful stop, logged as the tray's (ADR 0105 §10).
+    stopAsked: () => stopAsked("lookover stop"),
+    trayQuit: () => stopAsked("the tray"),
+    ...(deps.openBrowser === undefined ? {} : { openBrowser: deps.openBrowser }),
     ...(preferredPort === undefined ? {} : { preferredPort }),
     ...(config.origin === undefined ? {} : { origin: config.origin }),
     ...(config.eventsKept === undefined ? {} : { eventsKept: config.eventsKept }),
@@ -303,13 +320,6 @@ async function start(
     live: Pick<LiveOptions, "signIns"> = {},
   ): Promise<RunningService> => {
     const program = atLogin !== null;
-    // Start at login on the machine for the program alone, and only unguarded (ADR 0054): the loop's runs, guarded by
-    // their live config, never register anything on the owner's machine (ADR 0045). Every other wiring: the room's
-    // stand-in, which registers nothing (ADR 0070).
-    const loginItem =
-      atLogin !== null && liveConfig === undefined
-        ? (deps.loginItem ?? ((command) => osLoginItem(command, realSystem())))(atLogin)
-        : undefined;
     const gh = ghOf(deps);
     const adapters = await adaptersOf(deps, {
       home,
@@ -330,7 +340,7 @@ async function start(
       agent,
       gh,
       ...(webFiles === undefined ? {} : { webFiles }),
-      ...(loginItem === undefined ? {} : { loginItem: { item: loginItem, kind: "os" as const } }),
+      ...(atLogin !== null && liveConfig === undefined ? onTheMachine(deps, config, atLogin) : {}),
       // One data folder for every repository (ADR 0053): the store at its root, the settings files in it (ADR 0049).
       home,
       platform: config.platform,
@@ -385,6 +395,37 @@ function runsAs(start: LiveStart, { signIns, config }: LiveOptions): string {
     }
   }
 }
+
+/**
+ * What the unguarded program alone does on the machine, for `atLogin`, its start at login's command: start at login
+ * registered (ADR 0054) and the tray shown (ADR 0105 §8). The loop's runs, guarded by their live config, never
+ * register anything or put an icon on the owner's screen (ADR 0045); every other wiring has the room's stand-ins
+ * (ADR 0070). The tray is `lookover-tray` (ADR 0105 §6): in this clone's `dist/` from a clone, else beside the
+ * binary; what it says on its standard error goes to the log.
+ */
+const onTheMachine = (
+  deps: ProgramDeps,
+  config: Config,
+  atLogin: string[],
+): { loginItem: { item: LoginItem; kind: "os" }; tray: Tray } => ({
+  loginItem: {
+    item: (deps.loginItem ?? ((command) => osLoginItem(command, realSystem())))(atLogin),
+    kind: "os",
+  },
+  tray:
+    deps.tray ??
+    helperTray({
+      path: trayHelperPath(config.agent.executable, CLONE_ROOT, config.platform),
+      version: VERSION,
+      clone: config.agent.executable === null,
+      platform: config.platform,
+      env: config.env,
+      log: (line) => deps.print.err(line),
+    }),
+});
+
+/** This clone's root, whose `dist/` holds the tray helper `bun run build` makes. */
+const CLONE_ROOT = join(import.meta.dir, "..", "..", "..");
 
 /** The person's `gh` on the real GitHub and engines, read only: the real one under a live config too (ADR 0059). */
 const ghOf = (deps: ProgramDeps): Gh => (deps.gh ?? (() => osGh(realSystem())))();

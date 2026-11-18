@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./migration-name": "./src/migration-name.ts"
+    "./migration-name": "./src/migration-name.ts",
+    "./released-migrations": "./src/released-migrations.ts"
   },
   "dependencies": {
     "@lookover/contracts": "workspace:*",
@@ -17,7 +18,8 @@
   "lookover": {
     "imports": {},
     "entries": {
-      "./migration-name": "bun run migrations: how a migration's file is named, shared with the generator of the embedded list, which must read it while that list is stale (ADR 0032)"
+      "./migration-name": "bun run migrations: how a migration's file is named, shared with the generator of the embedded list, which must read it while that list is stale (ADR 0032)",
+      "./released-migrations": "the store's own test and bun run migrations --released: the last release's migrations, from its tag or the store's list, and what of them the working tree changed (ADR 0103, ADR 0104); kept off the index so the service never carries it"
     }
   }
 }

@@ -11,7 +11,7 @@ One command, `lookover`, with a verb after it. This page gives each verb's main 
 |---|---|
 | `lookover start` | Starts Lookover in the background, or finds the one running, then opens it in your browser. The terminal can then be closed. `--no-open` prints the link instead |
 | `lookover open` | Opens the running Lookover in your browser, with a new link that works once, within 2 minutes. `--no-open` prints the link instead |
-| `lookover status` | Running or stopped, its address, data folder, version and process, and whether it starts at login. `--json` for a program |
+| `lookover status` | Running or stopped, its address, data folder, version and process, whether it starts at login and whether its icon is in the tray. `--json` for a program, with the tray as `tray` |
 | `lookover stop` | Stops it, as Ctrl+C would. One that doesn't answer within 30 seconds is ended |
 | `lookover serve` | Runs Lookover in this terminal until Ctrl+C, instead of in the background |
 | `lookover --version` | The version installed |
@@ -23,10 +23,10 @@ One command, `lookover`, with a verb after it. This page gives each verb's main 
 Lookover runs in the background.
 Lookover is opening in your browser.
 Don't see it? `lookover open --no-open` prints a link to paste (it works once, within 2 minutes).
-You can close this terminal.
+Lookover is in the tray.
 ```
 
-On a Lookover already running, the first line is "Lookover already runs." When Windows ties it to the terminal it started from, the last line says to keep that terminal open instead.
+On a Lookover already running, the first line is "Lookover already runs." The last line names the menu bar on macOS. With **Show Lookover in the tray** off in Settings, or when the computer can't show the icon, it is "You can close this terminal." instead. When Windows ties it to the terminal it started from, the last line says to keep that terminal open.
 
 The app opens only through such a link. The bare address `lookover status` shows has no session: it says "This tab isn't signed in." and names the command to run. So does a tab whose session ended. Run `lookover open` for a fresh link.
 

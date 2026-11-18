@@ -47,6 +47,7 @@ import {
   titleEnd,
 } from "../view-model/first-review.ts";
 import { plural } from "../view-model/format.ts";
+import { trayFindLine } from "../view-model/in-the-tray.ts";
 import {
   aiStepActs,
   aiStepLabels,
@@ -554,12 +555,17 @@ function StepAgent() {
   );
 }
 
-/** "Reviews keep running in the background": the same words whatever is chosen, so the footer under it never moves. */
+/**
+ * "Reviews keep running in the background": the same words whatever is chosen, so the footer under it never moves. On
+ * Windows, while the tray is on, where its icon sits and how to keep it on the taskbar, said here once (ADR 0105 §13).
+ */
 export function BackgroundCard() {
+  const find = trayFindLine(useAppState().service);
   return (
     <div className="card background-note">
       <h4 className="card-title">Reviews keep running in the background</h4>
       <p>{BACKGROUND_TEXT}</p>
+      {find === null ? null : <p>{find}</p>}
     </div>
   );
 }

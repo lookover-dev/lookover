@@ -2,20 +2,27 @@
 // `dist/npm/` from the built executables, with their `SHA256SUMS`:
 //
 //   - one platform package per platform the main package names (`@lookover/<platform>-<arch>`, its `os` and `cpu`
-//     those two words): the executable alone, no `bin`, no script, a README line saying `lookover` installs it;
+//     those two words): the executable and, beside it, the tray helper `lookover-tray[.exe]` (ADR 0105 §16), where
+//     the service looks for it; no `bin`, no script, a README line saying `lookover` installs it;
 //   - the main package `lookover`, from `npm/package.template.json` at the release's version: the launcher
 //     (`npm/bin/lookover.js`), the README and the licence, the platform packages as `optionalDependencies` at that
 //     exact version.
 //
 // No package has an install script: npm picks the platform package by its `os` and `cpu`, and `--ignore-scripts`
-// changes nothing. The version is the root package.json's. Each executable is made executable before it is packed
-// (an artifact download loses the bit) and npm keeps the bit, so `--from` packs macOS's and Linux's on one of them and
-// refuses on Windows: it has no such bit, and its tarballs of them would install executables nothing can run.
+// changes nothing. The version is the root package.json's. Each executable and helper is made executable before it is
+// packed (an artifact download loses the bit) and npm keeps the bit, so `--from` packs macOS's and Linux's on one of
+// them and refuses on Windows: it has no such bit, and its tarballs of them would install executables nothing can run.
+// The release's standalone executables (its GitHub release assets, gathered by the public release.yml) carry no
+// helper: their tray is unavailable (ADR 0105 §17).
 //
-//   bun scripts/release-assets.ts --from <dir>   every platform, from <dir>/<platform>/lookover[.exe]
-//   bun scripts/release-assets.ts --host         this machine's platform alone, from `dist/lookover[.exe]` (a dry run)
+//   bun scripts/release-assets.ts --from <dir>   every platform, from <dir>/<platform>/lookover[.exe] and
+//                                                lookover-tray[.exe]
+//   bun scripts/release-assets.ts --host         this machine's platform alone, from `dist/` (a dry run)
 //
-// Exit 0 written, 1 a missing executable or a failed pack, 2 usage or `--from` on Windows.
+// The release itself never runs `--from`: it reads folders no workflow produces. Each release runner packs its own
+// platform with `--host`, so the helper reaches npm inside that runner's `--host` tarball.
+//
+// Exit 0 written, 1 a missing executable or helper or a failed pack, 2 usage or `--from` on Windows.
 import {
   chmodSync,
   copyFileSync,
@@ -31,6 +38,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { trayHelperName } from "../apps/service/src/tray-protocol.ts";
 
 const root = resolve(import.meta.dir, "..");
 const NPM = join(root, "npm");
@@ -39,6 +47,12 @@ const SCOPE = "@lookover/";
 /** The executable's name in a platform package, as the launcher looks for it. */
 export const executableName = (platform: string): string =>
   platform.startsWith("win32-") ? "lookover.exe" : "lookover";
+
+/** The tray helper's name in a platform package, beside the executable: the service's, as it looks for it. */
+const trayIn = (platform: string): string => trayHelperName(platform.split("-")[0] ?? "");
+
+/** A platform's built files: its executable and its tray helper. */
+export type PlatformFiles = { executable: string; tray: string };
 
 /** The main package's template: what every package says of where it comes from, and the platforms it names. */
 type Template = {
@@ -90,12 +104,13 @@ function pack(folder: string, out: string): string {
 }
 
 /**
- * Writes the release's npm packages into `out` (emptied first): each platform of `executables` (its executable's
- * path, by platform), the main package, and `SHA256SUMS` over the tarballs. The tarballs' names, in name order.
+ * Writes the release's npm packages into `out` (emptied first): each platform of `executables` (its executable's and
+ * its tray helper's paths, by platform), the main package, and `SHA256SUMS` over the tarballs. The tarballs' names,
+ * in name order.
  */
 export function releaseAssets(o: {
   version: string;
-  executables: Record<string, string>;
+  executables: Record<string, PlatformFiles>;
   out: string;
 }): string[] {
   const known = releasePlatforms();
@@ -115,13 +130,19 @@ export function releaseAssets(o: {
   mkdirSync(o.out, { recursive: true });
   const stage = realpathSync.native(mkdtempSync(join(tmpdir(), "lookover-release-assets-")));
   try {
-    for (const [platform, executable] of Object.entries(o.executables)) {
+    for (const [platform, files] of Object.entries(o.executables)) {
       const [os, cpu] = platform.split("-");
       const folder = join(stage, platform);
       mkdirSync(folder);
       const name = executableName(platform);
-      copyFileSync(executable, join(folder, name));
-      chmodSync(join(folder, name), 0o755);
+      const tray = trayIn(platform);
+      for (const [from, to] of [
+        [files.executable, name],
+        [files.tray, tray],
+      ] as const) {
+        copyFileSync(from, join(folder, to));
+        chmodSync(join(folder, to), 0o755);
+      }
       copyFileSync(join(root, "LICENSE"), join(folder, "LICENSE"));
       writeFileSync(join(folder, "README.md"), platformReadme(platform));
       const manifest = {
@@ -134,7 +155,7 @@ export function releaseAssets(o: {
         // Bun's Linux executables are linked against glibc: on Alpine and other musl Linux npm skips the package, and
         // the launcher says none fits, rather than installing one that can't start.
         ...(os === "linux" ? { libc: ["glibc"] } : {}),
-        files: [name],
+        files: [name, tray],
         publishConfig: { access: "public" },
       };
       writeFileSync(join(folder, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -171,19 +192,23 @@ export function releaseAssets(o: {
 }
 
 /**
- * The executables `args` ask for, by platform, on a machine running `os`; or why it refuses them. Windows has no
- * execute bit, so it refuses to pack macOS's and Linux's: npm would install executables nothing can run.
+ * The executables and tray helpers `args` ask for, by platform, on a machine running `os`; or why it refuses them.
+ * Windows has no execute bit, so it refuses to pack macOS's and Linux's: npm would install executables nothing can run.
  */
 export function executablesAsked(
   args: string[],
   os: NodeJS.Platform = process.platform,
-): { executables: Record<string, string> } | { refused: string } {
+): { executables: Record<string, PlatformFiles> } | { refused: string } {
   const [mode, dir, ...rest] = args;
+  const filesIn = (folder: string, platform: string): PlatformFiles => ({
+    executable: join(folder, executableName(platform)),
+    tray: join(folder, trayIn(platform)),
+  });
   if (mode === "--host" && dir === undefined) {
     const host = `${os}-${process.arch}`;
     if (!releasePlatforms().includes(host))
       return { refused: `No release is built for this machine, ${host}` };
-    return { executables: { [host]: join(root, "dist", executableName(host)) } };
+    return { executables: { [host]: filesIn(join(root, "dist"), host) } };
   }
   if (mode === "--from" && dir !== undefined && rest.length === 0) {
     const platforms = releasePlatforms();
@@ -196,7 +221,7 @@ export function executablesAsked(
       };
     return {
       executables: Object.fromEntries(
-        platforms.map((platform) => [platform, join(resolve(dir), platform, executableName(platform))]),
+        platforms.map((platform) => [platform, filesIn(join(resolve(dir), platform), platform)]),
       ),
     };
   }
@@ -210,9 +235,18 @@ if (import.meta.main) {
     process.exit(2);
   }
   const { executables } = asked;
-  const missing = Object.entries(executables).filter(([, file]) => !existsSync(file));
+  const missing = Object.entries(executables).flatMap(([platform, files]) =>
+    (
+      [
+        ["executable", files.executable],
+        ["tray helper", files.tray],
+      ] as const
+    )
+      .filter(([, file]) => !existsSync(file))
+      .map(([what, file]) => `No ${platform} ${what} at ${file}`),
+  );
   if (missing.length > 0) {
-    for (const [platform, file] of missing) console.error(`No ${platform} executable at ${file}`);
+    for (const line of missing) console.error(line);
     console.error("Build it first: bun run build (--baseline on x64).");
     process.exit(1);
   }

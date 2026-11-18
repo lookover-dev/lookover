@@ -638,7 +638,7 @@ const SERVICE = resolve(import.meta.dir, "../../../service/src/main.ts");
 // given longer than the starts it waits for, or Bun's 5 s would cut a slow start short.
 const START_LIMIT_MS = 10_000;
 /** The events S10's seed sends: the default scenario's, which every start plays. */
-const S10_SEEDED = 64;
+const S10_SEEDED = 65;
 const ONE_START_MS = START_LIMIT_MS + 5_000;
 const TWO_STARTS_MS = 2 * START_LIMIT_MS + 5_000;
 
@@ -882,11 +882,11 @@ test(
   async () => {
     const { demo, withSession } = await sharedDemo();
 
-    // Events 1 to 64 happened; the service keeps 63 and 64, the round of the seed's last review and the rules it
-    // counted. A tab at 62 missed two.
+    // Events 1 to 65 happened; the service keeps 64 and 65, the round of the seed's last review and the rules it
+    // counted. A tab at 63 missed two.
     const recent = new HttpApi({
       base: demo.origin,
-      fetch: snapshotAt(withSession, 62),
+      fetch: snapshotAt(withSession, 63),
       source: streamSource(withSession),
       visibility: new FakeVisibility(),
     });
@@ -896,14 +896,14 @@ test(
     await until(() => missed.length >= 2);
     await Bun.sleep(100);
     expect(events(missed)).toEqual([
-      [63, "round.finished"],
-      [64, "rules.changed"],
+      [64, "round.finished"],
+      [65, "rules.changed"],
     ]);
 
-    // A tab at 61 missed one the service no longer holds: it loads the snapshot again.
+    // A tab at 62 missed one the service no longer holds: it loads the snapshot again.
     const old = new HttpApi({
       base: demo.origin,
-      fetch: snapshotAt(withSession, 61),
+      fetch: snapshotAt(withSession, 62),
       source: streamSource(withSession),
       visibility: new FakeVisibility(),
     });
@@ -912,7 +912,7 @@ test(
     cleanups.push(old.subscribe((e) => reloaded.push(e)));
     await until(() => reloaded.length >= 1);
     expect(reloaded).toHaveLength(1);
-    expect(reloaded[0]).toMatchObject({ type: "state.replaced", seq: 64 });
+    expect(reloaded[0]).toMatchObject({ type: "state.replaced", seq: 65 });
   },
   ONE_START_MS,
 );
@@ -932,8 +932,8 @@ test(
     cleanups.push(api.subscribe((e) => seen.push(e)));
     const heard: LogMessage[] = [];
     cleanups.push(api.subscribeLogs((m) => heard.push(m)));
-    expect((await api.snapshot()).seq).toBe(64);
-    // The snapshot swapped the first stream for one asking after 64: it follows the log once its answer came. One
+    expect((await api.snapshot()).seq).toBe(65);
+    // The snapshot swapped the first stream for one asking after 65: it follows the log once its answer came. One
     // asked while the scenario loads waits for the load, and so misses the new room's seed lines (#313).
     const connected = () => heard.filter((m) => m.type === "connected").length;
     await until(() => connected() >= 2);
@@ -942,8 +942,8 @@ test(
     const drawer = new DemoApi({ base: demo.origin, fetch: withSession });
     await drawer.send({ type: "demo.load", id: "S10" });
     await until(() => seen.length >= 1);
-    // S10 again in a new room: its sixty-four events and the load's clock event, numbered on from 64.
-    expect(seen.map((e) => [e.seq, e.type])).toEqual([[129, "state.replaced"]]);
+    // S10 again in a new room: its sixty-five events and the load's clock event, numbered on from 65.
+    expect(seen.map((e) => [e.seq, e.type])).toEqual([[131, "state.replaced"]]);
     // The new room's seed wrote to the same log file, and its lines came live, on no event.
     const opened = (m: LogMessage) =>
       m.type === "line" && / sasensi\/lookover-sandbox#135 opened by /.test(m.line);
@@ -955,8 +955,8 @@ test(
     await drawer.send({ type: "demo.advance", ms: 60_000 });
     await until(() => seen.length >= 2);
     expect(events(seen)).toEqual([
-      [129, "state.replaced"],
-      [130, "clock"],
+      [131, "state.replaced"],
+      [132, "clock"],
     ]);
   },
   ONE_START_MS,
@@ -992,7 +992,7 @@ test(
     const after = seen[0];
     if (after?.type !== "state.replaced") throw new Error(`Expected a replaced state, got ${after?.type}`);
     // The restart plays the scenario again in a new room, numbered on from the first one's last event (ADR
-    // 0046), so the tab reloads rather than mixing two stories; what the start fixed moved with it. S10's sixty-four
+    // 0046), so the tab reloads rather than mixing two stories; what the start fixed moved with it. S10's sixty-five
     // events, on from the last number the tab had.
     expect(after.seq).toBe(before.seq + S10_SEEDED);
     expect(after.state.service.since).toBeGreaterThanOrEqual(before.service.since);

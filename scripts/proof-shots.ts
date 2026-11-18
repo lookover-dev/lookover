@@ -466,6 +466,26 @@ async function paletteShowsWholeRows(page: Page) {
     );
 }
 
+/** Settings' "Show Lookover in the tray" switch: its track, which the person clicks. */
+const traySwitch = (page: Page) =>
+  page.locator("label.switch").filter({ has: page.getByLabel("Show Lookover in the tray", { exact: true }) });
+
+/**
+ * "Show Lookover in the tray" switched off (ADR 0105 §11): its help says no icon is shown, and the switch stays under
+ * the pointer (rule 5), the shot failing when flipping it moved it.
+ */
+async function switchTrayOff(page: Page) {
+  const tray = traySwitch(page);
+  await page.getByText(/On: its icon is in the (tray|menu bar)\./).waitFor();
+  await centre(tray);
+  const before = await tray.boundingBox();
+  await tray.click();
+  await page.getByText("Off: no icon is shown.", { exact: false }).waitFor();
+  const after = await tray.boundingBox();
+  if (before?.x !== after?.x || before?.y !== after?.y)
+    throw new Error(`The tray's switch moved: from ${JSON.stringify(before)} to ${JSON.stringify(after)}`);
+}
+
 /** Settings' Start at login switch: its track, which the person clicks. */
 const loginSwitch = (page: Page) =>
   page.locator("label.switch").filter({ has: page.getByLabel("Start at login", { exact: true }) });
@@ -2026,6 +2046,36 @@ const LISTED: Shot[] = [
     inject: ["login-taken"],
     alone: true,
     act: switchLoginOffWhileTaken,
+  },
+  // "Show Lookover in the tray" (ADR 0105 §11-13), right after Start at login: on, its icon shown; switched off, the
+  // switch where it was; on, on a computer whose tray can't show it, with the reason. Where a new icon sits and how to
+  // keep it on the taskbar (the `^` text) shows only when proof runs on Windows, in all three, so nothing under the
+  // row moves when it is switched (the demo follows the machine's system).
+  {
+    name: "settings-tray",
+    scenario: "S10",
+    path: "/settings",
+    act: async (p) => {
+      await p.getByText(/On: its icon is in the (tray|menu bar)\./).waitFor();
+      await centre(traySwitch(p));
+    },
+  },
+  {
+    name: "settings-tray-off",
+    scenario: "S10",
+    path: "/settings",
+    alone: true,
+    act: switchTrayOff,
+  },
+  {
+    name: "settings-tray-unavailable",
+    scenario: "S10",
+    path: "/settings",
+    inject: ["tray-unavailable"],
+    act: async (p) => {
+      await p.getByText("On, but its icon can't be shown.", { exact: false }).waitFor();
+      await centre(traySwitch(p));
+    },
   },
   // The log file of the scratch data folder (ADR 0055), from the shot's own load on: its self-tests, then S10's seed.
   // The file holds every load the proof service made before it, which shots ran first decides, and the start's

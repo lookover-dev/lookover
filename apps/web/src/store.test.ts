@@ -77,6 +77,8 @@ function snapshot(seq: number, title: string): State {
       startAtLogin: true,
       atLogin: "this",
       loginItem: "os",
+      tray: { on: true, shown: "shown", reason: null },
+      os: "linux",
       paused: null,
       remote: false,
       unlocked: false,

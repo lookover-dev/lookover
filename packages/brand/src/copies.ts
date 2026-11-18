@@ -10,6 +10,7 @@ import { COLOURS } from "./numbers.ts";
 import { decodePng, encodePng, type Image } from "./png.ts";
 import { SHEET, sheet } from "./sheet.ts";
 import { SITE_FAVICON, SITE_MODULE, SITE_STYLESHEET, siteModule, siteStylesheet } from "./site.ts";
+import { TRAY_ICONS, TRAY_SHEET, trayIcon, traySheet } from "./tray.ts";
 import { wordmark } from "./wordmark.ts";
 
 /**
@@ -76,6 +77,13 @@ export const COPIES: readonly Copy[] = [
   },
   { path: SITE_MODULE, render: (_, format) => siteModule(format) },
   { path: SITE_STYLESHEET, render: (_, format) => siteStylesheet(format) },
+  // The tray's icons (ADR 0105, brand.md "The tray"), outside docs/ so the public tree has them, which the helper
+  // embeds by state, variant and size; and the sheet of every state at 16, 24 and 32 px, for the proof.
+  { path: TRAY_SHEET, picture: traySheet },
+  ...TRAY_ICONS.map(({ path, state, variant, side }) => ({
+    path,
+    picture: () => trayIcon(state, variant, side),
+  })),
 ];
 
 const lf = (text: string) => text.replaceAll("\r\n", "\n");

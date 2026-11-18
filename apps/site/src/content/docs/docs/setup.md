@@ -65,7 +65,9 @@ A pull request you open now shows in about a minute. With none, **Continue**.
 
 All of it is optional. The step installs the `lookover-review-loop` skill for Claude Code and Codex, so your agent waits for the review, fixes what it found, pushes and asks again until nothing is left. [Your coding agent](/docs/coding-agent/) says how.
 
-Under it, a card says reviews keep running in the background: Lookover starts each time you log in. **Don't start at login** is one click away, and Settings changes it later. When another Lookover on the computer already starts at login, the card says so and names it: this one won't, until **Start this one instead** in Settings. **Go to my reviews** ends the setup.
+Under it, a card says reviews keep running in the background: Lookover starts each time you log in. **Don't start at login** is one click away, and Settings changes it later. When another Lookover on the computer already starts at login, the card says so and names it: this one won't, until **Start this one instead** in Settings. On Windows the card also says where Lookover's icon is: Windows puts a new icon under the taskbar's `^`. To keep it on the taskbar, drag it from there onto the taskbar, or switch Lookover on in Windows Settings › Personalization › Taskbar › Other system tray icons, where its entry reads Lookover. **Go to my reviews** ends the setup.
+
+While Lookover runs, its icon sits in the tray, the menu bar on macOS: the eyes say what it is doing, a click opens it (on macOS a click opens its menu), and its menu opens it, pauses, resumes and quits. Settings › **Show Lookover in the tray** turns it off, and says under the row whether the icon is shown, or why the computer can't show it.
 
 ## Then
 

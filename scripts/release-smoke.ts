@@ -3,8 +3,10 @@
 // prefix, offline (npm reads nothing but the two tarballs, and none of the user's npm settings), then the installed
 // `lookover` runs on a scratch data folder in a scratch profile, never the user's (`LOOKOVER_HOME` and `--home=` both
 // name it, and the profile's folders are empty ones): `--version` (the root package.json's), `help`, `start --no-open`,
-// `status` (exit 0), `stop` and `status` (exit 3). Exit 0 when each passed, 1 at the first that didn't, 2 on a command
-// line it doesn't take.
+// `status` (exit 0), `stop` and `status` (exit 3). Before them, the platform package's tray helper (ADR 0105 §16),
+// started as the service starts it: it answers `--version` with the release's version, its first line says `ready` at
+// that version (or `unavailable`, on a runner with no desktop), and it exits 0 once its standard input closes. Exit 0
+// when each passed, 1 at the first that didn't, 2 on a command line it doesn't take.
 //
 //   bun scripts/release-smoke.ts [--from-registry <version> [--wait]]
 //
@@ -12,6 +14,8 @@
 // no install script run and none of the user's npm settings read (the public release.yml's `verify` job, once the
 // packages are published). `--wait` first waits, up to ten minutes, until the registry answers for `lookover` and each
 // platform package at that version, and for each one's tarball (a package just published may take a moment to show).
+// That job installs nothing before it runs this: so this file, and each one it imports at run time, imports only
+// `node:` modules and files by their relative path, never a package (`release-smoke-alone.test.ts` holds it).
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -24,14 +28,35 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { trayHelperName } from "../apps/service/src/tray-protocol.ts";
+import { trayFault } from "./cargo.ts";
 import { releasePlatforms } from "./release-assets.ts";
 import { PLAIN_VERSION } from "./release-version.ts";
 
 /** npm's command for a global install under `prefix`: `<prefix>\lookover.cmd` on Windows, `<prefix>/bin/lookover` elsewhere. */
 export function shimOf(prefix: string, platform: NodeJS.Platform): string {
   return platform === "win32" ? join(prefix, "lookover.cmd") : join(prefix, "bin", "lookover");
+}
+
+/**
+ * The tray helper of the platform package `platform` in npm's global install under `prefix`, found as the launcher
+ * finds its executable (from the `lookover` package's folder: npm puts the platform package beside it, or inside it);
+ * undefined when npm installed no such package, or it holds no helper.
+ */
+export function installedTray(prefix: string, platform: string): string | undefined {
+  const modules =
+    process.platform === "win32" ? join(prefix, "node_modules") : join(prefix, "lib", "node_modules");
+  let manifest: string;
+  try {
+    manifest = Bun.resolveSync(`@lookover/${platform}/package.json`, join(modules, "lookover"));
+  } catch {
+    return undefined;
+  }
+  const [os = ""] = platform.split("-");
+  const file = join(dirname(manifest), trayHelperName(os));
+  return existsSync(file) ? file : undefined;
 }
 
 /** What a run of the installed `lookover` printed, and how it ended: its exit code, else the signal that ended it. */
@@ -321,7 +346,17 @@ if (import.meta.main) {
   try {
     await installGlobal({ prefix, scratch, ...source });
     console.log(`Installed ${what} with npm.`);
-    for (const step of steps(home, version)) {
+    const host = `${process.platform}-${process.arch}`;
+    const tray = installedTray(prefix, host);
+    const trayWhy =
+      tray === undefined
+        ? `@lookover/${host} holds no ${trayHelperName(process.platform)}`
+        : await trayFault([tray], version);
+    console.log(
+      `${trayWhy === null ? "ok  " : "FAIL"} ${trayHelperName(process.platform)}:--version, its first line, its exit once its input closes${trayWhy === null ? "" : `: ${trayWhy}`}`,
+    );
+    if (trayWhy !== null) failed = true;
+    for (const step of failed ? [] : steps(home, version)) {
       const ran = runShim(shimOf(prefix, process.platform), step.args, { cwd: scratch, env });
       started ||= step.args[0] === "start" && ran.code === 0;
       const why = step.passes(ran);

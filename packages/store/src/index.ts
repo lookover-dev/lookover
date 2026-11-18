@@ -71,8 +71,8 @@
 // - `setup`: how far the owner got in the first-run setup (ADR 0047): "where is it" (at its first step, nothing
 //   done, until written), "was it ever written" (`kept`), "this changed" (a patch; the furthest step reached is
 //   kept, going back never loses it); "whose is it", "it is this person's" (ADR 0090: a GitHub id or none, beside the setup, never in it);
-//   beside it, start at login (ADR 0049): "did the owner choose it" (off until chosen), "the owner chose", in its own
-//   row, so it never makes the setup kept;
+//   beside it, start at login (ADR 0049) and Lookover in the tray (ADR 0105): "did the owner choose it" (on until
+//   chosen), "the owner chose", each in its own row, so it never makes the setup kept;
 // - `rules`: each repository's rules (ADR 0048): "these were just read from its default branch" (they replace the
 //   ones kept), "its rules, with how often each was cited (`raised`) and verified fixed (`acted`)", counted from every
 //   change's last round, never kept;

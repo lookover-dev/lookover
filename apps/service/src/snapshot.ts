@@ -40,6 +40,8 @@ import {
   repositoryName,
   repositoryRefOf,
   type Service,
+  type ServiceOs,
+  type ServiceTray,
   type SettingValues,
   type Setup,
   type State,
@@ -84,6 +86,8 @@ export interface Facts {
   atLogin: LoginHolder;
   /** Where that registration is: the machine's, or development's in memory (ADR 0054). */
   loginItem: LoginItemKind;
+  /** Lookover in the tray as this start states it (ADR 0105 §13): the store's choice, starting or off, never replayed. */
+  tray: ServiceTray;
   /** The machine the commands the app gives are for (an AI's install, ADR 0070), as Node names it. */
   platform: NodeJS.Platform;
   /** The pause the store keeps (ADR 0040): until when reviews hold; null when none is set. */
@@ -289,6 +293,10 @@ function connectionOf(f: Facts): State["connection"] {
   };
 }
 
+/** The system Node names, as `Service.os` says it: every one neither Windows nor macOS is the tray's Linux. */
+const osOf = (platform: NodeJS.Platform): ServiceOs =>
+  platform === "win32" ? "windows" : platform === "darwin" ? "macos" : "linux";
+
 /** The state before any event: the setup as kept, the connection it leads to, and nothing the host said yet. */
 function base(f: Facts): State {
   return {
@@ -309,6 +317,8 @@ function base(f: Facts): State {
       startAtLogin: f.startAtLogin,
       atLogin: f.atLogin,
       loginItem: f.loginItem,
+      tray: f.tray,
+      os: osOf(f.platform),
       paused: f.paused,
       remote: f.remote ?? false,
       unlocked: false,
@@ -401,8 +411,9 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * The service's facts a start states over whatever the log replayed: running since now, this version, its command,
- * its agent, its login item, the pause the store keeps, no check results (they read the process that ran them) and
- * locked; remote only when the start was told.
+ * its agent, its login item, its tray (the last run's icon is never this one's, ADR 0105 §13), the system it runs
+ * on (a data folder can move to another computer), the pause the store keeps, no check results (they read the
+ * process that ran them) and locked; remote only when the start was told.
  */
 function ownFactsOf(f: Facts): Partial<Service> {
   return {
@@ -412,6 +423,8 @@ function ownFactsOf(f: Facts): Partial<Service> {
     command: f.command,
     agent: f.agent,
     loginItem: f.loginItem,
+    tray: f.tray,
+    os: osOf(f.platform),
     ...(f.remote === undefined ? {} : { remote: f.remote }),
     paused: f.paused,
     unlocked: false,

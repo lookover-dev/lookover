@@ -42,7 +42,7 @@ export const lidBox = (view: Box, bottom: number): Box => ({
 });
 
 /** The share of an eye a paused mark's lids cover: past its centred pupil, a sliver of the eye left under it. */
-const PAUSED_SHARE = 0.74;
+export const PAUSED_SHARE = 0.74;
 /** That share as the lid's scale: the lid closes from the mark's top, above its eyes. */
 const { band } = MARK_SHAPES;
 const pausedLid = r2(

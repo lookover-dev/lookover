@@ -49,8 +49,12 @@
         "@lookover/settings": "workspace:*",
         "@lookover/store": "workspace:*",
         "@lookover/testkit": "workspace:*",
+        "@lookover/web": "workspace:*",
         "hono": "^4.12.0",
         "zod": "^4.6.5",
+      },
+      "devDependencies": {
+        "@lookover/brand": "workspace:*",
       },
     },
     "apps/site": {

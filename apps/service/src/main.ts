@@ -40,6 +40,7 @@ export async function main(self: Self): Promise<void> {
         clock: { now: () => Date.now() },
         print: printer,
         process,
+        openBrowser: (url) => openInBrowser(url),
         ...(self.kind === "clone" ? {} : { webFiles: self.webFiles }),
       }),
     background: {

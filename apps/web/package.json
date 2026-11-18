@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./tokens.css": "./src/styles/tokens.css",
-    "./github-colours.css": "./src/styles/github-colours.css"
+    "./github-colours.css": "./src/styles/github-colours.css",
+    "./tray": "./src/tray.ts"
   },
   "scripts": {
     "dev": "vite",
@@ -30,7 +31,10 @@
     "vite": "^8.3.2"
   },
   "lookover": {
-    "note": "The app on the service alone (ADR 0046): it talks to it through LookoverApi, the drawer through contracts' demo.ts. It also exports ./tokens.css, the design system's tokens (ADR 0064, 3), and ./github-colours.css, GitHub's colours for a picture of GitHub (the site's demo card), stylesheets, not module entries: the site imports them from its CSS and Astro files, which check-deps doesn't read; a TypeScript file importing one is a deep import, as for any package.",
-    "imports": {}
+    "note": "The app on the service alone (ADR 0046): it talks to it through LookoverApi, the drawer through contracts' demo.ts. It also exports ./tokens.css, the design system's tokens (ADR 0064, 3), and ./github-colours.css, GitHub's colours for a picture of GitHub (the site's demo card), stylesheets, not module entries: the site imports them from its CSS and Astro files, which check-deps doesn't read; a TypeScript file importing one is a deep import, as for any package. It exports ./tray, the tray's words (src/tray.ts), for the service alone: its tray icon says what the pill says (ADR 0105).",
+    "imports": {},
+    "entries": {
+      "./tray": "the service: the tray icon's state, its tooltip and its menu's line, in the pill's own words (ADR 0105)"
+    }
   }
 }

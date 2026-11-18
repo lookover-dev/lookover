@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { asWritten } from "./brand.test-support.ts";
 import {
   COLOURS,
+  COPIES,
   driftedCopies,
   LOADER,
   MARK,
@@ -95,13 +96,18 @@ test("a sheet that lost a region is refused, naming it and the region", () => {
   expect(() => sheet(lost)).toThrow(`${SHEET} has lost the region of the numbers \`bun run brand\` writes`);
 });
 
+// The copies drawn as text only: encoding the pictures, the tray's 66 among them, is most of a full write's time,
+// and this test ran over its limit under `check`'s load (as copies.test.ts's did, #793).
+const texts = { format: asWritten, copies: COPIES.filter((c) => !("picture" in c)) };
+
 test("a hand edit of a number in a region fails the check, naming the sheet", async () => {
   const root = checkout();
-  await writeCopies(root, { format: asWritten });
-  expect(await driftedCopies(root, { format: asWritten })).toEqual([]);
+  expect(texts.copies.map((c) => c.path)).toContain(SHEET);
+  await writeCopies(root, texts);
+  expect(await driftedCopies(root, texts)).toEqual([]);
   const file = join(root, SHEET);
   writeFileSync(file, readFileSync(file, "utf8").replace("<td>disc r 9.4</td>", "<td>disc r 9.5</td>"));
-  expect(await driftedCopies(root, { format: asWritten })).toEqual([
+  expect(await driftedCopies(root, texts)).toEqual([
     `${SHEET} is not what the source draws: run \`bun run brand\`.`,
   ]);
 });

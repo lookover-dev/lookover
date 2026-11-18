@@ -48,7 +48,15 @@ import type { Review, TimelineEntry } from "./review.ts";
 import type { CandidateFinding, Round, RoundSession, RuledOut, SecondFind } from "./round.ts";
 import { type CitedRule, RULES_FILES, type Rule } from "./rule.ts";
 import type { Run, RunPass, RunPosting, RunStep } from "./run.ts";
-import type { CheckItem, LoginHolder, LoginItemKind, Service } from "./service.ts";
+import type {
+  CheckItem,
+  LoginHolder,
+  LoginItemKind,
+  Service,
+  ServiceOs,
+  ServiceTray,
+  TrayShown,
+} from "./service.ts";
 import type {
   Depth,
   ResolvedSettings,
@@ -210,6 +218,13 @@ const loginHolder = tiedTo<LoginHolder>()(
   z.union([z.enum(["this", "none"]), z.object({ other: z.string() })]),
 );
 const loginItemKind = enumOf<LoginItemKind>()(["os", "stand-in"]);
+const serviceTray = tiedTo<ServiceTray>()(
+  z.object({
+    on: z.boolean(),
+    shown: enumOf<TrayShown>()(["shown", "starting", "off", "unavailable"]),
+    reason: z.string().nullable(),
+  }),
+);
 const settingsFileError = tiedTo<SettingsFileError>()(
   z.object({
     file: z.string(),
@@ -272,6 +287,8 @@ const serviceSchema = tiedTo<Service>()(
     startAtLogin: z.boolean(),
     atLogin: loginHolder,
     loginItem: loginItemKind,
+    tray: serviceTray,
+    os: enumOf<ServiceOs>()(["windows", "macos", "linux"]),
     paused: z.object({ since: z.number(), until: z.number().nullable() }).nullable(),
     remote: z.boolean(),
     unlocked: z.boolean(),

@@ -2,6 +2,15 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.18.0](https://github.com/lookover-dev/lookover/compare/v0.17.0...v0.18.0) (2026-11-18)
+
+### Features
+
+- **app:** Lookover sits in the tray while it runs, in the menu bar on macOS. Its eyes say what it is doing: reviewing, waiting for you, paused, or in trouble. A click opens the app (on macOS, its menu), and its menu opens it, pauses, resumes and quits Lookover. The icon comes with Lookover installed from npm; the standalone executables on the GitHub release have no tray.
+- **app:** Settings › **Show Lookover in the tray** turns the icon off, and says under the row whether it is shown, or why the computer can't show it. It is on by default.
+- **setup:** on Windows, the last step says where the icon is, under the taskbar's `^`, and how to keep it on the taskbar.
+- **cli:** `lookover start` ends with "Lookover is in the tray." (the menu bar on macOS), or "You can close this terminal." when the icon is off. `lookover status` says whether the icon is in the tray, and `--json` gives it as `tray`.
+
 ## [0.17.0](https://github.com/lookover-dev/lookover/compare/v0.16.0...v0.17.0) (2026-11-18)
 
 ### Features

@@ -11,12 +11,20 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:f
 import { join } from "node:path";
 import { API } from "@lookover/contracts";
 import { openStore } from "@lookover/store";
-import { type ApiDeps, createApi, type Loaded, type Loader, randomToken } from "./api.ts";
+import {
+  type ApiDeps,
+  createApi,
+  createLinks,
+  type Links,
+  type Loaded,
+  type Loader,
+  randomToken,
+} from "./api.ts";
 import { buildDemoRoom, type DemoRoomOptions, type Settled } from "./demo/driver.ts";
 import type { Scenario } from "./demo/scenario.ts";
 import { SCENARIOS } from "./demo/scenarios.ts";
 import type { LogReader, LogSink } from "./log-sink.ts";
-import { buildRoom, type RoomOptions } from "./room.ts";
+import { buildRoom, loggedAsks, type RoomOptions, type TrayAsks } from "./room.ts";
 import { described, said } from "./said.ts";
 import { REAL_TIMERS, type Timers } from "./timers.ts";
 import type { WebFiles } from "./web-files.ts";
@@ -46,6 +54,16 @@ interface ServerOptions {
    * same stop, then the process's exit).
    */
   stopAsked?: () => void;
+  /**
+   * What the tray's Quit asks for (ADR 0105 §10): `stopAsked`, else this service's own stop, unless the program gives
+   * its own (the same stop `lookover stop` asks for, logged as the tray's). Demo mode only logs it.
+   */
+  trayQuit?: () => void;
+  /**
+   * Opens the browser on the link the tray's Open mints (ADR 0105 §10), in demo mode too, answering whether it did:
+   * none in a test or development unless given, where the log says to run `open` instead.
+   */
+  openBrowser?: (url: string) => Promise<boolean>;
   /** The built web app the service serves beside its API (ADR 0054); none in development, where Vite serves it. */
   webFiles?: WebFiles;
   /**
@@ -149,6 +167,8 @@ export async function startService(o: ServiceOptions): Promise<RunningService> {
     origin: _origin,
     serverTimers: _timers,
     stopAsked: _stopAsked,
+    trayQuit: _trayQuit,
+    openBrowser: _openBrowser,
     webFiles: _webFiles,
     logSink: _logSink,
     preferredPort: _preferredPort,
@@ -156,8 +176,46 @@ export async function startService(o: ServiceOptions): Promise<RunningService> {
     namesOpen: _namesOpen,
     ...roomOptions
   } = o;
-  const room = await buildRoom({ ...roomOptions, log: logOf(o), ...secretsOf(o) });
-  return serve(o, { room: () => room, demo: () => null, loader: null });
+  const log = logOf(o);
+  /** The server, once it listens: the tray's Open and Quit reach it through this. */
+  let server: Served | null = null;
+  const trayAsks: TrayAsks = {
+    open: () => openMinted(server, o.openBrowser, () => room.snapshot().service.command, log),
+    // The stop `lookover stop` asks for (`API.stop`'s), unless the tray's own is given.
+    quit: () => (o.trayQuit ?? o.stopAsked ?? server?.stopped)?.(),
+  };
+  const room = await buildRoom({ ...roomOptions, log, ...secretsOf(o), trayAsks });
+  server = await serve(o, { room: () => room, demo: () => null, loader: null });
+  return server.running;
+}
+
+/**
+ * The tray's Open (ADR 0105 §10): the browser opened on a link `server` mints, or the log saying to run Lookover's
+ * `open` (`command`, read once the room is built) when it didn't open, never the link itself. Clicked before the
+ * server listens (`server` null, the room perhaps not built yet), it opens nothing, and the log says so.
+ */
+function openMinted(
+  server: Served | null,
+  openBrowser: ServerOptions["openBrowser"],
+  command: () => string,
+  log: (line: string) => void,
+): void {
+  if (server === null) {
+    log("The tray's Open came before Lookover was listening, so nothing opened");
+    return;
+  }
+  const url = server.links.mint().url;
+  const didnt = () => log(`The tray's Open didn't open a browser: run \`${command()} open\``);
+  if (openBrowser === undefined) {
+    didnt();
+    return;
+  }
+  void openBrowser(url).then(
+    (opened) => {
+      if (!opened) didnt();
+    },
+    () => didnt(),
+  );
 }
 
 /** Where a demo service keeps its rooms, one folder each, numbered in the order they were built. */
@@ -229,6 +287,13 @@ type LoadOptions = Pick<DemoRoomOptions, "ghSlow">;
  */
 export async function startDemoService(o: DemoServiceOptions): Promise<RunningService> {
   const log = logOf(o);
+  /** The server, once it listens: the tray's Open mints its link there, as the program's does. */
+  let server: Served | null = null;
+  // Demo mode plays the program's Open (ADR 0105 §10); its Quit is only logged, so the demo goes on.
+  const trayAsks: TrayAsks = {
+    open: () => openMinted(server, o.openBrowser, () => current.room.snapshot().service.command, log),
+    quit: loggedAsks(log).quit,
+  };
   /**
    * A room for `scenario` on a fresh folder, its events numbered after `eventsFrom`; the folder, to sweep it once
    * it is stopped. A seed that fails has stopped its room: its folder is swept here.
@@ -249,6 +314,7 @@ export async function startDemoService(o: DemoServiceOptions): Promise<RunningSe
         ...(o.userOnly === undefined ? {} : { userOnly: o.userOnly }),
         ...(o.gh === undefined ? {} : { gh: o.gh }),
         ...how,
+        trayAsks,
         // "gh-slow" (ADR 0091): this story loaded again, its `gh` slow from the start.
         againWithGhSlow: async (settled: Settled) => {
           const loaded = await load(scenario.id, settled, { ghSlow: true });
@@ -329,7 +395,8 @@ export async function startDemoService(o: DemoServiceOptions): Promise<RunningSe
     }
   };
   const loader: Loader = { loading: () => loading, load };
-  return serve(o, { room: () => current.room, demo: () => current.demo, loader });
+  server = await serve(o, { room: () => current.room, demo: () => current.demo, loader });
+  return server.running;
 }
 
 /** What the API reaches through accessors: the current room, its demo driver, and the loader that swaps rooms. */
@@ -348,8 +415,15 @@ function listenPreferring<T>(listen: (port: number) => T, wanted: number, prefer
   }
 }
 
+/** The server as it runs: what it gives the caller, its minted links, and its own stop with any failure logged. */
+interface Served {
+  running: RunningService;
+  links: Links;
+  stopped(): void;
+}
+
 /** The server over the rooms behind `doors`: the session, `Bun.serve` and the API. */
-async function serve(o: ServerOptions, doors: Doors): Promise<RunningService> {
+async function serve(o: ServerOptions, doors: Doors): Promise<Served> {
   const { port: wanted, origin: served, serverTimers } = o;
   const session = {
     cookie: sessionCookie(o.home),
@@ -380,19 +454,27 @@ async function serve(o: ServerOptions, doors: Doors): Promise<RunningService> {
   if (port === undefined) throw new Error("The server has no port");
   const own = `http://127.0.0.1:${port}`;
   const origin = served ?? own;
+  const timers = serverTimers ?? REAL_TIMERS;
+  const links = createLinks({
+    origin,
+    timers,
+    secret: (value) => o.logSink?.secret(value),
+    forget: (value) => o.logSink?.forget(value),
+  });
+  /** This service's own stop, its failure logged. */
+  const stopped = () => void stop().catch((error: unknown) => log(said(error)));
   api = createApi({
     ...doors,
     origin,
     session,
     namesOpen: o.namesOpen ?? false,
     keepaliveMs: KEEPALIVE_MS,
-    timers: serverTimers ?? REAL_TIMERS,
+    timers,
+    links,
     webFiles: o.webFiles ?? null,
     log,
     logs: o.logSink ?? null,
-    secret: (value) => o.logSink?.secret(value),
-    forget: (value) => o.logSink?.forget(value),
-    stop: () => (o.stopAsked ?? (() => void stop().catch((error: unknown) => log(said(error)))))(),
+    stop: () => (o.stopAsked ?? stopped)(),
   });
 
   /** The stop under way or done: asked twice (Ctrl+C, then `lookover stop`), the service stops once. */
@@ -408,10 +490,11 @@ async function serve(o: ServerOptions, doors: Doors): Promise<RunningService> {
     return stopping;
   };
 
-  return {
+  const running = {
     origin: own,
     port,
     openUrl: session.token === null ? null : `${origin}${API.session}?token=${session.token}`,
     stop,
   };
+  return { running, links, stopped };
 }

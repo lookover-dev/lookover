@@ -6,6 +6,7 @@
 // mark's numbers, 16 samples a pixel, so no rasteriser is needed.
 import { MARK_SHAPES } from "./icon.ts";
 import { COLOURS, MARK } from "./numbers.ts";
+import { drawPicture, type Rgb, rgb } from "./pixels.ts";
 import type { Image } from "./png.ts";
 
 /**
@@ -23,7 +24,6 @@ export const FULL_BLEED_PICTURES = {
   ],
 } as const;
 
-const SAMPLES = 4;
 const C = MARK.grid / 2;
 
 /** How far from the centre of the 64 grid the mark reaches: an eye's far edge or a line's far corner. */
@@ -34,13 +34,12 @@ export const MARK_REACH = Math.max(
   ),
 );
 
-const rgb = (hex: string) => [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
 const INK = rgb(COLOURS.ink);
 const PAPER = rgb(COLOURS.paper);
 const ACCENT = rgb(COLOURS.accent);
 
 /** The colour at a point of the 64 grid: the icon's drawing on the ink tile, solid eyes in paper. */
-function colourAt(gx: number, gy: number): number[] {
+function colourAt(gx: number, gy: number): Rgb {
   const [line1, line2] = MARK_SHAPES.lines;
   const inRect = (r: typeof line1) => gx >= r.x && gx < r.x + r.width && gy >= r.y && gy < r.y + r.height;
   if (inRect(line1)) return ACCENT;
@@ -55,24 +54,5 @@ function colourAt(gx: number, gy: number): number[] {
 
 /** The icon full bleed, `side` pixels square, every pixel opaque. */
 export function iconFullBleedPicture(side: number): Image {
-  const scale = side / MARK.grid;
-  const rgba = new Uint8Array(side * side * 4);
-  for (let y = 0; y < side; y++) {
-    for (let x = 0; x < side; x++) rgba.set([...pixelAt(x, y, scale), 255], (y * side + x) * 4);
-  }
-  return { width: side, height: side, rgba };
-}
-
-/** The pixel at (x, y): the mean of its samples' colours, on a grid of `SAMPLES` × `SAMPLES` inside it. */
-function pixelAt(x: number, y: number, scale: number): number[] {
-  const sum = [0, 0, 0];
-  for (let j = 0; j < SAMPLES; j++) {
-    for (let i = 0; i < SAMPLES; i++) {
-      const colour = colourAt((x + (i + 0.5) / SAMPLES) / scale, (y + (j + 0.5) / SAMPLES) / scale);
-      colour.forEach((c, k) => {
-        sum[k] = (sum[k] ?? 0) + c;
-      });
-    }
-  }
-  return sum.map((s) => Math.round(s / SAMPLES ** 2));
+  return drawPicture(side, { from: 0, span: MARK.grid }, colourAt);
 }

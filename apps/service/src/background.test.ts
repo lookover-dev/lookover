@@ -9,6 +9,7 @@ import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { API, type ServiceTray } from "@lookover/contracts";
 import {
   type BackgroundPorts,
   carriedWebFiles,
@@ -232,7 +233,8 @@ test("start runs the service in the background, start again reuses it; status, o
   expect(c.spawned).toEqual([["--demo", `--home=${home}`, "--background"]]);
   const link = linkIn(c.out);
   expect(link).toBeDefined();
-  expect(c.out.join("\n")).toContain("You can close this terminal.");
+  // Demo mode plays the machine on its fake tray, on by default (ADR 0105 §8): its icon is said to be there.
+  expect(c.out.at(-1)).toBe("Lookover is in the tray.");
   expect(c.opened).toEqual([]);
   // The link works, once: the service the command started is the one answering.
   const followed = await fetch(link ?? "", { redirect: "manual" });
@@ -256,6 +258,7 @@ test("start runs the service in the background, start again reuses it; status, o
     pid: expect.any(Number),
     since: expect.any(Number),
     atLogin: "none",
+    tray: { on: true, shown: "shown", reason: null },
   });
 
   expect(await c.run("open", `--home=${home}`, "--no-open")).toBe(0);
@@ -335,15 +338,11 @@ test("start and open name Lookover's command, never the bare address; --no-open 
   const named = `& 'C:\\Program Files\\Lookover\\lookover.exe' '--home=${home}'`;
   const c = command({}, { self: binary, platform: "win32" });
   expect(await c.run("start", "--demo", `--home=${home}`)).toBe(0);
-  expect(c.out).toEqual([
-    "Lookover runs in the background.",
-    ...opening(named),
-    "You can close this terminal.",
-  ]);
+  expect(c.out).toEqual(["Lookover runs in the background.", ...opening(named), "Lookover is in the tray."]);
   expect(c.opened).toHaveLength(1);
 
   expect(await c.run("start", `--home=${home}`)).toBe(0);
-  expect(c.out).toEqual(["Lookover already runs.", ...opening(named), "You can close this terminal."]);
+  expect(c.out).toEqual(["Lookover already runs.", ...opening(named), "Lookover is in the tray."]);
 
   expect(await c.run("open", `--home=${home}`)).toBe(0);
   expect(c.out).toEqual(opening(named));
@@ -442,7 +441,7 @@ test("from a clone, start and open name bun run lookover; the profile's data fol
   expect(c.out).toEqual([
     "Lookover runs in the background.",
     ...opening(`bun run lookover ${quoted}`),
-    "You can close this terminal.",
+    "Lookover is in the tray.",
   ]);
   expect(await c.run("stop", `--home=${home}`)).toBe(0);
 
@@ -638,15 +637,23 @@ const LINK_GIVEN = "http://127.0.0.1:1/api/v1/session?token=given";
 
 /**
  * The data folder `home` held in this process by a service still starting: its lock taken, no `instance.json` until
- * `announce` writes it, at the address of a server that mints `LINK_GIVEN`.
+ * `announce` writes it, at the address of a server that mints `LINK_GIVEN`; with `tray`, its snapshot says that tray
+ * (and nothing else; a function says the tray of the moment it is asked), the session asked as the UI asks.
  */
-function booting(home: string) {
+function booting(home: string, tray?: ServiceTray | (() => ServiceTray)) {
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "session"), "a".repeat(32));
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: () => Response.json({ url: LINK_GIVEN }),
+    fetch: (request) => {
+      const asked = new URL(request.url).pathname;
+      if (asked !== API.snapshot || tray === undefined) return Response.json({ url: LINK_GIVEN });
+      const cookie = request.headers.get("cookie") ?? "";
+      if (request.method !== "GET" || !cookie.endsWith(`=${"a".repeat(32)}`))
+        return Response.json({ error: "no session" }, { status: 401 });
+      return Response.json({ service: { tray: typeof tray === "function" ? tray() : tray } });
+    },
   });
   cleanups.push(() => server.stop(true));
   const instance = takeInstance(home, async () => {});
@@ -697,6 +704,90 @@ test("a service still starting: status says starting; start waits for it to say 
   // Only the data folder was given: no option to say wasn't used.
   expect(later.out.join("\n")).not.toContain("wasn't used");
   expect(later.out.join("\n")).toContain(LINK_GIVEN);
+});
+
+const TRAY_SHOWN: ServiceTray = { on: true, shown: "shown", reason: null };
+const TRAY_STARTING: ServiceTray = { on: true, shown: "starting", reason: null };
+const TRAY_OFF: ServiceTray = { on: false, shown: "off", reason: null };
+const TRAY_UNAVAILABLE: ServiceTray = {
+  on: true,
+  shown: "unavailable",
+  reason: "No lookover-tray beside this executable",
+};
+
+/**
+ * What `start` says last, and `status` says and prints as JSON, on a service whose snapshot says `tray`, `start`
+ * waiting on `time`.
+ */
+async function saidWith(
+  tray: ServiceTray | (() => ServiceTray) | undefined,
+  platform: NodeJS.Platform,
+  time?: BackgroundPorts["time"],
+) {
+  const home = folder();
+  const service = booting(home, tray);
+  await service.announce();
+  const c = command(time === undefined ? {} : { time }, { platform });
+  expect(await c.run("start", `--home=${home}`)).toBe(0);
+  const last = c.out.at(-1);
+  expect(await c.run("status", `--home=${home}`)).toBe(0);
+  const line = c.out.join("\n").split("\n").at(-1);
+  expect(await c.run("status", `--home=${home}`, "--json")).toBe(0);
+  return { last, line, json: JSON.parse(c.out.join("\n")).tray };
+}
+
+test("start's last line says Lookover is in the tray while its icon is shown (ADR 0105 §13)", async () => {
+  expect((await saidWith(TRAY_SHOWN, "linux")).last).toBe("Lookover is in the tray.");
+  expect((await saidWith(TRAY_SHOWN, "darwin")).last).toBe("Lookover is in the menu bar.");
+  expect((await saidWith(TRAY_OFF, "linux")).last).toBe("You can close this terminal.");
+  expect((await saidWith(TRAY_UNAVAILABLE, "win32")).last).toBe("You can close this terminal.");
+  // A service whose snapshot says no tray: as before.
+  expect((await saidWith(undefined, "linux")).last).toBe("You can close this terminal.");
+});
+
+/** A tray on its way for the first `waits` asks, then `then`: the asks counted. */
+function comingThen(waits: number, then: ServiceTray) {
+  const asks = { count: 0 };
+  return { asks, tray: () => (asks.count++ < waits ? TRAY_STARTING : then) };
+}
+
+test("start waits while the icon is on its way, then says where it went", async () => {
+  const shown = comingThen(2, TRAY_SHOWN);
+  expect((await saidWith(shown.tray, "win32", jumpingTime())).last).toBe("Lookover is in the tray.");
+  const failed = comingThen(1, TRAY_UNAVAILABLE);
+  expect((await saidWith(failed.tray, "win32", jumpingTime())).last).toBe("You can close this terminal.");
+});
+
+test("an icon still on its way after the helper's 10 s: start stops waiting and says the terminal can be closed", async () => {
+  const never = comingThen(Number.POSITIVE_INFINITY, TRAY_SHOWN);
+  // The clock jumps 5 s at each wait: start asks at 0, 5 and 10 s, then stops.
+  expect((await saidWith(never.tray, "win32", jumpingTime())).last).toBe("You can close this terminal.");
+  // Three asks from start, one each from status and status --json.
+  expect(never.asks.count).toBe(5);
+});
+
+test("status says the tray in one line, and --json carries it as the snapshot says it (ADR 0105 §12)", async () => {
+  expect(await saidWith(TRAY_SHOWN, "linux")).toMatchObject({
+    line: "Its icon is in the tray.",
+    json: TRAY_SHOWN,
+  });
+  expect(await saidWith(TRAY_SHOWN, "darwin")).toMatchObject({ line: "Its icon is in the menu bar." });
+  expect(await saidWith(TRAY_STARTING, "win32")).toMatchObject({
+    line: "Its icon is on its way to the tray.",
+    json: TRAY_STARTING,
+  });
+  expect(await saidWith(TRAY_OFF, "linux")).toMatchObject({
+    line: "It shows no icon in the tray.",
+    json: TRAY_OFF,
+  });
+  expect(await saidWith(TRAY_UNAVAILABLE, "win32")).toMatchObject({
+    line: "Its icon can't be shown in the tray. No lookover-tray beside this executable.",
+    json: TRAY_UNAVAILABLE,
+  });
+  // A service that doesn't say: no line, and null.
+  const unsaid = await saidWith(undefined, "linux");
+  expect(unsaid.line).toBe("It doesn't start at login.");
+  expect(unsaid.json).toBeNull();
 });
 
 test("a service still starting after 60 s: start says so, with where its log is", async () => {

@@ -33,10 +33,10 @@ Lookover starts in the background and opens in your browser:
 Lookover runs in the background.
 Lookover is opening in your browser.
 Don't see it? `lookover open --no-open` prints a link to paste (it works once, within 2 minutes).
-You can close this terminal.
+Lookover is in the tray.
 ```
 
-Close the terminal whenever you like: it keeps running, and starts again each time you log in (Settings turns that off).
+Close the terminal whenever you like: it keeps running, and starts again each time you log in (Settings turns that off). Its icon in the tray, the menu bar on macOS, opens it again; on macOS the last line says the menu bar.
 
 The setup takes a few minutes, one step at a time:
 

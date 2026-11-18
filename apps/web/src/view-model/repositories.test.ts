@@ -93,6 +93,8 @@ function world(repos: Repository[], departed: DepartedRepository[] = []): State 
       startAtLogin: true,
       atLogin: "this",
       loginItem: "os",
+      tray: { on: true, shown: "shown", reason: null },
+      os: "linux",
       paused: null,
       remote: false,
       unlocked: false,

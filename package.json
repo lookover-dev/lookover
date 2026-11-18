@@ -1,6 +1,6 @@
 {
   "name": "lookover",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "bun scripts/dev.ts",
     "build": "bun scripts/build.ts",
+    "cargo:check": "bun scripts/cargo-check.ts",
     "build:program": "bun run --filter @lookover/web build:program",
     "site:build": "bun apps/site/scripts/build.ts",
     "site:check": "bun apps/site/scripts/check.ts",
@@ -24,9 +25,9 @@
     "ignores": "bun scripts/check-ignores.ts",
     "imports": "bun scripts/check-deps.ts",
     "knip": "knip --cache",
-    "check": "bun run typecheck && bun run lint && bun run ignores && bun run imports && bun run knip && bun run test && bun run site:check",
+    "check": "bun run typecheck && bun run lint && bun run ignores && bun run imports && bun run knip && bun run test && bun run site:check && bun run cargo:check",
     "proof": "bun scripts/proof.ts",
-    "check:full": "bun run typecheck && bun run lint && bun run ignores && bun run imports && bun run knip && bun run test && bun run site:check && bun run test:scripts",
+    "check:full": "bun run typecheck && bun run lint && bun run ignores && bun run imports && bun run knip && bun run test && bun run site:check && bun run cargo:check && bun run test:scripts",
     "test:scripts": "GIT_DIR=no-such-git-dir bun scripts/test-run.ts ./scripts",
     "lookover": "bun apps/service/src/main.ts",
     "migrations": "bun scripts/migrations.ts",

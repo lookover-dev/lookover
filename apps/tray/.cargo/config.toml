@@ -1,0 +1,3 @@
+# Cargo builds into the root's dist/cargo (ADR 0105 §1), which Git, Biome, knip and the tests leave alone.
+[build]
+target-dir = "../../dist/cargo"

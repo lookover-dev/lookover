@@ -193,6 +193,8 @@ function world(prs: [number, Reviewed][]): State {
       startAtLogin: true,
       atLogin: "none",
       loginItem: "os",
+      tray: { on: true, shown: "shown", reason: null },
+      os: "linux",
       paused: null,
       remote: false,
       unlocked: false,

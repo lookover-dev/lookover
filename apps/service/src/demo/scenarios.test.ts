@@ -26,10 +26,10 @@ afterAll(stopAll);
 const MIN = 60_000;
 const id = (n: number) => changeId(`sasensi/lookover-sandbox#${n}`);
 /**
- * S10's seed: sixty-four events (the start, the account the sign-in reaches, the repository, six pull requests and their reviews, their outboxes as
- * they posted, main's rules read and counted three times).
+ * S10's seed: sixty-five events (the start, the account the sign-in reaches, the repository, the tray icon shown, six
+ * pull requests and their reviews, their outboxes as they posted, main's rules read and counted three times).
  */
-const SEEDED = 64;
+const SEEDED = 65;
 
 /**
  * S10 loaded once for the file (its seed is two and a half hours of polls), and the drawer's listing of it read as

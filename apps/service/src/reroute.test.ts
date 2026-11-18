@@ -99,10 +99,10 @@ const onClaude: Pick<ReviewJob, "state" | "deferral"> = {
   deferral: { reason: "engine-signed-out", engine: "claude" },
 };
 /**
- * The start, the account the sign-in reaches, the repository, #1 opened, queued and deferred, #2 opened (Mira's, not
- * asked: no job, ADR 0078), the ask queued and deferred.
+ * The start, the account the sign-in reaches, the repository, the tray icon shown (ADR 0105), #1 opened, queued and
+ * deferred, #2 opened (Mira's, not asked: no job, ADR 0078), the ask queued and deferred.
  */
-const SEEDED_EVENTS = 9;
+const SEEDED_EVENTS = 10;
 
 /** Reads events until a `job.changed` of `change` whose job is in `state`; the events read. */
 async function untilJob(

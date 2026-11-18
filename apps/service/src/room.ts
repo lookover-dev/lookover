@@ -114,6 +114,8 @@ import {
 import { atLoginLeft, createStartAtLogin, matchedAtStart } from "./start-at-login.ts";
 import { statusNow } from "./status-block.ts";
 import { REAL_TIMERS, type Timers } from "./timers.ts";
+import { nowhereTray, type Tray, type TrayItem } from "./tray.ts";
+import { createTrayKeeper, trayAtStart } from "./tray-keeper.ts";
 import { createUnreached } from "./unreached.ts";
 
 /** One find pass may take this long (ADR 0012's wall clock) before the engine is killed. */
@@ -241,6 +243,17 @@ export interface RoomOptions {
    * config (`runService` chooses); by default, the stand-in that registers nothing (ADR 0070).
    */
   loginItem?: AtLoginItem;
+  /**
+   * Lookover in the tray (ADR 0105 §8): the real one only for the program without a live config (`runService`
+   * chooses, `helperTray`); demo mode's fake; by default, the stand-in that shows nothing.
+   */
+  tray?: Tray;
+  /**
+   * What the tray's Open and Quit ask of the server around the room (ADR 0105 §10): a link minted and the browser
+   * opened on it, the service's graceful stop. `startService` gives them, `startDemoService` its Open and a logged
+   * Quit; a room alone (a test's) only logs the two clicks, and goes on.
+   */
+  trayAsks?: TrayAsks;
   /**
    * The person's own `gh` (ADR 0059), read only: the real one for the program and live mode, testkit's fake in demo
    * mode (`runService` chooses); none in a test that doesn't ask, read as `gh` not installed. Read for the person's
@@ -400,6 +413,8 @@ export interface Room {
    * Refused with the machine's reason, the choice as it was.
    */
   startAtLogin(on: boolean, takeOver?: boolean): Promise<"ok" | { refused: string }>;
+  /** "Show Lookover in the tray" (ADR 0105 §11): the choice kept and sent; off stops the icon at once, on starts it. */
+  tray(on: boolean): void;
   /**
    * Your coding agent (ADR 0058): `agent.check` reads the PATH and the skills again; `agent.path` puts Lookover's
    * folder on the PATH or takes it off (the binary alone: refused elsewhere), Lookover's command following;
@@ -481,6 +496,58 @@ function heldUntilReady<A extends unknown[]>(): {
 const loginItemOf = (o: RoomOptions): AtLoginItem =>
   o.loginItem ?? { item: nowhereLoginItem(), kind: "stand-in" };
 
+/** The tray the options give, else the stand-in that shows nothing (ADR 0105 §8). */
+const trayOf = (o: RoomOptions): Tray => o.tray ?? nowhereTray();
+
+/** What the tray's Open and Quit ask of the server around the room (ADR 0105 §10). */
+export interface TrayAsks {
+  /** A one-time link minted as `API.link` mints them, and the browser opened on it. */
+  open(): void;
+  /** The service's graceful stop, the one `lookover stop` asks for. */
+  quit(): void;
+}
+
+/** A room alone's Open and Quit (a test's), and demo mode's Quit: logged, and the room goes on. */
+export const loggedAsks = (log: (line: string) => void): TrayAsks => ({
+  open: () => log("The tray's menu asked to open Lookover"),
+  quit: () => log("The tray's menu asked to quit Lookover"),
+});
+
+/** The tray's Open and Quit: the server's when the options give them, else only logged. */
+const asksOf = (o: RoomOptions, log: (line: string) => void): TrayAsks => o.trayAsks ?? loggedAsks(log);
+
+/**
+ * What a click on the tray's menu does (ADR 0105 §10): the room's own, one case per item, so a new item fails to
+ * compile until it has its case. Open and Quit are the server's (`asks`); the Pauses take the app's three durations
+ * and Resume is the app's, on the queue, so the events say them (and the log, and the icon) as they say the app's.
+ */
+const trayClicks =
+  (asks: TrayAsks, queue: Pick<Room, "pause" | "resume">) =>
+  (item: TrayItem): void => {
+    switch (item) {
+      case "open":
+        asks.open();
+        return;
+      case "pause.hour":
+        queue.pause("hour");
+        return;
+      case "pause.tomorrow":
+        queue.pause("tomorrow");
+        return;
+      case "pause.forever":
+        queue.pause("forever");
+        return;
+      case "resume":
+        queue.resume();
+        return;
+      case "quit":
+        asks.quit();
+        return;
+      default:
+        item satisfies never;
+    }
+  };
+
 /** GitHub's web address the room's links are built on: GitHub's own unless the options name another. */
 const webOf = (o: RoomOptions): string => o.web ?? GITHUB_WEB;
 
@@ -507,6 +574,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   // Start at login made to match the owner's choice, once the setup is done (ADR 0054).
   const loginItem = loginItemOf(o);
   const heldAtStart = await matchedAtStart(loginItem.item, store, logLine);
+  // The tray: its keeper starts it once the room runs.
+  const tray = trayOf(o);
   const timers = o.timers ?? REAL_TIMERS;
   /** What the room watches: the store's last listing until the start's listing makes it the room's own. */
   const watching = { all: (): readonly RepositoryRef[] => store.repos.listed() };
@@ -599,6 +668,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       startAtLogin: store.setup.startAtLogin(),
       atLogin: heldAtStart,
       loginItem: loginItem.kind,
+      tray: trayAtStart(store.setup.tray(), tray),
       platform: o.platform,
       paused: store.pause.current(),
       ...(o.remote === undefined ? {} : { remote: o.remote }),
@@ -648,6 +718,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     const foundBefore = found();
     shown = apply(shown, event);
     log.publish(event);
+    // The tray icon told the pill's words, when the event moved them (ADR 0105 §9).
+    trayKeeper.moved();
     // An agent found or gone: its skill offered or not, read from its folder.
     if (body.type === "engine.changed" && !isDeepStrictEqual(found(), foundBefore))
       void codingAgent
@@ -664,6 +736,20 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
 
   /** The UI's state now: what the events made it, as of this moment. */
   const snapshot = (): State => ({ ...shown, now: Math.max(shown.now, o.clock.now()) });
+  // Lookover in the tray (ADR 0105): started below, once the room runs; told what the events make the UI show.
+  const trayKeeper = createTrayKeeper({
+    tray,
+    // The queue is built below; a click comes once the room runs.
+    clicked: trayClicks(asksOf(o, logLine), {
+      pause: (duration) => queue.pause(duration),
+      resume: () => queue.resume(),
+    }),
+    store,
+    clock: o.clock,
+    emit: (body) => emit(body),
+    state: snapshot,
+    log: logLine,
+  });
 
   /**
    * "Too noisy?"'s counts (ADR 0049): the repository's last 30 reviewed changes, as the store reads them.
@@ -1111,6 +1197,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   };
   // The installation's own loop: its repositories every 2 minutes (ADR 0088), or the install waited for (ADR 0053).
   github.begin(store.setup.read());
+  // The tray icon, when the owner's choice is on (ADR 0105 §11).
+  trayKeeper.begin();
 
   /** Settles once `stop` began: what waits on the engines or the disk then ends at once. */
   let letStop = () => {};
@@ -1326,6 +1414,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       (changeId, findingId) => decided(changeId, findingId, "wrong", null, "app", null),
     ),
     startAtLogin: atLogin.choose,
+    tray: trayKeeper.choose,
     agent: { check: codingAgent.check, path: codingAgent.path, skill: codingAgent.skill },
     pause: queue.pause,
     resume: queue.resume,
@@ -1334,6 +1423,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     stop: async () => {
       letStop();
       stopping = true;
+      trayKeeper.stop();
       unreached.stop();
       signIn.stop();
       deviceFlow.stop();

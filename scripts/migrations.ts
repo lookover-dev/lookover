@@ -3,11 +3,18 @@
 // bundled or compiled service carries them. Run it after adding, removing or renaming a migration; the store's
 // tests fail while the list misses one, and scripts/migrations.test.ts while the module differs from what this
 // writes. The text goes through Biome's formatter, so the module is as `bun run check` wants it whatever a
-// migration's name. This reads the folder itself and imports of the store only its name rule (a second entry that
-// imports nothing), so it runs while the list is stale.
+// migration's name. This reads the folder itself and imports of the store only two entries off its index: its name
+// rule, which imports nothing, and `released-migrations`, which imports only Node and zod. Neither reaches the
+// embedded list, so it runs while the list is stale.
+// `bun run migrations --released` writes the other list instead, packages/store/src/released-migrations.json: the
+// migrations the last release carries, each with a hash of its text, from the newest plain vX.Y.Z tag merged into
+// HEAD and never the working tree, for the store test that refuses an edit to one where no tag is reachable (CI's
+// checkout; ADR 0103, ADR 0104). Run it in the first pull request after each release (docs/agents/release.md); it
+// says which release it wrote, and fails when no tag is reachable (fetch the tags: `git fetch origin --tags`).
 import { readdirSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { MIGRATION_FILE as NAME } from "@lookover/store/migration-name";
+import { releasedList } from "@lookover/store/released-migrations";
 import { spawnSync } from "bun";
 
 const root = resolve(import.meta.dir, "..");
@@ -55,7 +62,16 @@ export function migrationsModule(folder: string = MIGRATIONS): string {
   );
 }
 
+/** The list of the last release's migrations, which `--released` writes. */
+const RELEASED_MIGRATIONS = join(STORE, "released-migrations.json");
+
 if (import.meta.main) {
-  writeFileSync(EMBEDDED_MIGRATIONS, migrationsModule());
-  console.log(`Wrote ${relative(root, EMBEDDED_MIGRATIONS)}.`);
+  if (process.argv.includes("--released")) {
+    const { release, text } = releasedList({ folder: MIGRATIONS, env: process.env });
+    writeFileSync(RELEASED_MIGRATIONS, text);
+    console.log(`Wrote ${relative(root, RELEASED_MIGRATIONS)} for ${release}.`);
+  } else {
+    writeFileSync(EMBEDDED_MIGRATIONS, migrationsModule());
+    console.log(`Wrote ${relative(root, EMBEDDED_MIGRATIONS)}.`);
+  }
 }

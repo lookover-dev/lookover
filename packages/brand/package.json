@@ -10,7 +10,7 @@
   "lookover": {
     "imports": {},
     "entries": {
-      "./write": "bun run brand: writes every copy of the eyes (the brand files, the brand sheet's regions, the app's and the site's copies) from the source (ADR 0063)"
+      "./write": "bun run brand: writes every copy of the eyes (the brand files, the brand sheet's regions, the app's, the site's and the tray's copies) from the source (ADR 0063)"
     }
   }
 }

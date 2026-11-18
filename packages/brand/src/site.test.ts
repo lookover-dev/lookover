@@ -12,6 +12,7 @@ import {
   addressableLoader,
   addressableMark,
   addressableWordmark,
+  COPIES,
   driftedCopies,
   GAZE,
   icon,
@@ -37,6 +38,8 @@ function checkout(): string {
 }
 
 const format = asWritten;
+/** The copies drawn as text: encoding the pictures, the tray's among them, is most of a full write's time. */
+const texts = { format, copies: COPIES.filter((c) => !("picture" in c)) };
 
 test("the site's text copies are its SVG favicon, its module of the eyes and its stylesheet", () => {
   expect([SITE_FAVICON, SITE_MODULE, SITE_STYLESHEET]).toEqual([
@@ -162,8 +165,8 @@ test("under reduced motion nothing moves: every animation plays only with no pre
 
 test("a hand edit of the site's module, stylesheet or favicon fails, naming the file", async () => {
   const root = checkout();
-  await writeCopies(root, { format });
-  expect(await driftedCopies(root, { format })).toEqual([]);
+  await writeCopies(root, texts);
+  expect(await driftedCopies(root, texts)).toEqual([]);
   for (const [path, from, to] of [
     // The full-bleed favicon rounded again by hand.
     [SITE_FAVICON, 'height="64" fill', 'height="64" rx="14.4" fill'],
@@ -174,7 +177,7 @@ test("a hand edit of the site's module, stylesheet or favicon fails, naming the 
     writeFileSync(file, readFileSync(file, "utf8").replace(from, to));
   }
   const run = "run `bun run brand`";
-  expect(await driftedCopies(root, { format })).toEqual([
+  expect(await driftedCopies(root, texts)).toEqual([
     `${SITE_FAVICON} is not what the source draws: ${run}.`,
     `${SITE_MODULE} is not what the source draws: ${run}.`,
     `${SITE_STYLESHEET} is not what the source draws: ${run}.`,

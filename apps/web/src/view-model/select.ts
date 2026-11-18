@@ -1198,10 +1198,21 @@ function counts(state: State, g: HomeGroups, reviewed: ChangeReview[], problemCo
 }
 
 /** How long reviews stay paused ("until 09:52", "until you resume"), or null when they aren't. */
-function pauseUntil(state: State): string | null {
+export function pauseUntil(state: State): string | null {
   const pause = state.service.paused;
   if (!pause) return null;
   return `until ${pause.until ? clock(pause.until) : "you resume"}`;
+}
+
+/**
+ * How Home's sentence and the tray count the person's pull requests that need them, without a full stop: "2 previews
+ * to read" when each is a preview (ADR 0072), else "2 pull requests need you"; null when none does.
+ */
+export function needsWords(needs: ChangeReview[]): string | null {
+  const n = needs.length;
+  if (n === 0) return null;
+  if (needs.every((i) => status(i).kind === "preview")) return `${plural(n, "preview")} to read`;
+  return `${n} pull ${n === 1 ? "request needs" : "requests need"} you`;
 }
 
 export function sentence(state: State): { title: string; small: string } {
@@ -1220,14 +1231,8 @@ export function sentence(state: State): { title: string; small: string } {
   // headline said them three times). The headline speaks of the reviews: the person's own that need them, else
   // "Nothing else needs you." under a problem. A review waiting because of a listed problem is that problem's effect.
   const blocking = list.filter((p) => p.tone === "need");
-  const own = g.needs;
-  if (own.length > 0 && own.every((i) => status(i).kind === "preview")) {
-    return { title: `${plural(own.length, "preview")} to read.`, small };
-  }
-  if (own.length > 0) {
-    const n = own.length;
-    return { title: `${n} pull ${n === 1 ? "request needs" : "requests need"} you.`, small };
-  }
+  const own = needsWords(g.needs);
+  if (own) return { title: `${own}.`, small };
   if (blocking.length > 0) return { title: "Nothing else needs you.", small };
   if (pausedFor) return { title: "Reviews are paused.", small: [pausedFor, ...parts].join(" · ") };
   if (g.running.length > 0 || g.waiting.length > 0) return { title: "Nothing needs you.", small };

@@ -1,0 +1,3 @@
+# The tray's icons
+
+Each file is `<state>-<variant>-<size>.png`, for example `needs-you-dark-16.png`: one of the tray's five states (`problem`, `paused`, `needs-you`, `reviewing`, `idle`), the variant its platform takes (`light` and `dark` for Windows, `template` for macOS, `panel` for Linux) and its side in pixels. Each is an 8-bit RGBA PNG, the colour not premultiplied. `bun run brand` writes them from `packages/brand`, and the check fails on one edited by hand: change the drawing there. What each state draws and why is in `docs/product/brand.md`, "The tray" (a folder the public tree leaves out).

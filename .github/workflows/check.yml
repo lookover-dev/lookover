@@ -1,6 +1,7 @@
 # The checks, on every pull request and every push to main: the exact dependencies in bun.lock, then `bun run check`
-# (types, Biome, the import rules, knip and the tests), as CONTRIBUTING.md asks before a commit. A pull request here
-# is ported by hand to the repository Lookover is made in (CONTRIBUTING.md); this says it is green first.
+# (types, Biome, the import rules, knip, the tests, the site's checks, and the tray helper's crate with the runner's
+# Cargo), as CONTRIBUTING.md asks before a commit. A pull request here is ported by hand to the repository Lookover is
+# made in (CONTRIBUTING.md); this says it is green first.
 #
 # Hardening: actions pinned to full commit SHAs (the tag in the comment), the token reads contents
 # only, checkout keeps no credentials, no pull_request_target, no cache.

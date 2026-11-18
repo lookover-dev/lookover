@@ -519,6 +519,23 @@ test("start at login is on until the owner turns it off, kept across a restart, 
   expect(open(dir).setup.startAtLogin()).toBe(false);
 });
 
+test("the tray is on until the owner turns it off, kept across a restart, apart from start at login (ADR 0105)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  expect(store.setup.tray()).toBe(true);
+  store.setup.keepTray(false);
+  expect(store.setup.tray()).toBe(false);
+  // Its own choice: start at login stays on, and the setup isn't kept.
+  expect(store.setup.startAtLogin()).toBe(true);
+  expect(store.setup.kept()).toBe(false);
+  store.close();
+  const again = open(dir);
+  expect(again.setup.tray()).toBe(false);
+  again.setup.keepTray(true);
+  again.close();
+  expect(open(dir).setup.tray()).toBe(true);
+});
+
 test("the pause is kept across a restart, a later pause replaces it, and a resume clears it (ADR 0040)", () => {
   const dir = migrated();
   const store = open(dir);

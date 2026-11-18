@@ -8,13 +8,13 @@
 // now; the listing is what the drawer shows. The owner is signed in to the shared App (ADR 0066) before the room
 // starts once the setup is past its GitHub step: a sign-in the fake's device flow issued, kept in a sign-in store on a
 // keychain of the room's own; the fake's device flow is offered all the same, its code entered on GitHub's fake device
-// page or by the drawer. Start at login is the fake's, kept across restarts as the computer keeps it (ADR 0054). Some
-// faults restart the service (start at login gone and refused, or taken, which a service matches only at its start;
-// the program installed by npm, which a service learns only at its start): the room
-// stopped and built again on the same folder,
-// store and world, its own timers dropped and the world's kept; `room` is the room now. A seed whose review fails (a
-// fixture missing an answer) rejects with the job's failure, and one whose move throws with that error, its room
-// stopped first: a scenario never loads half told.
+// page or by the drawer. Start at login is the fake's, kept across restarts as the computer keeps it (ADR 0054), and
+// so is the tray (ADR 0105), whose menu the drawer clicks and whose icon it ends. Some faults restart the service
+// (start at login gone and refused, or taken, which a service matches only at its start; a computer with no tray; the
+// program installed by npm, which a service learns only at its start): the room stopped and built again on the same
+// folder, store and world, its own timers dropped and the world's kept; `room` is the room now. A seed whose review
+// fails (a fixture missing an answer) rejects with the job's failure, and one whose move throws with that error, its
+// room stopped first: a scenario never loads half told.
 
 import { join } from "node:path";
 import {
@@ -42,12 +42,13 @@ import {
 import { memoryCommandPath } from "../command-path.ts";
 import { memoryKeychain } from "../keychain.ts";
 import { memoryLoginItem } from "../login-item.ts";
-import { buildRoom, type Room, type RoomOptions } from "../room.ts";
+import { buildRoom, type Room, type RoomOptions, type TrayAsks } from "../room.ts";
 import { said } from "../said.ts";
 import { type SignInStore, signInStore } from "../sign-in-store.ts";
 import { memorySkillFolders, SKILL_NAME } from "../skill-folders.ts";
 import { signedInAtSetup } from "../snapshot.ts";
 import type { Timers } from "../timers.ts";
+import { memoryTray, type TrayItem } from "../tray.ts";
 import type { Move, Scenario, TimedMove } from "./scenario.ts";
 import { SCENARIOS } from "./scenarios.ts";
 import { demoSettingsFiles, plantSettings } from "./settings.ts";
@@ -92,6 +93,8 @@ export interface DemoRoomOptions {
    * the commands under way (`settled`) have answered; what the load answered. Absent, the fault refuses.
    */
   againWithGhSlow?: (settled: Settled) => Promise<"ok" | { failed: string }>;
+  /** What the tray's Open and Quit ask of the server around the room (ADR 0105 §10): only logged unless given. */
+  trayAsks?: TrayAsks;
 }
 
 /**
@@ -113,7 +116,8 @@ export type InjectRefusal =
   | "not_signed_in"
   | "no_organisation_reached"
   | "nothing_asked"
-  | "no_load";
+  | "no_load"
+  | "no_tray";
 
 export interface DemoRoom {
   /** The room now: another one once a fault restarted the service. */
@@ -161,6 +165,22 @@ const DEMO_COMMAND = {
  * beside the downloaded program, as its `Run` value holds it.
  */
 const DEMO_OTHER_AT_LOGIN = String.raw`"${DEMO_USER_HOME}\AppData\Roaming\npm\node_modules\lookover\bin\lookover.exe" start --no-open`;
+
+/** Why the demo tray's icon ended, under `tray-ends`. */
+const DEMO_TRAY_ENDED = "The tray icon stopped answering";
+
+/** Why the demo computer shows no icon, under `tray-unavailable`. */
+const DEMO_NO_TRAY = "No tray to show an icon in";
+
+/** The drawer's verb that clicks each item of the tray's menu (ADR 0105 §10): a new item fails to compile here. */
+const TRAY_CLICKS = {
+  open: "tray-open",
+  "pause.hour": "tray-pause-hour",
+  "pause.tomorrow": "tray-pause-tomorrow",
+  "pause.forever": "tray-pause-forever",
+  resume: "tray-resume",
+  quit: "tray-quit",
+} as const satisfies Record<TrayItem, FaultId>;
 /** The binary as the skill calls it: forward slashes, one line Git Bash and PowerShell (with `&`) both read. */
 const DEMO_SKILL_COMMAND = "'C:/Users/Your Name/Downloads/lookover.exe'";
 /** The home of the room the `npm-install` fault restarts as an npm install (ADR 0061): its folders are under it. */
@@ -283,6 +303,14 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
   // The computer's start at login, in memory: it outlives a restart, as the owner's registration would. Said as the
   // machine's (`os`): demo mode plays the program, so its screens show what the owner's would, its faults included.
   const loginItem = memoryLoginItem();
+  // The computer's tray, in memory (ADR 0105 §8): what it was told to show, clicked and ended by the drawer.
+  const tray = memoryTray();
+  /** A click on the tray's menu; nothing when no icon is shown. */
+  const clickTray = (item: TrayItem): Promise<"ok" | InjectRefusal> => {
+    if (!tray.running()) return Promise.resolve("no_tray");
+    tray.click(item);
+    return Promise.resolve("ok");
+  };
   // Your coding agent's PATH and skill folders, in memory (ADR 0058): they outlive a restart, as the machine's would.
   let commandPath = memoryCommandPath({ folder: DEMO_PATH_FOLDER });
   // How the program was installed: downloaded, until `npm-install` restarts it as an npm install (ADR 0061).
@@ -294,10 +322,13 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
   /** The room reads it slow under "gh-slow": what it names answers once the clock is 30 s past the seed's end. */
   const roomGh = o.ghSlow ? heldUntil(gh, clock, start + scenario.seed + GH_SLOW_MS) : gh;
   let made = 0;
+  const trayAsks = o.trayAsks === undefined ? {} : { trayAsks: o.trayAsks };
   const optionsOn = (store: Store, own: ReturnType<typeof roomClock>): RoomOptions => ({
     home: o.home,
     store,
     loginItem: { item: loginItem, kind: "os" },
+    tray,
+    ...trayAsks,
     agent: {
       path: commandPath,
       skills: skillFolders,
@@ -709,6 +740,27 @@ export async function buildDemoRoom(o: DemoRoomOptions): Promise<DemoRoom> {
     "login-taken": async (settled: Settled) => {
       await restart(settled, () => {
         loginItem.holdOther(DEMO_OTHER_AT_LOGIN);
+        return Promise.resolve();
+      });
+      return "ok";
+    },
+    // The tray's menu clicked, as the person would on the icon (ADR 0105 §10): the room hears it as the real one's.
+    [TRAY_CLICKS.open]: () => clickTray("open"),
+    [TRAY_CLICKS["pause.hour"]]: () => clickTray("pause.hour"),
+    [TRAY_CLICKS["pause.tomorrow"]]: () => clickTray("pause.tomorrow"),
+    [TRAY_CLICKS["pause.forever"]]: () => clickTray("pause.forever"),
+    [TRAY_CLICKS.resume]: () => clickTray("resume"),
+    [TRAY_CLICKS.quit]: () => clickTray("quit"),
+    // The icon stops by itself, as a helper that crashed: started again once, unavailable the second time.
+    "tray-ends": () => {
+      if (!tray.running()) return Promise.resolve("no_tray" as const);
+      tray.end(DEMO_TRAY_ENDED);
+      return Promise.resolve("ok" as const);
+    },
+    // The computer has no tray, until the next load: the service, restarted, says the icon can't be shown, and why.
+    "tray-unavailable": async (settled: Settled) => {
+      await restart(settled, () => {
+        tray.unavailable(DEMO_NO_TRAY);
         return Promise.resolve();
       });
       return "ok";

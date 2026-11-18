@@ -4,12 +4,15 @@
 // service runs in the user's home) through the `startServe` port (the real one detached from the terminal, `@lookover/process/
 // background`; a test's, its child), told to print nothing (`--background`: its lines go to the log only), unless a
 // service already holds the data folder, which it reuses (waiting for one still starting to say where it serves);
-// then it does what `open` does, and says the terminal can be closed. The program's start refuses a clone whose web
+// then it does what `open` does, and says last that Lookover is in the tray (the menu bar on macOS) once the
+// service's snapshot says its icon is shown (an icon on its way is waited for, up to the helper's 10 s to say it is
+// ready), else that the terminal can be closed (ADR 0105 §13). The program's start refuses a clone whose web
 // app is missing or wasn't built for the program. `open` mints a one-time link (`API.link`) and opens the browser on it
 // through the `openBrowser` port (`--no-open` prints it only). Neither prints the bare address, which opens nothing
 // without a session (ADR 0058): once the browser has the link they say it is opening, and how Lookover's command
 // (`lookoverCommand`) gets a link to paste; the link itself only with `--no-open` or a browser that didn't open.
-// `status` says running or stopped, where, which data folder, version and process, exit 0 running and 3 stopped. `stop` asks the service to stop (`API.stop`) and waits
+// `status` says running or stopped, where, which data folder, version and process, and running, the tray in one line
+// as the snapshot says it (`--json`'s `tray`); exit 0 running and 3 stopped. `stop` asks the service to stop (`API.stop`) and waits
 // for its lock to be free; one that hasn't let it go 30 s after the ask is killed, only while its lock is held and its
 // process is the one `instance.json` named when it was asked. Each reaches the service as the UI does: the data
 // folder's session cookie (`<home>/session`) and the exact Origin, `instance.json`'s address. They only probe the
@@ -18,7 +21,15 @@
 // others with their usage. Their exits are the command's (its help, `command.ts`).
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { API, type LoginHolder, type MintedLink } from "@lookover/contracts";
+import {
+  API,
+  asSentence,
+  type LoginHolder,
+  type MintedLink,
+  type ServiceTray,
+  stateSchema,
+} from "@lookover/contracts";
+import { z } from "zod";
 import type { CommandPath } from "./command-path.ts";
 import {
   type Config,
@@ -80,6 +91,8 @@ const STOP_LIMIT_MS = 30_000;
 /** How long one request to the service may take before it counts as no answer. */
 const ANSWER_LIMIT_MS = 5_000;
 const POLL_MS = 50;
+/** How long the tray's helper has to say it is ready before the service refuses it (ADR 0105 §5). */
+const TRAY_READY_LIMIT_MS = 10_000;
 
 /** Said by `open` and `stop` when nothing serves the data folder. */
 const NOT_RUNNING = "Lookover isn't running.";
@@ -104,9 +117,71 @@ export async function start(argv: string[], deps: VerbDeps): Promise<number> {
     deps.print.err(
       "Windows keeps Lookover tied to this terminal: closing it may stop Lookover. Keep it open.",
     );
-  else deps.print.out("You can close this terminal.");
+  else if ((await trayAfterStart(config.home, found.serving.address, deps))?.shown !== "shown")
+    deps.print.out("You can close this terminal.");
+  // Each line said whole, as the landing page and the docs quote it (apps/site's facts.test.ts reads them here).
+  else if (deps.system.platform === "darwin") deps.print.out("Lookover is in the menu bar.");
+  else deps.print.out("Lookover is in the tray.");
   return 0;
 }
+
+/** Where the tray's icon sits on `platform`: the menu bar on macOS, the tray elsewhere (ADR 0105 §13). */
+const trayPlace = (platform: NodeJS.Platform): string =>
+  platform === "darwin" ? "the menu bar" : "the tray";
+
+/**
+ * The tray once its icon is no longer on its way (ADR 0105 §13): asked again while the snapshot says `starting`, up to
+ * the helper's ready limit, after which the service will have shown or refused it; null when the service didn't say.
+ */
+async function trayAfterStart(
+  home: string,
+  address: string,
+  { background: { time } }: VerbDeps,
+): Promise<ServiceTray | null> {
+  const deadline = time.now() + TRAY_READY_LIMIT_MS;
+  for (;;) {
+    const tray = await trayOn(home, address);
+    if (tray?.shown !== "starting" || time.now() >= deadline) return tray;
+    await time.sleep(POLL_MS);
+  }
+}
+
+/** `status`'s line on the tray (ADR 0105 §12): what this start's tray shows, with the reason it can't. */
+function trayLine(tray: ServiceTray, platform: NodeJS.Platform): string {
+  const place = trayPlace(platform);
+  switch (tray.shown) {
+    case "shown":
+      return `Its icon is in ${place}.`;
+    case "starting":
+      return `Its icon is on its way to ${place}.`;
+    case "off":
+      return `It shows no icon in ${place}.`;
+    case "unavailable": {
+      const why = tray.reason === null ? "" : ` ${asSentence(tray.reason.replace(/\.+$/, ""))}`;
+      return `Its icon can't be shown in ${place}.${why}`;
+    }
+    default:
+      return tray.shown satisfies never;
+  }
+}
+
+/**
+ * The tray as the snapshot of the service at `address` serving `home` says it (`Service.tray`), asked with the
+ * folder's session; null with no answer, or one that isn't a tray.
+ */
+async function trayOn(home: string, address: string): Promise<ServiceTray | null> {
+  const answer = await ask(home, address, API.snapshot, "GET");
+  if (answer === null || !answer.ok) return null;
+  try {
+    const said = SAYS_TRAY.safeParse(await answer.json());
+    return said.success ? said.data.service.tray : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A snapshot's tray, as this version writes it: the rest of the snapshot isn't read. */
+const SAYS_TRAY = z.object({ service: z.object({ tray: stateSchema.shape.service.shape.tray }) });
 
 /** Whether this clone's web app was built for the program; says what to do when it wasn't. */
 function builtForTheProgram(deps: VerbDeps): boolean {
@@ -194,7 +269,7 @@ export async function open(argv: string[], deps: VerbDeps): Promise<number> {
 export async function status(argv: string[], deps: VerbDeps): Promise<number> {
   if (!readsAll("status", argv, deps)) return 2;
   const home = dataFolder(argv, deps.system);
-  const now = statusOf(home, await atLoginOf(home, deps));
+  const now = await statusOf(home, await atLoginOf(home, deps));
   const atLogin =
     now.atLogin === "this"
       ? "It starts at login."
@@ -213,6 +288,7 @@ export async function status(argv: string[], deps: VerbDeps): Promise<number> {
         `  Process      ${now.pid}`,
         `  Since        ${new Date(now.since).toISOString()}`,
         atLogin,
+        ...(now.tray === null ? [] : [trayLine(now.tray, deps.system.platform)]),
       ].join("\n"),
     );
   return now.running ? 0 : 3;
@@ -221,20 +297,29 @@ export async function status(argv: string[], deps: VerbDeps): Promise<number> {
 /**
  * What `status` says, and `--json` prints as it is: stopped, starting (its lock held, `instance.json` not written yet)
  * or running; in all three, who starts at login (ADR 0068): the program on this data folder (`this`), no Lookover
- * (`none`), or another install (`{ other }`, the command it registered).
+ * (`none`), or another install (`{ other }`, the command it registered). Running, the tray as its snapshot says it
+ * (ADR 0105 §12), null when it didn't say.
  */
 type Status = { atLogin: LoginHolder } & (
   | { running: false; home: string }
   | { running: true; home: string; address: null }
-  | { running: true; home: string; address: string; version: string; pid: number; since: number }
+  | {
+      running: true;
+      home: string;
+      address: string;
+      version: string;
+      pid: number;
+      since: number;
+      tray: ServiceTray | null;
+    }
 );
 
-function statusOf(home: string, atLogin: LoginHolder): Status {
+async function statusOf(home: string, atLogin: LoginHolder): Promise<Status> {
   if (!holds(home)) return { running: false, home, atLogin };
   const serving = servingOf(home);
   if (serving === null) return { running: true, home, address: null, atLogin };
   const { address, version, pid, since } = serving;
-  return { running: true, address, home, version, pid, since, atLogin };
+  return { running: true, address, home, version, pid, since, atLogin, tray: await trayOn(home, address) };
 }
 
 /**
@@ -357,7 +442,16 @@ export async function mintLink(home: string, address: string): Promise<LinkMinte
 }
 
 /** A POST to the service as the UI makes one: the data folder's cookie and the exact Origin. Null with no answer. */
-async function post(home: string, address: string, path: string): Promise<Response | null> {
+const post = (home: string, address: string, path: string): Promise<Response | null> =>
+  ask(home, address, path, "POST");
+
+/** A request to the service as the UI makes one: the data folder's cookie and the exact Origin. Null with no answer. */
+async function ask(
+  home: string,
+  address: string,
+  path: string,
+  method: "GET" | "POST",
+): Promise<Response | null> {
   let secret: string;
   try {
     secret = readFileSync(join(home, "session"), "utf8");
@@ -366,7 +460,7 @@ async function post(home: string, address: string, path: string): Promise<Respon
   }
   try {
     return await fetch(`${address}${path}`, {
-      method: "POST",
+      method,
       headers: { cookie: `${sessionCookie(home)}=${secret}`, origin: address },
       signal: AbortSignal.timeout(ANSWER_LIMIT_MS),
     });
@@ -462,6 +556,7 @@ export const BACKGROUND_HELP = `start      Runs the service in the background (a
            running on the data folder, then opens it in your browser. The terminal can then be closed.
 open       Opens the running service in your browser: a link that works once, within 2 minutes. --no-open
            prints it instead.
-status     Says whether the service runs, where, on which data folder, its version and process, and whether
-           it starts at login. Exits 0 running, 3 stopped. --json for a program.
+status     Says whether the service runs, where, on which data folder, its version and process, whether
+           it starts at login and whether its icon is in the tray. Exits 0 running, 3 stopped. --json for a
+           program.
 stop       Stops the service, as Ctrl+C would; one that doesn't answer within 30 s is ended.`;

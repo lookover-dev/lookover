@@ -21,6 +21,7 @@ import {
   type Formatter,
   FULL_BLEED_PICTURES,
   iconFullBleed,
+  TRAY_ICONS,
   writeCopies,
 } from "./index.ts";
 
@@ -54,7 +55,7 @@ test.each(COPIES.map((c) => [c.path, c] as const))(
   },
 );
 
-test("the copies are the twelve brand files and the App's logo, the app's favicon, module, stylesheet and two wordmarks, the sheet, and the site's nine", () => {
+test("the copies are the twelve brand files and the App's logo, the app's favicon, module, stylesheet and two wordmarks, the sheet, the site's nine, then the tray's sheet and icons", () => {
   expect(COPIES.map((c) => c.path)).toEqual([
     "docs/product/brand/lookover-wordmark.svg",
     "docs/product/brand/lookover-wordmark-on-dark.svg",
@@ -84,7 +85,30 @@ test("the copies are the twelve brand files and the App's logo, the app's favico
     "apps/site/public/brand/lookover-wordmark-on-dark.svg",
     "apps/site/src/brand/eyes.generated.ts",
     "apps/site/src/brand/eyes.generated.css",
+    "docs/product/brand/lookover-tray-sheet.png",
+    ...TRAY_ICONS.map((i) => i.path),
   ]);
+});
+
+test("a tray icon changed by one pixel fails, naming that file; written again, it passes; the folder's README is left alone", async () => {
+  const root = checkout(false);
+  const path = "apps/tray/icons/needs-you-template-36.png";
+  const only = { format, copies: COPIES.filter((c) => c.path === path) };
+  expect(only.copies).toHaveLength(1);
+  await writeCopies(root, only);
+  const readme = join(root, "apps/tray/icons/README.md");
+  const readmeText = "# The tray's icons\n";
+  writeFileSync(readme, readmeText);
+  expect(await driftedCopies(root, only)).toEqual([]);
+  const file = join(root, path);
+  writeFileSync(
+    file,
+    withPixels(new Uint8Array(readFileSync(file)), (rows) => rows.with(4, (rows[4] ?? 0) ^ 1)),
+  );
+  expect(await driftedCopies(root, only)).toEqual([`${path} is not what the source draws: ${run}.`]);
+  await writeCopies(root, only);
+  expect(await driftedCopies(root, only)).toEqual([]);
+  expect(readFileSync(readme, "utf8")).toBe(readmeText);
 });
 
 test("where a ground not ours crops the icon, the copies are the icon full bleed; the app's favicon stays rounded", async () => {

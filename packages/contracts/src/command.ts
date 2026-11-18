@@ -79,6 +79,8 @@ export type Command =
    * install's registration.
    */
   | { type: "service.startAtLogin"; on: boolean; takeOver?: boolean }
+  /** The owner's choice to show Lookover in the tray (ADR 0105 §11): kept; off stops the icon at once, on starts it. */
+  | { type: "service.tray"; on: boolean }
   /**
    * Your coding agent (ADR 0058): `lookover` put on the PATH through Lookover's own folder, or taken off it. Offered
    * for the binary only. A write the machine refuses refuses the command with why, the state shown as it is.

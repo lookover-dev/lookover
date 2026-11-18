@@ -10,7 +10,7 @@ export const START_LINES = [
   "Lookover runs in the background.",
   "Lookover is opening in your browser.",
   "Don't see it? `lookover open --no-open` prints a link to paste (it works once, within 2 minutes).",
-  "You can close this terminal.",
+  "Lookover is in the tray.",
 ] as const;
 
 /** The systems it runs on, as the README's "What you need" says: Windows on x64 only, macOS and Linux on both. */

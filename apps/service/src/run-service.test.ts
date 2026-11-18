@@ -40,6 +40,7 @@ import {
   memoryKeychain,
   memoryLoginItem,
   memorySkillFolders,
+  memoryTray,
   type ProgramDeps,
   type ProgramProcess,
   probeInstance,
@@ -153,6 +154,7 @@ function deps(home: string, reach: "yes" | "no" = "no") {
   const skillFolders = new Map<string, MemorySkillFolders>();
   /** How many times the run asked for the person's `gh`. */
   const ghAsked: number[] = [];
+  const tray = memoryTray();
   const given: ProgramDeps = {
     clock: { now: () => FROZEN_AT },
     print: { out: (line) => out.push(line), err: (line) => err.push(line) },
@@ -180,8 +182,22 @@ function deps(home: string, reach: "yes" | "no" = "no") {
       ghAsked.push(1);
       return memoryGh({ as: { id: 11247504, login: "sasensi" } });
     },
+    tray,
   };
-  return { given, out, err, userOnly, program, loginItem, atLogin, onPath, path, skillFolders, ghAsked };
+  return {
+    given,
+    out,
+    err,
+    userOnly,
+    program,
+    loginItem,
+    atLogin,
+    onPath,
+    path,
+    skillFolders,
+    ghAsked,
+    tray,
+  };
 }
 
 /** Waits until `exits` has an entry, or 5 s have passed: a time limit, however long each look takes. */
@@ -616,6 +632,73 @@ test("only the program without a live.json registers start at login on the machi
   expect(liveRun.atLogin).toEqual([]);
   expect(liveRun.onPath).toEqual([]);
   expect((await stateOf(live, liveHome)).service).toMatchObject({ atLogin: "none", loginItem: "stand-in" });
+});
+
+test("only the program without a live.json shows its tray; a guarded program's is the development stand-in", async () => {
+  const bare = newHome();
+  const run = deps(bare);
+  const unguarded = await runService(program(bare), { ...run.given, liveAdapters: onFakeHost(bare) });
+  cleanups.push(() => unguarded.stop());
+  await waitUntil(() => run.tray.running(), 5_000);
+  expect((await stateOf(unguarded, bare)).service.tray).toEqual({ on: true, shown: "shown", reason: null });
+
+  const home = newHome();
+  const guardedRun = deps(home);
+  const guarded = await runService(program(home, { repositories: [SANDBOX] }), {
+    ...guardedRun.given,
+    liveAdapters: onFakeHost(home),
+  });
+  cleanups.push(() => guarded.stop());
+  expect(guardedRun.tray.running()).toBe(false);
+  expect((await stateOf(guarded, home)).service.tray.reason).toBe(
+    "Lookover shows no tray icon while it runs for development",
+  );
+});
+
+test("the program's tray: Open opens the browser on a link that opens the app once; Quit is `lookover stop`'s stop, said the tray's", async () => {
+  const home = newHome();
+  const run = deps(home);
+  const tray = memoryTray();
+  const opened: string[] = [];
+  const service = await runService(program(home), {
+    ...run.given,
+    liveAdapters: onFakeHost(home),
+    tray,
+    openBrowser: (url) => {
+      opened.push(url);
+      return Promise.resolve(true);
+    },
+  });
+  cleanups.push(() => service.stop());
+  await waitUntil(() => tray.running(), 5_000);
+
+  tray.click("open");
+  await waitUntil(() => opened.length === 1, 5_000);
+  const [url = ""] = opened;
+  expect(url).toStartWith(`${service.origin}${API.session}?token=`);
+  expect((await fetch(url, { redirect: "manual" })).status).toBe(303);
+  expect((await fetch(url, { redirect: "manual" })).status).toBe(403);
+  // The link's token is the log's secret: never written.
+  const token = new URL(url).searchParams.get("token") ?? "";
+  expect(logOf(home)).not.toContain(token);
+
+  tray.click("quit");
+  await exited(run.program.exits);
+  expect(run.program.exits).toEqual([0]);
+  const lines = logOf(home)
+    .trimEnd()
+    .split("\n")
+    .map((line) => line.slice(line.indexOf(" ") + 1));
+  expect(lines.slice(-2)).toEqual(["Lookover is stopping (the tray)", "Lookover stopped"]);
+});
+
+test("the program without a live.json is wired to the real tray, which refuses to run under bun test", async () => {
+  const home = newHome();
+  const { tray: _fake, ...given } = deps(home).given;
+  await expect(runService(program(home), { ...given, liveAdapters: onFakeHost(home) })).rejects.toThrow(
+    /real tray never runs under bun test/,
+  );
+  expect(probeInstance(home)).toBe("free");
 });
 
 test("the program without a live.json is wired to the real start at login, which refuses to run under bun test", async () => {

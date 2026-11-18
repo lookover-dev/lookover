@@ -69,6 +69,7 @@ import {
   signInStore,
   startService,
   type Timers,
+  type Tray,
   type WebFiles,
 } from "./index.ts";
 
@@ -537,6 +538,14 @@ export interface StartOptions {
    * else the room's own stand-in, which registers nothing (ADR 0070).
    */
   loginItem?: LoginItem;
+  /** Lookover in the tray (ADR 0105): the room's own stand-in, which shows nothing, unless given (`memoryTray`). */
+  tray?: Tray;
+  /** What the tray's Quit asks for (ADR 0105 §10): the service's own stop unless given. */
+  trayQuit?: () => void;
+  /** What `lookover stop` asks for (`API.stop`): the service's own stop unless given. */
+  stopAsked?: () => void;
+  /** The browser the tray's Open opens its link in: none unless given, so the log says to run `open`. */
+  openBrowser?: (url: string) => Promise<boolean>;
   /** The machine the commands the app gives are for (an AI's install, ADR 0070): Linux unless given, never this one. */
   platform?: NodeJS.Platform;
   /** Your coding agent's ports and facts (ADR 0058): the room's fakes and defaults unless given. */
@@ -561,6 +570,10 @@ const machineOf = (options: StartOptions): { platform: NodeJS.Platform } => ({
 /** The test's fake GitHub, else one holding its changes, its owner the person signed in. */
 const hostOf = (options: StartOptions, time: DemoClock, repos: RepositoryRef[]): FakeGitHost =>
   options.host ?? fakeHost(time, options.owner ?? OWNER, options.changes, options.cloneUrl, repos);
+
+/** The tray the test gives (ADR 0105), else the room's stand-in. */
+const trayOf = (options: StartOptions): Pick<RoomOptions, "tray"> =>
+  options.tray === undefined ? {} : { tray: options.tray };
 
 /** The room's options for a test's start, its fakes and its data folder. */
 async function roomOf(options: StartOptions) {
@@ -593,6 +606,7 @@ async function roomOf(options: StartOptions) {
     ...(options.loginItem === undefined
       ? {}
       : { loginItem: { item: options.loginItem, kind: "os" as const } }),
+    ...trayOf(options),
     ...(options.agent === undefined ? {} : { agent: options.agent }),
     ...(options.gh === undefined ? {} : { gh: options.gh }),
     ...machineOf(options),
@@ -608,6 +622,9 @@ export async function start(options: StartOptions = {}) {
     serverTimers: time,
     ...(options.webFiles === undefined ? {} : { webFiles: options.webFiles }),
     ...(options.logSink === undefined ? {} : { logSink: options.logSink }),
+    ...(options.trayQuit === undefined ? {} : { trayQuit: options.trayQuit }),
+    ...(options.stopAsked === undefined ? {} : { stopAsked: options.stopAsked }),
+    ...(options.openBrowser === undefined ? {} : { openBrowser: options.openBrowser }),
   });
   running.push(service);
   return { service, host, retrieval, time, logged };

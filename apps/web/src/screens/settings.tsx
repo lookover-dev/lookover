@@ -1,7 +1,7 @@
 // Settings: your defaults, a short list, then more pages one click away.
 // A repository's page shows the same settings; the few that differ from your defaults say so.
 // Every change goes through the page's save stamp: "Saved" once the service took it (ADR 0049).
-import type { Command, Repository, Rule, SettingKey, SettingValue } from "@lookover/contracts";
+import type { Command, Repository, Rule, Service, SettingKey, SettingValue } from "@lookover/contracts";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { browserLanding, keepPlace, pageOf } from "../keep-place.ts";
@@ -40,6 +40,7 @@ import { openChangeCount, pullRequestsCell, repositoryStanding } from "../view-m
 import { AGENT_INTRO } from "../view-model/coding-agent.ts";
 import { departedShown } from "../view-model/departed.ts";
 import { plural, repositoryLabel, SEPARATOR } from "../view-model/format.ts";
+import { TRAY_TITLE, trayHelp } from "../view-model/in-the-tray.ts";
 import { followLogs, logRunsShown } from "../view-model/logs.ts";
 import { addRepositoryLink, repositoriesFoot, repositoriesLook } from "../view-model/onboarding.ts";
 import { REPOSITORIES_BAR, RepositoriesChoice, repositoriesList } from "../view-model/repositories.ts";
@@ -185,6 +186,9 @@ export function Settings() {
             />
           </SetRow>
         </div>
+        <div {...row("tray")}>
+          <TrayRow service={state.service} save={save} />
+        </div>
         <div {...row("appearance")}>
           <SetRow title="Appearance" help="Dark is the default. This is kept in this browser only.">
             <Segmented
@@ -224,6 +228,23 @@ export function Settings() {
         </div>
       </Group>
     </Page>
+  );
+}
+
+/**
+ * "Show Lookover in the tray" (ADR 0105 §11-13): the choice the store keeps, saved through the page's stamp as Start
+ * at login's is, and under it what the computer shows. The switch sits level with the title, so the help changing
+ * under it never moves it.
+ */
+export function TrayRow({ service, save }: { service: Service; save: (command: Command) => void }) {
+  return (
+    <SetRow atTitle title={TRAY_TITLE} help={trayHelp(service)}>
+      <Switch
+        checked={service.tray.on}
+        onChange={(on) => save({ type: "service.tray", on })}
+        label={TRAY_TITLE}
+      />
+    </SetRow>
   );
 }
 

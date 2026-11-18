@@ -1,6 +1,7 @@
 // The npm packages at one seam (ADR 0061, spec #319's Testing Decisions): `releaseAssets` packs the six tarballs from
 // stand-in executables (a program that prints its arguments and `LOOKOVER_LAUNCHER`, and exits with the code
-// `STANDIN_EXIT` names), real npm installs them into a scratch prefix, offline, and the installed `lookover` shim runs.
+// `STANDIN_EXIT` names) and stand-in tray helpers (a few bytes, never run: `release-smoke.test.ts` runs the smoke's
+// check of a helper), real npm installs them into a scratch prefix, offline, and the installed `lookover` shim runs.
 // Each run costs about 20 s on Windows (the stand-in there is a compiled Bun program, 86 MB to pack and install), so
 // it lives with the script tests (`check:full`), not in `bun run check`.
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
@@ -8,17 +9,18 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { isNpmShim } from "@lookover/service";
 import { executablesAsked, releaseAssets } from "./release-assets.ts";
-import { installGlobal, runShim, shimOf } from "./release-smoke.ts";
+import { installedTray, installGlobal, runShim, shimOf } from "./release-smoke.ts";
 
 // Packing, then installing with npm, twice, and compiling the stand-in on Windows: well past Bun's 5 s.
 setDefaultTimeout(180_000);
@@ -31,6 +33,7 @@ const HOST = `${process.platform}-${process.arch}`;
 const PLATFORMS = ["win32-x64", "darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"];
 const VERSION = "1.2.3";
 const executableOf = (platform: string) => (platform.startsWith("win32") ? "lookover.exe" : "lookover");
+const trayOf = (platform: string) => (platform.startsWith("win32") ? "lookover-tray.exe" : "lookover-tray");
 
 let scratch = "";
 let out = "";
@@ -68,18 +71,29 @@ async function standIn(): Promise<string> {
 
 /** Every file in the gzipped tarball `tgz`, by its path in it, with its text. */
 function tarball(tgz: string): Map<string, string> {
+  return new Map([...entries(tgz)].map(([path, { text }]) => [path, text]));
+}
+
+/** Every file's mode in the gzipped tarball `tgz`, by its path in it. */
+function modesOf(tgz: string): Map<string, number> {
+  return new Map([...entries(tgz)].map(([path, { mode }]) => [path, mode]));
+}
+
+/** Every file in the gzipped tarball `tgz`, by its path in it, with its text and its mode. */
+function entries(tgz: string): Map<string, { text: string; mode: number }> {
   const tar = gunzipSync(readFileSync(tgz));
-  const files = new Map<string, string>();
+  const files = new Map<string, { text: string; mode: number }>();
   for (let at = 0; at + 512 <= tar.length; ) {
     const header = tar.subarray(at, at + 512);
     const name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/s, "");
     if (name === "") break;
     const prefix = header.subarray(345, 500).toString("utf8").replace(/\0.*$/s, "");
     const size = Number.parseInt(header.subarray(124, 136).toString("utf8").replace(/\0.*$/s, "").trim(), 8);
-    files.set(
-      prefix === "" ? name : `${prefix}/${name}`,
-      tar.subarray(at + 512, at + 512 + size).toString("utf8"),
-    );
+    const mode = Number.parseInt(header.subarray(100, 108).toString("utf8").replace(/\0.*$/s, "").trim(), 8);
+    files.set(prefix === "" ? name : `${prefix}/${name}`, {
+      text: tar.subarray(at + 512, at + 512 + size).toString("utf8"),
+      mode,
+    });
     at += 512 + Math.ceil(size / 512) * 512;
   }
   return files;
@@ -99,15 +113,18 @@ beforeAll(async () => {
   scratch = realpathSync.native(mkdtempSync(join(tmpdir(), "lookover-t324-assets-")));
   out = join(scratch, "npm");
   const host = await standIn();
-  const executables: Record<string, string> = {};
+  const executables: Record<string, { executable: string; tray: string }> = {};
   for (const platform of PLATFORMS) {
-    if (platform === HOST) executables[platform] = host;
+    // Never run here: a few bytes stand for each tray helper, and for the other platforms' executables.
+    const folder = join(scratch, "others", platform);
+    mkdirSync(folder, { recursive: true });
+    const tray = join(folder, trayOf(platform));
+    writeFileSync(tray, `the ${platform} tray helper`);
+    if (platform === HOST) executables[platform] = { executable: host, tray };
     else {
-      // Never run: a few bytes stand for the other platforms' executables.
-      const file = join(scratch, "others", platform, executableOf(platform));
-      mkdirSync(join(file, ".."), { recursive: true });
+      const file = join(folder, executableOf(platform));
       writeFileSync(file, `the ${platform} executable`);
-      executables[platform] = file;
+      executables[platform] = { executable: file, tray };
     }
   }
   releaseAssets({ version: VERSION, executables, out });
@@ -127,15 +144,27 @@ describe("the executables asked for", () => {
     });
   });
 
-  test("--from on Linux asks for every platform's, from <dir>/<platform>", () => {
+  test("--from on Linux asks for every platform's executable and tray helper, from <dir>/<platform>", () => {
     const asked = executablesAsked(["--from", "artifacts"], "linux");
     expect(asked).toEqual({
       executables: Object.fromEntries(
         PLATFORMS.map((platform) => [
           platform,
-          join(process.cwd(), "artifacts", platform, executableOf(platform)),
+          {
+            executable: join(process.cwd(), "artifacts", platform, executableOf(platform)),
+            tray: join(process.cwd(), "artifacts", platform, trayOf(platform)),
+          },
         ]),
       ),
+    });
+  });
+
+  test("--host asks for this machine's executable and tray helper, from dist/", () => {
+    const dist = join(import.meta.dir, "..", "dist");
+    expect(executablesAsked(["--host"])).toEqual({
+      executables: {
+        [HOST]: { executable: join(dist, executableOf(HOST)), tray: join(dist, trayOf(HOST)) },
+      },
     });
   });
 });
@@ -158,7 +187,7 @@ describe.skipIf(npm === null)("the npm packages", () => {
     }
   });
 
-  test("each platform package is its executable alone, for its os and cpu, with no bin and no install script", () => {
+  test("each platform package is its executable and its tray helper, for its os and cpu, with no bin and no install script", () => {
     for (const platform of PLATFORMS) {
       const [os, cpu] = platform.split("-");
       const manifest = manifestOf(`lookover-${platform}-1.2.3.tgz`);
@@ -167,7 +196,7 @@ describe.skipIf(npm === null)("the npm packages", () => {
         version: VERSION,
         os: [os],
         cpu: [cpu],
-        files: [executableOf(platform)],
+        files: [executableOf(platform), trayOf(platform)],
         license: "MIT",
         repository: { type: "git", url: "git+https://github.com/lookover-dev/lookover.git" },
         homepage: "https://lookover.dev",
@@ -179,6 +208,11 @@ describe.skipIf(npm === null)("the npm packages", () => {
       expect(manifest.scripts).toBeUndefined();
       const files = tarball(join(out, `lookover-${platform}-1.2.3.tgz`));
       expect(files.get(`package/${executableOf(platform)}`)).toBeDefined();
+      expect(files.get(`package/${trayOf(platform)}`)).toBe(`the ${platform} tray helper`);
+      // Made executable, as the executable is: npm keeps the bit, which an artifact download loses.
+      const modes = modesOf(join(out, `lookover-${platform}-1.2.3.tgz`));
+      expect(modes.get(`package/${trayOf(platform)}`)).toBe(modes.get(`package/${executableOf(platform)}`));
+      if (process.platform !== "win32") expect(modes.get(`package/${trayOf(platform)}`)).toBe(0o755);
       expect(files.get("package/README.md")).toContain("installed by `lookover`");
     }
   });
@@ -228,6 +262,15 @@ describe.skipIf(npm === null)("the npm packages", () => {
     expect(isNpmShim(shimOf(prefix, process.platform), said.launcher, process.platform)).toBe(true);
   });
 
+  test("installed with npm, the host's tray helper is beside its executable, where the smoke finds it", () => {
+    const tray = installedTray(join(scratch, "prefix"), HOST);
+    expect(tray).toBeDefined();
+    expect(readFileSync(tray ?? "", "utf8")).toBe(`the ${HOST} tray helper`);
+    expect(readdirSync(dirname(tray ?? "")).sort()).toEqual(
+      ["LICENSE", "README.md", executableOf(HOST), trayOf(HOST), "package.json"].sort(),
+    );
+  });
+
   // Windows has no signals to end by: a process there ends with a code, which the test above covers.
   test.skipIf(process.platform === "win32")(
     "installed with npm, the shim ends as its executable ends by a signal, even one Node ignores",
@@ -249,6 +292,7 @@ describe.skipIf(npm === null)("the npm packages", () => {
     expect(ran.err).toContain(`no executable for ${HOST}`);
     expect(ran.err).toContain("win32-x64, darwin-arm64, darwin-x64, linux-x64, linux-arm64");
     expect(ran.err).toContain("npm install -g lookover --include=optional");
+    expect(installedTray(prefix, HOST)).toBeUndefined();
   });
 });
 

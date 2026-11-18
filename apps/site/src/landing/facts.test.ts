@@ -28,7 +28,7 @@ describe("the landing page's facts", () => {
       "Lookover runs in the background.",
       "Lookover is opening in your browser.",
       "Don't see it? `lookover open --no-open` prints a link to paste (it works once, within 2 minutes).",
-      "You can close this terminal.",
+      "Lookover is in the tray.",
     ]);
     const program = printed(read("../../../service/src/background.ts"));
     for (const line of START_LINES) expect(program).toContain(line);

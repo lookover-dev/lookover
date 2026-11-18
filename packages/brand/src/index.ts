@@ -19,9 +19,14 @@
 // as offsets from its rest. `siteModule` and `siteStylesheet` render the site's two copies: the module that holds
 // those drawings for its pages and scripts, and the stylesheet that shows each in its theme and moves the loader
 // and the mark's states, through the formatter as the app's are.
+// For the tray (ADR 0105): `TRAY_STATES` are its five states, worst first; `trayIcon` draws a state's icon in a
+// variant (`light` and `dark` for Windows' taskbars, `template` for macOS, `panel` for Linux) at a side in pixels,
+// on a transparent ground, pixel by pixel as the icon full bleed is; `TRAY_ICONS` names each file the copies hold,
+// `apps/tray/icons/<state>-<variant>-<side>.png`, with its state, variant and side; `traySheet` draws every state at
+// 16, 24 and 32 px in each variant on a taskbar's grey, written at `TRAY_SHEET`.
 // `COPIES` lists every copy of the eyes elsewhere in the checkout as `{path, render}`, or `{path, picture}` for
 // the pictures, the icon full bleed as PNGs drawn pixel by pixel from the mark's numbers (the GitHub App's logo,
-// the site's favicons at 48, 96 and 192 px and its apple-touch icon at 180);
+// the site's favicons at 48, 96 and 192 px and its apple-touch icon at 180, the tray's icons and sheet);
 // `writeCopies` writes them (`bun run brand`, through the `./write` entry) and `driftedCopies` lists those on disk
 // that differ from what the source renders, one line each naming the file and saying to run `bun run brand`. Both
 // are async and take the formatter (Biome's unless given): a copy is compared with what the same formatter makes
@@ -53,4 +58,14 @@ export { COLOURS, MARK } from "./numbers.ts";
 export { SHEET, sheet } from "./sheet.ts";
 export { SITE_FAVICON, SITE_MODULE, SITE_STYLESHEET, siteModule, siteStylesheet } from "./site.ts";
 export { GAZE, MARK_STATES, type MarkState } from "./states.ts";
+export {
+  TRAY_ICONS,
+  TRAY_SHEET,
+  TRAY_STATES,
+  type TrayIcon,
+  type TrayState,
+  type TrayVariant,
+  trayIcon,
+  traySheet,
+} from "./tray.ts";
 export { WORDMARK, wordmark } from "./wordmark.ts";

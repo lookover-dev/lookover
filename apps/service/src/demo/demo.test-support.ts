@@ -27,7 +27,8 @@ const running: RunningService[] = [];
  * S10's world with a seed of five minutes, #135 opened and reviewed in it: what a test stands on when the story
  * behind it doesn't matter (a load's own steps, an engine's fault). Its room builds in a tenth of S10's time, whose
  * seed is two and a half hours of polls; its fifteen events are the start, the account the sign-in to the shared App
- * reaches, the repository, #135 and its review, with main's rules as its review read them and its outbox as it posted.
+ * reaches, the repository, the tray icon shown (ADR 0105), #135 and its review, with main's rules as its review read
+ * them and its outbox as it posted.
  */
 export function brief(): Scenario {
   return {
@@ -38,7 +39,7 @@ export function brief(): Scenario {
   };
 }
 /** The events the brief story's seed sends. */
-export const BRIEF_SEEDED = 14;
+export const BRIEF_SEEDED = 15;
 
 /**
  * The service on `scenario`, its seed played, standing at `T0` unless `at` says otherwise; and the app's session on
@@ -54,6 +55,8 @@ export async function startScenario(
     driver?: DemoServiceOptions["driver"];
     /** The person's `gh` (ADR 0059): none unless given, read as not installed. */
     gh?: DemoServiceOptions["gh"];
+    /** The browser the tray's Open opens its link in: none unless given. */
+    openBrowser?: DemoServiceOptions["openBrowser"];
   } = {},
 ) {
   const home = mkdtempSync(join(realpathSync.native(tmpdir()), "lookover-demo-"));
@@ -71,6 +74,7 @@ export async function startScenario(
     ...(options.scenarios === undefined ? {} : { scenarios: options.scenarios }),
     ...(options.driver === undefined ? {} : { driver: options.driver }),
     ...(options.gh === undefined ? {} : { gh: options.gh }),
+    ...(options.openBrowser === undefined ? {} : { openBrowser: options.openBrowser }),
   });
   running.push(service);
   const cookie = await openApp(service);

@@ -159,6 +159,8 @@ function before(
       startAtLogin: true,
       atLogin: "none",
       loginItem: "stand-in",
+      tray: { on: true, shown: "shown", reason: null },
+      os: "linux",
       paused: o.paused ?? null,
       remote: false,
       unlocked: false,

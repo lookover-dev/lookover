@@ -68,6 +68,16 @@
 // on `service.startAtLogin { takeOver }`, and the snapshot's `service.atLogin` says who the machine says holds it,
 // `service.loginItem` whose port it is (`os` for the real one and demo mode, which plays the program; `memory` for
 // live mode and a guarded program, always "none"). `lookover status` says it too, naming another install.
+// Lookover in the tray (ADR 0105) is a port beside it, `Tray` (`start(onClick, onEnd)`: a running tray to `show` a
+// view and `stop`, or why it can't run): demo mode a fake in memory (`memoryTray`, which can click, end and answer
+// unavailable); the program without a live config the real one (`helperTray`: `lookover-tray`, refused under `bun
+// test` but on a scripted spawn); live mode and a guarded program the stand-in that shows nothing (`nowhereTray`).
+// The room's keeper (`tray-keeper.ts`) starts it while the store's choice is on, tells it the pill's words
+// (`trayView`) when they change, starts it again once after it ends, and hands each click to the room; the snapshot's
+// `service.tray` says the choice and what is shown, set afresh by each start (`service.tray` changes it).
+// The clicks (ADR 0105 §10): each Pause and Resume is the app's own, on the queue; Open mints a one-time link and opens
+// the browser on it (the log says to run `open` when none opened, never the link); Quit is `lookover stop`'s stop;
+// demo mode opens as the program does and only logs Quit.
 // Your coding agent (ADR 0058) is two ports beside it, `CommandPath` (reachable, add, remove: `lookover` on the PATH
 // through a folder of Lookover's own) and `SkillFolders` (read, install, remove: the `lookover-review-loop` skill in
 // Claude Code's and Codex's folders), each with a memory fake (`memoryCommandPath`, `memorySkillFolders`, with
@@ -324,6 +334,10 @@ export {
   osGh,
 } from "./gh.ts";
 export { type HeldServiceOptions, heldLines, heldService } from "./held-service.ts";
+// The real tray, on a scripted helper in its tests (ADR 0105 §4-7), and the helper's file name. The scripts that run
+// with nothing installed (the release smoke, and what it imports) take it and the reading of the helper's first line
+// from `src/tray-protocol.ts` by its path, as the service does.
+export { helperTray } from "./helper-tray.ts";
 export type { GitHubSide, HostPorts } from "./installation.ts";
 export { InstanceHeld, probeInstance, servingOf, takeInstance } from "./instance.ts";
 export {
@@ -393,5 +407,7 @@ export {
 // A data folder set up: `bun run live` starts its run folder so (ADR 0066).
 export { SET_UP } from "./snapshot.ts";
 export { REAL_TIMERS, type Timers } from "./timers.ts";
+export { type MemoryTray, memoryTray, type Tray, type TrayItem } from "./tray.ts";
+export { trayHelperName } from "./tray-protocol.ts";
 export { VERSION } from "./version.ts";
 export { carriedWebFiles, diskWebFiles, type WebFiles } from "./web-files.ts";

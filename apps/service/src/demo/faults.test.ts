@@ -7,6 +7,7 @@ import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  API,
   changeId,
   DEMO_API,
   type Event,
@@ -530,6 +531,87 @@ test("login-taken: Lookover restarts and another Lookover holds start at login: 
   const taken = await send(door, { type: "service.startAtLogin", on: true, takeOver: true });
   expect(taken.status).toBe(200);
   expect((await snapshotOf(door)).service).toMatchObject({ startAtLogin: true, atLogin: "this" });
+});
+
+test("tray-ends: demo mode's tray icon is shown, started again once it stops, unavailable when it stops again (ADR 0105)", async () => {
+  const door = await morning();
+  const tray = async () => (await snapshotOf(door)).service.tray;
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.service.tray.shown === "shown",
+  );
+  expect(await inject(door, "tray-ends")).toBe(200);
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.service.tray.shown === "shown",
+  );
+  expect(await inject(door, "tray-ends")).toBe(200);
+  expect(await tray()).toEqual({ on: true, shown: "unavailable", reason: "The tray icon stopped answering" });
+  // Nothing runs to stop or click any more.
+  expect(await inject(door, "tray-ends")).toBe(409);
+  expect(await inject(door, "tray-open")).toBe(409);
+  // Turned off and on again, it starts again.
+  expect((await send(door, { type: "service.tray", on: false })).status).toBe(200);
+  expect(await tray()).toEqual({ on: false, shown: "off", reason: null });
+  expect((await send(door, { type: "service.tray", on: true })).status).toBe(200);
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.service.tray.shown === "shown",
+  );
+  expect(await inject(door, "tray-open")).toBe(200);
+});
+
+test("tray-pause-hour, tray-resume, tray-open, tray-quit: the Pause and Resume act; Open, with no browser, says to run `open`, never the link; Quit is logged, and the demo goes on (ADR 0105)", async () => {
+  const door = await morning();
+  const state = await eventually(
+    () => snapshotOf(door),
+    (s) => s.service.tray.shown === "shown",
+  );
+  expect(await inject(door, "tray-pause-hour")).toBe(200);
+  expect((await snapshotOf(door)).service.paused?.until).not.toBeNull();
+  expect(await inject(door, "tray-resume")).toBe(200);
+  expect((await snapshotOf(door)).service.paused).toBeNull();
+  expect(await inject(door, "tray-open")).toBe(200);
+  expect(await inject(door, "tray-quit")).toBe(200);
+  expect(door.logged.filter((line) => line.startsWith("The tray's"))).toEqual([
+    `The tray's Open didn't open a browser: run \`${state.service.command} open\``,
+    "The tray's menu asked to quit Lookover",
+  ]);
+  expect((await snapshotOf(door)).service.tray.shown).toBe("shown");
+});
+
+test("tray-open: the browser opened on a link minted as the program's Open mints it, which opens the app once (ADR 0105 §10)", async () => {
+  const opened: string[] = [];
+  const door = await startScenario(brief(), {
+    openBrowser: (url) => {
+      opened.push(url);
+      return Promise.resolve(true);
+    },
+  });
+  await eventually(
+    () => snapshotOf(door),
+    (s) => s.service.tray.shown === "shown",
+  );
+  expect(await inject(door, "tray-open")).toBe(200);
+  expect(opened).toHaveLength(1);
+  const [url = ""] = opened;
+  expect(url).toStartWith(`${door.service.origin}${API.session}?token=`);
+  expect((await fetch(url, { redirect: "manual" })).status).toBe(303);
+  expect((await fetch(url, { redirect: "manual" })).status).toBe(403);
+});
+
+test("tray-unavailable: Lookover restarts on a computer with no tray: said unavailable, with why (ADR 0105)", async () => {
+  const door = await morning();
+  expect(await inject(door, "tray-unavailable")).toBe(200);
+  const state = await eventually(
+    () => snapshotOf(door),
+    (s) => s.service.tray.shown === "unavailable",
+  );
+  expect(state.service.tray).toEqual({
+    on: true,
+    shown: "unavailable",
+    reason: "No tray to show an icon in",
+  });
 });
 
 test("repository-added, repository-removed: one added to the App is watched at once; removed, it goes; none left, the fault says so", async () => {

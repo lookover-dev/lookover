@@ -455,7 +455,10 @@ export {
   type LoginItemKind,
   type PauseFor,
   type Service,
+  type ServiceOs,
+  type ServiceTray,
   sameLoginHolder,
+  type TrayShown,
 } from "./service.ts";
 export type {
   Depth,

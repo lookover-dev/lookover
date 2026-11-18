@@ -67,6 +67,59 @@ const LINK_MS = 120_000;
 /** A new token or secret: 24 random bytes as base64url. */
 export const randomToken = () => randomBytes(24).toString("base64url");
 
+/** The links that open the app once within two minutes (ADR 0054): `API.link`'s, and the tray's Open's (ADR 0105). */
+export interface Links {
+  /** A new link, its token known to the log's filter before it is answered. Several may be live at once. */
+  mint(): MintedLink;
+  /** Whether `token` is a live minted link's, using it up. */
+  use(token: string): boolean;
+}
+
+/** What minting needs: the origin a link opens, the server's own timers it ages on, and the log's filter. */
+export interface LinkDeps {
+  origin: string;
+  timers: Timers;
+  /** Registers a minted link's token with the log's filter before it is answered (ADR 0054): it is never logged. */
+  secret(value: string): void;
+  /** Takes a minted link's token out of the log's filter once used or expired: the filter holds the live ones only. */
+  forget(value: string): void;
+}
+
+/** The server's minted links: each opens the app once, within two minutes, then leaves the map and the log's filter. */
+export function createLinks(deps: LinkDeps): Links {
+  /** The minted links' tokens, each with when it was minted: one leaves once used or two minutes old. */
+  const minted = new Map<string, number>();
+  /** A minted link that opens the app no more, used or expired: out of the map and out of the log's filter. */
+  const spent = (token: string) => {
+    minted.delete(token);
+    deps.forget(token);
+  };
+  /** Drops the minted links two minutes old. */
+  const expire = () => {
+    const now = deps.timers.now();
+    for (const [token, at] of minted) if (now - at >= LINK_MS) spent(token);
+  };
+  return {
+    mint: () => {
+      expire();
+      const token = randomToken();
+      deps.secret(token);
+      minted.set(token, deps.timers.now());
+      return { url: `${deps.origin}${API.session}?token=${token}` };
+    },
+    // Compared in constant time, each in turn: a map lookup would answer faster for a near miss.
+    use: (token) => {
+      expire();
+      for (const kept of minted.keys()) {
+        if (!same(token, kept)) continue;
+        spent(kept);
+        return true;
+      }
+      return false;
+    },
+  };
+}
+
 export interface ApiDeps {
   /** The one origin the app is served from: Host and Origin must be its. */
   origin: string;
@@ -90,8 +143,10 @@ export interface ApiDeps {
   loader: Loader | null;
   /** How often a quiet stream says it is alive. */
   keepaliveMs: number;
-  /** The server's own timers, which no room swap drops: the keepalive waits on them, a minted link ages on them. */
+  /** The server's own timers, which no room swap drops: the keepalive waits on them. */
   timers: Timers;
+  /** The server's minted links (`createLinks`, on the same timers): `API.link` mints them, the session uses them. */
+  links: Links;
   /** The built web app, served on every path no route answers (ADR 0054); null in development, where Vite serves it. */
   webFiles: WebFiles | null;
   /** Where an error no route expected is written (the log sink, which removes its secrets, ADR 0054). */
@@ -101,10 +156,6 @@ export interface ApiDeps {
    * a script), where the tail is empty and no line is sent. One for the server: a room swapped in writes to it too.
    */
   logs: LogReader | null;
-  /** Registers a minted link's token with the log's filter before it is answered (ADR 0054): it is never logged. */
-  secret(value: string): void;
-  /** Takes a minted link's token out of the log's filter once used or expired: the filter holds the live ones only. */
-  forget(value: string): void;
   /**
    * What `API.stop` asks for once its answer is sent: the service stopped as Ctrl+C stops it (and, in the program, the
    * process ended).
@@ -144,6 +195,7 @@ const NOTHING_TO_INJECT = {
   no_organisation_reached: "no organisation is reached through the shared App",
   nothing_asked: "no organisation waits for an owner",
   no_load: "no story to start afresh here",
+  no_tray: "no tray icon is shown",
 } as const satisfies Record<InjectRefusal, string>;
 
 /** What the commands endpoint parses: the app's commands and the developer drawer's verbs. */
@@ -384,6 +436,10 @@ const COMMANDS: { [K in Parsed["type"]]?: Row<K> } = {
     const answer = await room.startAtLogin(on, takeOver === true);
     return answer === "ok" ? OK : [{ error: `Start at login didn't change: ${answer.refused}` }, 500];
   },
+  "service.tray": async ({ room }, { on }) => {
+    room.tray(on);
+    return OK;
+  },
   "agent.check": async ({ room }) => {
     await room.agent.check();
     return OK;
@@ -464,34 +520,16 @@ export function createApi(deps: ApiDeps) {
   const { origin, session, room, demo, loader } = deps;
   const host = new URL(origin).host;
   let tokenUsed = false;
-  /** The minted links' tokens, each with when it was minted: one leaves once used or two minutes old. */
-  const minted = new Map<string, number>();
-  /** A minted link that opens the app no more, used or expired: out of the map and out of the log's filter. */
-  const spent = (token: string) => {
-    minted.delete(token);
-    deps.forget(token);
-  };
-  /** Drops the minted links two minutes old. */
-  const expire = () => {
-    const now = deps.timers.now();
-    for (const [token, at] of minted) if (now - at >= LINK_MS) spent(token);
-  };
   /**
-   * Whether `token` opens the app, using it up: the start's once, a minted one once within two minutes. Compared in
-   * constant time, each in turn: a map lookup would answer faster for a near miss.
+   * Whether `token` opens the app, using it up: the start's once, compared in constant time, a minted one once within
+   * two minutes.
    */
   const opens = (token: string): boolean => {
     if (!tokenUsed && session.token !== null && same(token, session.token)) {
       tokenUsed = true;
       return true;
     }
-    expire();
-    for (const kept of minted.keys()) {
-      if (!same(token, kept)) continue;
-      spent(kept);
-      return true;
-    }
-    return false;
+    return deps.links.use(token);
   };
   /** Every open stream's way to say reload: told once the rooms are swapped (ADR 0046). */
   const reloaders = new Set<() => void>();
@@ -566,14 +604,7 @@ export function createApi(deps: ApiDeps) {
 
   // `lookover open` and `lookover start` (ADR 0054): a link that opens the app once, within two minutes, its token
   // known to the log's filter before anyone sees it. Several may be live at once.
-  app.post(API.link, (c) => {
-    expire();
-    const token = randomToken();
-    deps.secret(token);
-    minted.set(token, deps.timers.now());
-    const link: MintedLink = { url: `${origin}${API.session}?token=${token}` };
-    return c.json(link);
-  });
+  app.post(API.link, (c) => c.json(deps.links.mint()));
 
   // `lookover stop` (ADR 0054): answered first, then the service stops as Ctrl+C stops it. The stop waits for the
   // answer to leave, since it closes every connection, this one included.

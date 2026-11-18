@@ -33,6 +33,8 @@
 //   `contracts`). Any change under a row's path, added, changed, renamed (both paths) or removed, selects its
 //   tests, gathered from every changed file, in doubt too; a reader the tree doesn't hold is left out. When the
 //   change can't be told, `check` runs `everyReader`. A new `scripts/` test that reads a folder adds its row.
+// - **The tray helper's crate** (ADR 0105 §15, `reachesCrate`): a change under `apps/tray/`, or to the scripts that
+//   run its check, or one that can't be told, runs `cargo:check --frozen` beside the steps.
 //
 // `bun scripts/check-reach.ts <file>…`: prints, for those changed files, each test file picked and why, one line
 // each (`  <test>: the change to <file> reaches it`), or why everything runs, then the check's line with its
@@ -642,6 +644,19 @@ export function selectTests(root: string, changed: readonly string[]): Selection
   for (const [file, reason] of lost) note(file, `it runs whatever changes: ${reason}`);
   return { tests: tests.filter((t) => why.has(t)), total: tests.length, why, readers };
 }
+
+/** The tray helper's crate, and the scripts that run its check (`cargoCheck`): what reaches `cargo:check --frozen`. */
+const CRATE_INPUTS = ["apps/tray/", "scripts/cargo.ts", "scripts/cargo-check.ts"];
+
+/**
+ * Whether `bun run check` runs the tray helper's crate's check (ADR 0105 §15): the change reaches `apps/tray` or the
+ * scripts that run its check, or can't be told.
+ */
+export const reachesCrate = (change: { files: string[] } | { doubt: string }): boolean =>
+  "doubt" in change ||
+  change.files.some((file) =>
+    CRATE_INPUTS.some((input) => (input.endsWith("/") ? file.startsWith(input) : file === input)),
+  );
 
 /** The files the change holds (see the header), relative to `root` with `/`, sorted; or why it can't be told. */
 export function changeOf(

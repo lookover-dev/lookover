@@ -144,6 +144,8 @@ function snapshot(review: Partial<Review> = {}, change: Partial<Change> = {}): S
       startAtLogin: true,
       atLogin: "this",
       loginItem: "os",
+      tray: { on: true, shown: "shown", reason: null },
+      os: "linux",
       paused: null,
       remote: false,
       unlocked: false,

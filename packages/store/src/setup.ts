@@ -7,8 +7,8 @@
 // to the GitHub step, so whoever signs in next chooses the repositories again (ADR 0079). Beside the setup, never in
 // it, the person it belongs to (ADR 0090): "whose is it" (a GitHub id, none until recorded), "it is this person's",
 // left as it is by every write of the setup. In live mode the service writes "done" at the first start of a data folder; in demo mode the
-// scenario decides. Beside it, start at login (ADR 0049): the owner's choice, the machine's, off until chosen, kept
-// in its own row so choosing it never makes the setup kept. Nothing registers it before row 8.
+// scenario decides. Beside it, start at login (ADR 0049) and Lookover in the tray (ADR 0105 §11): the owner's
+// choices, the machine's, each on until chosen, each kept in its own row so choosing it never makes the setup kept.
 import type { Database } from "bun:sqlite";
 import {
   changeId,
@@ -41,6 +41,10 @@ export interface Setup {
   startAtLogin(): boolean;
   /** The owner chose to start Lookover at login, or not: kept; the service registers it with the machine. */
   keepStartAtLogin(on: boolean): void;
+  /** Whether the owner chose to show Lookover in the tray: on until chosen (ADR 0105). */
+  tray(): boolean;
+  /** The owner chose to show Lookover in the tray, or not: kept; the service starts or stops the icon. */
+  keepTray(on: boolean): void;
 }
 
 /** The setup before anything was done: the first step. */
@@ -56,7 +60,7 @@ const START: SetupState = {
 const STEP = z.enum(SETUP_ORDER);
 const GITHUB = enumOf<SetupGitHub>()(["start", "waiting-for-install", "nothing-granted", "done"]);
 const flag = z.union([z.literal(0), z.literal(1)]).transform((f) => f === 1);
-const startRow = z.object({ enabled: flag });
+const choiceRow = z.object({ enabled: flag });
 const personRow = z.object({ person_id: z.number().int().nullable() });
 const row = z.object({
   done: flag,
@@ -108,6 +112,10 @@ export function setup(db: Database): Setup {
   const upsertStart = db.query(
     "INSERT INTO start_at_login (id, enabled) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET enabled = excluded.enabled",
   );
+  const selectTray = db.query("SELECT enabled FROM tray WHERE id = 1");
+  const upsertTray = db.query(
+    "INSERT INTO tray (id, enabled) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET enabled = excluded.enabled",
+  );
   return {
     read,
     kept: () => select.get() !== null,
@@ -119,10 +127,17 @@ export function setup(db: Database): Setup {
     keepPerson: (id) => keepPerson.immediate(id),
     startAtLogin: () => {
       const found = selectStart.get();
-      return found === null || startRow.parse(found).enabled;
+      return found === null || choiceRow.parse(found).enabled;
     },
     keepStartAtLogin: (on) => {
       upsertStart.run(on ? 1 : 0);
+    },
+    tray: () => {
+      const found = selectTray.get();
+      return found === null || choiceRow.parse(found).enabled;
+    },
+    keepTray: (on) => {
+      upsertTray.run(on ? 1 : 0);
     },
   };
 }

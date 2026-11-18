@@ -7,6 +7,12 @@
 // script, and stops when asked. The generated entry is in `dist/`, which Git, `tsc`, knip and Biome leave out, so a
 // clone that never built checks green. Nothing is signed, uploaded or put on the PATH. `--baseline` (ADR 0061, the
 // release's x64 executables) compiles for Bun's `-baseline` build of this machine's target; nothing else changes.
+// Beside it, the tray helper (ADR 0105 §14): `cargo build --release --locked` in `apps/tray`, with the root
+// package.json's version compiled in (`LOOKOVER_VERSION`), copied to `dist/lookover-tray` (`.exe` on Windows),
+// where the service looks for it. Its check, on a copy beside the binary's: `--version` says that version, and
+// started as the service starts it, it says `ready` (or `unavailable`, on a machine with no tray) and exits 0 once
+// its standard input closes. With no Cargo, the build stops first and says how to install Rust (rustup); fetching
+// the crates is the build's network, as `bun install`'s is.
 
 import { Database } from "bun:sqlite";
 import {
@@ -22,7 +28,15 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { API } from "@lookover/contracts";
-import { renderSkill, SKILL_NAME, skillCommandLine, skillStampOf, VERSION } from "@lookover/service";
+import {
+  renderSkill,
+  SKILL_NAME,
+  skillCommandLine,
+  skillStampOf,
+  trayHelperName,
+  VERSION,
+} from "@lookover/service";
+import { machineCargo, NO_CARGO, RELEASE_DIR, runCargo, trayFault } from "./cargo.ts";
 
 const root = resolve(import.meta.dir, "..");
 const WEB = join(root, "apps", "web");
@@ -34,6 +48,8 @@ const MIGRATIONS = join(root, "packages", "store", "src", "migrations");
 const DIST = join(root, "dist");
 const ENTRY = join(DIST, "build", "lookover.ts");
 const BINARY = join(DIST, process.platform === "win32" ? "lookover.exe" : "lookover");
+/** The tray helper beside it (ADR 0105 §6). */
+const TRAY = join(DIST, trayHelperName(process.platform));
 /** Lookover's one version (ADR 0061), read off the disk: the binary must say it, whatever its build inlined. */
 const ROOT_VERSION: unknown = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 /** How long the binary may take to start in demo mode, or to stop once asked, before the check fails. */
@@ -115,6 +131,30 @@ async function build(target: string[]): Promise<void> {
   // Run in `dist`, so the compile's scratch file (`.*.bun-build`) lands there, not in the clone's root.
   await run([process.execPath, "build", "--compile", ...target, ENTRY, "--outfile", BINARY], DIST);
   console.log(`Built ${relative(root, BINARY)}, carrying the web app's ${files.length} files.`);
+}
+
+/** The tray helper, built by `cargo` with the program's version compiled in, copied beside the binary. */
+async function buildTray(cargo: string): Promise<void> {
+  const code = await runCargo(cargo, ["build", "--release", "--locked"], {
+    LOOKOVER_VERSION: String(ROOT_VERSION),
+  });
+  if (code !== 0) throw new Error(`cargo build --release --locked in apps/tray exited ${code}`);
+  copyFileSync(join(RELEASE_DIR, trayHelperName(process.platform)), TRAY);
+  console.log(`Built ${relative(root, TRAY)}, version ${String(ROOT_VERSION)}.`);
+}
+
+/** Fails the helper's check with `why`. */
+function trayFailed(why: string): never {
+  throw new Error(`The tray helper failed its check: ${why}`);
+}
+
+/** The helper run as `command` (its copy) in `cwd`, checked by `trayFault`: it fails the build with why. */
+async function checkTray(command: string[], cwd: string): Promise<void> {
+  const fault = await trayFault(command, String(ROOT_VERSION), { limitMs: LIMIT_MS, cwd });
+  if (fault !== null) trayFailed(fault);
+  console.log(
+    `Checked the tray helper: version ${String(ROOT_VERSION)}, its first line, and its exit when its input closed.`,
+  );
 }
 
 /** Fails the check with `why`. */
@@ -199,6 +239,10 @@ async function check(): Promise<void> {
   const copy = join(scratch, BINARY.slice(DIST.length + 1));
   try {
     copyFileSync(BINARY, copy);
+    // The helper beside it, where the service looks for it.
+    const tray = join(scratch, trayHelperName(process.platform));
+    copyFileSync(TRAY, tray);
+    await checkTray([tray], scratch);
     const version = (await run([copy, "--version"], scratch)).trim();
     if (version !== ROOT_VERSION || version !== VERSION)
       failed(`--version said "${version}", not the root package.json's ${String(ROOT_VERSION)}`);
@@ -268,6 +312,12 @@ if (import.meta.main) {
     process.exit(2);
   }
   const baseline = process.argv.includes("--baseline");
+  const cargo = machineCargo();
+  if (cargo === undefined) {
+    console.error(NO_CARGO);
+    process.exit(1);
+  }
   await build(targetArgs({ baseline, platform: process.platform, arch: process.arch }));
+  await buildTray(cargo);
   await check();
 }

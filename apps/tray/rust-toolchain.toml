@@ -1,0 +1,5 @@
+# The helper's toolchain (ADR 0105 §1): rustup installs this exact one, with the checks `bun run cargo:check` runs.
+[toolchain]
+channel = "1.100.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

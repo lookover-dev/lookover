@@ -26,6 +26,10 @@
 //   when the change can't be told; red in either run fails the `test` step. The line gains a clause naming them:
 //   "…, and 1 scripts test that reads what changed: scripts/public-tree.test.ts". `--full` runs them once, in
 //   `test:scripts`.
+// - The tray helper's crate (ADR 0105 §15): when the change reaches `apps/tray` or the scripts that run its check, or
+//   can't be told (`reachesCrate`), the step `cargo:check --frozen` runs beside the others: format, lint and test,
+//   offline on the crates already fetched, so the check never reaches the network (hard rule 1). Not fetched yet,
+//   it says to run `bun run cargo:check` once; no Cargo, how to install it. `--full` runs it whatever the change.
 // - What a run checks, its key, is the working tree's git tree (every tracked file hashed again from its content,
 //   about half a second a key here), Bun's version and what is installed in
 //   `node_modules` (the package folders Bun installed and each workspace's links to them). The key is taken again
@@ -48,7 +52,15 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { spawn, spawnSync } from "bun";
 import { preCommit } from "./check-pre-commit.ts";
-import { changeOf, everyReader, reachInDoubt, readersClause, selectTests, testRuns } from "./check-reach.ts";
+import {
+  changeOf,
+  everyReader,
+  reachesCrate,
+  reachInDoubt,
+  readersClause,
+  selectTests,
+  testRuns,
+} from "./check-reach.ts";
 import { isCode } from "./check-scope.ts";
 
 const root = process.cwd();
@@ -200,8 +212,13 @@ const STEPS = ["typecheck", "lint", "ignores", "docs", "imports", "knip", "test"
 // check scripts themselves (they drive real git repos), the gate test (`scripts/gates.test.ts`, also
 // `bun run gates`) among them.
 const FULL_STEPS = ["site:check", "test:scripts"];
+/** The tray helper's crate's check (`scripts/cargo-check.ts`): `--frozen`, so it never fetches (hard rule 1). */
+const CRATE_STEP = "cargo:check";
 // `bun test` writes each file's duration here, for the over-budget line.
-const EXTRA_ARGS: Record<string, string[]> = { test: [`--timings=${TIMINGS}`, "--update-timings"] };
+const EXTRA_ARGS: Record<string, string[]> = {
+  test: [`--timings=${TIMINGS}`, "--update-timings"],
+  [CRATE_STEP]: ["--frozen"],
+};
 
 /**
  * The test files this run takes: the line that says so, why all of them when in doubt, `bun run test`'s list, and
@@ -214,6 +231,9 @@ type Reach = {
   none: boolean;
   readersList?: string;
 };
+
+/** What changed, or why it can't be told (`changeOf`). */
+type Change = ReturnType<typeof changeOf>;
 
 /** Every list this run started writing, whole or not: each is removed after the run. */
 const lists: string[] = [];
@@ -235,9 +255,9 @@ function withReaders(reach: Reach, readers: string[]): Reach {
 }
 
 /** What the fast check's tests run (ADR 0071; the rules are `check-reach.ts`'s); every test file if that fails. */
-function reach(): Reach {
+function reach(change: Change): Reach {
   try {
-    return reachOrThrow();
+    return reachOrThrow(change);
   } catch (error) {
     // A half-edited package.json, a file that can't be read, a list that can't be written: doubt, never a crash.
     // Every reader runs, unless their list can't be written either. A list written before the failure goes after.
@@ -246,15 +266,24 @@ function reach(): Reach {
   }
 }
 
-function reachOrThrow(): Reach {
-  // The last green run's key (a green `check:full` writes it too), and the one this run checks.
-  const green = keyParts(existsSync(join(CACHE, "green")) ? readFileSync(join(CACHE, "green"), "utf8") : "");
-  const now = keyParts(key);
-  const sameBun = green.bun === Bun.version;
-  const sameInstall = green.install === now.install;
-  // The green tree only when it was checked on this Bun and install; the tree now in any case.
-  const trees = { green: sameBun && sameInstall ? green.tree : undefined, now: now.tree };
-  const change = changeOf(root, process.env, trees);
+// The last green run's key (a green `check:full` writes it too), and the one this run checks.
+const green = keyParts(existsSync(join(CACHE, "green")) ? readFileSync(join(CACHE, "green"), "utf8") : "");
+const now = keyParts(key);
+const sameBun = green.bun === Bun.version;
+const sameInstall = green.install === now.install;
+
+/** The change this run checks (`check-reach.ts`), measured once: git failing is doubt, never a crash. */
+function measuredChange(): Change {
+  try {
+    // The green tree only when it was checked on this Bun and install; the tree now in any case.
+    const trees = { green: sameBun && sameInstall ? green.tree : undefined, now: now.tree };
+    return changeOf(root, process.env, trees);
+  } catch (error) {
+    return { doubt: `git can't list the change (${error instanceof Error ? error.message : String(error)})` };
+  }
+}
+
+function reachOrThrow(change: Change): Reach {
   const selection = selectTests(root, "files" in change ? change.files : []);
   const doubt =
     "doubt" in change
@@ -300,13 +329,16 @@ async function testStep(reached: Reach) {
 }
 
 const started = performance.now();
-const steps = full ? [...STEPS, ...FULL_STEPS] : STEPS;
+const change = full ? undefined : measuredChange();
+// The tray helper's crate (ADR 0105 §15): `check:full` always checks it, the fast check when the change reaches it.
+const crate = change === undefined || reachesCrate(change) ? [CRATE_STEP] : [];
+const steps = full ? [...STEPS, ...FULL_STEPS, ...crate] : [...STEPS, ...crate];
 let reached: Reach | undefined;
 const results = await Promise.all(
   steps.map(async (step) => {
     const begun = performance.now();
     // The other steps are started by now: the selection reads the graph while they run.
-    if (step === "test" && !full) reached = reach();
+    if (step === "test" && change !== undefined) reached = reach(change);
     const { ok, output } =
       reached !== undefined && step === "test"
         ? await testStep(reached)

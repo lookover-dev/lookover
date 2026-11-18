@@ -61,6 +61,29 @@ export type LoginHolder = "this" | "none" | { other: string };
 export const sameLoginHolder = (a: LoginHolder, b: LoginHolder): boolean =>
   typeof a === "string" || typeof b === "string" ? a === b : a.other === b.other;
 
+/**
+ * What the machine shows of Lookover in the tray (ADR 0105 §12): `shown`, the icon is there; `starting`, the tray is
+ * asked and hasn't answered; `off`, the owner chose not to show it; `unavailable`, it can't be shown, and why.
+ */
+export type TrayShown = "shown" | "starting" | "off" | "unavailable";
+
+/** Lookover in the tray: the owner's choice (on until they turn it off) and what the machine shows. */
+export interface ServiceTray {
+  on: boolean;
+  shown: TrayShown;
+  /**
+   * Why it is unavailable, as the tray or the service says it (no helper beside the executable, a refused version, no
+   * desktop, no tray host, it ended twice); null otherwise.
+   */
+  reason: string | null;
+}
+
+/**
+ * The computer's system, as the app needs it (ADR 0105 §13): where the tray's icon sits (the menu bar on macOS) and
+ * what Windows does with a new one. `linux` is every other system, as the tray's helper is built for it.
+ */
+export type ServiceOs = "windows" | "macos" | "linux";
+
 export interface Service {
   state: "running";
   since: number;
@@ -90,6 +113,13 @@ export interface Service {
   atLogin: LoginHolder;
   /** Where that registration is: the machine's, or development's stand-in that registers nothing. */
   loginItem: LoginItemKind;
+  /**
+   * Lookover in the tray (ADR 0105 §11-12): the choice the store keeps and what this start's tray shows. Each start
+   * sets it afresh, `starting` while the choice is on: the last run's answer is never replayed.
+   */
+  tray: ServiceTray;
+  /** The computer the service runs on; demo mode's is the one it runs on, as its install commands are. */
+  os: ServiceOs;
   paused: { since: number; until: number | null } | null;
   /** Server mode: reachable over the network, so actions ask to unlock first. */
   remote: boolean;
