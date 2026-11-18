@@ -1,7 +1,8 @@
 // The schema, as forward-only migrations: one SQL file each in `src/migrations/`, named by timestamp (ADR 0032),
 // `YYYYMMDDHHMMSS-<what>.sql`, so two branches adding a table never edit the same file nor both create
 // "migration 12". Each runs once, in name order, inside its own transaction, and is recorded in `migrations`.
-// There is no downgrade before 1.0: reset the data folder instead (AGENTS.md rule 10).
+// There is no downgrade before 1.0: reset the data folder instead (AGENTS.md rule 10). A migration a release carries
+// is never edited, renamed or deleted: an installed data folder never runs it again (ADR 0103).
 // The store runs the embedded list, `embedded-migrations.ts`, which `bun run migrations` (scripts/migrations.ts)
 // generates from the folder; a test may give a folder instead, read from the disk.
 import type { Database } from "bun:sqlite";

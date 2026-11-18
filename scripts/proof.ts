@@ -43,7 +43,8 @@
 // Shots are deterministic: the service's clock stands still, the page's `Date` with it, the time zone fixed,
 // the fonts in before an act, every motion settled before a shot, the loops still. Just before a shot (ADR 0096) the
 // demo's listing reads are answered, a full page gets a window as tall as it, an open modal plays its entry again, and
-// Chrome lays the page's layers out afresh (`LayerTree.enable`). Each worktree takes its own
+// Chrome lays the page's layers out afresh (`LayerTree.enable`). A shot whose pixels the GPU's history moves
+// (`ownBrowser`, ADR 0099) is shot in a browser of its own, which has drawn nothing before. Each worktree takes its own
 // ports (scripts/port.ts), so two can run proof at once. Proof never calls `claude`, `codex` or the network.
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -628,13 +629,13 @@ async function growToPage(page: Page): Promise<void> {
 }
 
 /**
- * Every element's style computed again (an unused property set on the root for a frame), and an open modal and its
- * backdrop playing their entry again, as on any opening. An element whose animation ended in a frame that recomputed
- * nothing kept the mark of a running opacity animation, so Chrome drew it through a surface of its own on some runs:
- * the palette opened again during its own fade had its shadow, or the blurred page behind its backdrop, a level apart,
- * and restyling them was not enough. A sheet of proof's own takes their animations off for a frame (the backdrop
- * hidden; the dialog shown, so focus stays where it is), then the page settles. Their transitions stay off until the
- * page closes after its shot: given back while the entry ran, they left the dialogs a level apart again.
+ * Every element's style computed again (an unused property set on the root, then taken off), and an open modal and
+ * its backdrop playing their entry again, as on any opening (ADR 0096). A sheet of proof's own takes their animations
+ * off (the backdrop hidden; the dialog shown, so focus stays where it is) for a style recalculation, not a drawn frame:
+ * it is taken off in the next animation frame's callback, before that frame's style. Then the page settles. Their
+ * transitions stay off until the page closes after its shot: given back while the entry ran, they left the dialogs a
+ * level apart again. The drift this was written for, the palette opened again during its fade, was what the GPU drew
+ * before the shot (ADR 0099); the replay may no longer be needed.
  */
 async function replayModals(page: Page): Promise<void> {
   await page.evaluate(async () => {
@@ -1051,14 +1052,30 @@ function byWorld(todo: Todo): Todo[] {
   return [...worlds.values()];
 }
 
+/**
+ * Proof's browser: the system Edge, no browser download needed on Windows; elsewhere Playwright's own Chromium (the
+ * site's checks start theirs in `apps/site/scripts/browser.ts`).
+ */
+function startBrowser(): Promise<Browser> {
+  return chromium.launch(process.platform === "win32" ? { channel: "msedge" } : {});
+}
+
 /** One world's shots on the service: loaded once and its shots taken at once, or alone, loaded on each try. */
 async function shootWorld(s: Shooting, server: ServiceServer, items: Todo): Promise<void> {
   const { url, cookie, demo } = server;
-  const take = (theme: Theme, shot: Shot, key: Key, now: number) => {
+  const take = async (theme: Theme, shot: Shot, key: Key, now: number) => {
     const visit = { url, cookie, demo, now, judged: !s.side.base };
-    return shot.frames
-      ? shootFrames(s.browser, visit, theme, shot, stripFile(shot, theme))
-      : shootOne(s.browser, visit, theme, shot, s.fileOf(key));
+    if (shot.frames) return shootFrames(s.browser, visit, theme, shot, stripFile(shot, theme));
+    if (!shot.ownBrowser) return shootOne(s.browser, visit, theme, shot, s.fileOf(key));
+    const own = await startBrowser();
+    try {
+      await shootOne(own, visit, theme, shot, s.fileOf(key));
+    } finally {
+      // The shot alone says whether it passed: a browser that won't close doesn't take it again, it is said.
+      await own
+        .close()
+        .catch((error) => console.log(`warn ${shot.name}: its own browser didn't close: ${error}`));
+    }
   };
   const [first] = items;
   if (!first) return;
@@ -1276,8 +1293,7 @@ const everyStrip = THEMES.flatMap((theme) =>
 );
 
 const began = Date.now();
-// The system Edge: no browser download needed on Windows. Elsewhere, Playwright's own Chromium.
-const browser = await chromium.launch(process.platform === "win32" ? { channel: "msedge" } : {});
+const browser = await startBrowser();
 // No shot left over from an earlier run.
 rmSync(out, { recursive: true, force: true });
 // The console's listeners bite, or no shot is worth judging by them.

@@ -2,6 +2,18 @@
 
 What changed in each version of Lookover, for the people who use it. Each version's notes are written when it is released.
 
+## [0.17.0](https://github.com/lookover-dev/lookover/compare/v0.16.0...v0.17.0) (2026-11-18)
+
+### Features
+
+- **review:** a correct finding you decide not to fix has **Accept as is** on its card, with an optional one-line reason. The thread says you accepted it, the status block and the check no longer count it as open, it is never counted as noise, and Lookover doesn't raise it again on that pull request. **This finding is wrong** stays for a finding that is wrong.
+- **cli:** `lookover settle <finding> accepted|wrong --confirmed-by-owner "<reason>"` lets your coding agent settle a finding once you have told it to, in your words. Lookover settles it as the app would, and the thread, the status block and the app say it was settled on your word through your coding agent. It answers the agent's comment with 🚀, or 😕 when it can't settle it. Without the flag, the command refuses.
+- **cli:** when a finding needs you, `lookover wait` and `lookover feedback` (exit 4) name it and say where to settle it: **Accept as is** in the app, or `lookover settle` on your word. `wait` resolves the thread of a finding you settled.
+
+### Bug Fixes
+
+- **github:** when GitHub briefly answers "not found" for a check Lookover has just created, Lookover writes it again within seconds, instead of leaving it unfinished until the next review.
+
 ## [0.16.0](https://github.com/lookover-dev/lookover/compare/v0.15.0...v0.16.0) (2026-11-13)
 
 ### Features

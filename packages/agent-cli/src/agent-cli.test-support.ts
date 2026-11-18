@@ -33,6 +33,9 @@ export const owner = { id: 1234567, login: "sasensi" };
 /** Another person, signed in to the shared App on their own machine: their Lookover posts as them. */
 export const colleague = { id: 7654321, login: "dana" };
 export const BRANCH = "feature/unpaid";
+/** Where the owner settles a finding the agent can't (ADR 0100), or has it settled on their word (ADR 0101), as `wait` says it. */
+export const SETTLE =
+  "The owner settles it in Lookover's app (`lookover open`), on this pull request's review: Accept as is, or Too noisy? › This finding is wrong. Or ask them: on their word, `lookover settle <finding> accepted|wrong --confirmed-by-owner \"<their reason>\"`.";
 const START = Date.parse("2026-10-07T12:00:00Z");
 /** `ms` past the start, as the result block writes a time. */
 export const iso = (ms: number) => new Date(START + ms).toISOString();
@@ -99,6 +102,7 @@ export function result(overrides: {
       withdrawn: 0,
       acknowledged: 0,
       dismissed: 0,
+      accepted: 0,
       obsolete: 0,
       kept_in_app: 0,
     },

@@ -46,6 +46,12 @@ export interface Shot {
   /** Its act changes what the service holds: shot on a load of its own, one theme at a time. */
   alone?: boolean;
   /**
+   * Shot in a browser of its own, which has drawn nothing before (ADR 0099): for a shot that comes out a level apart
+   * beside some other shots and never alone. The GPU draws every page of a browser in one process, and what it drew
+   * for the pages before moved such a shot's shadows and blur.
+   */
+  ownBrowser?: boolean;
+  /**
    * The selector of the screen it must show: by default the screen its path routes to, the session screen
    * without a session.
    */
@@ -743,6 +749,22 @@ const toEveryone = async (page: Page) => {
 const tooNoisy = (page: Page, title: string) =>
   page.locator(".card.finding", { hasText: title }).getByRole("button", { name: "Too noisy?" });
 
+/**
+ * Opens Accept as is on S4's escalated finding (ADR 0100) once its popover has come in (ADR 0093), and types
+ * `reason` in its field. The pointer leaves, so the shot shows it at rest.
+ */
+async function acceptAsIs(page: Page, reason: string) {
+  await page
+    .locator(".card.finding", { hasText: "Anyone can mark an invoice paid" })
+    .getByRole("button", { name: "Accept as is" })
+    .click();
+  const field = page.getByLabel("Why, in one line");
+  await field.waitFor();
+  await entriesPlayed(page);
+  await field.fill(reason);
+  await page.mouse.move(0, 0);
+}
+
 /** S1 from Codex signed out to both AIs ready: Codex signed in; the step says so and waits for Continue (ADR 0058). */
 async function setupUntilBothReady(page: Page, demo: Demo) {
   await button(page, "Sign in from a terminal").click();
@@ -1116,6 +1138,41 @@ const LISTED: Shot[] = [
     advance: 11 * MIN,
     fullPage: true,
   },
+  // The owner accepts the escalated finding as is from its card (ADR 0100): the popover, its reason typed.
+  {
+    name: "review-accept-as-is",
+    scenario: "S4",
+    path: "/reviews/sasensi/ledger-api/149",
+    advance: 11 * MIN,
+    act: (p) => acceptAsIs(p, "Accepted deploy-window gap"),
+  },
+  // Accepted: under Done, with the reason; the review settled.
+  {
+    name: "review-accepted",
+    scenario: "S4",
+    path: "/reviews/sasensi/ledger-api/149",
+    advance: 11 * MIN,
+    alone: true,
+    fullPage: true,
+    act: async (p) => {
+      await acceptAsIs(p, "Accepted deploy-window gap");
+      await p.getByRole("button", { name: "Accept", exact: true }).click();
+      await p.getByText("Accepted as is. Lookover won't ask again.").waitFor();
+      // Nothing left to do: Done is the page's one list, no tab to press.
+      await p.getByText("You accepted it as is: Accepted deploy-window gap").waitFor();
+      await p.mouse.move(0, 0);
+    },
+  },
+  // S4's #154: the owner told their coding agent to accept its escalated finding as is, and the agent settled it on
+  // their word (ADR 0101): under Done, the card names the agent and quotes the reason; the review settled.
+  {
+    name: "review-agent-accepted",
+    scenario: "S4",
+    path: "/reviews/sasensi/ledger-api/154",
+    advance: 23 * MIN,
+    fullPage: true,
+    act: (p) => p.getByText("Your coding agent accepted it as is, on your word: ").waitFor(),
+  },
   // On the finding that follows a rule: every choice, "This finding is wrong" first (ADR 0049, ADR 0052).
   {
     name: "review-too-noisy",
@@ -1421,6 +1478,45 @@ const LISTED: Shot[] = [
       await p.goto(github);
       // `lookover wait` resolved its thread (#148 is the agent's): opened, as a reader would, to show what it holds.
       const thread = p.locator("details.gh-thread", { hasText: "Dismissed by the owner" });
+      await thread.waitFor({ state: "attached" });
+      await thread.evaluate((el) => {
+        if (el instanceof HTMLDetailsElement) el.open = true;
+      });
+    },
+  },
+  // The owner accepts S4's escalated finding as is in the app: Lookover's reply on its thread, the root still
+  // readable, the status block counting it accepted (ADR 0100).
+  {
+    name: "github-accepted",
+    scenario: "S4",
+    path: "/github/sasensi/ledger-api/149",
+    advance: 11 * MIN,
+    alone: true,
+    fullPage: true,
+    act: async (p) => {
+      const github = p.url();
+      await p.goto(github.replace("/github/", "/reviews/"));
+      await acceptAsIs(p, "Accepted deploy-window gap");
+      await p.getByRole("button", { name: "Accept", exact: true }).click();
+      await p.getByText("Accepted as is. Lookover won't ask again.").waitFor();
+      await p.goto(github);
+      const thread = p.locator("details.gh-thread", { hasText: "Accepted by the owner" });
+      await thread.waitFor({ state: "attached" });
+      await thread.evaluate((el) => {
+        if (el instanceof HTMLDetailsElement) el.open = true;
+      });
+    },
+  },
+  // S4's #154 accepted as is through the coding agent, on the owner's word (ADR 0101): Lookover's reply on its thread
+  // says so and quotes the reason, the root still readable, the status block counting it accepted.
+  {
+    name: "github-agent-accepted",
+    scenario: "S4",
+    path: "/github/sasensi/ledger-api/154",
+    advance: 23 * MIN,
+    fullPage: true,
+    act: async (p) => {
+      const thread = p.locator("details.gh-thread", { hasText: "through their coding agent" });
       await thread.waitFor({ state: "attached" });
       await thread.evaluate((el) => {
         if (el instanceof HTMLDetailsElement) el.open = true;
@@ -3153,6 +3249,7 @@ const LISTED: Shot[] = [
   {
     name: "palette-reopened",
     scenario: "S12",
+    ownBrowser: true,
     act: async (p) => {
       await p.keyboard.press("Control+k");
       await p.locator("dialog.cmdk[open]").waitFor();

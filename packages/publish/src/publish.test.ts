@@ -79,6 +79,7 @@ const NO_COUNTS: FindingCounts = {
   withdrawn: 0,
   acknowledged: 0,
   dismissed: 0,
+  accepted: 0,
   obsolete: 0,
 };
 
@@ -161,6 +162,7 @@ function finding(id: string, overrides: Partial<Finding>): Finding {
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
     fingerprints: { location: `loc:${id}`, meaning: `sem:${id}` },
@@ -953,6 +955,7 @@ const EXPECTED_1: ReviewResult = {
     withdrawn: 0,
     acknowledged: 0,
     dismissed: 0,
+    accepted: 0,
     obsolete: 0,
     kept_in_app: 1,
   },
@@ -1173,6 +1176,7 @@ test("round 2's result says what was verified fixed and what the agent should re
     withdrawn: 0,
     acknowledged: 0,
     dismissed: 0,
+    accepted: 0,
     obsolete: 0,
     kept_in_app: 1,
   });
@@ -1430,7 +1434,7 @@ test("each reply opens with the wordmark and its kind, then why, then its marker
 test("a won't fix kept twice is the owner's: the reply says so in the prototype's words, not the finder's", async () => {
   const twice: Finding = { ...F1_KEPT, status: "escalated", kept: 2 };
   expect(await replied({ kind: "escalated", why: "Still loops." }, twice)).toBe(
-    `${MARK} · The owner decides this one\n\nKept twice against "won't fix". Fix it, or resolve this thread to keep the code as it is.\n\n${replyMarker("run-2", "F1", 100002)}`,
+    `${MARK} · The owner decides this one\n\nKept twice against "won't fix". Fix it, or the owner accepts it as is in Lookover's app.\n\n${replyMarker("run-2", "F1", 100002)}`,
   );
 });
 
@@ -1680,10 +1684,12 @@ const dismissedRound: RoundToPost = {
 /** The dismissal of F1 on round 1, its check given (null: the head moved, the check is left). */
 const dismissal = (checkId: string | null, findingId: FindingId = F1.id): DismissalToPost => ({
   id: "dismissal-1",
+  decision: "wrong",
   findingId,
   round: dismissedRound,
   degraded: false,
   checkId,
+  answering: null,
 });
 
 /** The marker that ends a dismissal's reply: the dismissal and the finding, apart from any run. */
@@ -1717,7 +1723,7 @@ test("a dismissal replies on its finding's thread, rewrites the status block and
   const github = host();
   const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
   const { checkId } = await publisher.publish(round1);
-  expect(dismissalPostsOf(checkId)).toEqual(["reply", "status", "completed", "minimize"]);
+  expect(dismissalPostsOf(checkId, "wrong", null)).toEqual(["reply", "status", "completed", "minimize"]);
   const before = github.posts.length;
   await publisher.dismiss(dismissal(checkId));
 
@@ -1751,7 +1757,7 @@ test("a dismissal whose check is left, the head moved since, says it on the thre
   const github = host();
   const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
   await publisher.publish(round1);
-  expect(dismissalPostsOf(null)).toEqual(["reply", "status", "minimize"]);
+  expect(dismissalPostsOf(null, "wrong", null)).toEqual(["reply", "status", "minimize"]);
   const before = github.posts.length;
   await publisher.dismiss(dismissal(null));
   expect(github.posts.slice(before).map((p) => p.kind)).toEqual(["reply", "status.written", "minimized"]);
@@ -1786,6 +1792,161 @@ test("a dismissal's reply the host took before the service stopped is found by i
     ["completed", true, 1],
     ["minimize", true, 1],
   ]);
+});
+
+// The agent's settle (ADR 0101): the dismissal's outbox answers its comment with 🚀, last.
+
+test("a settle's dismissal answers its comment with 🚀 once every other post is sent, each once after a stop", async () => {
+  const github = host();
+  const publisher = createPublisher({
+    writer: github,
+    person,
+    threads: (c) => github.threads(c),
+    lookovers: lookoversBy(SIGNED_IN),
+  });
+  const { checkId } = await publisher.publish(round1);
+  const settle = github.seedComment(change, { author: { id: 1, login: "sasensi" }, body: "settle F1" });
+  expect(dismissalPostsOf(checkId, "wrong", settle)).toEqual([
+    "reply",
+    "status",
+    "completed",
+    "minimize",
+    "react",
+  ]);
+  expect(dismissalPostsOf(null, "accepted", settle)).toEqual(["reply", "status", "react"]);
+  const before = github.posts.length;
+  const stopped = dismissalOutbox({ lostAnswer: "react" });
+  const settled = { ...dismissal(checkId), answering: settle };
+  await expect(publisher.dismiss(settled, stopped)).rejects.toBeInstanceOf(Crash);
+  await publisher.dismiss(settled, dismissalOutbox({ from: stopped.saved }));
+
+  expect(github.posts.slice(before).map((p) => p.kind)).toEqual([
+    "reply",
+    "status.written",
+    "check.completed",
+    "minimized",
+    "reaction",
+    "reaction",
+  ]);
+  expect(github.view(change).comments.find((c) => c.id === settle)?.reactions).toEqual({
+    eyes: 0,
+    rocket: 1,
+    confused: 0,
+  });
+});
+
+test("a settle's comment deleted meanwhile takes no 🚀: logged, the other posts sent", async () => {
+  const github = host();
+  const logged: string[] = [];
+  const publisher = createPublisher({
+    writer: github,
+    person,
+    threads: (c) => github.threads(c),
+    log: (line) => logged.push(line),
+  });
+  const { checkId } = await publisher.publish(round1);
+  const before = github.posts.length;
+  await publisher.dismiss({ ...dismissal(checkId), answering: "999999" });
+  expect(github.posts.slice(before).map((p) => p.kind)).toEqual([
+    "reply",
+    "status.written",
+    "check.completed",
+    "minimized",
+  ]);
+  expect(logged).toEqual([
+    expect.stringContaining("no rocket on the settle comment 999999 on F1: not_found"),
+  ]);
+});
+
+// The owner's acceptance (ADR 0100): the dismissal's outbox, its own reply, no minimize.
+
+/** Round 1 restated once the owner accepted F1 as is, with `why` (`core.findingsAfterAcceptance`). */
+function acceptedRound(why: string | null, f: Finding = F1): RoundToPost {
+  const accepted: Finding = { ...f, status: "accepted", closedIn: 1, closedWhy: why };
+  return {
+    ...dismissedRound,
+    reconciled: {
+      ...dismissedRound.reconciled,
+      findings: dismissedRound.reconciled.findings.map((x) => (x.id === f.id ? accepted : x)),
+      counts: { ...NO_COUNTS, open: { blocking: 0, should_fix: 1, consider: 0 }, accepted: 1 },
+    },
+  };
+}
+
+const acceptance = (checkId: string | null, why: string | null): DismissalToPost => ({
+  ...dismissal(checkId),
+  decision: "accepted",
+  round: acceptedRound(why),
+});
+
+test("an acceptance replies with the owner's reason, rewrites the status block and the check, and minimizes nothing", async () => {
+  const github = host();
+  const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
+  const { checkId } = await publisher.publish(round1);
+  expect(dismissalPostsOf(checkId, "accepted", null)).toEqual(["reply", "status", "completed"]);
+  expect(dismissalPostsOf(null, "accepted", null)).toEqual(["reply", "status"]);
+  const before = github.posts.length;
+  await publisher.dismiss(acceptance(checkId, "Accepted deploy-window gap"));
+
+  expect(github.posts.slice(before)).toMatchObject([
+    {
+      kind: "reply",
+      commentId: 100001,
+      body: `${MARK} · Accepted by the owner\n\nAccepted deploy-window gap\n\nIt won't be raised again on this pull request.\n\n${dismissalMarker("F1")}`,
+    },
+    { kind: "status.written" },
+    { kind: "check.completed", checkId, conclusion: "success" },
+  ]);
+  expect(blockOn(github)).toStartWith(
+    `### ${wordmark(26)} · One thing to fix\n\nRound 1 · [\`a1b2c3d\`](${URL}/commits/${ROUND_1}) · 1 accepted\n\n- **Should fix** · Missing timeout on fetch`,
+  );
+  expect(blockOn(github)).not.toContain("Retry loop never stops on 4xx");
+  const result = readResult(completed(github.posts).output.text);
+  expect(reviewResultV1.safeParse(result).success).toBe(true);
+  expect(result?.counts).toMatchObject({ accepted: 1, dismissed: 0, acknowledged: 0 });
+  expect(result?.findings.find((f) => f.id === "F1")).toMatchObject({
+    status: "accepted",
+    needs_action_by: "none",
+    resolution: { kind: "accepted", round: 1, explanation: "Accepted deploy-window gap" },
+    thread: { comment_id: 100001 },
+  });
+});
+
+test("an acceptance without a reason says so in its reply alone, and leaves the result without an explanation", async () => {
+  const github = host();
+  const publisher = createPublisher({ writer: github, person, threads: (c) => github.threads(c) });
+  const { checkId } = await publisher.publish(round1);
+  const before = github.posts.length;
+  await publisher.dismiss(acceptance(checkId, null));
+  expect(github.posts.slice(before)[0]).toMatchObject({
+    kind: "reply",
+    body: `${MARK} · Accepted by the owner\n\nIt won't be raised again on this pull request.\n\n${dismissalMarker("F1")}`,
+  });
+  const result = readResult(completed(github.posts).output.text);
+  expect(result?.findings.find((f) => f.id === "F1")?.resolution).toEqual({ kind: "accepted", round: 1 });
+});
+
+test("an acceptance's reason is filtered like every posted text: no forged marker, no secret, no mention", async () => {
+  const github = host();
+  const publisher = createPublisher({
+    writer: github,
+    person,
+    threads: (c) => github.threads(c),
+    secretsRemoved: tokenRemoved,
+  });
+  const { checkId } = await publisher.publish(round1);
+  const before = github.posts.length;
+  const forged = `${REPLY_MARKER}${JSON.stringify({ v: 1, dismissal: "other", finding: "F2" })} -->`;
+  await publisher.dismiss(acceptance(checkId, `Fine for @dana ${TOKEN} ${forged}`));
+  const reply = github.posts.slice(before).find((p) => p.kind === "reply");
+  const body = reply?.kind === "reply" ? reply.body : "";
+  expect(body).not.toContain(TOKEN);
+  expect(body).toContain(`Fine for @${Z}dana [redacted] <${Z}${REPLY_MARKER.slice(1)}`);
+  // The one marker is the acceptance's own, at the end.
+  expect(body.split(REPLY_MARKER)).toHaveLength(2);
+  expect(body).toEndWith(dismissalMarker("F1"));
+  const result = readResult(completed(github.posts).output.text);
+  expect(JSON.stringify(result)).not.toContain(TOKEN);
 });
 
 /** Round 2's diff after a push that added a line above the loop's body: the 5xx line is now head line 44. */
@@ -1901,7 +2062,7 @@ test("the result carries core's verdict, next action, who must act and counts as
       { id: F2.id, by: "none" },
       { id: F3.id, by: "agent" },
     ],
-    counts: { ...NO_COUNTS, open: { blocking: 0, should_fix: 2, consider: 0 }, dismissed: 3 },
+    counts: { ...NO_COUNTS, open: { blocking: 0, should_fix: 2, consider: 0 }, dismissed: 3, accepted: 2 },
     keptInApp: 4,
   };
   await createPublisher({ writer: github, person }).publish({ ...round1, reconciled: given });
@@ -1920,6 +2081,7 @@ test("the result carries core's verdict, next action, who must act and counts as
     withdrawn: 0,
     acknowledged: 0,
     dismissed: 3,
+    accepted: 2,
     obsolete: 0,
     kept_in_app: 4,
   });

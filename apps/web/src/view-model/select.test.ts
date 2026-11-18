@@ -43,7 +43,6 @@ import {
   chip,
   differences,
   failedNotice,
-  gitHubPrimary,
   homeGroups,
   listedReviews,
   lookedOver,
@@ -1350,6 +1349,7 @@ function finding(id: string, severity: Severity, status: Finding["status"]): Fin
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
   };
@@ -1933,19 +1933,15 @@ test("the review button is the page's primary only when it answers what needs th
   ).toBe(true);
 });
 
-test("a review that needs the person has one filled primary: Open on GitHub, where they settle the thread (#644)", () => {
-  const github = (st: State) => gitHubPrimary(firstOf(st));
-  expect(github(withChange(calm(), 1, "needs-you"))).toBe(true);
-  // Every other state, Open on GitHub stays a secondary.
-  for (const kind of ["to-fix", "settled", "clean", "running", "queued", "none"] as const)
-    expect(github(withChange(calm(), 1, kind))).toBe(false);
-  // New commits on it: Review again is the primary, and the only one.
+test("a review that needs the person has no filled primary: it is settled on the finding's card (ADR 0100)", () => {
   const st = withChange(calm(), 1, "needs-you");
+  expect(reviewButtonPrimary(firstOf(st))).toBe(false);
+  // New commits on it: Review again is the primary, nobody having looked at them.
   const id = changeId("sam/app#1");
   const change = st.changes[id];
   if (!change) throw new Error("No change");
   const newer = firstOf({ ...st, changes: { ...st.changes, [id]: { ...change, newCommits: 1 } } });
-  expect([reviewButtonPrimary(newer), gitHubPrimary(newer)]).toEqual([true, false]);
+  expect(reviewButtonPrimary(newer)).toBe(true);
 });
 
 test("the shortcut list says every label R can press: Review now, Review again and Try again", () => {

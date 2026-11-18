@@ -344,6 +344,43 @@ export function Tag({
   );
 }
 
+/**
+ * A labelled field (design-system.md "Input"): the label above, the help below, both tied to the input by id; the
+ * input takes every prop an input does, `className` aside.
+ */
+export function Input({
+  label,
+  help,
+  error,
+  ...props
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "className" | "id"> & {
+  label: string;
+  help?: string;
+  /** What is wrong with the value: said in pink in the help's place, the field's border pink too. */
+  error?: string;
+}) {
+  const id = useId();
+  const below = error ?? help;
+  const belowId = `${id}-${error === undefined ? "help" : "err"}`;
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <input
+        className="input"
+        id={id}
+        aria-describedby={below === undefined ? undefined : belowId}
+        aria-invalid={error === undefined ? undefined : true}
+        {...props}
+      />
+      {below === undefined ? null : (
+        <span className={error === undefined ? "help" : "err"} id={belowId}>
+          {below}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function Search({ kbd, ...props }: InputHTMLAttributes<HTMLInputElement> & { kbd?: string }) {
   return (
     <div className="search">

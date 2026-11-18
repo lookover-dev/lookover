@@ -14,12 +14,15 @@ import {
   type Severity,
 } from "@lookover/contracts";
 import {
+  ACCEPT_AS_IS,
+  acceptAsIs,
   doneLine,
   edgeNeedsYou,
   findingGroups,
   findingMeta,
   findingTabs,
   needsYou,
+  needsYouBanner,
   noiseChoices,
   onGitHub,
   placeText,
@@ -58,6 +61,7 @@ function finding(id: string, status: FindingStatus, extra: Partial<Finding> = {}
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
     ...extra,
@@ -218,12 +222,45 @@ test("any other settled finding says why", () => {
   const why = 'The agent replied: "Intended." The reviewer agreed.';
   expect(doneLine(finding("a", "withdrawn", { closedWhy: why }))).toEqual({ kind: "why", text: why });
   expect(doneLine(finding("a", "obsolete"))).toEqual({ kind: "why", text: "No longer in the code." });
-  // The owner gives no reason when dismissing (ADR 0052): the app says what it was.
+  // A dismissal without a reason (ADR 0101 lets it keep one): the app says what the owner did.
   expect(doneLine(finding("a", "dismissed"))).toEqual({ kind: "why", text: "You marked it as wrong." });
   expect(doneLine(finding("a", "acknowledged"))).toEqual({
     kind: "why",
     text: "The reviewer accepted the reply.",
   });
+  // The owner's acceptance (ADR 0100): their reason, when they gave one, after what they did.
+  expect(doneLine(finding("a", "accepted"))).toEqual({ kind: "why", text: "You accepted it as is." });
+  expect(doneLine(finding("a", "accepted", { closedWhy: "Accepted deploy-window gap" }))).toEqual({
+    kind: "why",
+    text: "You accepted it as is: Accepted deploy-window gap",
+  });
+});
+
+test("the owner's decision says who made it, then their reason: never the bare reason (#813)", () => {
+  const reason = "The cache is warmed at deploy";
+  const why = (status: FindingStatus, decidedVia: Finding["decidedVia"], closedWhy?: string) =>
+    doneLine(finding("a", status, closedWhy === undefined ? { decidedVia } : { decidedVia, closedWhy }));
+  expect([
+    why("dismissed", "app"),
+    why("dismissed", "app", reason),
+    why("accepted", "app"),
+    why("accepted", "app", reason),
+    why("dismissed", "agent"),
+    why("dismissed", "agent", reason),
+    why("accepted", "agent"),
+    why("accepted", "agent", reason),
+  ]).toEqual(
+    [
+      "You marked it as wrong.",
+      `You marked it as wrong: ${reason}`,
+      "You accepted it as is.",
+      `You accepted it as is: ${reason}`,
+      "Your coding agent marked it as wrong, on your word.",
+      `Your coding agent marked it as wrong, on your word: ${reason}`,
+      "Your coding agent accepted it as is, on your word.",
+      `Your coding agent accepted it as is, on your word: ${reason}`,
+    ].map((text) => ({ kind: "why", text })),
+  );
 });
 
 test("why a finding was raised: the rule it follows, and where that rule is (ADR 0048)", () => {
@@ -401,4 +438,90 @@ test('"This finding is wrong" is offered on any posted finding still unsettled, 
   expect(noiseChoices(on, finding("F3", "open", { posted: false }))).toEqual([]);
   for (const status of ["verified_fixed", "withdrawn", "dismissed", "acknowledged", "obsolete"] as const)
     expect(noiseChoices(on, finding("F4", status))).toEqual([]);
+});
+
+test("Accept as is (ADR 0100): on any posted finding still unsettled, saying what it does on GitHub", () => {
+  const id = changeId("sam/app#1");
+  const inline = finding("F1", "escalated", { severity: "blocking", commented: true });
+  const accept = acceptAsIs(id, inline, true);
+  expect(ACCEPT_AS_IS).toBe("Accept as is");
+  expect(accept && { ...accept, command: undefined }).toEqual({
+    title: "Accept F1 as is",
+    effect:
+      "Lookover stops asking for a fix. On GitHub it replies on the thread that you accepted it, with your reason when you give one, and the description and the check stop counting it. It won't be raised again on this pull request.",
+    label: "Why, in one line",
+    help: "Optional. Posted on the thread as you write it.",
+    max: 200,
+    saved: "Accepted as is. Lookover won't ask again.",
+    back: "Back",
+    submit: "Accept",
+    command: undefined,
+  });
+  // The reason typed goes as typed; none typed, none sent.
+  expect(accept?.command("Accepted deploy-window gap")).toEqual({
+    type: "finding.accept",
+    changeId: id,
+    findingId: findingId("F1"),
+    reason: "Accepted deploy-window gap",
+  });
+  expect(accept?.command("  ")).toEqual({ type: "finding.accept", changeId: id, findingId: findingId("F1") });
+  // In the description only, no thread to reply on; a commit pushed since, the check stays on the older commit.
+  const descriptionOnly = finding("F2", "open", { commented: false });
+  expect(
+    [
+      acceptAsIs(id, descriptionOnly, true),
+      acceptAsIs(id, inline, false),
+      acceptAsIs(id, descriptionOnly, false),
+    ].map((a) => a?.effect),
+  ).toEqual([
+    "Lookover stops asking for a fix. On GitHub the description and the check stop counting it. It won't be raised again on this pull request.",
+    "Lookover stops asking for a fix. On GitHub it replies on the thread that you accepted it, with your reason when you give one, and the description stops counting it. The check stays: it is on an older commit. It won't be raised again on this pull request.",
+    "Lookover stops asking for a fix. On GitHub the description stops counting it. The check stays: it is on an older commit. It won't be raised again on this pull request.",
+  ]);
+  // With no thread, the reason is posted nowhere: the help says only that it is optional.
+  expect(acceptAsIs(id, descriptionOnly, true)?.help).toBe("Optional.");
+  // Kept off the pull request, or settled: nothing to accept.
+  expect(acceptAsIs(id, finding("F3", "open", { posted: false }), true)).toBeNull();
+  for (const status of [
+    "verified_fixed",
+    "withdrawn",
+    "dismissed",
+    "accepted",
+    "acknowledged",
+    "obsolete",
+  ] as const)
+    expect(acceptAsIs(id, finding("F4", status), true)).toBeNull();
+});
+
+test("the needs-you banner names Accept as is, for one finding and for several", () => {
+  const round = (n: number): Review["rounds"][number] => ({
+    n,
+    sha: commitSha("a1f9c2e"),
+    base: null,
+    reviewer: "claude",
+    secondFind: null,
+    confirmer: null,
+    confirmFallback: null,
+    confirmFailure: null,
+    ruledOut: [],
+    startedAt: 0,
+    endedAt: 0,
+    raised: 1,
+    verifiedFixed: 0,
+    open: 1,
+    steps: [],
+    sessions: [],
+  });
+  const after = (rounds: number, findings: Finding[]): Review => ({
+    ...review(findings),
+    rounds: Array.from({ length: rounds }, (_, i) => round(i + 1)),
+  });
+  const one = after(3, [finding("F1", "escalated"), finding("F2", "open")]);
+  expect(needsYouBanner({ writtenBy: "claude" }, one)).toBe(
+    "The agent and the reviewer disagree on one finding after 3 rounds. Only you can settle it: fix it, or use Accept as is on its card.",
+  );
+  const two = after(4, [finding("F1", "escalated"), finding("F2", "escalated")]);
+  expect(needsYouBanner({ writtenBy: null }, two)).toBe(
+    "The author and the reviewer disagree on 2 findings after 4 rounds. Only you can settle them: fix them, or use Accept as is on their cards.",
+  );
 });

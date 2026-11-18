@@ -142,7 +142,7 @@
 // fails with Zod's own errors. A host port's refusal is a `HostError` and nothing else (its `failure` says
 // which); the engines and process ports never throw: their failures are outcomes.
 export type { EngineActivity, RunActivity } from "./activity.ts";
-export type { AgentChange, AgentCheck, AgentHost, AgentThread } from "./agent-host.ts";
+export type { AgentChange, AgentCheck, AgentHost, AgentReaction, AgentThread } from "./agent-host.ts";
 export type { LogMessage, LookoverApi, MintedLink, NoSession } from "./api.ts";
 export { API, SSE } from "./api.ts";
 export { apply, emptyReview, UnknownEvent } from "./apply.ts";
@@ -164,7 +164,7 @@ export type {
   PathReach,
   SkillState,
 } from "./coding-agent.ts";
-export type { Command, NoiseChoice } from "./command.ts";
+export type { AcceptRefusal, Command, NoiseChoice } from "./command.ts";
 export type { Confirmation, ConfirmFailure, ConfirmFallback, ConfirmVerdict } from "./confirm.ts";
 export { NOT_CHECKED } from "./confirm.ts";
 export type {
@@ -261,8 +261,23 @@ export type {
 export { limitMet } from "./engines-port.ts";
 export { enumOf } from "./enum-of.ts";
 export type { Event, EventBody } from "./event.ts";
-export type { Finding, FindingStatus, Fingerprints, Severity } from "./finding.ts";
-export { bySeverity, fingerprintWord, isCounted, isUnsettled } from "./finding.ts";
+export type {
+  DecisionVia,
+  Finding,
+  FindingStatus,
+  Fingerprints,
+  OwnerDecision,
+  Severity,
+} from "./finding.ts";
+export {
+  bySeverity,
+  decidedStatus,
+  fingerprintWord,
+  isCounted,
+  isUnsettled,
+  OWNER_DECISION,
+  ownerDecisionOf,
+} from "./finding.ts";
 export { findingOfMarker } from "./finding-marker.ts";
 export type { FixAction } from "./fix.ts";
 export {
@@ -273,6 +288,8 @@ export {
   RESULT_MARKER,
   REVIEW_MARKER,
   REVIEW_RESULT_SCHEMA,
+  SETTLE_COMMAND,
+  SETTLE_MARKER,
   STATUS_END_MARKER,
   STATUS_MARKER,
   WORDMARK_URLS,
@@ -350,6 +367,7 @@ export {
   changePrefixOf,
   commitSha,
   connectionId,
+  FINDING_PATTERN,
   findingId,
   jobId,
   repositoryId,
@@ -391,6 +409,7 @@ export type {
 } from "./process.ts";
 export type { Dropped, DroppedWhy } from "./read-state.ts";
 export { readState } from "./read-state.ts";
+export { type OneLineReason, oneLineReason, REASON_MAX } from "./reason.ts";
 export type {
   ActionBy,
   FindingCounts,
@@ -454,6 +473,8 @@ export type {
   Strictness,
 } from "./settings.ts";
 export type { ResolveSettings, SettingsLayer } from "./settings-resolve.ts";
+export type { SettleText } from "./settle-comment.ts";
+export { decisionAsked, readSettle, settleComment } from "./settle-comment.ts";
 export type { Setup, SetupGitHub, SetupStep } from "./setup.ts";
 export { furthestReached, reposChosen, SETUP_ORDER } from "./setup.ts";
 export type { SharedApp } from "./shared-app.ts";

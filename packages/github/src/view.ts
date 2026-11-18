@@ -157,7 +157,7 @@ export function createView(api: GitHubApi, session: Session, allowed: Allowed) {
           id: String(c.id),
           author: { id: c.user.id, login: c.user.login },
           body: c.body,
-          reactions: { eyes: c.reactions.eyes, rocket: c.reactions.rocket },
+          reactions: { eyes: c.reactions.eyes, rocket: c.reactions.rocket, confused: c.reactions.confused },
           minimized: hidden.get(c.node_id) ?? null,
         })),
       };

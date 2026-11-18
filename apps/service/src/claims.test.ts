@@ -84,7 +84,7 @@ test("a won't fix on a blocking finding is kept in round 2 and escalated to the 
     resolution: { kind: "escalated", round: 3 },
   });
   expect(statusOf(w.host.view(PR1).description)).toContain(
-    "  Said won't fix twice, kept twice: the owner decides on the thread.",
+    "  Said won't fix twice, kept twice: the owner decides in Lookover's app.",
   );
 
   // Nothing new on the thread: the claim answered is never quoted again.
@@ -481,7 +481,7 @@ test("a claim kept, then escalated, is answered once each on its thread, after t
   // Kept twice against "won't fix": the prototype's words (ADR 0074), not the finder's.
   expect(repliesOn(w.host).map((r) => said(r.body))).toEqual([
     `Kept\n\n${STILL}\n\nIf it is kept again, the owner decides.`,
-    `The owner decides this one\n\nKept twice against "won't fix". Fix it, or resolve this thread to keep the code as it is.`,
+    `The owner decides this one\n\nKept twice against "won't fix". Fix it, or the owner accepts it as is in Lookover's app.`,
   ]);
   expect(repliesOn(w.host).map((r) => r.commentId)).toEqual([w.root, w.root]);
 

@@ -9,7 +9,7 @@ import {
   type Reconciled,
   type Severity,
 } from "@lookover/contracts";
-import { findingsAfterDismissal, loopState, standing } from "./index.ts";
+import { findingsAfterAcceptance, findingsAfterDismissal, loopState, standing } from "./index.ts";
 
 function finding(
   id: string,
@@ -45,6 +45,7 @@ function finding(
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
   };
@@ -55,7 +56,7 @@ const statusOf = (findings: Finding[]) => findings.map((f) => [String(f.id), f.s
 test("the loop is settled with nothing open, open while the author has work, and needs the owner once a finding is escalated", () => {
   const cases: [FindingStatus[], LoopState][] = [
     [[], "settled"],
-    [["verified_fixed", "withdrawn", "dismissed", "acknowledged", "obsolete"], "settled"],
+    [["verified_fixed", "withdrawn", "dismissed", "accepted", "acknowledged", "obsolete"], "settled"],
     [["open", "verified_fixed"], "open"],
     [["escalated"], "needs_owner"],
     [["open", "escalated"], "needs_owner"],
@@ -79,14 +80,36 @@ test("the owner settles an unsettled finding by dismissing it; a settled one sta
     [finding("escalated-one", "escalated", "blocking"), finding("fixed-one", "verified_fixed")],
     [findingId("escalated-one"), findingId("fixed-one")],
     3,
+    null,
+    "app",
   );
   expect(statusOf(after)).toEqual([
     ["escalated-one", "dismissed"],
     ["fixed-one", "verified_fixed"],
   ]);
   // The owner gives no reason: the words are the app's and GitHub's, never the ledger's.
-  expect(after[0]).toMatchObject({ closedIn: 3, closedWhy: null });
+  expect(after[0]).toMatchObject({ closedIn: 3, closedWhy: null, decidedVia: "app" });
   expect(loopState(after)).toBe("settled");
+});
+
+test("a dismissal given a reason keeps it as the finding's why, as an acceptance does (ADR 0101)", () => {
+  const after = findingsAfterDismissal(
+    [finding("F1", "escalated", "blocking"), finding("F2", "open")],
+    [findingId("F1")],
+    2,
+    "The cache is cleared on logout",
+    "agent",
+  );
+  expect(statusOf(after)).toEqual([
+    ["F1", "dismissed"],
+    ["F2", "open"],
+  ]);
+  expect(after[0]).toMatchObject({
+    closedIn: 2,
+    closedWhy: "The cache is cleared on logout",
+    decidedVia: "agent",
+  });
+  expect(after[1]).toMatchObject({ closedIn: null, closedWhy: null, decidedVia: null });
 });
 
 test("a round restated over the ledger after a dismissal: where the change stands now, what the round did kept", () => {
@@ -115,12 +138,13 @@ test("a round restated over the ledger after a dismissal: where the change stand
       acknowledged: 0,
       withdrawn: 0,
       dismissed: 0,
+      accepted: 0,
       obsolete: 0,
     },
     verifiedFixed: 0,
     replies: [{ findingId: findingId("F2"), kind: "kept", why: "Still there." }],
   };
-  const ledger = findingsAfterDismissal(round.findings, [findingId("F1")], 1);
+  const ledger = findingsAfterDismissal(round.findings, [findingId("F1")], 1, null, "app");
   expect(standing(round, ledger)).toEqual({
     findings: ledger,
     raised: round.raised,
@@ -143,12 +167,13 @@ test("a round restated over the ledger after a dismissal: where the change stand
       acknowledged: 0,
       withdrawn: 0,
       dismissed: 1,
+      accepted: 0,
       obsolete: 0,
     },
     verifiedFixed: 0,
     replies: round.replies,
   });
-  const none = findingsAfterDismissal(ledger, [findingId("F2")], 1);
+  const none = findingsAfterDismissal(ledger, [findingId("F2")], 1, null, "app");
   expect(standing(round, none)).toMatchObject({
     loop: "settled",
     verdict: "clean",
@@ -156,4 +181,42 @@ test("a round restated over the ledger after a dismissal: where the change stand
     conclusion: "success",
     open: 0,
   });
+  // Accepted as is (ADR 0100): settled too, and counted apart from a dismissal.
+  const accepted = findingsAfterAcceptance(ledger, [findingId("F2")], 1, null, "app");
+  expect(standing(round, accepted)).toMatchObject({
+    loop: "settled",
+    verdict: "clean",
+    nextAction: "stop",
+    actionBy: [
+      { id: findingId("F1"), by: "none" },
+      { id: findingId("F2"), by: "none" },
+      { id: findingId("F3"), by: "none" },
+    ],
+    conclusion: "success",
+    open: 0,
+    counts: { open: { blocking: 0, should_fix: 0, consider: 0 }, dismissed: 1, accepted: 1 },
+  });
+});
+
+test("the owner accepts an unsettled finding as is (ADR 0100): settled, the reason kept; a settled one stays", () => {
+  const after = findingsAfterAcceptance(
+    [finding("escalated-one", "escalated", "blocking"), finding("fixed-one", "verified_fixed")],
+    [findingId("escalated-one"), findingId("fixed-one")],
+    3,
+    "Accepted deploy-window gap",
+    "agent",
+  );
+  expect(statusOf(after)).toEqual([
+    ["escalated-one", "accepted"],
+    ["fixed-one", "verified_fixed"],
+  ]);
+  expect(after[0]).toMatchObject({
+    closedIn: 3,
+    closedWhy: "Accepted deploy-window gap",
+    decidedVia: "agent",
+  });
+  expect(after[1]).toMatchObject({ closedIn: null, closedWhy: null, decidedVia: null });
+  expect(loopState(after)).toBe("settled");
+  const silent = findingsAfterAcceptance([finding("F1", "open")], [findingId("F1")], 2, null, "app");
+  expect(silent[0]).toMatchObject({ status: "accepted", closedIn: 2, closedWhy: null, decidedVia: "app" });
 });

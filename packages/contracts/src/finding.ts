@@ -5,14 +5,16 @@ import type { FindingClaim } from "./claim.ts";
 import type { Confirmation } from "./confirm.ts";
 import type { Anchoring, DiffSide } from "./diff.ts";
 import type { EngineId } from "./engine.ts";
+import { enumOf } from "./enum-of.ts";
 import type { CommitSha, FindingId } from "./ids.ts";
 import type { CitedRule } from "./rule.ts";
 
 export type Severity = "blocking" | "should_fix" | "consider";
 
 /**
- * Set by the reviewer, except `dismissed`, which is the owner's. Only `open` and `escalated` are unsettled.
- * `escalated`: the author and the reviewer disagree, and only the owner can settle it.
+ * Set by the reviewer, except `dismissed` and `accepted`, which are the owner's. Only `open` and `escalated` are
+ * unsettled. `escalated`: the author and the reviewer disagree, and only the owner can settle it. `accepted`: the
+ * owner leaves a correct finding as is (ADR 0100); `dismissed`: the owner marked it wrong.
  */
 export type FindingStatus =
   | "open"
@@ -21,7 +23,35 @@ export type FindingStatus =
   | "acknowledged"
   | "withdrawn"
   | "dismissed"
+  | "accepted"
   | "obsolete";
+
+/**
+ * What the owner decided of an unsettled finding: `wrong` ("This finding is wrong", ADR 0052, status `dismissed`) or
+ * `accepted` (accepted as is, ADR 0100: correct, and left as it is).
+ */
+export type OwnerDecision = "wrong" | "accepted";
+
+/** Every `OwnerDecision`, as a settle comment's marker and `lookover settle` parse it. */
+export const OWNER_DECISION = enumOf<OwnerDecision>()(["accepted", "wrong"]);
+
+/** The statuses the owner's decisions leave a finding in. */
+type DecidedStatus = Extract<FindingStatus, "dismissed" | "accepted">;
+
+const DECIDED: Record<OwnerDecision, DecidedStatus> = { wrong: "dismissed", accepted: "accepted" };
+
+/** The status the owner's `decision` leaves a finding in: `wrong` is `dismissed`, `accepted` is `accepted`. */
+export const decidedStatus = (decision: OwnerDecision): DecidedStatus => DECIDED[decision];
+
+/** The owner's decision a status says, for `dismissed` and `accepted`; null for the reviewer's statuses. */
+export const ownerDecisionOf = (status: FindingStatus): OwnerDecision | null =>
+  OWNER_DECISION.options.find((decision) => DECIDED[decision] === status) ?? null;
+
+/**
+ * How the owner's decision came (ADR 0101): `app`, the owner in Lookover's app; `agent`, their coding agent on the
+ * owner's word.
+ */
+export type DecisionVia = "app" | "agent";
 
 /**
  * Both fingerprints of ADR 0032, computed by `review`: where a finding is, and what it says. `core` keeps a
@@ -104,6 +134,8 @@ export interface Finding {
   verifiedSha: CommitSha | null;
   /** Why it was settled, in a sentence, for every other settled status. */
   closedWhy: string | null;
+  /** How the owner's decision came, for `dismissed` and `accepted` (ADR 0101); null for the reviewer's statuses. */
+  decidedVia: DecisionVia | null;
   /** The newest claim a round read on its thread (ADR 0052); null when its author never claimed anything. */
   claim: FindingClaim | null;
   /**

@@ -15,6 +15,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   AgentCheck,
   AgentHost,
+  AgentReaction,
   AgentThread,
   ChangeRef,
   CheckConclusion,
@@ -32,6 +33,7 @@ import {
   FINDING_MARKER,
   findingId,
   reviewRequest,
+  settleComment,
 } from "@lookover/contracts";
 import type { HostRefusal } from "./fake-git-host.ts";
 import { equals } from "./matchers.ts";
@@ -279,16 +281,50 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
       const f = await setup();
       const note = await f.host.comment(f.change, "Pushed the fix.");
       const request = await f.host.comment(f.change, reviewRequest(f.head));
+      const settle = settleComment({
+        finding: findingId("F1"),
+        decision: "wrong",
+        reason: "The owner says so",
+      });
+      const refused = await f.host.comment(f.change, settle);
       await f.react(request, "eyes");
+      await f.react(refused, "confused");
 
+      const none = { eyes: 0, rocket: 0, confused: 0 };
       const written = [
-        { id: note, author: f.account, body: "Pushed the fix.", reactions: { eyes: 0, rocket: 0 } },
-        { id: request, author: f.account, body: reviewRequest(f.head), reactions: { eyes: 1, rocket: 0 } },
+        { id: note, author: f.account, body: "Pushed the fix.", reactions: none },
+        { id: request, author: f.account, body: reviewRequest(f.head), reactions: { ...none, eyes: 1 } },
+        { id: refused, author: f.account, body: settle, reactions: { ...none, confused: 1 } },
       ];
       const read = async () =>
-        (await f.host.comments(f.change)).filter((c) => c.id === note || c.id === request);
-      const ours = await shown(read, written, "the two comments and the App's reaction");
+        (await f.host.comments(f.change)).filter((c) => [note, request, refused].includes(c.id));
+      const ours = await shown(read, written, "the three comments and the App's reactions");
       expect(ours).toEqual(written);
+    });
+
+    test("who put Lookover's reactions on a comment: the person the App posts as; none on a bare one; a comment that isn't one is not found", async () => {
+      const f = await setup();
+      const settle = settleComment({
+        finding: findingId("F1"),
+        decision: "accepted",
+        reason: "The owner says so",
+      });
+      const answered = await f.host.comment(f.change, settle);
+      const bare = await f.host.comment(f.change, "Pushed the fix.");
+      await f.react(answered, "rocket");
+      await f.react(answered, "eyes");
+
+      const byKind = async (id: string) =>
+        (await f.host.reactions(f.change.repo, id)).sort((a, b) => a.reaction.localeCompare(b.reaction));
+      const expected: AgentReaction[] = [
+        { reaction: "eyes", by: f.person.id },
+        { reaction: "rocket", by: f.person.id },
+      ];
+      expect(await shown(() => byKind(answered), expected, "the App's two reactions")).toEqual(expected);
+      expect(await f.host.reactions(f.change.repo, bare)).toEqual([]);
+      await expect(f.host.reactions(f.change.repo, String(NO_COMMENT))).rejects.toMatchObject({
+        failure: "not_found",
+      });
     });
 
     test("a change nobody reviewed has no threads; a change that isn't one is not found, and nothing is replied", async () => {
@@ -420,6 +456,7 @@ export function describeAgentHost(name: string, { open: setup, patience, refusin
         await expect(f.host.checks(f.change.repo, f.head, "lookover")).rejects.toMatchObject(failure);
         await expect(f.host.comments(f.change)).rejects.toMatchObject(failure);
         await expect(f.host.comment(f.change, "Refused.")).rejects.toMatchObject(failure);
+        await expect(f.host.reactions(f.change.repo, "1")).rejects.toMatchObject(failure);
         await expect(f.host.threads(f.change, "lookover", NO_PERSON)).rejects.toMatchObject(failure);
         await expect(f.host.reply(f.change, 1, "Refused.")).rejects.toMatchObject(failure);
         await expect(f.host.resolve(NO_THREAD)).rejects.toMatchObject(failure);

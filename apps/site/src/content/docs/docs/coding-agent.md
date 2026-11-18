@@ -1,6 +1,6 @@
 ---
 title: Your coding agent
-description: The review loop for Claude Code and Codex. The skill, lookover wait and its exit codes, feedback and reply.
+description: The review loop for Claude Code and Codex. The skill, lookover wait and its exit codes, feedback, reply and settle.
 ---
 
 A coding agent that pushes to a pull request can run the review loop itself: it waits for Lookover's review, fixes what it found, pushes, and asks again until nothing is left. It talks to Lookover through GitHub only, with your own `gh` login: a `/lookover review` comment asks, the `Lookover` check on the commit answers.
@@ -25,21 +25,22 @@ Installed from npm, `lookover` is on your PATH too. If npm's global folder isn't
 lookover wait       # asks for a review of the pushed commit, waits for it
 lookover feedback   # the findings waiting on you, each with its thread
 lookover reply F3 wont-fix "The value is checked by the caller."
+lookover settle F2 accepted --confirmed-by-owner "Keep the code simple."   # only on your word
 ```
 
-`wait`, `feedback` and `reply` run from the checkout of the repository the agent works on, and take the pull request from the current branch (`--pr N` names another). Of the Lookover checks on a commit they read only your own account's, never a colleague's.
+`wait`, `feedback`, `reply` and `settle` run from the checkout of the repository the agent works on, and take the pull request from the current branch (`--pr N` names another). Of the Lookover checks on a commit they read only your own account's, never a colleague's.
 
 ## Wait for the review
 
 After every push, `lookover wait` takes your commit from local git, asks for its review if nobody has, and waits for its check: up to 30 minutes (`--timeout`), and 3 minutes for Lookover to pick the request up (`--appear-timeout`). Then it says what to do next by its exit code. `--json` prints the findings that need you as one JSON document.
 
-Then `wait` resolves the threads of the findings it verified fixed or withdrew. It resolves them with your login, as Lookover doesn't resolve threads; a finding the owner dismissed counts as withdrawn. When you replied on a thread since the last round, `wait` asks again on the same commit, and waits for the round that answers your reply.
+Then `wait` resolves the threads of the findings it verified fixed or withdrew, or the owner settled. It resolves them with your login, as Lookover doesn't resolve threads. You settle a finding in Lookover's app, or tell your agent to: you mark it wrong, or accept it as is. When you replied on a thread since the last round, `wait` asks again on the same commit, and waits for the round that answers your reply.
 
 | Exit | Meaning | What the agent does |
 |---|---|---|
 | 0 | Nothing to fix | Stops: the review passed. |
 | 3 | Something to fix | Reads each finding, checks it against the code, fixes what is real, pushes, runs `wait` again. A finding it won't fix or thinks wrong: it answers on its thread with `reply`, then runs `wait`. |
-| 4 | A person is needed | Stops and tells you, with the findings. |
+| 4 | A person is needed | Stops, tells you the findings only you can settle, and asks what you decide. You settle them in Lookover's app (`lookover open`), on the pull request's review, **Accept as is**, or **Too noisy?** › **This finding is wrong**; or you tell the agent, and it runs `settle` on your word. |
 | 5 | Timed out | Runs `wait` again, or tells you. |
 | 6 | Skipped | Stops and says why. A pull request from a fork is reviewed only when you ask: the agent never asks for it. |
 | 7 | The review failed | Stops and tells you what `wait` printed; it doesn't ask again. |
@@ -71,7 +72,24 @@ lookover reply F3 wont-fix "The caller checks the range: see jobs.ts:40."
 | `deferred` | Deferred: (later, elsewhere) |
 | `question` | Question: |
 
-Then run `lookover wait`: the next round reads the answer. A finding in the status block only, in the pull request's description, has no thread, and `reply` refuses it. A blocking finding you won't fix is kept once, with Lookover's reason; the second time, you are asked (exit 4). `reply` exits 0 when posted, 1 on an error, 2 on a wrong call.
+Then run `lookover wait`: the next round reads the answer. A finding in the status block only, in the pull request's description, has no thread, and `reply` refuses it: fix it, or accept it as is or mark it wrong, in Lookover's app or on your word with `settle`. A blocking finding you won't fix is kept once, with Lookover's reason; the second time, you are asked (exit 4). Then it is your decision: accept it as is, or mark it wrong. No reply settles it. `reply` exits 0 when posted, 1 on an error, 2 on a wrong call.
+
+## Settle a finding on your word
+
+```sh
+lookover settle F2 accepted --confirmed-by-owner "Keep the code simple: the deploy window covers it."
+lookover settle F3 wrong --confirmed-by-owner "The cache is cleared on logout."
+```
+
+Tell your agent "accept F2 as is, I want to keep the code simple", or "F3 is wrong, the cache is cleared on logout", and it settles the finding for you, without you opening the app. `accepted`: the finding is right, and the code stays as it is. `wrong`: the reviewer was mistaken. `--confirmed-by-owner` is required and takes your reason, in your words, on one line of at most 200 characters.
+
+The agent posts a comment on the pull request saying it asks, on your word, with your reason. Lookover settles the finding as it would from the app: the reply on its thread, the status, the check, and it isn't raised again. Everything says it was your coding agent, on your word, and quotes your reason: the reply on GitHub, the finding and the timeline in the app. Lookover answers on the comment: 🚀 settled, 😕 refused.
+
+`settle` reads the newest round on the pull request's head first. It refuses before posting a finding that round doesn't have, kept in the app, or settled already, and while a round runs on the head; with no round on the head yet, it posts and leaves the rest to Lookover. Then it waits for Lookover's answer, up to 3 minutes (`--timeout`). It exits 0 once the finding is settled (then `wait` resolves its thread), 1 when Lookover refused it or didn't answer, saying why, 2 on a wrong call.
+
+The skill tells your agent to use it only when you said so in the conversation: never on its own judgment, never to get past a finding it disagrees with. On exit 4, it asks you, and settles only on your answer.
+
+The trade-off: the agent posts as you, so nothing on GitHub proves you confirmed it. The flag and the comment anyone can read make it a deliberate act, never a side effect of a reply.
 
 ## Without Lookover's command
 

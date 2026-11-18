@@ -12,6 +12,7 @@ import {
   type CheckOutput,
   changeName,
   checkExternalId,
+  decidedStatus,
   type FindingId,
   HostError,
   type HostFailure,
@@ -19,6 +20,7 @@ import {
   type HostWriter,
   newestThread,
   type OpenCheckStatus,
+  type OwnerDecision,
   REVIEW_MAX_COMMENTS,
   type ReviewResult,
   type ThreadReply,
@@ -221,12 +223,23 @@ async function unless(
 }
 
 /**
- * The posts a dismissal owes, in the order they are sent (ADR 0052): the reply on the finding's thread, the status
- * block, the round's check when it is rewritten (`checkId`), then the thread's root minimized. What the caller saves
- * as owed before the first is sent.
+ * The posts the owner's decision owes, in the order they are sent (ADR 0052, ADR 0100): the reply on the finding's
+ * thread, the status block, the round's check when it is rewritten (`checkId`), then, for a finding marked wrong, the
+ * thread's root minimized; an accepted one stays readable; last, for the coding agent's settle (ADR 0101), the 🚀 on
+ * its comment (`answering`). What the caller saves as owed before the first is sent.
  */
-export function dismissalPostsOf(checkId: string | null): DismissalPostKind[] {
-  return ["reply", "status", ...(checkId === null ? [] : ["completed" as const]), "minimize"];
+export function dismissalPostsOf(
+  checkId: string | null,
+  decision: OwnerDecision,
+  answering: string | null,
+): DismissalPostKind[] {
+  return [
+    "reply",
+    "status",
+    ...(checkId === null ? [] : ["completed" as const]),
+    ...(decision === "wrong" ? ["minimize" as const] : []),
+    ...(answering === null ? [] : ["react" as const]),
+  ];
 }
 
 /**
@@ -551,6 +564,11 @@ export function createPublisher({
       const read = await threadsOf(change, signal);
       const root = newestThread(read ?? [], dismissal.findingId);
       const marker = dismissalMarker(dismissal.id, dismissal.findingId);
+      // The why is the owner's reason, if any, for either decision (ADR 0101), as the round filtered it (ADR 0056): no
+      // mention, markup or forged marker. Its way is the finding's own, which the reply's words follow.
+      const accepted = dismissal.decision === "accepted";
+      const why = round.reconciled.findings.find((f) => f.id === dismissal.findingId)?.closedWhy ?? "";
+      const kind = decidedStatus(dismissal.decision);
       const said = (what: string) => (error: HostError) =>
         log(`${changeName(change)}: ${what} on ${dismissal.findingId}: ${error.failure}: ${error.message}`);
       if (root)
@@ -562,7 +580,7 @@ export function createPublisher({
                 writer.reply(
                   change,
                   root.commentId,
-                  renderReply(round, { findingId: dismissal.findingId, kind: "dismissed", why: "" }, marker),
+                  renderReply(round, { findingId: dismissal.findingId, kind, why }, marker),
                 ),
               () => sentReply(change, marker),
             ),
@@ -580,11 +598,23 @@ export function createPublisher({
           return checkId;
         });
       }
-      if (root)
+      if (root && !accepted)
         await unless(
           () => send("minimize", () => minimized(change, root.nodeId)),
           () => true,
           said("root not minimized"),
+        );
+      // The agent's settle answered last (ADR 0101): its 🚀 says the posts are out. GitHub keeps a repeat as one.
+      const { answering } = dismissal;
+      if (answering !== null)
+        await unless(
+          () =>
+            send("react", async () => {
+              await writer.react(change.repo, answering, "rocket");
+              return answering;
+            }),
+          () => true,
+          said(`no rocket on the settle comment ${answering}`),
         );
     },
     async findReview(given) {

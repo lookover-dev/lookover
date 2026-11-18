@@ -144,7 +144,10 @@ const issueComment = z.object({ id: z.int(), user, body: z.string() });
 
 /** The conversation as `view` reads it: each comment with GitHub's count of each of its reactions. */
 export const viewedComments = z.array(
-  issueComment.extend({ node_id: z.string(), reactions: z.object({ eyes: z.int(), rocket: z.int() }) }),
+  issueComment.extend({
+    node_id: z.string(),
+    reactions: z.object({ eyes: z.int(), rocket: z.int(), confused: z.int() }),
+  }),
 );
 
 /** Whether each comment asked about is hidden, and why (GitHub's word); null for an id that names nothing. */

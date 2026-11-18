@@ -45,8 +45,9 @@
 //   "the change's latest round that posted, with its plan and its check" (what a dismissal restates), and "the ids
 //   of every reply the host took for this change", its rounds' and its dismissals' (`replies(changeId)`: what tells
 //   Lookover's replies from the person's it posts as, ADR 0066);
-// - `dismissals`: the owner's "This finding is wrong" (ADR 0052), an outbox of its own keyed by the dismissal: "the
-//   owner dismissed this finding" (the ledger it leaves, the round's plan's too, and its posts owed, in one
+// - `dismissals`: the owner's "This finding is wrong" (ADR 0052) and "Accept as is" (ADR 0100), the decision and its
+//   way (ADR 0101) kept, an outbox of its own keyed by the dismissal: "the owner dismissed this finding" (the ledger
+//   it leaves, the round's plan's too, its posts owed and the coding agent's settle comment it answers, in one
 //   transaction, refused while a run of the change goes), "this dismissal and its posts", "a send began", "the host
 //   took it", "its posts are over", and "which still owe posts" (what a restart resumes). While one owes posts, its
 //   change is busy for the take;
@@ -54,9 +55,11 @@
 //   pause at most, kept as it was given; whether a timed one is over is the caller's to say;
 // - `requests`: review requests (ADR 0043): "where is the poll in this repository's comments" (the newest comment
 //   time seen, only forward, and the floor, the first place; null before the first poll), "which of these comments
-//   were handled", "the poll looked at these" (forgetting the plain comments before where it lists from next),
-//   "which reactions are owed" (👀 once a request is recorded, 🚀 once its job is done), "this one was sent", "the
-//   global ids of the requests this job answers" (what its round minimizes, ADR 0052). A
+//   were handled" (a settle comment a saved dismissal answers included, ADR 0101), "the poll looked at these"
+//   (forgetting the plain comments before where it lists from next), "which reactions are owed" (👀 once a request is
+//   recorded, 🚀 once its job is done, 😕 once a settle comment is refused, ADR 0101: "this settle was refused"),
+//   "this one was sent", "the global ids of the requests this job answers" (what
+//   its round minimizes, ADR 0052). A
 //   request is recorded by `jobs.asked` or `jobs.skipped`, with its job, in that job's transaction; a job that yields
 //   to its change's follow-up hands its requests to it; a job that ends without a round settles their 🚀 as never;
 //   and the coding agent's requests made before the repositories were chosen (ADR 0090): "keep this one", "the kept

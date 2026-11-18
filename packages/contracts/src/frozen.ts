@@ -60,3 +60,16 @@ export const MARKER_PREFIX = "<!-- lookover:";
  * `lookover:` marker a request may carry.
  */
 export const REQUEST_MARKER = "<!-- lookover:request ";
+
+/**
+ * The command that opens a settle comment's first line (ADR 0101), then the finding and the decision:
+ * `/lookover settle F2 accepted`. Only `lookover settle` writes it; written by hand it settles nothing.
+ */
+export const SETTLE_COMMAND = "/lookover settle";
+
+/**
+ * The marker `lookover settle` puts under its command, `<!-- lookover:settle {json} -->` (ADR 0101): the finding, the
+ * decision, the owner's reason and that the owner confirmed it. The one `lookover:` marker a settle may carry, and
+ * what alone makes the comment a settle.
+ */
+export const SETTLE_MARKER = "<!-- lookover:settle ";

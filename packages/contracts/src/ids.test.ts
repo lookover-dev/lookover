@@ -11,6 +11,7 @@ import {
   changePrefixOf,
   commitSha,
   connectionId,
+  FINDING_PATTERN,
   type FindingId,
   findingId,
   type JobId,
@@ -82,4 +83,10 @@ test("a repository is read from its owner and name", () => {
   expect(repositoryRefOf("lookover-dev/ledger-api")).toEqual({ owner: "lookover-dev", name: "ledger-api" });
   for (const bad of ["ledger-api", "/ledger-api", "lookover-dev/", "a/b/c"])
     expect(repositoryRefOf(bad)).toBeNull();
+});
+
+test("a finding is named as Lookover numbers them on a pull request: F and a number from 1", () => {
+  for (const good of ["F1", "F12", "F305"]) expect(FINDING_PATTERN.test(good)).toBe(true);
+  for (const bad of ["F0", "F01", "f2", "F", "F2a", " F2", "2"])
+    expect(FINDING_PATTERN.test(bad)).toBe(false);
 });

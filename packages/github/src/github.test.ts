@@ -455,7 +455,7 @@ const DONE = { title: "No blocking finding", summary: "Round 1: 0 open.", text: 
 const checks: Route = withToken(TOKEN, (call) => {
   if (call.method === "POST" && call.path === `${SANDBOX}/check-runs`)
     return { status: 201, body: { id: 111954805720, ...(typeof call.body === "object" ? call.body : {}) } };
-  if (call.method === "PATCH" && call.path === `${SANDBOX}/check-runs/111954805720`)
+  if (call.method === "PATCH" && call.path.toLowerCase() === `${SANDBOX}/check-runs/111954805720`)
     return { status: 200, body: { id: 111954805720 } };
   return undefined;
 });
@@ -543,6 +543,153 @@ test("a check output over the byte limit is refused before anything is sent", as
     failure: "too_large",
   });
   expect(api.calls.length).toBe(sent);
+});
+
+// GitHub's lag on a check just created (ADR 0102): its PATCH answered 404 is sent again a second later, for up to
+// 30 s after the creation on the writer's clock; any other check, and any other refusal, end at once.
+
+/**
+ * The adapter on the check runs, their PATCH answered `refusals` first, in order, then as `checks` answers; its clock
+ * moved by each pause it takes, and by `pass`.
+ */
+function lagging(...refusals: number[]) {
+  return laggingOn({ moves: true }, ...refusals);
+}
+
+/** `lagging`, its clock moved by the pauses only when `moves`: a frozen clock when not. */
+function laggingOn({ moves }: { moves: boolean }, ...refusals: number[]) {
+  const left = [...refusals];
+  const refusing: Route = withToken(TOKEN, (call) => {
+    // GitHub's paths ignore case.
+    if (call.method !== "PATCH" || call.path.toLowerCase() !== `${SANDBOX}/check-runs/111954805720`)
+      return undefined;
+    const status = left.shift();
+    return status === undefined ? undefined : { status, body: { message: "Not Found" } };
+  });
+  const api = stubGitHub(refusing, checks);
+  let now = AT;
+  const pauses: number[] = [];
+  const github = createGitHub({
+    session: SESSION,
+    repositories: LISTED,
+    fetch: api.fetch,
+    clock: { now: () => now },
+    sleep: (ms) => {
+      pauses.push(ms);
+      if (moves) now += ms;
+      return Promise.resolve();
+    },
+    deadline: noWaits().deadline,
+  });
+  const patches = () => api.calls.filter((c) => c.method === "PATCH").length;
+  const pass = (ms: number) => {
+    now += ms;
+  };
+  return { github, pauses, patches, pass };
+}
+
+test("a check just created, completed while GitHub answers 404 once, is completed again a second later", async () => {
+  const { github, pauses, patches } = lagging(404);
+  const id = await github.writer.createCheck(SANDBOX_REPO, SHA, "queued", RUNNING, "job-1");
+  await github.writer.completeCheck(SANDBOX_REPO, id, "neutral", DONE);
+  expect({ patches: patches(), pauses }).toEqual({ patches: 2, pauses: [1000] });
+});
+
+test("a check just created, updated while GitHub answers 404 once, is updated again a second later", async () => {
+  const { github, pauses, patches } = lagging(404);
+  const id = await github.writer.createCheck(SANDBOX_REPO, SHA, "queued", RUNNING, "job-1");
+  await github.writer.updateCheck(SANDBOX_REPO, id, "in_progress", RUNNING);
+  expect({ patches: patches(), pauses }).toEqual({ patches: 2, pauses: [1000] });
+});
+
+test("a 404 that lasts on a check just created ends not found 30 s after the creation", async () => {
+  const { github, pauses, patches } = lagging(...Array<number>(100).fill(404));
+  const id = await github.writer.createCheck(SANDBOX_REPO, SHA, "queued", RUNNING, "job-1");
+  await expect(github.writer.completeCheck(SANDBOX_REPO, id, "neutral", DONE)).rejects.toMatchObject({
+    failure: "not_found",
+  });
+  // Sent at 0 s, then a second apart until the 30th second: 31 sends, 30 pauses.
+  expect({ patches: patches(), pauses: pauses.length }).toEqual({ patches: 31, pauses: 30 });
+  expect(pauses.every((ms) => ms === 1000)).toBe(true);
+});
+
+test("a 404 that lasts on a check just created ends not found after 31 sends, even on a clock that doesn't move", async () => {
+  const { github, pauses, patches } = laggingOn({ moves: false }, ...Array<number>(100).fill(404));
+  const id = await github.writer.createCheck(SANDBOX_REPO, SHA, "queued", RUNNING, "job-1");
+  await expect(github.writer.completeCheck(SANDBOX_REPO, id, "neutral", DONE)).rejects.toMatchObject({
+    failure: "not_found",
+  });
+  expect({ patches: patches(), pauses: pauses.length }).toEqual({ patches: 31, pauses: 30 });
+});
+
+test("a 404 on a check just created, its address written in another case, is sent again", async () => {
+  const { github, pauses, patches } = lagging(404);
+  const id = await github.writer.createCheck(SANDBOX_REPO, SHA, "queued", RUNNING, "job-1");
+  const shouted = { owner: SANDBOX_REPO.owner.toUpperCase(), name: SANDBOX_REPO.name.toUpperCase() };
+  await github.writer.completeCheck(shouted, id, "neutral", DONE);
+  expect({ patches: patches(), pauses }).toEqual({ patches: 2, pauses: [1000] });
+});
+
+test("a 404 from the token's renewal on a check just created ends not found at once, never sent again", async () => {
+  const api = stubGitHub(checks);
+  const pauses: number[] = [];
+  let renewals = 0;
+  const github = createGitHub({
+    session: {
+      ...SESSION,
+      // The creation's token, then a renewal GitHub answers 404: the App no longer installed there.
+      withToken: (_repo, call) => {
+        renewals++;
+        return renewals === 1 ? call(TOKEN) : Promise.reject(new HostError("not_found", "Not Found"));
+      },
+    },
+    repositories: LISTED,
+    fetch: api.fetch,
+    clock: { now: () => AT },
+    sleep: (ms) => {
+      pauses.push(ms);
+      return Promise.resolve();
+    },
+    deadline: noWaits().deadline,
+  });
+  const id = await github.writer.createCheck(SANDBOX_REPO, SHA, "queued", RUNNING, "job-1");
+  await expect(github.writer.completeCheck(SANDBOX_REPO, id, "neutral", DONE)).rejects.toMatchObject({
+    failure: "not_found",
+  });
+  expect({ renewals, pauses }).toEqual({ renewals: 2, pauses: [] });
+});
+
+test("a 404 on a check this writer never created ends not found at once", async () => {
+  const { github, pauses, patches } = lagging(404);
+  await expect(
+    github.writer.completeCheck(SANDBOX_REPO, "111954805720", "neutral", DONE),
+  ).rejects.toMatchObject({ failure: "not_found" });
+  expect({ patches: patches(), pauses }).toEqual({ patches: 1, pauses: [] });
+});
+
+test("a 404 on a check created more than 30 s ago ends not found at once", async () => {
+  const { github, pauses, patches, pass } = lagging(404);
+  const id = await github.writer.createCheck(SANDBOX_REPO, SHA, "queued", RUNNING, "job-1");
+  pass(30_000);
+  await expect(github.writer.updateCheck(SANDBOX_REPO, id, "in_progress", RUNNING)).rejects.toMatchObject({
+    failure: "not_found",
+  });
+  expect({ patches: patches(), pauses }).toEqual({ patches: 1, pauses: [] });
+});
+
+test("a 403, a 422 or a 502 on a check just created ends at once, as it is", async () => {
+  for (const [status, failure] of [
+    [403, "unauthorized"],
+    [422, "invalid"],
+    [502, "unavailable"],
+  ] as const) {
+    const { github, pauses, patches } = lagging(status);
+    const id = await github.writer.createCheck(SANDBOX_REPO, SHA, "queued", RUNNING, "job-1");
+    await expect(github.writer.completeCheck(SANDBOX_REPO, id, "neutral", DONE)).rejects.toMatchObject({
+      failure,
+    });
+    expect({ status, patches: patches(), pauses }).toEqual({ status, patches: 1, pauses: [] });
+  }
 });
 
 const CHANGE_REF = { repo: SANDBOX_REPO, number: 7 };
@@ -924,12 +1071,12 @@ const shown: Route = withToken(TOKEN, (call) => {
         // GitHub's rollup of the comment's reactions: every kind, Lookover's two among them.
         reactions: {
           url: "https://api.github.com/repos/sasensi/lookover-sandbox/issues/comments/100/reactions",
-          total_count: 2,
+          total_count: 3,
           "+1": 1,
           "-1": 0,
           laugh: 0,
           hooray: 0,
-          confused: 0,
+          confused: 1,
           heart: 0,
           rocket: 0,
           eyes: 1,
@@ -1044,7 +1191,7 @@ test("the view is what GitHub shows: the head's checks, the reviews with their c
         id: "100",
         author: PERSON,
         body: "Round 1: 1 open.",
-        reactions: { eyes: 1, rocket: 0 },
+        reactions: { eyes: 1, rocket: 0, confused: 1 },
         minimized: null,
       },
     ],
@@ -1074,7 +1221,7 @@ const earlierChecks: Route = withToken(TOKEN, (call) =>
 );
 
 test("the view reads every page GitHub gives: a conversation past its first 100 comments", async () => {
-  const reactions = { eyes: 0, rocket: 0 };
+  const reactions = { eyes: 0, rocket: 0, confused: 0 };
   const others = Array.from({ length: 100 }, (_, i) => ({
     id: i + 1,
     node_id: `IC_${i + 1}`,
@@ -1639,11 +1786,13 @@ test("a reaction is posted on the comment as GitHub names it; a repeat GitHub an
   await github.writer.react(SANDBOX_REPO, "100", "eyes");
   await github.writer.react(SANDBOX_REPO, "100", "eyes");
   await github.writer.react(SANDBOX_REPO, "100", "rocket");
+  await github.writer.react(SANDBOX_REPO, "100", "confused");
 
   expect(api.calls.filter((c) => c.path.endsWith("/reactions")).map((c) => c.body)).toEqual([
     { content: "eyes" },
     { content: "eyes" },
     { content: "rocket" },
+    { content: "confused" },
   ]);
   await expect(github.writer.react(SANDBOX_REPO, "101", "eyes")).rejects.toMatchObject({
     failure: "not_found",

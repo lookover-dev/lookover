@@ -231,7 +231,7 @@ describe("createAgentHost", () => {
       id,
       user,
       body: `Comment ${id}`,
-      reactions: { eyes: id === 2 ? 1 : 0, rocket: 0, "+1": 3 },
+      reactions: { eyes: id === 2 ? 1 : 0, rocket: 0, confused: 0, "+1": 3 },
     });
     const { host } = github({
       [`GET ${API}/issues/7/comments?per_page=100`]: () =>
@@ -239,9 +239,44 @@ describe("createAgentHost", () => {
       [`GET ${page2}`]: () => json(200, [comment(2, { id: 5, login: "sasensi" }), comment(3, null)]),
     });
     expect(await host.comments({ repo, number: 7 })).toEqual([
-      { id: "1", author: { id: 5, login: "sasensi" }, body: "Comment 1", reactions: { eyes: 0, rocket: 0 } },
-      { id: "2", author: { id: 5, login: "sasensi" }, body: "Comment 2", reactions: { eyes: 1, rocket: 0 } },
+      {
+        id: "1",
+        author: { id: 5, login: "sasensi" },
+        body: "Comment 1",
+        reactions: { eyes: 0, rocket: 0, confused: 0 },
+      },
+      {
+        id: "2",
+        author: { id: 5, login: "sasensi" },
+        body: "Comment 2",
+        reactions: { eyes: 1, rocket: 0, confused: 0 },
+      },
     ]);
+  });
+
+  test("who reacted on a comment: Lookover's reactions only, each with its account's id, a deleted account's left out", async () => {
+    // GitHub's answer trimmed to what is read.
+    const reaction = (id: number, user: { id: number; login: string } | null, content: string) => ({
+      id,
+      user,
+      content,
+    });
+    const { host } = github({
+      [`GET ${API}/issues/comments/42/reactions?per_page=100`]: () =>
+        json(200, [
+          reaction(1, { id: 7654321, login: "teammate" }, "rocket"),
+          reaction(2, { id: 1234567, login: "sasensi" }, "+1"),
+          reaction(3, { id: 1234567, login: "sasensi" }, "confused"),
+          reaction(4, null, "rocket"),
+          reaction(5, { id: 1234567, login: "sasensi" }, "eyes"),
+        ]),
+    });
+    expect(await host.reactions(repo, "42")).toEqual([
+      { reaction: "rocket", by: 7654321 },
+      { reaction: "confused", by: 1234567 },
+      { reaction: "eyes", by: 1234567 },
+    ]);
+    await expect(host.reactions(repo, "43")).rejects.toMatchObject({ failure: "not_found" });
   });
 
   test("a comment goes on a pull request's conversation, never on an issue of that number", async () => {

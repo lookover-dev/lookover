@@ -4,6 +4,7 @@
 // the loop open.
 import {
   type ActionBy,
+  type DecisionVia,
   type Finding,
   type FindingCounts,
   type FindingId,
@@ -25,14 +26,46 @@ export function loopState(findings: Finding[]): LoopState {
 }
 
 /**
- * The owner settles unsettled findings by dismissing them (ADR 0052), after round `round`. The owner gives no
- * reason: what it means is said by the app and on GitHub, never kept in the ledger.
+ * The owner settles unsettled findings by dismissing them as wrong (ADR 0052), after round `round`, with their reason
+ * (ADR 0101; none: null) as `closedWhy`, the only place it is kept, and how the decision came as `decidedVia`. What a
+ * dismissal means is said by the app and on GitHub, never kept in the ledger.
  */
-export function findingsAfterDismissal(findings: Finding[], ids: FindingId[], round: number): Finding[] {
+export function findingsAfterDismissal(
+  findings: Finding[],
+  ids: FindingId[],
+  round: number,
+  reason: string | null,
+  via: DecisionVia,
+): Finding[] {
+  return settledBy(findings, ids, round, "dismissed", reason, via);
+}
+
+/**
+ * The owner accepts unsettled findings as is (ADR 0100), after round `round`: settled `accepted`, correct and never
+ * noise, with the owner's reason (or null) as `closedWhy`, the only place it is kept, and how the decision came as
+ * `decidedVia` (ADR 0101).
+ */
+export function findingsAfterAcceptance(
+  findings: Finding[],
+  ids: FindingId[],
+  round: number,
+  reason: string | null,
+  via: DecisionVia,
+): Finding[] {
+  return settledBy(findings, ids, round, "accepted", reason, via);
+}
+
+/** The unsettled findings among `ids` settled `status` by the owner after round `round`, with `closedWhy` and the way. */
+function settledBy(
+  findings: Finding[],
+  ids: FindingId[],
+  round: number,
+  status: "dismissed" | "accepted",
+  closedWhy: string | null,
+  decidedVia: DecisionVia,
+): Finding[] {
   return findings.map((f) =>
-    ids.includes(f.id) && isUnsettled(f)
-      ? { ...f, status: "dismissed", closedIn: round, closedWhy: null }
-      : f,
+    ids.includes(f.id) && isUnsettled(f) ? { ...f, status, closedIn: round, closedWhy, decidedVia } : f,
   );
 }
 
@@ -58,6 +91,7 @@ function counts(findings: Finding[]): FindingCounts {
     acknowledged: 0,
     withdrawn: 0,
     dismissed: 0,
+    accepted: 0,
     obsolete: 0,
   };
   for (const f of findings.filter((finding) => finding.posted)) {

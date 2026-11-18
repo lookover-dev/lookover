@@ -73,6 +73,7 @@ function finding(title: string, line: number, at: At = {}): Finding {
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
   };

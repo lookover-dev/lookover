@@ -1253,6 +1253,10 @@ textarea.input {
   color: var(--ink-2);
   margin: 0 0 10px;
 }
+/* A decision's one optional field, between its effect and Back and the primary (design-system.md "Popover"). */
+.pop .field {
+  margin: var(--s-4) 0;
+}
 .anchor {
   position: relative;
   display: inline-block;

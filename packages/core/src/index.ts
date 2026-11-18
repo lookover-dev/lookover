@@ -49,35 +49,37 @@
 // claim and the keep count stored on the finding; what to reply, never for verified fixed nor acknowledged; a claim the
 // finder said nothing about left unread; with no claim, after a push (the round's commit isn't `lastChecked`), a
 // finding open on its own thread and still present says the finder's reason, counted for nothing, ADR 0081; a reply
-// says the reason of the verdict the round acted on, never one it overruled, ADR 0094), the
-// loop, the verdict, the agent's next action, who must act on each finding, the check's conclusion, what to post (a finding an earlier round withheld, its review never landed, posted now while
-// it is open), the counts over posted findings only and how many findings are kept in the app (unsettled, not posted);
-// `obsolete` waits), answered as contracts' `Reconciled`, which `publish` posts as it is; the claims on Lookover's
-// threads (`readThreads`, ADR 0052, ADR 0048: per unsettled finding, by the root comment's marker, never its line, the
-// newest reply newer than the claim last answered, the one the finding holds or the one Lookover's reply marker names
-// (`readReplyMarker`; Lookover's reply: `lookoversReply`, ADR 0066, one whose id it kept, else by who posts holding a
-// reply marker), never cut at that reply: a claim written while a round ran is read by the next; from the owner, or the
-// change's author unless a fork's, by account id; its first line read case-insensitive, `Fixed`, `Won't fix`/`Wontfix`,
-// `Disputed`/`False positive`/`Not a bug`, `Deferred`/`Out of scope` as whole words, anything else a question); the
-// `Round` a finished run makes of it (`roundOf`, the service's one builder); what the owner's dismissal does
-// (`findingsAfterDismissal`: the finding settled `dismissed`, no reason kept) and the latest round restated over the
-// ledger it leaves (`standing`, ADR 0052: where the change stands now, what the round raised and answered kept); a
-// repository's rules files as rules (`parseRules`, ADR 0048: one per Markdown list item, its first line's number, else
-// one per paragraph, headings as context; its id a hash of the repository, the file and its whitespace-collapsed text
-// without the list marker, so it stays when lines move and is new when the text changes) and what both prompts may give
-// of them (`promptRules`: 32 KB in total, 16 KB per file, counted as the file's bytes up to a line, filled in the order
-// REVIEW.md, AGENTS.md, CLAUDE.md, cut at the last line that fits, with the file's length; a file with no room left is
-// listed with nothing given; labelled `R1`… across the files; a rule switched off, by its id, is given to neither pass
-// and takes no label, and the rules nested in it go with it, their lines still counted against the budget; each parsed
-// rule carries the ids of the items it sits in, `parentIds`). Interface: pure functions over domain values from
-// @lookover/contracts, never the UI snapshot as a whole (`intake` reads only a change's `author`, `draft` and `fork`,
-// from contracts' `Change`, which the snapshot holds too, and of setup only `{ reposChosen }`, contracts' `reposChosen`;
-// `reconcile` gives a new finding the facts the app shows with it when the candidate has none: as its `why`, the
-// text of the rule it cites when the rules given hold it (ADR 0048), else none, `NOT_CHECKED` as its confirmation; who
-// found it and its line's text are the candidate's). Same input, same output: no clock, no IDs, no randomness; a
-// finding's id is its rank on the change, `F<n>`. Invariants: a settled
-// finding never changes again; a finding is never raised twice on one change; a finding reported again is still
-// present; escalated wins the loop state.
+// says the reason of the verdict the round acted on, never one it overruled, ADR 0094), the loop, the verdict, the
+// agent's next action, who must act on each finding, the check's conclusion, what to post (a finding an earlier round
+// withheld, its review never landed, posted now while it is open), the counts over posted findings only and how many
+// findings are kept in the app (unsettled, not posted); `obsolete` waits), answered as contracts' `Reconciled`, which
+// `publish` posts as it is; the claims on Lookover's threads (`readThreads`, ADR 0052, ADR 0048: per unsettled finding,
+// by the root comment's marker, never its line, the newest reply newer than the claim last answered, the one the
+// finding holds or the one Lookover's reply marker names (`readReplyMarker`; Lookover's reply: `lookoversReply`, ADR
+// 0066, one whose id it kept, else by who posts holding a reply marker), never cut at that reply: a claim written while
+// a round ran is read by the next; from the owner, or the change's author unless a fork's, by account id; its first
+// line read case-insensitive, `Fixed`, `Won't fix`/`Wontfix`, `Disputed`/`False positive`/`Not a bug`, `Deferred`/`Out
+// of scope` as whole words, anything else a question); the `Round` a finished run makes of it (`roundOf`, the service's
+// one builder); what the owner's dismissal does (`findingsAfterDismissal`: the finding settled `dismissed`, the reason,
+// if any, as `closedWhy`, ADR 0101), what the owner's acceptance does (`findingsAfterAcceptance`, ADR 0100: settled
+// `accepted`, the reason as `closedWhy`), each with how the decision came as `decidedVia` (ADR 0101), and the latest
+// round restated over the ledger it leaves (`standing`, ADR 0052: where the change stands now, what the round raised
+// and answered kept); a repository's rules files as rules (`parseRules`, ADR 0048: one per Markdown list item, its
+// first line's number, else one per paragraph, headings as context; its id a hash of the repository, the file and its
+// whitespace-collapsed text without the list marker, so it stays when lines move and is new when the text changes) and
+// what both prompts may give of them (`promptRules`: 32 KB in total, 16 KB per file, counted as the file's bytes up to
+// a line, filled in the order REVIEW.md, AGENTS.md, CLAUDE.md, cut at the last line that fits, with the file's length;
+// a file with no room left is listed with nothing given; labelled `R1`… across the files; a rule switched off, by its
+// id, is given to neither pass and takes no label, and the rules nested in it go with it, their lines still counted
+// against the budget; each parsed rule carries the ids of the items it sits in, `parentIds`). Interface: pure functions
+// over domain values from @lookover/contracts, never the UI snapshot as a whole (`intake` reads only a change's
+// `author`, `draft` and `fork`, from contracts' `Change`, which the snapshot holds too, and of setup only `{
+// reposChosen }`, contracts' `reposChosen`; `reconcile` gives a new finding the facts the app shows with it when the
+// candidate has none: as its `why`, the text of the rule it cites when the rules given hold it (ADR 0048), else none,
+// `NOT_CHECKED` as its confirmation; who found it and its line's text are the candidate's). Same input, same output: no
+// clock, no IDs, no randomness; a finding's id is its rank on the change, `F<n>`. Invariants: a settled finding never
+// changes again; a finding is never raised twice on one change; a finding reported again is still present; escalated
+// wins the loop state.
 // Ordering: `reconcile` takes a change's rounds in order, each against the ledger the one before returned (round 1
 // against none); new findings are numbered in the order the engine gave them, after the ledger's last. An unsettled
 // finding's status, in precedence: verified fixed (the engine says gone and did not report it again), then what its
@@ -97,7 +99,7 @@
 export { type ConfirmApplied, confirmPolicy, type Judged, toConfirm, unconfirmed } from "./confirm.ts";
 export { type Identity, sameFinding } from "./identity.ts";
 export { endUnsent, type Intake, intake, type SkipOutcome, skipOutcome } from "./intake.ts";
-export { findingsAfterDismissal, loopState, standing } from "./loop.ts";
+export { findingsAfterAcceptance, findingsAfterDismissal, loopState, standing } from "./loop.ts";
 export { mergeFinds } from "./merge.ts";
 export { pausedAt, pauseOf } from "./pause.ts";
 export { type ReviewPlan, type RoundPlan, type RoundPlanFacts, roundPlan } from "./plan.ts";

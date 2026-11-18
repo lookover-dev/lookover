@@ -5,8 +5,8 @@
 // how many candidates it ruled out, each finding's confirmation: all required, AGENTS.md rule 10 reads no older
 // result before 1.0). Frozen
 // additive-only from the first real post: a new field is fine, a rename or a removal needs `v2`. The sets of
-// values are closed too: a Zod enum reader rejects a value it doesn't know, so a new value is a `v2` as well,
-// and every value an accepted decision already names is here now. A reader that meets an unknown value is reading a newer format and says
+// values are closed too: a Zod enum reader rejects a value it doesn't know, so a new value is a `v2` as well
+// once 1.0 is out (before it, rule 10 adds one in place: `accepted`, ADR 0100), and every value an accepted decision already names is here now. A reader that meets an unknown value is reading a newer format and says
 // so. Every value in the published format is snake_case: `run.trigger` is contracts' `Trigger` with
 // `first-review` written `first_review`; the builder maps it. Parsed with Zod where it enters (a check read
 // back); nothing inside re-checks it. Every enum is tied to the type contracts names it by (`enumOf`), so a
@@ -18,7 +18,7 @@ import type { Confirmation } from "./confirm.ts";
 import type { DiffSide } from "./diff.ts";
 import type { EngineId } from "./engine.ts";
 import { enumOf } from "./enum-of.ts";
-import type { FindingStatus, Severity } from "./finding.ts";
+import type { DecisionVia, FindingStatus, Severity } from "./finding.ts";
 import { RESULT_MARKER, REVIEW_RESULT_SCHEMA } from "./frozen.ts";
 import type { GitHost } from "./host.ts";
 import type { CheckConclusion } from "./host-writer.ts";
@@ -41,6 +41,7 @@ const findingStatus = enumOf<FindingStatus>()([
   "acknowledged",
   "withdrawn",
   "dismissed",
+  "accepted",
   "obsolete",
 ]);
 /** The review job's state, contracts' `JobState` (ADR 0029): `done` once the round is posted. */
@@ -76,6 +77,7 @@ const conclusion = enumOf<CheckConclusion | "failure" | "skipped" | "cancelled">
  * and a newer review of the change took this one's place (ADR 0043).
  */
 const nextAction = enumOf<NextAction | "reply" | "wait">()(["fix", "reply", "wait", "stop", "ask_human"]);
+const decisionVia = enumOf<DecisionVia>()(["app", "agent"]);
 const claimKind = enumOf<ClaimKind>()(["claimed_fixed", "wont_fix", "disputed", "deferred", "question"]);
 /**
  * Why a finding was settled (its status but `open`), or `kept`: the reviewer kept it open after a claim, or
@@ -89,6 +91,7 @@ const resolutionKind = enumOf<Exclude<FindingStatus, "open"> | "kept" | "still_p
   "escalated",
   "obsolete",
   "dismissed",
+  "accepted",
   "still_present",
 ]);
 const placement = z.enum(["inline", "status", "check_only"]);
@@ -220,6 +223,8 @@ const finding = z
         round: count,
         explanation: z.string().optional(),
         evidence: z.array(z.string()).optional(),
+        /** How the owner's decision came, for `dismissed` and `accepted` (ADR 0101): their app, or their coding agent. */
+        via: decisionVia.optional(),
       })
       .nullable()
       .optional(),
@@ -302,6 +307,7 @@ export const reviewResultV1 = z.object({
       withdrawn: count,
       acknowledged: count,
       dismissed: count,
+      accepted: count,
       obsolete: count,
     } satisfies Record<Exclude<FindingStatus, "open">, typeof count>),
     kept_in_app: count,

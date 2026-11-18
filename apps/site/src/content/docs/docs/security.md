@@ -44,7 +44,9 @@ Your teammates see your review written by you, its status in the description and
 
 In the description, Lookover rewrites only its own part, between two hidden markers, after your text. It reads the description just before each write, but GitHub can't refuse a write over a newer edit: an edit saved in that same moment can be lost. A description rewritten whole loses the status until Lookover writes it again.
 
-As you too, when your coding agent runs them: `lookover wait`'s `/lookover review` comment and the threads it resolves once settled (fixed, withdrawn or dismissed), and `lookover reply`'s answers on a thread.
+As you too, when your coding agent runs them: `lookover wait`'s `/lookover review` comment and the threads it resolves once settled (fixed, withdrawn, dismissed or accepted by the owner), and `lookover reply`'s answers on a thread.
+
+`lookover settle`'s comment too, which asks Lookover to accept a finding as is or mark it wrong on your word, with your reason. Lookover acts on it because it is posted as you, and GitHub can't tell your agent from you: nothing on GitHub proves you confirmed it. The flag your agent must pass, and the comment anyone on the pull request can read, make it a deliberate act, never a side effect of a reply. The skill tells your agent to use it only when you said so. A `/lookover settle` written by hand, or by anyone but you, settles nothing.
 
 Secrets in a known shape are taken out of what it posts and of its logs.
 

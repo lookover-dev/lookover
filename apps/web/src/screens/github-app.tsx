@@ -438,8 +438,8 @@ export function GitHubButton({
   children,
 }: {
   change: Change;
-  /** A secondary, or the page's filled primary where the person settles what needs them on GitHub. */
-  variant?: "primary" | "secondary" | "ghost";
+  /** A secondary, or a ghost among a card's quieter actions. */
+  variant?: "secondary" | "ghost";
   size?: "sm" | "md";
   kbd?: string;
   /** Its accessible name, when its words may be hidden (an icon alone on a phone). */

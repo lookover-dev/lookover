@@ -2,7 +2,18 @@
 // command's own sleeps move, so a 30-minute wait takes milliseconds. One test per exit code, then the rules.
 import { describe, expect, test } from "bun:test";
 import { checkExternalId, REQUEST_MARKER, reviewRequest } from "@lookover/contracts";
-import { BRANCH, earlier, finding, newer, owner, ref, result, sha, world } from "./agent-cli.test-support.ts";
+import {
+  BRANCH,
+  earlier,
+  finding,
+  newer,
+  owner,
+  ref,
+  result,
+  SETTLE,
+  sha,
+  world,
+} from "./agent-cli.test-support.ts";
 
 const someone = { id: 99, login: "someone" };
 /** A fork's pull request skipped when it opened (ADR 0048). */
@@ -61,25 +72,29 @@ describe("lookover wait: exit codes", () => {
   });
 
   test("3: something to fix: the findings that need the agent, blocking first", async () => {
-    const w = world();
     const findings = [
       finding("F1", { severity: "should_fix", title: "Totals skip refunds" }),
       finding("F2", { needs_action_by: "human", status: "escalated" }),
       finding("F3", { severity: "blocking", title: "Unpaid filter drops drafts" }),
       finding("F4", { needs_action_by: "none", status: "verified_fixed" }),
     ];
-    w.at(10_000, () => w.check("round", "in_progress"));
-    w.at(90_000, () =>
-      w.complete(
-        "round",
-        "neutral",
-        result({
-          verdict: { value: "blocking", conclusion: "neutral" },
-          loop: { state: "open", next_action: "fix" },
-          findings,
-        }),
-      ),
-    );
+    const toFix = () => {
+      const w = world();
+      w.at(10_000, () => w.check("round", "in_progress"));
+      w.at(90_000, () =>
+        w.complete(
+          "round",
+          "neutral",
+          result({
+            verdict: { value: "blocking", conclusion: "neutral" },
+            loop: { state: "open", next_action: "fix" },
+            findings,
+          }),
+        ),
+      );
+      return w;
+    };
+    const w = toFix();
     expect(await w.lookover("wait", "--json")).toBe(3);
     expect(w.json()).toMatchObject({
       exit: 3,
@@ -89,16 +104,79 @@ describe("lookover wait: exit codes", () => {
       next_action: "fix",
       findings: [findings[2], findings[0]],
     });
+    // F2 waits on the owner, but the agent has work first: only exit 4 says where the owner settles it.
+    expect(w.json()).not.toHaveProperty("for_the_owner");
+    const text = toFix();
+    expect(await text.lookover("wait")).toBe(3);
+    expect(text.err).not.toContain(SETTLE);
   });
 
-  test("4: a person is needed", async () => {
-    const w = world();
-    w.at(10_000, () => w.check("round", "in_progress"));
-    w.at(20_000, () =>
-      w.complete("round", "neutral", result({ loop: { state: "needs_owner", next_action: "ask_human" } })),
-    );
-    expect(await w.lookover("wait")).toBe(4);
-    expect(w.err.at(-1)).toBe("Lookover: a person is needed on 5d9114c.");
+  describe("4: a person is needed: the findings that need the owner, and where the owner settles them (ADR 0100)", () => {
+    const escalated = [
+      finding("F1", { status: "verified_fixed", needs_action_by: "none" }),
+      finding("F2", {
+        needs_action_by: "human",
+        status: "escalated",
+        severity: "should_fix",
+        confirmation: { verdict: "not_checked", demoted: true },
+        title: "Totals skip refunds",
+        location: { path: "src/totals.ts", start_line: 40, end_line: 44, side: "head", sha },
+      }),
+      finding("F3", { needs_action_by: "human", status: "escalated", title: "Unpaid filter drops drafts" }),
+    ];
+    const needsOwner = () => {
+      const w = world();
+      w.at(10_000, () => w.check("round", "in_progress"));
+      w.at(20_000, () =>
+        w.complete(
+          "round",
+          "neutral",
+          result({ loop: { state: "needs_owner", next_action: "ask_human" }, findings: escalated }),
+        ),
+      );
+      return w;
+    };
+
+    test("as text: the owner's findings, blocking first, then the settle line on stderr; nothing on stdout", async () => {
+      const w = needsOwner();
+      expect(await w.lookover("wait")).toBe(4);
+      expect(w.err.slice(-4)).toEqual([
+        "Lookover: a person is needed on 5d9114c.",
+        "F3 · Blocking · Unpaid filter drops drafts (src/invoice.ts:12)",
+        "F2 · Should fix, unconfirmed · Totals skip refunds (src/totals.ts:40-44)",
+        SETTLE,
+      ]);
+      expect(w.out).toEqual([]);
+    });
+
+    test("as JSON: for_the_owner holds the findings and the settle line", async () => {
+      const w = needsOwner();
+      expect(await w.lookover("wait", "--json")).toBe(4);
+      expect(w.json()).toMatchObject({
+        exit: 4,
+        meaning: "ask_human",
+        findings: [],
+        for_the_owner: {
+          findings: [
+            {
+              id: "F3",
+              severity: "blocking",
+              title: "Unpaid filter drops drafts",
+              path: "src/invoice.ts",
+              line: 12,
+            },
+            {
+              id: "F2",
+              severity: "should_fix",
+              title: "Totals skip refunds",
+              path: "src/totals.ts",
+              line: 40,
+            },
+          ],
+          settle: SETTLE,
+        },
+      });
+    });
   });
 
   test("5: the check is still waiting at the timeout", async () => {

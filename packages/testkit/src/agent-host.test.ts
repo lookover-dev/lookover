@@ -69,6 +69,7 @@ const AGENT_CALLS = {
   getChange: "read",
   checks: "read",
   comments: "read",
+  reactions: "read",
   comment: "write",
   threads: "read",
   reply: "write",

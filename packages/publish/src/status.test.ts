@@ -48,6 +48,7 @@ function finding(id: string, overrides: Partial<Finding>): Finding {
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
     fingerprints: { location: `loc:${id}`, meaning: `sem:${id}` },
@@ -214,7 +215,7 @@ describe("the status block, as the prototype words each state", () => {
         `Round 3 · ${at(SHA_2)} · 1 fixed`,
         [
           `- **Should fix** · [A thrown delivery waits for the broker](${thread(102)}) · \`src/queue/ack.ts\` line 19`,
-          "  Said won't fix twice, kept twice: the owner decides on the thread.",
+          "  Said won't fix twice, kept twice: the owner decides in Lookover's app.",
         ].join("\n"),
       ].join("\n\n"),
     );
@@ -403,7 +404,7 @@ describe("the open findings", () => {
     expect(shown.split("\n\n")[2]).toBe(
       [
         "- **Should fix** · Ack before the retry · `src/queue/send.ts` line 11",
-        "  Disputed, and the finder still calls it wrong: the owner decides on the thread.",
+        "  Disputed, and the finder still calls it wrong: the owner decides in Lookover's app.",
         `- **Blocking** · [Retry loop never stops on 4xx](${thread(101)}) · \`src/queue/send.ts\` line 11`,
         `- **Should fix** · [A thrown delivery waits for the broker](${thread(102)}) · \`src/queue/ack.ts\` line 19`,
       ].join("\n"),

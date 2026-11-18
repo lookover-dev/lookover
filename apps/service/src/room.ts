@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { Gh, LimitMet, SignIn } from "@lookover/contracts";
 import {
+  type AcceptRefusal,
   type AskToInstallRefusal,
   accountOf,
   apply,
@@ -18,6 +19,7 @@ import {
   type ConnectionAccount,
   changeIdOf,
   changePrefixOf,
+  type DecisionVia,
   DISCOVERY_RETRY_MS,
   type EngineHealth,
   type EngineId,
@@ -25,11 +27,14 @@ import {
   type Engines,
   type EventBody,
   type Finding,
+  type FindingId,
   GITHUB_WEB,
   type IdGen,
   type LoginItemKind,
   type LookRefusal,
   type NoiseChoice,
+  type OwnerDecision,
+  oneLineReason,
   type PauseFor,
   type RepositoryId,
   type RepositoryRef,
@@ -65,14 +70,14 @@ import {
 } from "./coding-agent.ts";
 import { memoryCommandPath } from "./command-path.ts";
 import { createDeviceFlow } from "./device-flow.ts";
-import { createDismissals, type Dismissing, type DismissRefusal } from "./dismiss.ts";
+import { createDismissals, type DismissRefusal, type SettleRefusal } from "./dismiss.ts";
 import { EventLog } from "./events.ts";
 import { checkItems, freeGbOf } from "./health-checks.ts";
 import { createInstallation, type GitHubSide, type Installation } from "./installation.ts";
-import { differsLine, droppedLine, logLineOf, skippedLine } from "./log-lines.ts";
+import { differsLine, droppedLine, logLineOf, settleRefusedLine, skippedLine } from "./log-lines.ts";
 import { secretShapesRemoved } from "./log-sink.ts";
 import { type LoginItem, nowhereLoginItem } from "./login-item.ts";
-import { createPoller, type Poller } from "./poller.ts";
+import { createPoller, type Poller, type PollerDeps } from "./poller.ts";
 import { createQueue } from "./queue.ts";
 import { createReactions } from "./reactions.ts";
 import { createRun } from "./run.ts";
@@ -308,6 +313,24 @@ export interface Room {
    * passed over. Refused when none of them is said departed.
    */
   dismissDeparted(repoIds: readonly RepositoryId[]): "ok" | "no_such_repository";
+  /**
+   * The owner's decision on a finding of the change, the one way to it (ADR 0101): dismissed as wrong (ADR 0052,
+   * "This finding is wrong") or accepted as is (ADR 0100, "Accept as is"), with the reason given (none: null), kept
+   * as the finding's why (`dismiss.ts`), and how it came, `via`: `app`, the owner in the app, or `agent`, their coding
+   * agent on their word. Refused for a reason over `REASON_MAX` characters once on one line, a change of no
+   * watched repository, no such finding, one settled or kept off the pull request, a round running, and asked while
+   * another person's sign-in is on its way to be held (ADR 0090). `answering`: the coding agent's settle comment it
+   * came from (the poll's), kept with it and answered with 🚀 as its last post. Saved before its first wait unless
+   * another person's sign-in is on its way: the poll hands nothing over then.
+   */
+  settle(
+    changeId: ChangeId,
+    findingId: FindingId,
+    decision: OwnerDecision,
+    reason: string | null,
+    via: DecisionVia,
+    answering: string | null,
+  ): Promise<"ok" | "no_such_change" | DismissRefusal | AcceptRefusal>;
   /** "Unlock" (ADR 0047): the session unlocked, sent once; nothing when it is already. */
   unlock(): void;
   /**
@@ -841,7 +864,8 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     timers,
     ...logged,
   });
-  // "This finding is wrong" (ADR 0052): posted outside any round, the change busy for the take until it is.
+  // "This finding is wrong" (ADR 0052) and "Accept as is" (ADR 0100): posted outside any round, the change busy for
+  // the take until it is.
   const dismissals = createDismissals({
     store,
     clock: o.clock,
@@ -854,6 +878,12 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   });
   // The watched repositories, polled by the service itself (ADR 0043, ADR 0053): what it sees is sent and handed to
   // the queue.
+  const agent = agentSettled({
+    decideNow: (...args) => decideNow(...args),
+    refused: (repo, commentId) => reactions.refused(repo, commentId),
+    again: () => listed(),
+    log: logLine,
+  });
   const poller = createPoller({
     store,
     clock: o.clock,
@@ -874,6 +904,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     opened: (changeId) => queue.opened(changeId),
     pushed: (changeId, sha) => queue.pushed(changeId, sha),
     requested: (changeId, request, full) => queue.requested(changeId, request, full),
+    settled: agent.settled,
     resend: () => {
       reactions.send();
       checks.resend();
@@ -901,6 +932,49 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
    * or posts as the new one.
    */
   let switching: Promise<void> | null = null;
+
+  /**
+   * The owner's decision on a finding (ADR 0052, ADR 0100, ADR 0101), its reason already on one line
+   * (`oneLineReason`; none: null), decided now, in this turn: saved (its comment with it) and "ok", or why not: a
+   * change no longer watched, the store's refusal; or `switching`, another person's sign-in on its way to be held
+   * (ADR 0090), nothing saved. Synchronous on purpose: the poll marks a settle comment seen right after handing it
+   * over, so the save must land first, or a stop between the two loses it.
+   */
+  const decideNow = (
+    changeId: ChangeId,
+    findingId: FindingId,
+    decision: OwnerDecision,
+    reason: string | null,
+    via: DecisionVia,
+    answering: string | null,
+  ): "ok" | "no_such_change" | SettleRefusal | "switching" => {
+    if (watched.find(changeId) === null) return "no_such_change";
+    if (switching !== null) return "switching";
+    return dismissals.settle(changeId, findingId, decision, reason, via, answering);
+  };
+
+  /**
+   * `decideNow`, a finding kept off the pull request said `settled` as the app and the API say it; asked while another
+   * person's sign-in is on its way to be held (ADR 0090), refused once it is: the earlier person's round is no longer
+   * theirs to post on, and the setup is being made again.
+   */
+  const decided = async (
+    ...args: Parameters<typeof decideNow>
+  ): Promise<"ok" | "no_such_change" | DismissRefusal> => {
+    const answer = decideNow(...args);
+    if (answer === "not_posted") return "settled";
+    if (answer !== "switching") return answer;
+    await switching;
+    return "settled";
+  };
+
+  /** The one way to the owner's decision (ADR 0101): the app's two actions go through it, and the agent's. */
+  const settle: Room["settle"] = async (changeId, findingId, decision, reason, via, answering) => {
+    const oneLine = oneLineReason(reason);
+    if (!("reason" in oneLine)) return "reason_too_long";
+    return decided(changeId, findingId, decision, oneLine.reason, via, answering);
+  };
+
   /** Which person's sign-in the app's asks are made under: moves as another person's begins to be held (ADR 0090). */
   let signInTurn = 0;
   /** Whether "Reconnect" runs: it lists the installation's repositories itself, first. */
@@ -999,9 +1073,14 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
   // yet (the setup's GitHub step) there is nothing to list: the setup lists once it is (ADR 0047). With the App or its
   // installation refused at start, the loop lists, and shows the connection back once GitHub answers; asked to wait
   // there, it lists at the wait's end.
+  // The owner's dismissals a stopped service left owing posts go on first (ADR 0052): one the first poll saves (a
+  // settle written meanwhile, ADR 0101) posts after them, in the order they were saved. A send needs nothing of the
+  // first listing: it reads the store, as a start that doesn't list sends them too; its take waits for the recovery.
+  dismissals.resume();
   if (shown.connection.state !== "not-connected" && github.down() === null && !waitsAtStart)
     await poller.first();
   queue.recover();
+  agent.recovered();
   // The repositories chosen already: the coding agent's requests kept before are answered now (ADR 0090), those a
   // stopped service left kept, or kept until a start set up at once (`setUpAtOnce`) chose without the setup's write.
   queue.chosen();
@@ -1013,8 +1092,6 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
     log: logLine,
   });
   runFolders.start();
-  // The owner's dismissals a stopped service left owing posts go on (ADR 0052).
-  dismissals.resume();
   poller.start();
   const atLogin = createStartAtLogin({
     item: loginItem.item,
@@ -1228,6 +1305,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       for (const repoId of named) emit({ type: "repo.dismissed", at, repoId });
       return "ok";
     },
+    settle,
     unlock: () => {
       if (shown.service.unlocked) return;
       emit({ type: "service.changed", at: o.clock.now(), patch: { unlocked: true } });
@@ -1245,13 +1323,7 @@ export async function buildRoom(o: RoomOptions): Promise<Room> {
       }),
       watched.find,
       (id) => store.rounds.ledger(id),
-      // Asked while another person's sign-in is on its way to be held (ADR 0090): the earlier person's round is no
-      // longer theirs to post on, and the setup is being made again; refused once it is held, nothing saved or posted.
-      async (changeId, findingId) => {
-        if (switching === null) return dismissals.dismiss(changeId, findingId);
-        await switching;
-        return "settled";
-      },
+      (changeId, findingId) => decided(changeId, findingId, "wrong", null, "app", null),
     ),
     startAtLogin: atLogin.choose,
     agent: { check: codingAgent.check, path: codingAgent.path, skill: codingAgent.skill },
@@ -1521,6 +1593,63 @@ async function sinceLastStart(d: {
  * GitHub asked the start's listing of the installations to wait (ADR 0088): the poller keeps it, and asks nothing
  * before its end. Whether that end is still to come at `now`.
  */
+/** What the poller's `settled` asks of the room. */
+interface AgentSettledDeps {
+  /** The room's decision, in this turn (`decideNow`). */
+  decideNow(
+    changeId: ChangeId,
+    findingId: FindingId,
+    decision: OwnerDecision,
+    reason: string | null,
+    via: DecisionVia,
+    answering: string | null,
+  ): "ok" | "no_such_change" | SettleRefusal | "switching";
+  /** The 😕 owed on a refused settle's comment. */
+  refused(repo: RepositoryRef, commentId: string): void;
+  /** A poll, then the take: what reads a held settle again. */
+  again(): Promise<void>;
+  log(line: string): void;
+}
+
+/**
+ * The poller's `settled`: the coding agent's settle on the owner's word (ADR 0101), decided now, saved with its
+ * comment before this returns, as the poll's bookkeeping needs; refused, 😕 owed on the comment, the refusal logged. A
+ * save that throws is thrown to the poll, which leaves the comment unseen for the next one, as a request's. Another
+ * person's sign-in on its way (ADR 0090): the poll hands nothing over then, and were it to, nothing is saved or sent as
+ * them. Before the queue's recovery (the first poll at start), a run going is a job the last service left running,
+ * which the recovery may fail or put back: the settle is held for the poll after it, never judged against that job.
+ */
+function agentSettled(d: AgentSettledDeps): {
+  settled: PollerDeps["settled"];
+  /** The queue's recovery ran: a settle held is read again by a poll now, and none is held from then on. */
+  recovered(): void;
+} {
+  let recovered = false;
+  let held = false;
+  return {
+    settled: (changeId, comment, { finding, decision, reason }) => {
+      const oneLine = oneLineReason(reason);
+      const answer: ReturnType<AgentSettledDeps["decideNow"]> | AcceptRefusal =
+        "reason" in oneLine
+          ? d.decideNow(changeId, finding, decision, oneLine.reason, "agent", comment.id)
+          : "reason_too_long";
+      if (answer === "ok" || answer === "switching") return "answered";
+      if (answer === "reviewing" && !recovered) {
+        held = true;
+        return "held";
+      }
+      d.refused(comment.repo, comment.id);
+      d.log(settleRefusedLine(changeId, finding, answer));
+      return "answered";
+    },
+    recovered() {
+      recovered = true;
+      if (held)
+        d.again().catch((error: unknown) => d.log(`the pull requests could not be listed: ${said(error)}`));
+    },
+  };
+}
+
 function holdPollsForStartLimit(github: Installation, poller: Poller, now: number): boolean {
   const until = github.limitedAtStart();
   if (until === null) return false;
@@ -1607,7 +1736,8 @@ function settingsCommands(d: SettingsCommandsDeps): Omit<Room["settings"], "quie
 }
 
 /**
- * "Too noisy?" (ADR 0049, ADR 0052) over the settings commands: `wrong` dismisses the finding (`dismiss`);
+ * "Too noisy?" (ADR 0049, ADR 0052) over the settings commands: `wrong` dismisses the finding as the owner in the
+ * app, with no reason, through `markedWrong`;
  * `rule-off` switches off the rule the finding cites, as the rules page does; `blocking-only` sets the change's
  * repository's strictness to blocking, as its settings page does. `repoOf` gives the watched repository a change is
  * in, null for none (no such change); `ledger` a change's findings as its last round left them.
@@ -1616,7 +1746,10 @@ function withNoise(
   commands: Omit<Room["settings"], "quiet">,
   repoOf: (changeId: ChangeId) => RepositoryRef | null,
   ledger: (changeId: ChangeId) => Finding[],
-  dismiss: (...args: Parameters<Dismissing["dismiss"]>) => Promise<ReturnType<Dismissing["dismiss"]>>,
+  markedWrong: (
+    changeId: ChangeId,
+    findingId: FindingId,
+  ) => Promise<"ok" | "no_such_change" | DismissRefusal>,
 ): Room["settings"] {
   return {
     ...commands,
@@ -1624,7 +1757,7 @@ function withNoise(
       const repo = repoOf(choice.changeId);
       if (repo === null) return "no_such_change";
       const findings = ledger(choice.changeId);
-      if (choice.kind === "wrong") return await dismiss(choice.changeId, choice.findingId);
+      if (choice.kind === "wrong") return markedWrong(choice.changeId, choice.findingId);
       if (choice.kind === "blocking-only") return commands.set(repoIdOf(repo), "strictness", "blocking");
       const finding = findings.find((f) => f.id === choice.findingId);
       if (finding === undefined) return "no_such_finding";

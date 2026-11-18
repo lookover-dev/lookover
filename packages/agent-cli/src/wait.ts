@@ -65,19 +65,25 @@ const PUSH_SHOWN_MS = 15_000;
 const PUSH_RETRY_MS = 3_000;
 
 /** `90_000` as `1m30s`. */
-function span(ms: number): string {
+export function span(ms: number): string {
   const seconds = Math.round(ms / 1000);
   const [h, m, s] = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60];
   return [h ? `${h}h` : "", m ? `${m}m` : "", s || seconds === 0 ? `${s}s` : ""].join("");
 }
 
-/** The findings that need the agent, blocking first. */
-export function forTheAgent(result: ReviewResult | null): ReviewResult["findings"] {
+/** The findings that need `who`, blocking first. */
+function needing(result: ReviewResult | null, who: "agent" | "human"): ReviewResult["findings"] {
   const order = { blocking: 0, should_fix: 1, consider: 2 } as const;
   return (result?.findings ?? [])
-    .filter((f) => f.needs_action_by === "agent")
+    .filter((f) => f.needs_action_by === who)
     .sort((a, b) => order[a.severity] - order[b.severity]);
 }
+
+/** The findings that need the agent, blocking first. */
+export const forTheAgent = (result: ReviewResult | null) => needing(result, "agent");
+
+/** The findings only the owner settles (escalated, ADR 0100), blocking first. */
+export const forTheOwner = (result: ReviewResult | null) => needing(result, "human");
 
 export async function wait(args: WaitArgs, w: World): Promise<Outcome> {
   let commit: CommitSha | null = null;

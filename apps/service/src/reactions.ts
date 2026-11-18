@@ -1,6 +1,8 @@
 // The reactions on review requests (ADR 0043): 👀 once a request is recorded, 🚀 once the round its job led to is
-// posted, and no other. What is owed is the store's (`requests.unreacted`), so a reaction refused, or owed when the
-// service stopped, is sent at the next `send`, and one sent is never sent again, after a restart too.
+// posted, and no other; and 😕 on the coding agent's settle comment Lookover refused (ADR 0101, `refused`), owed in the
+// store as the others are and sent once. A settle's 🚀 is its dismissal's last post, not one of these.
+// What is owed is the store's (`requests.unreacted`), so a reaction refused, or owed when the service stopped, is sent
+// at the next `send`, and one sent is never sent again, after a restart too.
 // Ordering: one send at a time; a send asked for while one goes makes it go round once more. A request's 👀 goes
 // before its 🚀: a 👀 refused holds back that request's 🚀 until the next send. Each reaction is checked against the
 // store right before it goes: one settled meanwhile (another person signed in, ADR 0090) is not sent.
@@ -8,7 +10,7 @@
 // one on a comment the host no longer has (deleted) is given up, logged. Never throws.
 // It must never know: which comments are requests, or when a job is done (the poller's, the queue's, the store's).
 
-import { HostError, type HostWriter } from "@lookover/contracts";
+import { HostError, type HostWriter, type RepositoryRef } from "@lookover/contracts";
 import type { Store, Unreacted } from "@lookover/store";
 import { said } from "./said.ts";
 
@@ -21,9 +23,14 @@ export interface ReactionsDeps {
 export interface Reactions {
   /** Sends every reaction owed and not yet sent. Never throws. */
   send(): void;
+  /**
+   * 😕 on `repo`'s settle comment `commentId`, refused (ADR 0101): owed in the store, then sent with the others. What
+   * the store throws is thrown: the comment is then not marked seen, and the next poll refuses it again.
+   */
+  refused(repo: RepositoryRef, commentId: string): void;
   /** Waits for the send under way, and the one asked meanwhile, if any; settles at once with none. */
   idle(): Promise<void>;
-  /** Sends nothing more, and waits for the send under way. */
+  /** Sends nothing more, and waits for the sends under way. */
   stop(): Promise<void>;
 }
 
@@ -68,18 +75,24 @@ export function createReactions(d: ReactionsDeps): Reactions {
     } while (again && !stopping);
   }
 
+  function send(): void {
+    if (stopping) return;
+    if (sending !== null) {
+      again = true;
+      return;
+    }
+    sending = goRound()
+      .catch((error: unknown) => d.log(`the reactions owed could not be read: ${error}`))
+      .finally(() => {
+        sending = null;
+      });
+  }
+
   return {
-    send() {
-      if (stopping) return;
-      if (sending !== null) {
-        again = true;
-        return;
-      }
-      sending = goRound()
-        .catch((error: unknown) => d.log(`the reactions owed could not be read: ${error}`))
-        .finally(() => {
-          sending = null;
-        });
+    send,
+    refused(repo, commentId) {
+      d.store.requests.refused(repo, commentId);
+      send();
     },
     async idle() {
       await sending;

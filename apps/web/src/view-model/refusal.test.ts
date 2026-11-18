@@ -1,6 +1,7 @@
 // What the band's Refused line and the toast say of a command the service refused: "Lookover couldn't do that."
 // and the reason the UI knows from the status and the service's answer (spec #105), never the service's own words.
 import { expect, test } from "bun:test";
+import { changeId, findingId } from "@lookover/contracts";
 import { Refused } from "../api/http.ts";
 import { refusalOf, refusalText, refusalToast, sessionLost } from "./refusal.ts";
 
@@ -142,6 +143,22 @@ test("Ask to install refused (ADR 0067): why, from the service's `askToInstall`,
     status: 409,
     error: "x",
   });
+});
+
+test("Accept as is refused (ADR 0100): a reason too long, from the service's `accept`; the others as This finding is wrong's", () => {
+  const accept = {
+    type: "finding.accept",
+    changeId: changeId("sasensi/ledger-api#151"),
+    findingId: findingId("F1"),
+    reason: "x".repeat(201),
+  } as const;
+  const tooLong = refusalOf(new Refused(409, { error: "x", accept: "reason_too_long" }), accept);
+  expect(tooLong).toEqual({ status: 409, error: "x", accept: "reason_too_long", command: accept });
+  expect(refusalToast(tooLong)).toBe("Lookover couldn't do that. That reason is longer than 200 characters.");
+  expect(refusalText(refusalOf(new Refused(409, { error: "x", refused: "settled" }), accept)).detail).toBe(
+    "That finding is already settled, or isn't on the pull request.",
+  );
+  expect(refusalOf(new Refused(409, { error: "x", accept: "weather" }))).toEqual({ status: 409, error: "x" });
 });
 
 test("any refusal but a sign-in's on setup has its toast", () => {

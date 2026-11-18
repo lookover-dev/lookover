@@ -287,6 +287,7 @@ test("a job moved to a newer commit completes its old check skipped, with the re
       withdrawn: 0,
       acknowledged: 0,
       dismissed: 0,
+      accepted: 0,
       obsolete: 0,
       kept_in_app: 0,
     },

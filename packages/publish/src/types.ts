@@ -16,6 +16,7 @@ import type {
   JobFailure,
   JobId,
   LoopState,
+  OwnerDecision,
   Reconciled,
   ReviewResult,
   Round,
@@ -80,13 +81,16 @@ export interface RoundToPost {
 }
 
 /**
- * The owner's dismissal of a finding ("This finding is wrong", ADR 0052), posted outside any round: said on the
- * finding's thread, then the change's status block and the latest round's check say where the change stands now.
+ * The owner's decision on a finding (`decision`), posted outside any round: said on the finding's thread, then the
+ * change's status block and the latest round's check say where the change stands now. How it came (ADR 0101) is the
+ * finding's own `decidedVia`, read with the round as restated.
  */
 export interface DismissalToPost {
   /** The dismissal's own key, apart from any run: what its reply's hidden marker names. */
   id: string;
   findingId: FindingId;
+  /** Marked wrong, or accepted as is: the reply's words, and whether the thread's root is minimized. */
+  decision: OwnerDecision;
   /**
    * The change's latest round that posted, as its posts were rendered, with `reconciled` restated over the ledger as
    * it is when the posts are sent (`core.standing`): what the check says, and the status block without a reader of
@@ -97,13 +101,18 @@ export interface DismissalToPost {
   degraded: boolean;
   /** That round's check, rewritten; null leaves it: the change's head moved since the round. */
   checkId: string | null;
+  /**
+   * The settle comment the coding agent posted on the owner's word (ADR 0101), answered with 🚀 once the other posts
+   * are sent; null for the app's decision.
+   */
+  answering: string | null;
 }
 
 /**
  * One of a dismissal's posts: the reply on its thread, the status block in the description, the round's check, its
- * root comment minimized.
+ * root comment minimized, the 🚀 on the agent's settle comment.
  */
-export type DismissalPostKind = "reply" | "status" | "completed" | "minimize";
+export type DismissalPostKind = "reply" | "status" | "completed" | "minimize" | "react";
 
 /** One post of a dismissal as its outbox keeps it: sent, with the host's id, or owed; and how often a send began. */
 export interface SavedDismissalPost {
@@ -323,14 +332,17 @@ export interface Publisher {
    */
   findReview(round: PlacedRound): Promise<FoundReview | null>;
   /**
-   * Posts the owner's dismissal (ADR 0052), its owed posts in order (`dismissalPostsOf`): a reply on the finding's
-   * thread ("Dismissed by the owner."), the status block (`status`) and the round's check (when `checkId` is given)
-   * rendered from the round as restated, then the thread's root comment minimized as `resolved`. The thread is found
-   * in one read of the change's threads, made as the posts begin; a finding with none (in the status block only), or a
-   * read refused for good, sends no reply and minimizes nothing. A reply begun before is looked for by its marker
-   * first; a reply refused for good (`not_found`, `invalid`), a status block refused for good and a refused minimize
-   * go to `log`. Retries, refusals, the
-   * outbox and `signal` as for `publish`.
+   * Posts the owner's decision (ADR 0052, ADR 0100), its owed posts in order (`dismissalPostsOf`): a reply on the
+   * finding's thread ("Dismissed by the owner" for `wrong`, "Accepted by the owner" for `accepted`; "… on the owner's
+   * word, through their coding agent" when the finding's `decidedVia` is `agent`, ADR 0101), with the owner's reason,
+   * if any, from the finding's `closedWhy` as filtered with the round; the status block (`status`) and the round's
+   * check (when `checkId` is given) rendered from the round as restated, then, for `wrong` only, the thread's root
+   * comment minimized as `resolved`: an accepted finding is correct and stays readable; last, for the agent's settle
+   * (`answering`, ADR 0101), 🚀 on its comment. The thread is found in one
+   * read of the change's threads, made as the posts begin; a finding with none (in the status block only), or a read
+   * refused for good, sends no reply and minimizes nothing. A reply begun before is looked for by its marker first; a
+   * reply refused for good (`not_found`, `invalid`), a status block refused for good and a refused minimize go to
+   * `log`. Retries, refusals, the outbox and `signal` as for `publish`.
    */
   dismiss(dismissal: DismissalToPost, outbox?: DismissalOutbox, signal?: AbortSignal): Promise<void>;
   /**

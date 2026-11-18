@@ -8,18 +8,22 @@
 import {
   type AskedBy,
   type Change,
+  type ChangeId,
   cancelPhrase,
   confirmFailureText,
+  type DecisionVia,
   type Dropped,
   deferralText,
   type EngineId,
   type EventBody,
   engineDeferral,
   engineName,
+  type FindingId,
   failureWords,
   type JobFailure,
   postWaitText,
   pushedText,
+  REASON_MAX,
   type Review,
   type ReviewJob,
   type Round,
@@ -54,6 +58,12 @@ const ASKED: Record<AskedBy, string> = {
 const ASKED_FOR: Record<AskedBy, string> = {
   agent: "asked for by the agent on GitHub",
   person: "asked for on GitHub",
+};
+
+/** How the owner's decision came (ADR 0101): "F1 accepted as is through your coding agent, on your word". */
+const DECIDED_VIA: Record<DecisionVia, string> = {
+  app: "by you",
+  agent: "through your coding agent, on your word",
 };
 
 /** What asked for a new job: its trigger, and for a request comment, who wrote it (when one is known). */
@@ -229,6 +239,33 @@ export const signInLines = {
   notKept: (why: string) => `the GitHub sign-in was not kept: ${why}`,
 } as const;
 
+/** Why Lookover refused a settle the coding agent asked for (ADR 0101), the store's or the room's code. */
+export type SettleRefused =
+  | "no_such_finding"
+  | "settled"
+  | "not_posted"
+  | "reviewing"
+  | "reason_too_long"
+  | "no_such_change";
+
+/** Each refusal of a settle in the log's words, for `finding`. */
+const SETTLE_REFUSED: Record<SettleRefused, (finding: FindingId) => string> = {
+  no_such_finding: (finding) => `Lookover raised no ${finding} on it`,
+  settled: (finding) => `${finding} is settled already`,
+  not_posted: (finding) => `${finding} was kept off the pull request`,
+  reviewing: () => "a review of the pull request was running",
+  reason_too_long: () => `its reason is longer than ${REASON_MAX} characters`,
+  no_such_change: () => "Lookover doesn't watch this pull request",
+};
+
+/**
+ * A settle comment of the coding agent's that Lookover refused (ADR 0101), answered 😕: "sasensi/ledger-api#151: the
+ * settle of F9 your coding agent asked for was refused: Lookover raised no F9 on it".
+ */
+export function settleRefusedLine(changeId: ChangeId, finding: FindingId, why: SettleRefused): string {
+  return `${changeId}: the settle of ${finding} your coding agent asked for was refused: ${SETTLE_REFUSED[why](finding)}`;
+}
+
 /** A piece of the replayed state a start dropped (ADR 0085): "dropped repos sasensi/ledger-api: enabled: …". */
 export function droppedLine({ section, key, why }: Dropped): string {
   return `dropped ${section}${key === null ? "" : ` ${key}`}: ${droppedWords(section, why)}`;
@@ -302,7 +339,9 @@ export function logLineOf(event: EventBody, before: State): string | null {
     case "round.finished":
       return `${event.changeId} round ${event.round.n} ${roundLine(event.round, event.job, event.preview)}`;
     case "finding.dismissed":
-      return `${event.changeId} ${event.findingIds.join(", ")} marked wrong by you`;
+      return `${event.changeId} ${event.findingIds.join(", ")} marked wrong ${DECIDED_VIA[event.via]}`;
+    case "finding.accepted":
+      return `${event.changeId} ${event.findingIds.join(", ")} accepted as is ${DECIDED_VIA[event.via]}`;
     case "service.changed":
       return pauseLine(event.patch.paused, before.service.paused, event.at);
     case "engine.changed":

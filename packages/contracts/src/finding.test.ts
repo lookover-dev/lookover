@@ -3,12 +3,14 @@
 import { expect, test } from "bun:test";
 import {
   bySeverity,
+  decidedStatus,
   type Finding,
   type FindingStatus,
   findingId,
   fingerprintWord,
   isCounted,
   isUnsettled,
+  ownerDecisionOf,
   type Severity,
 } from "./index.ts";
 
@@ -20,6 +22,7 @@ const STATUSES = {
   acknowledged: "settled",
   withdrawn: "settled",
   dismissed: "settled",
+  accepted: "settled",
   obsolete: "settled",
 } as const satisfies Record<FindingStatus, "settled" | "unsettled">;
 const SEVERITIES = { blocking: 1, should_fix: 2, consider: 3 } as const satisfies Record<Severity, number>;
@@ -53,6 +56,7 @@ function finding(status: FindingStatus, posted = true): Finding {
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
   };
@@ -102,4 +106,20 @@ test("findings are listed blocking, should fix, consider, the given order kept w
   ];
   expect(bySeverity(items, (i) => i.severity).map((i) => i.id)).toEqual(["c", "b", "d", "a"]);
   expect(items.map((i) => i.id)).toEqual(["a", "b", "c", "d"]);
+});
+
+test("the owner's decision is a status and back: wrong is dismissed, accepted is accepted; no other status is one", () => {
+  expect(decidedStatus("wrong")).toBe("dismissed");
+  expect(decidedStatus("accepted")).toBe("accepted");
+  expect(ownerDecisionOf("dismissed")).toBe("wrong");
+  expect(ownerDecisionOf("accepted")).toBe("accepted");
+  for (const status of [
+    "open",
+    "escalated",
+    "verified_fixed",
+    "acknowledged",
+    "withdrawn",
+    "obsolete",
+  ] as const)
+    expect(ownerDecisionOf(status)).toBeNull();
 });

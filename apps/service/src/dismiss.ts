@@ -1,28 +1,36 @@
-// "This finding is wrong" (ADR 0052): the owner dismisses a finding posted and still unsettled, from "Too noisy?".
-// Refused while a round of its change runs (the store's transaction says so), else saved in one write: the ledger with
-// the finding dismissed (`core.findingsAfterDismissal`, the change's last round as the round it closes), and the posts
-// it owes under its own key (`publish`'s `dismissalPostsOf`): the latest round's check is among them only while that
-// round is on the change's head and completed its check (one it gave up on keeps its failure). The UI hears
-// `finding.dismissed` at once; the posts follow, one dismissal of a change at a time, in the order they were saved
-// (a later one's status block is the last word), each change's apart from the others' (a dismissal GitHub keeps
-// waiting on one pull request holds no other's). Each is rendered as it is sent: the status block from where the
-// change stands then (ADR 0074), the check from the round restated over the ledger as it then is (`core.standing`),
-// so a late resend never says less than the ledger. While its posts are owed the change is busy for the take; once
-// they end (sent, or given up at a host refusal, which goes to the log) the queue takes again. A dismissal a stopped
-// service left owing is resumed at the next start (`resume`). The sign-in changed (ADR 0090, the store ended every
-// dismissal's posts): `cut` aborts every send under way or queued and ends it, so none posts after it as whoever signs
-// in next, nor at a later start, and settles once they have (a post the host is answering lands first). It must never
-// know: the loop's rules (`core`), the words on GitHub (`publish`), or which job is next (the queue).
+// The owner's decision on a finding posted and still unsettled (`settle`): "This finding is wrong" (ADR 0052), from
+// "Too noisy?", or "Accept as is" (ADR 0100), from its card, each with an optional one-line reason (ADR 0101;
+// one line, as `oneLineReason` makes it, refused past `REASON_MAX` characters before it comes here). Both
+// go the one way, the decision saved with them and how it came (`via`: the app, or the coding agent on the owner's
+// word, ADR 0101). Refused while a round of its change runs (the store's transaction says so), else saved in one write:
+// the ledger with the finding dismissed (`core.findingsAfterDismissal`) or accepted (`core.findingsAfterAcceptance`),
+// the reason as its why, the change's last round as the round it closes, the coding agent's settle comment it answers,
+// if any, and the posts it owes under its own key (`publish`'s `dismissalPostsOf`, 🚀 on that comment last): the latest
+// round's check is among them only while that round is on the change's head and completed its check (one it gave up on
+// keeps its failure). The UI hears `finding.dismissed` or `finding.accepted` at once; the posts follow, one dismissal
+// of a change at a time, in the order they were saved (a later one's status block is the last word), each change's
+// apart from the others' (a dismissal GitHub keeps waiting on one pull request holds no other's). Each is rendered as
+// it is sent: the status block from where the change stands then (ADR 0074), the check from the round restated over the
+// ledger as it then is (`core.standing`), so a late resend never says less than the ledger. While its posts are owed
+// the change is busy for the take; once they end (sent, or given up at a host refusal, which goes to the log) the queue
+// takes again. A dismissal a stopped service left owing is resumed at the next start (`resume`). The sign-in changed
+// (ADR 0090, the store ended every dismissal's posts): `cut` aborts every send under way or queued and ends it, so none
+// posts after it as whoever signs in next, nor at a later start, and settles once they have (a post the host is
+// answering lands first). It must never know: the loop's rules (`core`), the words on GitHub (`publish`), or which job
+// is next (the queue).
 import {
   type ChangeId,
   type Clock,
   type CommitSha,
+  type DecisionVia,
+  decidedStatus,
   type EventBody,
   type FindingId,
   type IdGen,
   isCounted,
+  type OwnerDecision,
 } from "@lookover/contracts";
-import { findingsAfterDismissal, loopState, standing } from "@lookover/core";
+import { findingsAfterAcceptance, findingsAfterDismissal, loopState, standing } from "@lookover/core";
 import {
   type DismissalOutbox,
   type DismissalPostKind,
@@ -48,10 +56,32 @@ export interface DismissDeps {
 /** Why a dismissal is refused: no such finding, one settled or kept off the pull request, a round running. */
 export type DismissRefusal = "no_such_finding" | "settled" | "reviewing";
 
+/**
+ * Why `Dismissing.settle` refuses: a `DismissRefusal`, or `not_posted`, a finding kept off the pull request, which
+ * the room tells apart only in its log (the app and the API say `settled` for it).
+ */
+export type SettleRefusal = DismissRefusal | "not_posted";
+
 export interface Dismissing {
-  /** The owner dismissed `findingId` of `changeId` as wrong: saved and sent to the UI, its posts begun. */
-  dismiss(changeId: ChangeId, findingId: FindingId): "ok" | DismissRefusal;
-  /** The dismissals a stopped service left owing posts: sent again, in the order they were saved. */
+  /**
+   * The owner's `decision` on `findingId` of `changeId`, dismissed as wrong or accepted as is, with `reason` on one
+   * line (`oneLineReason`; none: null) and `via` how it came (ADR 0101): saved with the way, sent to the UI, its posts
+   * begun. `answering`: the coding agent's settle comment it came from, kept in the same write and answered with 🚀
+   * once the other posts are sent (null for the app's). Refused for no such finding, one settled or kept off the pull
+   * request, and a round running.
+   */
+  settle(
+    changeId: ChangeId,
+    findingId: FindingId,
+    decision: OwnerDecision,
+    reason: string | null,
+    via: DecisionVia,
+    answering: string | null,
+  ): "ok" | SettleRefusal;
+  /**
+   * The dismissals a stopped service left owing posts: sent again, in the order they were saved. Once, at start,
+   * before any other is saved, so each later one posts after them.
+   */
   resume(): void;
   /**
    * The sign-in changed (ADR 0090), the store having ended every dismissal's posts: each send under way or queued is
@@ -117,9 +147,11 @@ export function createDismissals(d: DismissDeps): Dismissing {
         {
           id,
           findingId: dismissal.findingId,
+          decision: dismissal.decision,
           round,
           degraded: dismissal.degraded,
           checkId: dismissal.checkId,
+          answering: dismissal.answering,
         },
         outboxOf(id, dismissal.posts, signal),
         signal,
@@ -145,42 +177,53 @@ export function createDismissals(d: DismissDeps): Dismissing {
     });
   };
 
+  /** The owner's decision on a finding, saved, sent to the UI and its posts begun; or why not. */
+  const settle: Dismissing["settle"] = (changeId, findingId, decision, reason, via, answering) => {
+    const ledger = d.store.rounds.ledger(changeId);
+    const finding = ledger.find((f) => f.id === findingId);
+    if (finding === undefined) return "no_such_finding";
+    const latest = d.store.posts.latest<SavedPlan>(changeId);
+    // Only a finding on the pull request, still unsettled, has anything on GitHub to dismiss.
+    if (!finding.posted) return "not_posted";
+    if (!isCounted(finding) || latest === null) return "settled";
+    // The round's check says the head's verdict only while the round is on it: a check on an older commit is left.
+    const onHead = latest.plan.post.sha === d.head(changeId);
+    const checkId = onHead ? latest.checkId : null;
+    const closedIn = d.store.rounds.of(changeId).at(-1)?.n ?? latest.plan.post.round;
+    const at = d.clock.now();
+    const id = d.ids.next();
+    const saved = d.store.dismissals.saved({
+      id,
+      changeId,
+      findingId,
+      decision,
+      via,
+      answering,
+      runId: latest.runId,
+      checkId,
+      dismiss: (findings) =>
+        decision === "wrong"
+          ? findingsAfterDismissal(findings, [findingId], closedIn, reason, via)
+          : findingsAfterAcceptance(findings, [findingId], closedIn, reason, via),
+      posts: dismissalPostsOf(checkId, decision, answering),
+      at,
+    });
+    if (saved === "reviewing") return "reviewing";
+    d.emit({
+      type: `finding.${decidedStatus(decision)}`,
+      at,
+      changeId,
+      findingIds: [findingId],
+      findings: saved,
+      loop: loopState(saved),
+      via,
+    });
+    queued(id, changeId);
+    return "ok";
+  };
+
   return {
-    dismiss(changeId, findingId) {
-      const ledger = d.store.rounds.ledger(changeId);
-      const finding = ledger.find((f) => f.id === findingId);
-      if (finding === undefined) return "no_such_finding";
-      const latest = d.store.posts.latest<SavedPlan>(changeId);
-      // Only a finding on the pull request, still unsettled, has anything on GitHub to dismiss.
-      if (!isCounted(finding) || latest === null) return "settled";
-      // The round's check says the head's verdict only while the round is on it: a check on an older commit is left.
-      const onHead = latest.plan.post.sha === d.head(changeId);
-      const checkId = onHead ? latest.checkId : null;
-      const closedIn = d.store.rounds.of(changeId).at(-1)?.n ?? latest.plan.post.round;
-      const at = d.clock.now();
-      const id = d.ids.next();
-      const saved = d.store.dismissals.saved({
-        id,
-        changeId,
-        findingId,
-        runId: latest.runId,
-        checkId,
-        dismiss: (findings) => findingsAfterDismissal(findings, [findingId], closedIn),
-        posts: dismissalPostsOf(checkId),
-        at,
-      });
-      if (saved === "reviewing") return "reviewing";
-      d.emit({
-        type: "finding.dismissed",
-        at,
-        changeId,
-        findingIds: [findingId],
-        findings: saved,
-        loop: loopState(saved),
-      });
-      queued(id, changeId);
-      return "ok";
-    },
+    settle,
     resume() {
       for (const id of d.store.dismissals.owing()) {
         const changeId = d.store.dismissals.of<SavedPlan>(id)?.changeId;

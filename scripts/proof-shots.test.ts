@@ -17,6 +17,10 @@ test("no two shots share a name: each is one file per theme", () => {
   expect(names.length).toBe(new Set(names).size);
 });
 
+test("a browser of its own is for a still shot: a frames shot is never compared, so it has none (ADR 0099)", () => {
+  expect(SHOTS.filter((s) => s.ownBrowser && s.frames).map((s) => s.name)).toEqual([]);
+});
+
 test("only a shot without the session may land on the session screen", () => {
   const onSession = SHOTS.filter((s) => screenOf(s).includes(".session")).map((s) => s.name);
   expect(onSession).toEqual(SHOTS.filter((s) => s.noSession).map((s) => s.name));

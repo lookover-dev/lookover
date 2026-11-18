@@ -10,6 +10,7 @@
 import {
   type AgentChange,
   type AgentHost,
+  type AgentReaction,
   type AgentThread,
   CHECK_NAME,
   type ChangeRef,
@@ -18,12 +19,14 @@ import {
   type CommitSha,
   changeName,
   commitSha,
+  enumOf,
   findingOfMarker,
   type HostCheck,
   type HostComment,
   HostError,
   type HostFailure,
   type HostThreadReply,
+  type Reaction,
   type RepositoryRef,
   utf8Bytes,
 } from "@lookover/contracts";
@@ -139,9 +142,16 @@ const comment = z.object({
   // A deleted account (a ghost) has no user.
   user: z.object({ id: z.number(), login: z.string() }).nullable(),
   body: z.string().nullable(),
-  reactions: z.object({ eyes: z.number(), rocket: z.number() }),
+  reactions: z.object({ eyes: z.number(), rocket: z.number(), confused: z.number() }),
 });
 const created = z.object({ id: z.number() });
+/** Lookover's reactions, as GitHub names them (`content`). */
+const lookoverReaction = enumOf<Reaction>()(["eyes", "rocket", "confused"]);
+/** A reaction on a comment: who put it (null for a deleted account) and which, any of GitHub's eight. */
+const reactionRead = z.object({
+  user: z.object({ id: z.number() }).nullable(),
+  content: z.string(),
+});
 
 /** What GraphQL answers: its data, and the errors it refused with, each typed (`NOT_FOUND`, `FORBIDDEN`…) or not. */
 const graphqlAnswer = z.object({
@@ -581,10 +591,25 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
                   id: String(c.id),
                   author: { id: c.user.id, login: c.user.login },
                   body: c.body ?? "",
-                  reactions: { eyes: c.reactions.eyes, rocket: c.reactions.rocket },
+                  reactions: {
+                    eyes: c.reactions.eyes,
+                    rocket: c.reactions.rocket,
+                    confused: c.reactions.confused,
+                  },
                 },
               ],
         );
+    },
+
+    async reactions(repo, commentId) {
+      const listed = await all(
+        `${repoPath(repo)}/issues/comments/${commentId}/reactions?per_page=100`,
+        (body) => z.array(reactionRead).parse(body),
+      );
+      return listed.flatMap((r): AgentReaction[] => {
+        const reaction = lookoverReaction.safeParse(r.content);
+        return reaction.success && r.user !== null ? [{ reaction: reaction.data, by: r.user.id }] : [];
+      });
     },
 
     async comment(change, body) {

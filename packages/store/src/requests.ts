@@ -11,12 +11,16 @@
 // round could not be recorded. A job that ends without a round (skipped, cancelled, failed before posting) settles its
 // requests' 🚀 as never, so it is not read again; the sign-in changed (ADR 0090) settles every reaction still owed or
 // to come, the 👀 as if sent, the 🚀 as never. A request is kept with its global id on the host, which the round
-// that answers it minimizes once its check completes (ADR 0052): `of(job)` gives those of a job's requests.
+// that answers it minimizes once its check completes (ADR 0052): `of(job)` gives those of a job's requests. A settle
+// comment of the coding agent's that Lookover refused (ADR 0101) owes its 😕 (`refused`), sent as the requests'
+// reactions are, once: owed once however often it is refused, never again once sent or given up, never owed after the
+// sign-in changed (ADR 0090), and dropped with a repository that leaves.
 import type { Database } from "bun:sqlite";
 import {
   type AskedBy,
   type ChangeId,
   changeId,
+  changePrefixOf,
   type Reaction,
   type RepositoryRef,
 } from "@lookover/contracts";
@@ -39,11 +43,17 @@ export interface RequestComment {
   askedBy: AskedBy;
 }
 
-/** A reaction owed to a request: 👀 once recorded, 🚀 once its job's round is posted. */
+/**
+ * The reactions the store keeps owed: a review request's 👀 and 🚀, and a refused settle's 😕 (ADR 0101), each in its
+ * own column, so no other reaction can take one's place.
+ */
+type OwedReaction = Extract<Reaction, "eyes" | "rocket" | "confused">;
+
+/** A reaction owed: a request's 👀 once recorded, its 🚀 once its job's round is posted, a refused settle's 😕. */
 export interface Unreacted {
   repo: RepositoryRef;
   commentId: string;
-  reaction: Reaction;
+  reaction: OwedReaction;
 }
 
 /** Where the poll of a repository's comments is: the newest comment time it saw, and its first place. */
@@ -55,7 +65,10 @@ export interface CommentPlace {
 export interface Requests {
   /** Where the poll of `repo`'s comments is; null before its first poll. */
   place(repo: RepositoryRef): CommentPlace | null;
-  /** Which of `ids` were handled already: requests recorded, or comments the poll looked at. */
+  /**
+   * Which of `ids` were handled already: requests recorded, comments the poll looked at, or settle comments a saved
+   * dismissal answers (ADR 0101), its change in `repo`.
+   */
   handled(repo: RepositoryRef, ids: readonly string[]): Set<string>;
   /**
    * The poll looked at `comments` (handled from now on); the newest comment time it saw is `newest`, unless it
@@ -63,12 +76,20 @@ export interface Requests {
    * before `keepFrom` (where the next poll lists from) are forgotten.
    */
   seen(repo: RepositoryRef, comments: readonly SeenComment[], at: { newest: number; keepFrom: number }): void;
-  /** The reactions owed and not yet sent, oldest request first; a request's 👀 before its 🚀. */
+  /**
+   * The reactions owed and not yet sent, oldest request first, a request's 👀 before its 🚀; then the refused
+   * settles' 😕, oldest refusal first.
+   */
   unreacted(): Unreacted[];
   /** Whether `reaction` on `repo`'s comment `commentId` is still owed: one of `unreacted`, read alone. */
-  owes(repo: RepositoryRef, commentId: string, reaction: Reaction): boolean;
-  /** The reaction was put on the request's comment. */
-  reacted(repo: RepositoryRef, commentId: string, reaction: Reaction): void;
+  owes(repo: RepositoryRef, commentId: string, reaction: OwedReaction): boolean;
+  /** The reaction was put on the comment, or given up (the comment gone): owed no more. */
+  reacted(repo: RepositoryRef, commentId: string, reaction: OwedReaction): void;
+  /**
+   * Lookover refused the coding agent's settle comment `commentId` (ADR 0101): its 😕 is owed. One owed, sent or given
+   * up already is left as it is: a comment is answered once.
+   */
+  refused(repo: RepositoryRef, commentId: string): void;
   /**
    * The global ids of the requests job `jobId` answers (those a job it yielded to handed it included), oldest first:
    * what its round minimizes once its check completes (ADR 0052).
@@ -188,9 +209,12 @@ export function requestsSettled(db: Database): () => void {
     UPDATE comments SET rocket = ${ROCKET.never}
     WHERE job_id IS NOT NULL AND rocket IN (${ROCKET.waits}, ${ROCKET.owed})
   `);
+  // A refused settle's 😕 too (ADR 0101): never sent.
+  const confused = db.query("UPDATE settle_refusals SET confused = 1 WHERE confused = 0");
   return () => {
     eyes.run();
     rocket.run();
+    confused.run();
   };
 }
 
@@ -206,6 +230,7 @@ const keptRows = z.array(
   }),
 );
 const placeRow = z.object({ newest: z.int(), floor: z.int() });
+const refusedRows = z.array(z.object({ repo_owner: z.string(), repo_name: z.string(), id: z.string() }));
 const nodeRows = z.array(z.object({ node_id: z.string() }));
 const flag = z.union([z.literal(0), z.literal(1)]);
 const unreactedRows = z.array(
@@ -232,6 +257,10 @@ export function requests(db: Database): Requests {
     ON CONFLICT (repo_owner, repo_name) DO UPDATE SET newest = MAX(newest, excluded.newest)
   `);
   const selectHandled = db.query("SELECT 1 FROM comments WHERE repo_owner = ? AND repo_name = ? AND id = ?");
+  // The change's id begins with its repository's prefix (`changePrefixOf`): compared as text, never as a pattern.
+  const selectSettled = db.query(
+    "SELECT 1 FROM dismissals WHERE comment_id = ?1 AND substr(change_id, 1, length(?2)) = ?2 LIMIT 1",
+  );
   const insertSeen = db.query(
     "INSERT OR IGNORE INTO comments (repo_owner, repo_name, id, created_at) VALUES (?, ?, ?, ?)",
   );
@@ -250,10 +279,25 @@ export function requests(db: Database): Requests {
     SELECT 1 FROM comments WHERE repo_owner = ? AND repo_name = ? AND id = ? AND job_id IS NOT NULL
       AND rocket = ${ROCKET.owed}
   `);
+  // A refused settle's 😕 (ADR 0101): 0 owed, 1 settled.
+  const insertRefused = db.query(
+    "INSERT OR IGNORE INTO settle_refusals (repo_owner, repo_name, id, confused) VALUES (?, ?, ?, 0)",
+  );
+  const selectConfused = db.query(
+    "SELECT repo_owner, repo_name, id FROM settle_refusals WHERE confused = 0 ORDER BY rowid",
+  );
+  const owesConfused = db.query(
+    "SELECT 1 FROM settle_refusals WHERE repo_owner = ? AND repo_name = ? AND id = ? AND confused = 0",
+  );
+  const markConfused = db.query(
+    "UPDATE settle_refusals SET confused = 1 WHERE repo_owner = ? AND repo_name = ? AND id = ?",
+  );
+  const owesBy = { eyes: owesEyes, rocket: owesRocket, confused: owesConfused } as const;
   const markEyes = db.query("UPDATE comments SET eyes = 1 WHERE repo_owner = ? AND repo_name = ? AND id = ?");
   const markRocket = db.query(
     `UPDATE comments SET rocket = ${ROCKET.sent} WHERE repo_owner = ? AND repo_name = ? AND id = ?`,
   );
+  const markBy = { eyes: markEyes, rocket: markRocket, confused: markConfused } as const;
 
   const selectNodes = db.query(
     "SELECT node_id FROM comments WHERE job_id = ? AND node_id IS NOT NULL ORDER BY created_at, rowid",
@@ -283,20 +327,39 @@ export function requests(db: Database): Requests {
       return row === null ? null : placeRow.parse(row);
     },
     handled: (repo, ids) =>
-      new Set(ids.filter((id) => selectHandled.get(repo.owner, repo.name, id) !== null)),
+      new Set(
+        ids.filter(
+          (id) =>
+            selectHandled.get(repo.owner, repo.name, id) !== null ||
+            selectSettled.get(id, changePrefixOf(repo)) !== null,
+        ),
+      ),
     seen: (repo, comments, at) => seen(repo, comments, at),
     unreacted: () =>
-      unreactedRows.parse(selectUnreacted.all()).flatMap((r): Unreacted[] => {
-        const repo = { owner: r.repo_owner, name: r.repo_name };
-        const owed: Unreacted[] = [];
-        if (r.eyes === 0) owed.push({ repo, commentId: r.id, reaction: "eyes" });
-        if (r.rocket === ROCKET.owed) owed.push({ repo, commentId: r.id, reaction: "rocket" });
-        return owed;
-      }),
-    owes: (repo, commentId, reaction) =>
-      (reaction === "eyes" ? owesEyes : owesRocket).get(repo.owner, repo.name, commentId) !== null,
+      unreactedRows
+        .parse(selectUnreacted.all())
+        .flatMap((r): Unreacted[] => {
+          const repo = { owner: r.repo_owner, name: r.repo_name };
+          const owed: Unreacted[] = [];
+          if (r.eyes === 0) owed.push({ repo, commentId: r.id, reaction: "eyes" });
+          if (r.rocket === ROCKET.owed) owed.push({ repo, commentId: r.id, reaction: "rocket" });
+          return owed;
+        })
+        .concat(
+          refusedRows.parse(selectConfused.all()).map(
+            (r): Unreacted => ({
+              repo: { owner: r.repo_owner, name: r.repo_name },
+              commentId: r.id,
+              reaction: "confused",
+            }),
+          ),
+        ),
+    owes: (repo, commentId, reaction) => owesBy[reaction].get(repo.owner, repo.name, commentId) !== null,
     reacted: (repo, commentId, reaction) => {
-      (reaction === "eyes" ? markEyes : markRocket).run(repo.owner, repo.name, commentId);
+      markBy[reaction].run(repo.owner, repo.name, commentId);
+    },
+    refused: (repo, commentId) => {
+      insertRefused.run(repo.owner, repo.name, commentId);
     },
     of: (jobId) => nodeRows.parse(selectNodes.all(jobId)).map((r) => r.node_id),
     keep: (id, { repo, comment, nodeId }, full) => {

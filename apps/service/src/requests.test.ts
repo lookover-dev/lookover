@@ -106,7 +106,11 @@ test("the owner's /lookover review gets 👀, a queued check, a round, then 🚀
     "minimized",
     `rocket ${comment}`,
   ]);
-  expect(host.view(ref(1)).comments.find((c) => c.id === comment)?.reactions).toEqual({ eyes: 1, rocket: 1 });
+  expect(host.view(ref(1)).comments.find((c) => c.id === comment)?.reactions).toEqual({
+    eyes: 1,
+    rocket: 1,
+    confused: 0,
+  });
 });
 
 test("the command from another account, from the App, on an issue or a closed pull request, quoting a marker, or edited in, does nothing", async () => {

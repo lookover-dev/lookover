@@ -56,6 +56,7 @@ function finding(extra: Partial<Finding> = {}): Finding {
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
     ...extra,

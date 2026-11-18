@@ -14,6 +14,7 @@ import {
   endedHead,
   escalationText,
   type Finding,
+  type FindingStatus,
   failedHead,
   failedLine,
   failedTitle,
@@ -279,25 +280,33 @@ export function timelineOf(review: Review): TimelineItem[] {
 export interface Thread {
   /** Folded away, the way GitHub shows a resolved thread. */
   resolved: boolean;
-  /** Its first comment hidden by Lookover, as resolved (ADR 0074): withdrawn, or dismissed by the owner. */
+  /** Its first comment hidden by Lookover, as resolved (ADR 0074): withdrawn, or dismissed by the owner; never accepted. */
   hidden: boolean;
   label: string | null;
   note: string | null;
 }
 
+/** The reply that settled a finding on its thread: withdrawn, or the owner's dismissal or acceptance; null for none. */
+function settledReply(status: FindingStatus): ReplyKind | null {
+  return status === "withdrawn" || status === "dismissed" || status === "accepted" ? status : null;
+}
+
 /**
  * A line comment's thread. Lookover resolves none (ADR 0074: the shared App has no Contents: write): it hides the
  * first comment of one it withdrew or the owner dismissed, and the coding agent's `lookover wait` resolves those and
- * the ones verified fixed with the person's login; on any other pull request they are the author's to resolve. An
+ * the ones verified fixed or accepted as is by the owner (never hidden: ADR 0100) with the person's login; on any
+ * other pull request they are the author's to resolve. An
  * escalated one stays open, the owner's to settle (ADR 0052).
  */
 export function threadOf(change: Change, finding: Finding): Thread {
   if (finding.status === "escalated")
     return { resolved: false, hidden: false, label: NEEDS_YOUR_LOOK, note: null };
   if (isUnsettled(finding)) return { resolved: false, hidden: false, label: null, note: null };
+  // Hidden once withdrawn or dismissed; one verified fixed or accepted as is stays readable (ADR 0100).
+  const hidden = finding.status === "withdrawn" || finding.status === "dismissed";
   const byWait = (said: string): Thread => ({
     resolved: true,
-    hidden: finding.status !== "verified_fixed",
+    hidden,
     label: "Resolved",
     note: `${said} ${change.openedBy} resolved the thread with lookover wait.`,
   });
@@ -314,11 +323,12 @@ export function threadOf(change: Change, finding: Finding): Thread {
           note: `${fixed} The thread is yours to resolve.`,
         };
   }
-  if (finding.status === "withdrawn" || finding.status === "dismissed") {
-    const label = replyKind(finding.status === "withdrawn" ? "withdrawn" : "dismissed", finding).kind;
+  const replied = settledReply(finding.status);
+  if (replied !== null) {
+    const label = replyKind(replied, finding).kind;
     return inAgentLoop(change)
       ? byWait(`${label}.`)
-      : { resolved: false, hidden: true, label, note: "The thread is yours to resolve." };
+      : { resolved: false, hidden, label, note: "The thread is yours to resolve." };
   }
   // Acknowledged or obsolete: settled with no reply, the thread left as it is.
   return { resolved: false, hidden: false, label: null, note: null };
@@ -332,11 +342,13 @@ export interface Reply {
 
 /**
  * Which reply Lookover last posted on a finding's thread, from what the round decided about the author's claim: kept
- * once, kept again once escalated (kept three times), escalated, withdrawn, dismissed by the owner; null for none.
+ * once, kept again once escalated (kept three times), escalated, withdrawn, dismissed or accepted by the owner; null
+ * for none.
  * Never `still_present` (ADR 0081): the finding keeps nothing of that reply, which lives on GitHub's thread alone.
  */
 function replyOn(finding: Finding): ReplyKind | null {
   if (finding.status === "dismissed") return "dismissed";
+  if (finding.status === "accepted") return "accepted";
   if (finding.claim === null) return null;
   switch (finding.status) {
     case "withdrawn":
@@ -360,7 +372,9 @@ export function replyOf(finding: Finding): Reply | null {
   const reply = replyOn(finding);
   if (reply === null) return null;
   const { kind, why, last } = replyKind(reply, finding);
-  const own = reply === "withdrawn" ? finding.closedWhy : why;
+  // A withdrawn one says the reason it was closed; the owner's decision, their reason, if any (ADR 0100, ADR 0101).
+  const own =
+    reply === "withdrawn" || reply === "accepted" || reply === "dismissed" ? finding.closedWhy : why;
   return { kind, said: [own, last].filter((part): part is string => part !== null && part !== "") };
 }
 

@@ -241,27 +241,28 @@ test("why a change wasn't reviewed", () => {
 
 test("why the owner decides an escalated finding: a dispute whatever its keeps, else the claim kept twice", () => {
   expect(escalationText("disputed")).toBe(
-    "Disputed, and the finder still calls it wrong: the owner decides on the thread.",
+    "Disputed, and the finder still calls it wrong: the owner decides in Lookover's app.",
   );
   expect(escalationText("wont_fix")).toBe(
-    "Said won't fix twice, kept twice: the owner decides on the thread.",
+    "Said won't fix twice, kept twice: the owner decides in Lookover's app.",
   );
   expect(escalationText("claimed_fixed")).toBe(
-    "Said fixed twice, kept twice: the owner decides on the thread.",
+    "Said fixed twice, kept twice: the owner decides in Lookover's app.",
   );
   expect(escalationText("deferred")).toBe(
-    "Said deferred twice, kept twice: the owner decides on the thread.",
+    "Said deferred twice, kept twice: the owner decides in Lookover's app.",
   );
-  expect(escalationText("question")).toBe("Asked twice, kept twice: the owner decides on the thread.");
-  expect(escalationText(null)).toBe("Kept twice: the owner decides on the thread.");
+  expect(escalationText("question")).toBe("Asked twice, kept twice: the owner decides in Lookover's app.");
+  expect(escalationText(null)).toBe("Kept twice: the owner decides in Lookover's app.");
 });
 
 test("a reply's kind by what the round decided: kept once warns, kept on an escalated one hands over", () => {
-  const open = { status: "open" as const, kept: 1, claim: null };
+  const open = { status: "open" as const, kept: 1, claim: null, decidedVia: null };
   const escalated = (kept: number, kind: "wont_fix" | "disputed") => ({
     status: "escalated" as const,
     kept,
     claim: { kind },
+    decidedVia: null,
   });
   expect(replyKind("kept", open)).toEqual({
     kind: "Kept",
@@ -275,7 +276,7 @@ test("a reply's kind by what the round decided: kept once warns, kept on an esca
   });
   expect(replyKind("escalated", escalated(2, "wont_fix"))).toEqual({
     kind: "The owner decides this one",
-    why: 'Kept twice against "won\'t fix". Fix it, or resolve this thread to keep the code as it is.',
+    why: `Kept twice against "won't fix". Fix it, or the owner accepts it as is in Lookover's app.`,
     last: null,
   });
   expect(replyKind("escalated", escalated(1, "wont_fix")).why).toBeNull();
@@ -292,10 +293,45 @@ test("a reply's kind by what the round decided: kept once warns, kept on an esca
     why: null,
     last: "It won't be raised again on this pull request.",
   });
+  expect(replyKind("accepted", undefined)).toEqual({
+    kind: "Accepted by the owner",
+    why: null,
+    last: "It won't be raised again on this pull request.",
+  });
 });
 
-test("a round's line: its number, its commit, then what was fixed and withdrawn among the posted findings", () => {
-  const f = (status: "verified_fixed" | "withdrawn" | "dismissed" | "open", posted = true) => ({
+test("the owner's decision says its way: in the app, by the owner; through their coding agent, on their word", () => {
+  const decided = (status: "dismissed" | "accepted", decidedVia: "app" | "agent") => ({
+    status,
+    kept: 0,
+    claim: null,
+    decidedVia,
+  });
+  const last = "It won't be raised again on this pull request.";
+  expect(replyKind("dismissed", decided("dismissed", "app"))).toEqual({
+    kind: "Dismissed by the owner",
+    why: null,
+    last,
+  });
+  expect(replyKind("accepted", decided("accepted", "app"))).toEqual({
+    kind: "Accepted by the owner",
+    why: null,
+    last,
+  });
+  expect(replyKind("dismissed", decided("dismissed", "agent"))).toEqual({
+    kind: "Dismissed on the owner's word, through their coding agent",
+    why: null,
+    last,
+  });
+  expect(replyKind("accepted", decided("accepted", "agent"))).toEqual({
+    kind: "Accepted on the owner's word, through their coding agent",
+    why: null,
+    last,
+  });
+});
+
+test("a round's line: its number, its commit, then what was fixed, withdrawn and accepted among the posted findings", () => {
+  const f = (status: "verified_fixed" | "withdrawn" | "dismissed" | "accepted" | "open", posted = true) => ({
     status,
     posted,
   });
@@ -312,6 +348,11 @@ test("a round's line: its number, its commit, then what was fixed and withdrawn 
   expect(roundLine(1, "C", [f("open")])).toEqual(["Round 1 · ", "C"]);
   expect(roundCountsText([f("verified_fixed"), f("verified_fixed")])).toBe("2 fixed");
   expect(roundCountsText([f("open")])).toBe("");
+  expect(roundCountsText([f("accepted")])).toBe("1 accepted");
+  expect(roundCountsText([f("accepted", false)])).toBe("");
+  expect(roundCountsText([f("verified_fixed"), f("dismissed"), f("accepted"), f("accepted")])).toBe(
+    "1 fixed, 1 withdrawn, 2 accepted",
+  );
 });
 
 test("the status block's headings and its note for a finding not in the diff", () => {

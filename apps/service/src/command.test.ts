@@ -147,6 +147,7 @@ test("help, or no command, lists every verb the command has, and only those", as
       "wait",
       "feedback",
       "reply",
+      "settle",
       "help",
       "--version",
     ])
@@ -154,7 +155,7 @@ test("help, or no command, lists every verb the command has, and only those", as
     for (const missing of ["restart", "install"]) expect(text).not.toContain(`lookover ${missing}`);
     // One table for the command's own verbs; the agent's keep theirs.
     expect(text).toContain(
-      "Exit (all but wait, feedback and reply): 0 done or running, 1 error, 2 usage, 3 not running",
+      "Exit (all but wait, feedback, reply and settle): 0 done or running, 1 error, 2 usage, 3 not running",
     );
     expect(text).toContain("Exit (wait and feedback): 0 nothing to fix");
   }
@@ -167,17 +168,19 @@ test("a word that is no verb is a usage error, with the verbs", async () => {
   expect(c.err.join("\n")).toContain("lookover serve");
 });
 
-test("wait, feedback and reply get their arguments as they are: no App named, whatever the data folder keeps", async () => {
+test("wait, feedback, reply and settle get their arguments as they are: no App named, whatever the data folder keeps", async () => {
   const data = folder();
   await plantApp(join(data, "lookover"), "lookover-ada");
   const c = command(machine(data));
   expect(await c.run("wait", "--pr", "7", "--json")).toBe(3);
   expect(await c.run("feedback")).toBe(3);
   expect(await c.run("reply", "F3", "wont-fix", "The caller checks it.")).toBe(3);
+  expect(await c.run("settle", "F3", "wrong", "--confirmed-by-owner", "The caller checks it.")).toBe(3);
   expect(c.agent).toEqual([
     ["wait", "--pr", "7", "--json"],
     ["feedback"],
     ["reply", "F3", "wont-fix", "The caller checks it."],
+    ["settle", "F3", "wrong", "--confirmed-by-owner", "The caller checks it."],
   ]);
 });
 

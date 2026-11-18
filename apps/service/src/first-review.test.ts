@@ -540,7 +540,7 @@ test("an agent's /lookover review beside the owner's waiting preview gets a revi
     const c = host.view(ref).comments.find((x) => x.id === comment);
     return c?.reactions;
   };
-  expect(reactions()).toEqual({ eyes: 1, rocket: 0 });
+  expect(reactions()).toEqual({ eyes: 1, rocket: 0, confused: 0 });
   const checks = () => host.view(ref).checks.map((c) => [c.status, c.conclusion]);
   expect(checks()).toEqual([["queued", null]]);
 
@@ -550,7 +550,7 @@ test("an agent's /lookover review beside the owner's waiting preview gets a revi
   const first = await until(stream, "round.finished");
   await time.advance(0);
   // The preview's round answers no request: the 👀 only, still.
-  expect(reactions()).toEqual({ eyes: 1, rocket: 0 });
+  expect(reactions()).toEqual({ eyes: 1, rocket: 0, confused: 0 });
   await time.advance(12 * 60_000);
   const rounds = [...first, ...(await until(stream, "round.finished"))];
   const ran = rounds.flatMap((e) => (e.type === "run.started" ? [[e.job.trigger, e.run.preview]] : []));
@@ -566,7 +566,7 @@ test("an agent's /lookover review beside the owner's waiting preview gets a revi
   await time.advance(0);
   expect(postedRounds(host)).toHaveLength(1);
   expect(checks()).toEqual([["completed", "success"]]);
-  expect(reactions()).toEqual({ eyes: 1, rocket: 1 });
+  expect(reactions()).toEqual({ eyes: 1, rocket: 1, confused: 0 });
 });
 
 test("a preview's check end the host refused is sent again until it lands, after a restart too", async () => {

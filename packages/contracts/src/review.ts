@@ -1,7 +1,7 @@
 // The review of one change, in the three levels of ADR 0029: the latest review job (is a review waiting?),
 // the run in progress (is one running, and at which step?) and the loop (where the back-and-forth with the
 // author stands). The screens derive one display status from the three.
-import type { Finding } from "./finding.ts";
+import type { DecisionVia, Finding } from "./finding.ts";
 import type { ChangeId, CommitSha, FindingId } from "./ids.ts";
 import type { AskedBy, Deferral, JobFailure, PushedBy, ReviewJob, Trigger } from "./job.ts";
 import type { LoopState } from "./loop.ts";
@@ -32,8 +32,16 @@ export type TimelineEntry = {
   | { kind: "posted"; round: number; open: number }
   /** The job ended failed, on its commit (ADR 0081): its failure, as the job has it. */
   | { kind: "failed"; failure: JobFailure | null }
-  /** The owner dismissed findings as wrong ("Too noisy?", ADR 0052): which ones. */
-  | { kind: "dismissed"; findingIds: FindingId[] }
+  /**
+   * The owner dismissed findings as wrong ("Too noisy?", ADR 0052): which ones, and how the decision came (ADR 0101);
+   * the reason, if any, is each finding's own `closedWhy`.
+   */
+  | { kind: "dismissed"; findingIds: FindingId[]; via: DecisionVia }
+  /**
+   * The owner accepted findings as is (ADR 0100): which ones, and how the decision came (ADR 0101); the reason is
+   * each finding's own `closedWhy`.
+   */
+  | { kind: "accepted"; findingIds: FindingId[]; via: DecisionVia }
 );
 
 export interface Review {

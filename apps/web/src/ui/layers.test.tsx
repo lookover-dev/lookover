@@ -1,10 +1,11 @@
 // A layer that opens from its anchor (design-system.md, Menu and Elevation): closed by Esc or by a click on its scrim,
 // focus goes back to its trigger; with a scrim, Tab never reaches the dimmed page, the layer closes as focus leaves.
 // A menu's item that does something is drawn as an action: its icon before its words, in the icon's own place, so
-// "Run all checks" under the status lines reads as a command, never as one more label (row 47, round 5).
+// "Run all checks" under the status lines reads as a command, never as one more label (row 47, round 5). Arrow keys
+// move between a layer's items, but never out of a text field: there they move the caret.
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { focusLeaves, MenuItem, returnFocus } from "./layers.tsx";
+import { focusLeaves, MenuItem, returnFocus, typingIn } from "./layers.tsx";
 
 /** An anchor holding its trigger and one item of its layer; the first button it finds is the trigger. */
 function anchorOf() {
@@ -33,6 +34,17 @@ test("with a scrim, focus moving out of the anchor closes the layer; moving with
   expect(focusLeaves(anchor, "item")).toBe(false);
   // A click on the layer's words, or another window: focus goes nowhere in the page, the layer stays.
   expect(focusLeaves(anchor, null)).toBe(false);
+});
+
+test("arrow keys stay a text field's own: in a text input or a textarea they move no focus", () => {
+  expect(typingIn({ tagName: "INPUT", type: "text" })).toBe(true);
+  expect(typingIn({ tagName: "INPUT", type: "search" })).toBe(true);
+  expect(typingIn({ tagName: "TEXTAREA" })).toBe(true);
+  // A layer's items, and an input that takes no typing, move between the items.
+  expect(typingIn({ tagName: "BUTTON", type: "button" })).toBe(false);
+  expect(typingIn({ tagName: "INPUT", type: "checkbox" })).toBe(false);
+  expect(typingIn({ tagName: "A" })).toBe(false);
+  expect(typingIn(null)).toBe(false);
 });
 
 test("an item with an icon draws it first, in a place of its own, then its words", () => {

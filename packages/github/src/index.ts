@@ -16,7 +16,8 @@
 // (`GITHUB_WEB` when not given; the links the app shows are the service's, contracts' `githubLinks`).
 // `secret`, on each, is given every secret the adapter comes to hold (a device code, each person's token and refresh
 // token) before any request carries it, so the service's log removes it (ADR 0054); the adapter itself logs nothing.
-// `sleep` and `deadline`, on each, are the waits of a request tried again (ADR 0080), real timers when not given.
+// `sleep` and `deadline`, on each, are the waits of a request tried again (ADR 0080), real timers when not given;
+// `sleep`, on `clock`, also paces the status block's reads (below) and a just-created check's write sent again.
 // Signing in (ADR 0066): `createHostSignIn({ api?, web?, clock?, fetch?, sleep?, deadline?, secret? })` is contracts'
 // `HostSignIn` for the shared App (`SHARED_APP.clientId`, no secret): `startSignIn` (GitHub's device code: the code,
 // its page, its expiry and interval), `pollSignIn` (once: `pending`, `slow-down` with the interval GitHub gives,
@@ -68,8 +69,11 @@
 // Ordering: every call checks the allow-list before anything else, then takes the session's token, then makes its
 // requests. Calls are independent: the check's lifecycle and a round's post order (review → status block → check
 // completed) are the caller's, as the `HostWriter` port states them; updating or completing a check needs the id its
-// creation gave. A listing's `unchanged` is about this adapter's last read of it, whoever asked: a hint, never a
-// reason to skip its items.
+// creation gave. A check's update or completion that GitHub answers 404 within 30 s of its creation by this adapter
+// (`clock`, read once the creation answers) is sent again unchanged a second later (`sleep`), until those 30 s are
+// over, then `not_found` (GitHub's lag on a check it just answered with, ADR 0102); for any other check at once. A
+// listing's `unchanged` is about this adapter's last read of it, whoever asked: a hint, never a reason to skip its
+// items.
 // Error modes: everything it throws is a `HostError`. `not_found` for a repository or change GitHub has not, for one
 // off the list (before any request), for a commit compare doesn't know or two with no common history, and for a
 // comment a reaction can't find; `unauthorized` for a token or permission GitHub rejects, never for a secondary limit;

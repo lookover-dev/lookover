@@ -49,14 +49,18 @@ export interface HostOptions {
   api?: string;
   /** GitHub's web address, where the sign-in's OAuth endpoints are: `GITHUB_WEB` when not given. */
   web?: string;
-  /** The time, for token renewal and for when GitHub said to retry. The real clock when not given. */
+  /**
+   * The time, for token renewal, for when GitHub said to retry, and for how long the status block's reads and a
+   * just-created check's write sent again on a 404 go on (ADR 0069, ADR 0102). The real clock when not given.
+   */
   clock?: Clock;
   /** The HTTP client, for tests. `globalThis.fetch` when not given. */
   fetch?: Fetch;
   /**
    * A pause of `ms`, for tests: between two tries of a request that failed on the way (1 s, then 3 s, ADR 0080), and
-   * the status block's write's second between two reads while GitHub's read lags (ADR 0069), measured on `clock`. A
-   * real timer when not given.
+   * the status block's write's second between two reads while GitHub's read lags (ADR 0069), and the second before
+   * a just-created check's write that GitHub answered 404 is sent again (ADR 0102), both measured on `clock`. A real
+   * timer when not given.
    */
   sleep?(ms: number): Promise<void>;
   /**

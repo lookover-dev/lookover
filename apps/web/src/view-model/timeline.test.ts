@@ -177,9 +177,12 @@ test("each timeline entry reads as one line of the review's history", () => {
       "The review failed: the code could not be fetched",
     ],
     [{ at: NOW, sha: SHA, kind: "failed", failure: null }, "The review failed: the review could not run"],
-    [{ at: NOW, sha: null, kind: "dismissed", findingIds: [findingId("F2")] }, "You marked F2 as wrong"],
     [
-      { at: NOW, sha: null, kind: "dismissed", findingIds: [findingId("F2"), findingId("F3")] },
+      { at: NOW, sha: null, kind: "dismissed", findingIds: [findingId("F2")], via: "app" },
+      "You marked F2 as wrong",
+    ],
+    [
+      { at: NOW, sha: null, kind: "dismissed", findingIds: [findingId("F2"), findingId("F3")], via: "app" },
       "You marked F2 and F3 as wrong",
     ],
     [
@@ -188,8 +191,21 @@ test("each timeline entry reads as one line of the review's history", () => {
         sha: null,
         kind: "dismissed",
         findingIds: [findingId("F2"), findingId("F3"), findingId("F5")],
+        via: "app",
       },
       "You marked F2, F3 and F5 as wrong",
+    ],
+    [
+      { at: NOW, sha: null, kind: "accepted", findingIds: [findingId("F1")], via: "app" },
+      "You accepted F1 as is",
+    ],
+    [
+      { at: NOW, sha: null, kind: "dismissed", findingIds: [findingId("F2")], via: "agent" },
+      "Your coding agent marked F2 as wrong, on your word",
+    ],
+    [
+      { at: NOW, sha: null, kind: "accepted", findingIds: [findingId("F2")], via: "agent" },
+      "Your coding agent accepted F2 as is, on your word",
     ],
   ];
   for (const [entry, text] of cases) {

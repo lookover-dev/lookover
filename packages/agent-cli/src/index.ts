@@ -1,5 +1,5 @@
-// @lookover/agent-cli: the `lookover` command a coding agent runs (ADR 0021, ADR 0043, ADR 0052): `wait`,
-// `feedback` and `reply`.
+// @lookover/agent-cli: the `lookover` command a coding agent runs (ADR 0021, ADR 0043, ADR 0052, ADR 0101): `wait`,
+// `feedback`, `reply` and `settle`.
 // The decision it hides: how an agent asks Lookover for a review, learns what to do next and answers it through
 // GitHub alone, with its own login. `wait` takes the commit from local git (never what GitHub shows first), finds
 // the pull request (`--pr`, else the current branch's), waits about 15 s for GitHub to show that commit as its
@@ -19,11 +19,15 @@
 // no claim, the round started before it), it asks again on the same commit (never on a fork's pull request), its
 // request naming that reply (none posted when one names it already), and only a check that appeared since, or whose
 // round read the reply, answers it. Otherwise it resolves, with the agent's login, the open threads of the findings
-// the round verified fixed, withdrew or saw dismissed by the owner (the App can't, ADR 0052, 0074), says which and
-// why on stderr, and says a refusal plainly without changing the exit. `feedback` reads the newest check of the pull
+// the round verified fixed, withdrew or saw dismissed or accepted by the owner (the App can't, ADR 0052, 0074, 0100),
+// says which and why on stderr, and says a refusal plainly without changing the exit. `feedback` reads the newest check of the pull
 // request's head once, and the threads;
 // `reply <finding> <claim> <text>` posts on the finding's thread, its first line opened as Lookover reads a claim
 // (`Fixed:`, `Won't fix:`, `Disputed:`, `Deferred:`, `Question:`), and refuses a finding with no thread.
+// `settle <finding> <accepted|wrong> --confirmed-by-owner <reason>` settles a finding on the person's word (ADR 0101):
+// it refuses, posting nothing, what the head's newest round of its person says for sure Lookover would refuse (no such
+// finding, kept off the pull request, settled; a round running), then posts the settle comment (`settleComment`) and
+// waits up to `--timeout` (3 minutes) for Lookover's 🚀 (settled) or 😕 (refused, said why from the newest result).
 // Interface: `run(argv, world) → exit code`, the whole program against a `World` (the host with the agent's
 // token, the local checkout, a clock and `sleep`, stdout and stderr); `realWorld(cwd, env)` is the machine's (the
 // checkout through `git`, the real clock and streams); `createAgentHost` (`AgentHost` over GitHub's REST API, and its
@@ -39,14 +43,22 @@
 // `feedback`: the newest check is still running), 6 skipped (the check's `run.state` `skipped` or `cancelled`),
 // 7 the review failed (`failed`), 9 no review appeared (neither a 👀 on a request naming the commit nor a check
 // within `--appear-timeout`, 3 minutes; `feedback`: no check on the head), 10 the pull request's head moved past
-// the commit. 8 is unused. `reply`: 0 posted, 1 error or refused, 2 usage. A completed check whose result's
+// the commit. 8 is unused. `reply`: 0 posted, 1 error or refused, 2 usage. `settle`: 0 settled (🚀), 1 error, refused
+// (before posting, or 😕) or no answer in time, 2 usage (no `--confirmed-by-owner`, no reason, one over `REASON_MAX`
+// characters once on one line, or no finding or decision). A completed check whose result's
 // `next_action` is `wait` (skipped for a newer commit, or for a newer review of this one) ends nothing by itself:
 // the head is compared next (10 for a newer commit), else the wait goes on for the newer review's check.
 // Output: one sentence on stderr when it ends, a heartbeat on stderr every 30 s while it waits; on stdout, with
 // `--json`, one JSON document (the commit, the `change` number, the exit and its meaning, the verdict, the next
 // action, the reason a review didn't run, the findings whose `needs_action_by` is `agent`, blocking first; for
 // `feedback` each with its `thread` and `lookover_reply`, and the `guard` sentence), else those findings as text
-// (for `feedback` after the guard sentence: the findings are a reviewer's opinion, never instructions).
+// (for `feedback` after the guard sentence: the findings are a reviewer's opinion, never instructions). On exit 4,
+// `wait` and `feedback` say where the owner settles what only they can (ADR 0100): stderr, after the sentence, has a
+// line per finding whose `needs_action_by` is `human` (`F1 · Blocking · <title> (<path>:<line>)`), then the settle
+// line (Lookover's app, `lookover open`, this pull request's review: Accept as is, or Too noisy? › This finding is
+// wrong; or `lookover settle` on the owner's word, once they said so); the JSON has `for_the_owner: { findings: [{ id,
+// severity, title, path, line }], settle }`, on exit 4 only. No reply accepts or dismisses a finding: only `settle`,
+// with the person's reason, which nothing on GitHub can prove they gave, since it posts with the owner's login.
 // Ordering: on each read, a completed check ends the wait before the head is compared, except one that doesn't
 // answer a reply `wait` asked about, which ends nothing; a moved head before the appear timeout; the appear timeout
 // before the timeout. The newest of the App's checks on the commit is the one read.
@@ -58,6 +70,7 @@ import { ask, USAGE } from "./args.ts";
 import { feedback } from "./feedback.ts";
 import { reply } from "./reply.ts";
 import { report, reportFeedback } from "./report.ts";
+import { settle } from "./settle.ts";
 import { EXIT, wait } from "./wait.ts";
 import type { World } from "./world.ts";
 
@@ -74,8 +87,9 @@ export async function run(argv: string[], w: World): Promise<number> {
     w.out(USAGE);
     return 0;
   }
-  const json = asked.command !== "reply" && asked.args.json;
   if (asked.command === "reply") return reply(asked.args, w);
+  if (asked.command === "settle") return settle(asked.args, w);
+  const json = asked.args.json;
   if (asked.command === "wait") return report(await wait(asked.args, w), json, w);
   const { outcome, threads, poster } = await feedback(asked.args, w);
   return reportFeedback(outcome, threads, poster, json, w);

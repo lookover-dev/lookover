@@ -16,6 +16,7 @@ import {
   type Setup,
   type SignIn,
   type State,
+  settleComment,
 } from "@lookover/contracts";
 import { openStore } from "@lookover/store";
 import { DemoClock, type FakeChange, FakeGitHost } from "@lookover/testkit";
@@ -598,8 +599,8 @@ test("two reactions owed, the first held at the host as Bob signs in: the second
 
   expect(reactions.asked()).toEqual([`eyes ${first}`]);
   const counts = (id: string) => host.view(PR1).comments.find((c) => c.id === id)?.reactions;
-  expect(counts(first)).toEqual({ eyes: 1, rocket: 0 });
-  expect(counts(second)).toEqual({ eyes: 0, rocket: 0 });
+  expect(counts(first)).toEqual({ eyes: 1, rocket: 0, confused: 0 });
+  expect(counts(second)).toEqual({ eyes: 0, rocket: 0, confused: 0 });
 });
 
 test("a status block under way as Bob signs in, then refused for a moment, is not written again for the owner's cancelled review", async () => {
@@ -813,6 +814,107 @@ async function findingPosted(service: RunningService, cookie: string) {
 
 const dismissing = (service: RunningService, cookie: string, findingId: string) =>
   post(service, cookie, { type: "noise.apply", choice: { kind: "wrong", changeId: PLANTED, findingId } });
+
+/** "Accept as is" on the owner's finding (ADR 0100), as its card sends it. */
+const accepting = (service: RunningService, cookie: string, findingId: string) =>
+  post(service, cookie, {
+    type: "finding.accept",
+    changeId: PLANTED,
+    findingId,
+    reason: "Accepted as it is",
+  });
+
+test("the coding agent's settle under way as Bob signs in: its post under way lands, its 🚀 is never sent, now or at the next start", async () => {
+  const time = new DemoClock({ at: T0 });
+  const engines = fakeEngines({ time });
+  engines.answer({ outcome: "ok", text: ONE_FINDING }, NOTHING);
+  const writer = heldChecks();
+  const { dir, service, cookie, host } = await ownersFolder({ time, engines, writer: writer.writerOf });
+  const finding = await findingPosted(service, cookie);
+  // The settle's status block is written, and GitHub's answer held.
+  writer.holdStatus();
+  const mark = host.posts.length;
+  const body = settleComment({ finding: finding.id, decision: "accepted", reason: "Keep it as it is" });
+  const comment = host.seedComment(PR1, { author: OWNER, body });
+  await time.advance(MIN);
+  await until(() => writer.held() === 1);
+
+  await bobAsks(service, cookie, host, time);
+  await aMoment();
+  writer.release();
+  await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.setup.github === "done",
+  );
+  for (let polls = 0; polls < 3; polls++) await time.advance(MIN);
+  expect(host.posts.slice(mark).map((p) => p.kind)).toEqual(["status.written"]);
+  expect(host.view(PR1).comments.find((c) => c.id === comment)?.reactions).toEqual({
+    eyes: 0,
+    rocket: 0,
+    confused: 0,
+  });
+  await service.stop();
+  const store = openStore({ home: dir, durable: false });
+  expect(store.dismissals.owing()).toEqual([]);
+  store.close();
+});
+
+test("an acceptance's post under way as Bob signs in lands before his sign-in is held; its posts after it are never sent", async () => {
+  const time = new DemoClock({ at: T0 });
+  const engines = fakeEngines({ time });
+  engines.answer({ outcome: "ok", text: ONE_FINDING }, NOTHING);
+  const writer = heldChecks();
+  const { dir, service, cookie, host } = await ownersFolder({ time, engines, writer: writer.writerOf });
+  const finding = await findingPosted(service, cookie);
+  // The acceptance's status block is written, and GitHub's answer held.
+  writer.holdStatus();
+  const mark = host.posts.length;
+  expect((await accepting(service, cookie, finding.id)).status).toBe(200);
+  await until(() => writer.held() === 1);
+
+  await bobAsks(service, cookie, host, time);
+  await aMoment();
+  writer.release();
+  await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.setup.github === "done",
+  );
+  for (let polls = 0; polls < 3; polls++) await time.advance(MIN);
+  // The finding has no thread: the block landed; the check after it is never sent, now or at the next start.
+  expect(host.posts.slice(mark).map((p) => p.kind)).toEqual(["status.written"]);
+  await service.stop();
+  const store = openStore({ home: dir, durable: false });
+  expect(store.dismissals.owing()).toEqual([]);
+  store.close();
+});
+
+test("the owner's finding accepted as Bob signs in, a check write still under way, asks nothing: refused once he is held, nothing posted", async () => {
+  const time = new DemoClock({ at: T0 });
+  const engines = fakeEngines({ time });
+  engines.answer({ outcome: "ok", text: ONE_FINDING }, NOTHING);
+  const checks = heldChecks();
+  const { service, cookie, host } = await ownersFolder({ time, engines, writer: checks.writerOf });
+  const finding = await findingPosted(service, cookie);
+  engines.setHealth("claude", { installed: true, version: "2.4.1", signedIn: false });
+  checks.hold();
+  host.push(PR1, SHA1_PUSHED, []);
+  await time.advance(MIN);
+  await until(() => checks.held() === 1);
+  await bobAsks(service, cookie, host, time);
+  await aMoment();
+  const mark = host.posts.length;
+
+  const accepted = accepting(service, cookie, finding.id);
+  await aMoment();
+  checks.release();
+  expect((await accepted).status).toBe(409);
+  await eventually(
+    () => snapshot(service, cookie),
+    (s) => s.setup.github === "done",
+  );
+  for (let polls = 0; polls < 3; polls++) await time.advance(MIN);
+  expect(host.posts.slice(mark).filter((p) => DISMISSAL_POSTS.has(p.kind))).toEqual([]);
+});
 
 test("the owner's finding dismissed once their dismissal sends are cut, a check write still under way as Bob signs in, asks nothing: refused once he is held, nothing posted", async () => {
   const time = new DemoClock({ at: T0 });

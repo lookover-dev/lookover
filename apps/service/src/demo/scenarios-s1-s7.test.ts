@@ -376,6 +376,38 @@ test("S4, the agent keeps asking without fixing: #149's blocking F1 answered won
   ]);
 });
 
+test("S4, settled on the owner's word: #154's blocking F1 escalated the same way, then accepted as is through the coding agent", async () => {
+  await loaded("S4");
+  // #149's story is over before #154 opens: its escalated F1 stands as S4's earlier shots show it.
+  const before = await after(11 * MIN + 30_000);
+  expect(before.changes[id(154)]).toMatchObject({ author: "you", writtenBy: "claude" });
+  expect(findingsOf(before, 149)).toEqual([["F1", "blocking", "escalated", true]]);
+
+  // Round 1 finds the double refund; the agent answers "won't fix" twice, pushing and asking each time.
+  expect(posted(await after(4 * MIN), 154)).toEqual([1]);
+  expect(posted(await after(4 * MIN), 154)).toEqual([1, 2]);
+  const escalated = await after(2 * MIN);
+  expect(posted(escalated, 154)).toEqual([1, 2, 3]);
+  expect(findingsOf(escalated, 154)).toEqual([["F1", "blocking", "escalated", true]]);
+  expect(escalated.reviews[id(154)]?.loop).toBe("needs_owner");
+
+  // The owner tells the agent to accept it as is; the agent's settle comment is read at the next poll. This lands at
+  // 23:00, the settle move's own instant, where the shots `review-agent-accepted` and `github-agent-accepted` are.
+  const settled = await after(MIN + 30_000);
+  expect(findingsOf(settled, 154)).toEqual([["F1", "blocking", "accepted", true]]);
+  expect(settled.reviews[id(154)]?.findings[0]).toMatchObject({
+    decidedVia: "agent",
+    closedWhy: "The provider refuses a refund over the charge's amount, so a second one fails.",
+  });
+  expect(settled.reviews[id(154)]?.loop).toBe("settled");
+  expect(settled.reviews[id(154)]?.timeline.at(-1)).toMatchObject({ kind: "accepted", via: "agent" });
+  // #149's F1 is still the owner's own to settle.
+  expect(findingsOf(settled, 149)).toEqual([["F1", "blocking", "escalated", true]]);
+  expect(door.logged).toContain(
+    "sasensi/ledger-api#154 F1 accepted as is through your coding agent, on your word",
+  );
+});
+
 test("S6, new commits after a review: round 1 posted, the owner pushes two commits, nothing runs until Review again", async () => {
   const start = await loaded("S6");
   expect(posted(start, 153)).toEqual([1]);

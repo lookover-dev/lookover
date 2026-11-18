@@ -111,6 +111,7 @@ function raised(
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
   };
@@ -433,10 +434,16 @@ test("a settled finding is never raised again nor settled twice; one reported ag
     earlier(2, "dismissed", "dismissed", "blocking", {
       closedIn: 2,
       closedWhy: "You marked this finding as wrong",
+      decidedVia: "agent",
     }),
     earlier(3, "withdrawn", "withdrawn", "should_fix", { closedIn: 2, closedWhy: "Intended." }),
     earlier(4, "still_there", "open", "blocking"),
     earlier(5, "unasked", "open", "blocking"),
+    earlier(6, "accepted", "accepted", "blocking", {
+      closedIn: 2,
+      closedWhy: "Deploy-window gap.",
+      decidedVia: "app",
+    }),
   ];
   const r = round(
     prior,
@@ -448,6 +455,7 @@ test("a settled finding is never raised again nor settled twice; one reported ag
         candidate("dismissed", "blocking", { line: 42 }),
         candidate("withdrawn", "should_fix", { line: 30 }),
         candidate("still_there", "blocking", { line: 14 }),
+        candidate("accepted", "blocking", { line: 60 }),
       ],
       earlier: [
         { id: findingId("F1"), verdict: "present", why: "" },
@@ -456,9 +464,21 @@ test("a settled finding is never raised again nor settled twice; one reported ag
         { id: findingId("F4"), verdict: "gone", why: "" },
         // Not answered: stays as it was.
         { id: findingId("F5"), verdict: "unknown", why: "" },
+        { id: findingId("F6"), verdict: "gone", why: "" },
       ],
     }),
-    { round: 3, threads: { claims: [claim(1, "disputed"), claim(3, "wont_fix"), claim(5, "question")] } },
+    {
+      round: 3,
+      threads: {
+        claims: [
+          claim(1, "disputed"),
+          claim(2, "disputed"),
+          claim(3, "wont_fix"),
+          claim(5, "question"),
+          claim(6, "wont_fix"),
+        ],
+      },
+    },
   );
   expect(r.findings).toEqual(prior);
   expect(r).toMatchObject({
@@ -1412,6 +1432,7 @@ test("the counts cover the posted findings only: the open ones by severity, ever
     earlier(8, "ack", "acknowledged", "should_fix", { closedIn: 1, closedWhy: "Later." }),
     earlier(9, "dis", "dismissed", "should_fix", { closedIn: 1, closedWhy: "Not ours." }),
     earlier(10, "obs", "obsolete", "should_fix", { closedIn: 1 }),
+    earlier(13, "acc", "accepted", "blocking", { closedIn: 1, closedWhy: "Deploy-window gap." }),
     // Kept off the pull request: in no count, whatever its status.
     earlier(11, "hidden_open", "open", "blocking", { posted: false }),
     earlier(12, "hidden_fixed", "verified_fixed", "consider", { posted: false, closedIn: 1 }),
@@ -1424,6 +1445,7 @@ test("the counts cover the posted findings only: the open ones by severity, ever
     withdrawn: 1,
     acknowledged: 1,
     dismissed: 1,
+    accepted: 1,
     obsolete: 1,
   });
   // The check's count is the same findings: open and escalated on the pull request.

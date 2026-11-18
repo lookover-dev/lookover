@@ -291,7 +291,10 @@ export interface Queue {
    * any, is what the record said before: no take reports a deferral it leaves unchanged.
    */
   rebuilt(changeId: ChangeId): void;
-  /** Runs the take (after a poll that saw something). */
+  /**
+   * Runs the take (after a poll that saw something). Nothing before the restart's recovery (`recover`), which takes
+   * once it has: a job the last service left running is not a job to start beside.
+   */
   take(): void;
   /**
    * "Send the waiting reviews to the other AI" (`engine.reroute`, ADR 0047): every job deferred on `from` whose
@@ -399,7 +402,7 @@ export function createQueue(d: QueueDeps): Queue {
   /** When the armed tick fires. */
   let tickAt = 0;
   let stopping = false;
-  /** The restart's recovery has run: a self-test that ends before it doesn't take. */
+  /** The restart's recovery has run: no take before it (a dismissal resumed at start may end first). */
   let recovered = false;
   const now = () => d.clock.now();
   const log = d.log ?? ((line: string) => console.error(line));
@@ -824,7 +827,7 @@ export function createQueue(d: QueueDeps): Queue {
 
   /** Runs the take until nothing more starts; asked for while it runs, it goes round once more. */
   function take(): void {
-    if (stopping || !d.mayTake()) return;
+    if (stopping || !recovered || !d.mayTake()) return;
     // A check's end the host refused is sent again at every take, the first after a restart too.
     d.checks.resend();
     if (taking !== null) {

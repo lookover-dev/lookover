@@ -14,6 +14,7 @@
 // (coding standards: the words are the UI's).
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
+  type AcceptRefusal,
   type AgentRefusal,
   API,
   type AskToInstallRefusal,
@@ -23,6 +24,7 @@ import {
   type LookRefusal,
   type MintedLink,
   type NoSession,
+  REASON_MAX,
   type SettingsFileError,
   type SettingsRefusal,
   type SettingsWriteFailure,
@@ -156,6 +158,7 @@ type Answer = [
         unwritten?: SettingsWriteFailure;
         refused?: SettingsRefusal;
         agent?: AgentRefusal;
+        accept?: AcceptRefusal;
       },
   status: 200 | 404 | 409 | 500 | 501 | 502,
 ];
@@ -407,6 +410,14 @@ const COMMANDS: { [K in Parsed["type"]]?: Row<K> } = {
     )
       return refused(answer);
     return settingsAnswer(answer);
+  },
+  "finding.accept": async ({ room }, { changeId, findingId, reason }) => {
+    const answer = await room.settle(changeId, findingId, "accepted", reason ?? null, "app", null);
+    if (answer === "ok") return OK;
+    if (answer === "no_such_change") return [{ error: "no such change" }, 404];
+    if (answer === "reason_too_long")
+      return [{ error: `the reason is longer than ${REASON_MAX} characters`, accept: answer }, 409];
+    return refused(answer);
   },
   "repo.setEnabled": async ({ room }, { repoId, enabled }) =>
     room.setup.setEnabled([repoId], enabled) === "ok" ? OK : [{ error: "no such repository" }, 404],

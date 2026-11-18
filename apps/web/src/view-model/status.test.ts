@@ -134,6 +134,7 @@ const FIXED: Finding = {
   closedIn: 2,
   verifiedSha: SHA,
   closedWhy: null,
+  decidedVia: null,
   claim: null,
   kept: 0,
 };

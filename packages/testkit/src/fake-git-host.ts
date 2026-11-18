@@ -42,13 +42,15 @@
 // 0067) are not listed until an owner installs it there (`installOn(login)`), last.
 // `asAgent` is the same host seen by a coding agent with its own token (`AgentHost`, ADR 0021): it reads the checks of
 // a commit from one App only (each check keeps the slug of the App that made it), answers the agent's own account,
-// and writes comments as it; it reads Lookover's threads (an App's bot's roots, or the given person's)
-// with their thread ids (`PRRT_<root id>`) and whether they are resolved, replies in them as the agent and resolves
-// them, as GitHub's GraphQL lets a person do. Made with `mayResolve: false`, the agent's token may not resolve a
-// thread, and `resolve` is refused as GitHub refuses it.
+// and writes comments as it, and tells who put each reaction on a comment (a teammate reacts with `reactAs`); it reads
+// Lookover's threads (an App's bot's roots, or the given person's) with their thread ids (`PRRT_<root id>`) and
+// whether they are resolved, replies in them as the agent and resolves them, as GitHub's GraphQL lets a person do.
+// Made with `mayResolve: false`, the agent's token may not resolve a thread, and `resolve` is refused as GitHub
+// refuses it.
 import type {
   AgentCheck,
   AgentHost,
+  AgentReaction,
   AgentThread,
   ChangeRef,
   CheckConclusion,
@@ -96,6 +98,7 @@ import {
   changeName,
   characterCount,
   DESCRIPTION_MAX_CHARACTERS,
+  enumOf,
   findingOfMarker,
   HostError,
   repositoryName,
@@ -113,6 +116,9 @@ import { FakeSignIn } from "./fake-sign-in.ts";
  * a wrapper gives the fake (ADR 0069), with no pause, as the fake keeps no time of its own for it.
  */
 const STATUS_REREADS = 10;
+
+/** Lookover's reactions, in the order the agent's `reactions` lists them. */
+const REACTIONS = enumOf<Reaction>()(["eyes", "rocket", "confused"]).options;
 
 /** Lines a comment can go on: `from` to `to` inclusive, on one side of one file. */
 export interface CommentableRange {
@@ -843,7 +849,11 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
             id: c.id,
             author: { ...c.author },
             body: c.body,
-            reactions: { eyes: c.reactedBy.eyes.size, rocket: c.reactedBy.rocket.size },
+            reactions: {
+              eyes: c.reactedBy.eyes.size,
+              rocket: c.reactedBy.rocket.size,
+              confused: c.reactedBy.confused.size,
+            },
             minimized: c.minimized,
           }),
         ),
@@ -1076,6 +1086,16 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
     return Number(id);
   }
 
+  /**
+   * Someone other than the person Lookover posts as (a teammate, by numeric id) puts a reaction on the comment, as
+   * GitHub lets anyone who can read the pull request: the comments' counts take it, and nothing is recorded as posted.
+   */
+  reactAs(by: number, commentId: string, reaction: Reaction): void {
+    const kept = this.comment(commentId);
+    kept.reactedBy[reaction].add(by);
+    this.moved(kept.repo, "comments");
+  }
+
   /** The comment edited by its author, now by the host's clock. */
   editComment(commentId: string, body: string): void {
     const kept = this.comment(commentId);
@@ -1138,6 +1158,14 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
         }),
       comments: (change) =>
         this.answerAgent(() => this.view(change).comments.map(({ minimized: _, ...c }): HostComment => c)),
+      reactions: (repo, commentId) =>
+        this.answerAgent(() => {
+          const kept = this.comments.find((c) => c.id === commentId && sameRepository(c.repo, repo));
+          if (!kept) throw new HostError("not_found", `No comment ${commentId}`);
+          return REACTIONS.flatMap((reaction) =>
+            [...kept.reactedBy[reaction]].map((by): AgentReaction => ({ reaction, by })),
+          );
+        }),
       comment: (change, body) =>
         this.answerAgent(() => {
           this.find(change);
@@ -1733,7 +1761,7 @@ export class FakeGitHost implements HostIntake, HostWriter, HostAccounts, HostSi
       body,
       createdAt: at,
       updatedAt: at,
-      reactedBy: { eyes: new Set(), rocket: new Set() },
+      reactedBy: { eyes: new Set(), rocket: new Set(), confused: new Set() },
       minimized: null,
     };
     this.comments.push(kept);

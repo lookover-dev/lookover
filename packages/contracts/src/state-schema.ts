@@ -23,7 +23,7 @@ import type { Anchoring, DiffSide } from "./diff.ts";
 import type { Engine, EngineId, EngineState } from "./engine.ts";
 import type { EngineUnusable, EngineUsage } from "./engines-port.ts";
 import { enumOf } from "./enum-of.ts";
-import type { Finding, Fingerprints, Severity } from "./finding.ts";
+import type { DecisionVia, Finding, Fingerprints, Severity } from "./finding.ts";
 import type { AccountCause, HostAccount, HostLogin } from "./github-app.ts";
 import type { TransientHostFailure } from "./host.ts";
 import {
@@ -369,6 +369,7 @@ const changeSchema = tiedTo<Change>()(
 const severity = enumOf<Severity>()(["blocking", "should_fix", "consider"]);
 const diffSide = enumOf<DiffSide>()(["head", "base"]);
 const anchoring = enumOf<Anchoring>()(["reported", "moved", "unmatched"]);
+const decisionVia = enumOf<DecisionVia>()(["app", "agent"]);
 const runStep = enumOf<RunStep>()(["preparing", "finding", "confirming", "publishing"]);
 const runPass = enumOf<RunPass>()(["find", "find-2", "confirm"]);
 const steps = z.array(z.object({ step: runStep, ms: z.number() }));
@@ -430,6 +431,7 @@ const finding = tiedTo<Finding>()(
       "acknowledged",
       "withdrawn",
       "dismissed",
+      "accepted",
       "obsolete",
     ]),
     posted: z.boolean(),
@@ -439,6 +441,7 @@ const finding = tiedTo<Finding>()(
     closedIn: z.number().nullable(),
     verifiedSha: shaSchema.nullable(),
     closedWhy: z.string().nullable(),
+    decidedVia: decisionVia.nullable(),
     claim: findingClaim.nullable(),
     kept: z.number(),
   }),
@@ -655,7 +658,8 @@ const timelineEntry = tiedTo<TimelineEntry>()(
     entry("started", { round: z.number() }),
     entry("posted", { round: z.number(), open: z.number() }),
     entry("failed", { failure: jobFailure.nullable() }),
-    entry("dismissed", { findingIds: z.array(findingIdSchema) }),
+    entry("dismissed", { findingIds: z.array(findingIdSchema), via: decisionVia }),
+    entry("accepted", { findingIds: z.array(findingIdSchema), via: decisionVia }),
   ]),
 );
 

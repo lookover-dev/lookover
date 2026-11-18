@@ -82,6 +82,7 @@ const reviewResultExample: ReviewResult = {
     withdrawn: 1,
     acknowledged: 0,
     dismissed: 0,
+    accepted: 0,
     obsolete: 0,
     kept_in_app: 1,
   },
@@ -235,6 +236,24 @@ describe("lookover.review-result/v1", () => {
     const parsed = reviewResultV1.safeParse(reviewResultExample);
     expect(parsed.success).toBe(true);
     expect(parsed.data).toEqual(reviewResultExample);
+  });
+
+  test("an owner's decision says how it came, app or agent; another way is no result (ADR 0101)", () => {
+    const [first, ...rest] = reviewResultExample.findings;
+    const settled = (via: string) => ({
+      ...reviewResultExample,
+      findings: [
+        {
+          ...first,
+          status: "accepted",
+          resolution: { kind: "accepted", round: 2, explanation: "Kept simple.", via },
+        },
+        ...rest,
+      ],
+    });
+    expect(reviewResultV1.safeParse(settled("agent")).data?.findings[0]?.resolution?.via).toBe("agent");
+    expect(reviewResultV1.safeParse(settled("app")).data?.findings[0]?.resolution?.via).toBe("app");
+    expect(reviewResultV1.safeParse(settled("email")).success).toBe(false);
   });
 
   test("rejects a document missing a required field, naming it", () => {

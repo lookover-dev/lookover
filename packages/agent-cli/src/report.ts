@@ -1,6 +1,7 @@
 // What `wait` and `feedback` print when they end: the sentence on stderr; on stdout, with `--json`, one JSON
 // document (the commit, the pull request, the exit and its meaning, the verdict, the next action, why a review
-// didn't run, and the findings that need the agent), else those findings as text. `feedback` joins each finding
+// didn't run, the findings that need the agent, and on exit 4 `for_the_owner`), else those findings as text; on exit
+// 4, stderr also names the findings only the owner settles, and where (ADR 0100). `feedback` joins each finding
 // with its thread on GitHub and Lookover's last reply there, after the guard sentence (ADR 0056, SR-12).
 import {
   type AgentThread,
@@ -8,9 +9,10 @@ import {
   newestThread,
   type ReviewResultFinding,
   STILL_PRESENT,
+  severityText,
 } from "@lookover/contracts";
 import { lookoverReply } from "./threads.ts";
-import { EXIT, forTheAgent, type Outcome } from "./wait.ts";
+import { EXIT, forTheAgent, forTheOwner, type Outcome } from "./wait.ts";
 import type { Poster } from "./whose.ts";
 import type { World } from "./world.ts";
 
@@ -21,8 +23,50 @@ function where(f: ReviewResultFinding): string {
   return start_line === end_line ? `${path}:${start_line}` : `${path}:${start_line}-${end_line}`;
 }
 
-/** The document's fields every report has, around its findings. */
+/** A severity as the pull request says it. */
+const SEVERITY = {
+  blocking: "Blocking",
+  should_fix: "Should fix",
+  consider: "Consider",
+} satisfies Record<ReviewResultFinding["severity"], string>;
+
+/** A finding's severity as the pull request says it, "unconfirmed" when the confirm pass lowered it (ADR 0044). */
+function severityOf(f: ReviewResultFinding): string {
+  const demoted = f.confirmation.verdict !== "confirmed" && f.confirmation.demoted;
+  return severityText(SEVERITY[f.severity], demoted);
+}
+
+/**
+ * Where the owner settles a finding the agent can't (ADR 0100): in the app, or through the agent's `settle` on their
+ * word once they said so (ADR 0101); never by a reply.
+ */
+const SETTLE =
+  "The owner settles it in Lookover's app (`lookover open`), on this pull request's review: Accept as is, or Too noisy? › This finding is wrong. Or ask them: on their word, `lookover settle <finding> accepted|wrong --confirmed-by-owner \"<their reason>\"`.";
+
+/** On exit 4 alone, the findings only the owner settles and where (`for_the_owner`); null on any other exit. */
+function ownersOf(outcome: Outcome) {
+  if (outcome.meaning !== "ask_human") return null;
+  const findings = forTheOwner(outcome.result).map((f) => ({
+    id: f.id,
+    severity: f.severity,
+    title: f.title,
+    path: f.location?.path ?? null,
+    line: f.location?.start_line ?? null,
+  }));
+  return { findings, settle: SETTLE };
+}
+
+/** The sentence on stderr; on exit 4, then a line per finding only the owner settles, then where they settle it. */
+function said(outcome: Outcome, w: Pick<World, "err">): void {
+  w.err(outcome.message);
+  if (outcome.meaning !== "ask_human") return;
+  for (const f of forTheOwner(outcome.result)) w.err(`${f.id} · ${severityOf(f)} · ${f.title} (${where(f)})`);
+  w.err(SETTLE);
+}
+
+/** The document's fields every report has, around its findings; `for_the_owner` on exit 4 alone. */
 function documentOf(outcome: Outcome, findings: unknown[]) {
+  const owners = ownersOf(outcome);
   return {
     commit: outcome.commit,
     change: outcome.change,
@@ -33,6 +77,7 @@ function documentOf(outcome: Outcome, findings: unknown[]) {
     next_action: outcome.result?.loop.next_action ?? null,
     state_reason: outcome.result?.run.state_reason ?? outcome.skip ?? null,
     findings,
+    ...(owners === null ? {} : { for_the_owner: owners }),
   };
 }
 
@@ -68,7 +113,7 @@ function printed(
 
 export function report(outcome: Outcome, json: boolean, w: Pick<World, "out" | "err">): number {
   const findings = forTheAgent(outcome.result);
-  w.err(outcome.message);
+  said(outcome, w);
   if (json) w.out(JSON.stringify(documentOf(outcome, findings), null, 2));
   else for (const f of findings) printed(f, w, [], outcome.result?.loop.round ?? null);
   return EXIT[outcome.meaning];
@@ -106,7 +151,7 @@ function conversation(
 ): string[] {
   if (thread === undefined && f.placement !== "inline")
     return [
-      "Thread: none, it is in the status block only, in the pull request's description. Fix it, or ask the owner to dismiss it.",
+      "Thread: none, it is in the status block only, in the pull request's description. Fix it, or ask the owner to accept it as is or mark it wrong: in Lookover's app, or on their word with lookover settle.",
     ];
   const lines = thread ? [`Thread: ${thread.url}${thread.resolved ? " (resolved)" : ""}`] : [];
   if (f.claim) {
@@ -131,7 +176,7 @@ export function reportFeedback(
     const thread = newestThread(threads, f.id);
     return { f, thread, last: thread && poster ? lookoverReply(thread, poster) : null };
   });
-  w.err(outcome.message);
+  said(outcome, w);
   if (json) {
     const findings = joined.map(({ f, thread, last }) => ({
       ...f,

@@ -29,13 +29,21 @@
 //   the first poll's "now" on a fresh data folder: what was written before Lookover watched is no request. That "now"
 //   is GitHub's (when it answered the poll's listing of the changes, its `Date`), so this machine's clock, ahead or
 //   behind, never moves the line: every time the poll compares is GitHub's. A comment GitHub lists twice (its pages
-//   shift when one is edited between two reads) counts once, as last edited. Each
-//   comment written since where the poll lists from and not handled yet is handled once, after a restart too; a
-//   review request (`readRequest`) the owner wrote (by numeric id: never the App, nor anyone else) on an open
-//   change goes to the queue's `requested`, oldest first, saying whether it asks for a full round
-//   (`/lookover review full`, ADR 0052). A request on a commit already reviewed is a new round all the same. An
-//   edit is not a request: an old comment edited was written before where the poll lists from, and one the poll already looked at is handled. The one exception: a comment
-//   written and then edited between two polls counts with its text when the poll first sees it. A comment on a
+//   shift when one is edited between two reads) counts once, as last edited. Each comment written since where the
+//   poll lists from and not handled yet is handled once, after a restart too; a review request (`readRequest`) the
+//   owner wrote (by numeric id: never the App, nor anyone else) on an open change goes to the queue's `requested`,
+//   oldest first, saying whether it asks for a full round (`/lookover review full`, ADR 0052); a settle comment
+//   (`readSettle`, ADR 0101) the owner wrote (by numeric id) on an open change goes to the room's `settled`, in the
+//   same order, which saves it with its comment before the poll marks the comments seen: a comment a saved dismissal
+//   names counts as handled (`requests.handled`), so a stop between the two never reads it again. A request or a
+//   settle whose handing over throws (its save failed) is thrown as a listing's error is: the comments before it are
+//   seen, it and those after it are not, and the place stays, so the next poll hands them over again. A settle the
+//   room holds (`held`) is left unseen the same way, the others seen, the place kept: at start, the first poll runs
+//   before the queue's recovery, and a settle on a change whose job the last service left running waits for the
+//   poll after it, never judged against a job that may fail or go back to the queue. A request on a commit already
+//   reviewed is a new round all the same. An edit is not a request: an old comment edited was written before where
+//   the poll lists from, and one the poll already looked at is handled. The one exception: a comment written and
+//   then edited between two polls counts with its text when the poll first sees it. A comment on a
 //   number the changes listed don't have is left for the next poll while it was written within the overlap before
 //   that listing: its pull request may have opened since (GitHub's comments don't tell a pull request from an
 //   issue). Older, it is on an issue or a closed pull request, no open change: handled, so a pull request reopened
@@ -124,6 +132,8 @@ import {
   type RepositoryRef,
   type ReviewRequestText,
   readRequest,
+  readSettle,
+  type SettleText,
   type State,
   sameRepository,
 } from "@lookover/contracts";
@@ -196,6 +206,17 @@ export interface PollerDeps {
    * any refused before) and the checks' ends it refused before (a job that failed while GitHub was down).
    */
   resend(): void;
+  /**
+   * The room's: the coding agent's settle comment (ADR 0101), the owner's on an open change, its finding settled through
+   * the room's one command as the agent's, the comment answered with 🚀 once the posts are out, or 😕 refused. A settle
+   * saved is saved before this returns, its comment with it: the poll's bookkeeping comes after. `held`: not judged
+   * yet, the comment left unseen and the place kept, so a later poll hands it over again.
+   */
+  settled(
+    changeId: ChangeId,
+    comment: { repo: RepositoryRef; id: string },
+    settle: SettleText,
+  ): "answered" | "held";
   /** The queue's take, after a poll of the loop that saw something. */
   take(): void;
   /**
@@ -520,15 +541,50 @@ export function createPoller(d: PollerDeps): Poller {
     else if (error instanceof HostError && error.failure === "not_found") d.discover("refused");
   }
 
+  /** Whether the owner wrote the comment on an open change: the only one that may ask anything (ADR 0043). */
+  const owners = (c: HostConversationComment, open: ReadonlySet<number>): boolean =>
+    open.has(c.change) && c.author.id === d.owner.id;
+
   /** What a comment asks, when it is a review request the owner wrote on an open change (ADR 0043); else null. */
   const requestOf = (c: HostConversationComment, open: ReadonlySet<number>): ReviewRequestText | null =>
-    open.has(c.change) && c.author.id === d.owner.id ? readRequest(c.body) : null;
+    owners(c, open) ? readRequest(c.body) : null;
 
   /**
-   * The comments listed from `from`: each written since then and not handled yet is handled now, the owner's review
-   * requests on open changes, oldest first, handed to the queue; except one on a number the changes listed at
-   * `hostNow` don't have, written within the overlap before that listing, which the next poll looks at again. The
-   * place moves to the newest comment time listed. True when a request was handed over.
+   * What a comment settles, when it is a settle comment the owner wrote (by numeric id) on an open change (ADR 0101).
+   */
+  const settleOf = (c: HostConversationComment, open: ReadonlySet<number>): SettleText | null =>
+    owners(c, open) ? readSettle(c.body) : null;
+
+  /**
+   * Hands `c` over: a review request to the queue (`requested`), a settle comment to the room (`answered`, or `held`
+   * for a later poll); anything else is `nothing`. A save that throws is thrown.
+   */
+  function handOver(
+    repo: RepositoryRef,
+    c: HostConversationComment,
+    open: ReadonlySet<number>,
+  ): "requested" | "answered" | "held" | "nothing" {
+    const asks = requestOf(c, open);
+    if (asks !== null) {
+      const request: RequestComment = {
+        repo,
+        comment: { id: c.id, createdAt: c.createdAt },
+        nodeId: c.nodeId,
+        // The marker naming a commit is `lookover wait`'s: the agent asked (ADR 0081); the command alone, a person.
+        askedBy: asks.commit === null ? "person" : "agent",
+      };
+      d.requested(changeIdOf(repo, c.change), request, asks.full);
+      return "requested";
+    }
+    const settle = settleOf(c, open);
+    return settle === null ? "nothing" : d.settled(changeIdOf(repo, c.change), { repo, id: c.id }, settle);
+  }
+
+  /**
+   * The comments listed from `from`: each written since then and not handled yet is handled now, oldest first, the
+   * owner's review requests on open changes handed to the queue and their settle comments to the room; except one on
+   * a number the changes listed at `hostNow` don't have, written within the overlap before that listing, which the
+   * next poll looks at again. The place moves to the newest comment time listed. True when a request was handed over.
    */
   function handled(
     repo: RepositoryRef,
@@ -552,19 +608,36 @@ export function createPoller(d: PollerDeps): Poller {
     const news = fresh
       .filter((c) => !done.has(c.id) && !later(c))
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id, "en", { numeric: true }));
-    const requests = news.flatMap((c) => {
-      const asks = requestOf(c, open);
-      return asks === null ? [] : [{ c, asks }];
-    });
-    for (const { c, asks } of requests) {
-      const request: RequestComment = {
+    let requested = false;
+    let handedOver = 0;
+    /** The settles the room held: left unseen, and the place kept so the next poll lists them again. */
+    const held = new Set<string>();
+    /** The first `count` handed over are seen but those held; the place stays, so the next poll reads the rest again. */
+    const placeKept = (count: number) =>
+      d.store.requests.seen(
         repo,
-        comment: { id: c.id, createdAt: c.createdAt },
-        nodeId: c.nodeId,
-        // The marker naming a commit is `lookover wait`'s: the agent asked (ADR 0081); the command alone, a person.
-        askedBy: asks.commit === null ? "person" : "agent",
-      };
-      d.requested(changeIdOf(repo, c.change), request, asks.full);
+        news
+          .slice(0, count)
+          .filter((c) => !held.has(c.id))
+          .map((c) => ({ id: c.id, createdAt: c.createdAt })),
+        { newest: place.newest, keepFrom: listedFrom(place) },
+      );
+    try {
+      for (const c of news) {
+        const answer = handOver(repo, c, open);
+        if (answer === "requested") requested = true;
+        if (answer === "held") held.add(c.id);
+        handedOver += 1;
+      }
+    } catch (error) {
+      // Handing one over threw (its save failed): those before it are seen (a refusal's 😕 is owed once), it and those
+      // after it are not, and the place stays, so the next poll reads them again. Thrown, as a listing's error is.
+      placeKept(handedOver);
+      throw error;
+    }
+    if (held.size > 0) {
+      placeKept(news.length);
+      return requested;
     }
     const newest = items.reduce((at, c) => Math.max(at, c.updatedAt), place.newest);
     d.store.requests.seen(
@@ -573,7 +646,7 @@ export function createPoller(d: PollerDeps): Poller {
       // What the next poll lists from: the comments that were no request before it are never looked at again.
       { newest, keepFrom: listedFrom({ newest, floor: place.floor }) },
     );
-    return requests.length > 0;
+    return requested;
   }
 
   /**

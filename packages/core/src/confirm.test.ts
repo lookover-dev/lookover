@@ -66,6 +66,7 @@ function inLedger(n: number, c: CandidateFinding): Finding {
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
   };

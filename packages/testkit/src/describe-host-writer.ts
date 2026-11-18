@@ -489,9 +489,11 @@ export function describeHostWriter(name: string, { open: setup, patience, refusi
       await f.writer.react(f.change.repo, id, "eyes");
       await f.writer.react(f.change.repo, id, "eyes");
       await f.writer.react(f.change.repo, id, "rocket");
+      await f.writer.react(f.change.repo, id, "confused");
+      await f.writer.react(f.change.repo, id, "confused");
       const reactions = async () => (await f.observe()).comments.find((c) => c.id === id)?.reactions;
-      const both = { eyes: 1, rocket: 1 };
-      expect(await shown(reactions, equals(both), "the poster's two reactions")).toEqual(both);
+      const all = { eyes: 1, rocket: 1, confused: 1 };
+      expect(await shown(reactions, equals(all), "the poster's three reactions")).toEqual(all);
     });
 
     test("a reaction on a comment the host doesn't have is not found", async () => {

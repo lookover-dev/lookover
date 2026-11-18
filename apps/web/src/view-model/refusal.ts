@@ -3,14 +3,16 @@
 // `error` line, or a settings refusal's data and code (ADR 0049), is read to pick the sentence, never shown. A
 // status or answer with no words here gets the title alone; the console keeps the service's. The session screen's sentence is here too: the one screen shown without a state.
 
-import type {
-  AgentRefusal,
-  AskToInstallRefusal,
-  Command,
-  SettingsFileError,
-  SettingsRefusal,
-  SettingsWriteFailure,
-  SignInStartRefusal,
+import {
+  type AcceptRefusal,
+  type AgentRefusal,
+  type AskToInstallRefusal,
+  type Command,
+  REASON_MAX,
+  type SettingsFileError,
+  type SettingsRefusal,
+  type SettingsWriteFailure,
+  type SignInStartRefusal,
 } from "@lookover/contracts";
 import { Refused } from "../api/http.ts";
 import type { WebMode } from "../dev/mode.ts";
@@ -36,6 +38,8 @@ export interface Refusal {
   signIn?: SignInNotStarted;
   /** Why "Ask to install on <org>" wasn't kept (ADR 0067): the service's `askToInstall`. */
   askToInstall?: AskToInstallRefusal;
+  /** Why "Accept as is" wasn't kept besides what "This finding is wrong" says (ADR 0100): the service's `accept`. */
+  accept?: AcceptRefusal;
   command?: Command;
 }
 
@@ -115,6 +119,13 @@ const ASK_TO_INSTALL: Record<AskToInstallRefusal, string> = {
 const isAskToInstallRefusal = (value: unknown): value is AskToInstallRefusal =>
   typeof value === "string" && Object.hasOwn(ASK_TO_INSTALL, value);
 
+/** Why "Accept as is" wasn't kept (ADR 0100), by the service's `accept`; its other refusals are `refused`'s. */
+const ACCEPT: Record<AcceptRefusal, string> = {
+  reason_too_long: `That reason is longer than ${REASON_MAX} characters.`,
+};
+const isAcceptRefusal = (value: unknown): value is AcceptRefusal =>
+  typeof value === "string" && Object.hasOwn(ACCEPT, value);
+
 /**
  * The refusal a request rejected with: the service's status, `error` line and the data it carried (a settings
  * refusal's, an App's, Your coding agent's), or status 0 and no words when the request never reached it (the console
@@ -128,6 +139,7 @@ export function refusalOf(error: unknown, command?: Command): Refusal {
   const invalid = invalidOf(answer);
   const unwritten = unwrittenOf(answer);
   const refused = isRecord(answer) && isRefused(answer.refused) ? answer.refused : null;
+  const accept = isRecord(answer) && isAcceptRefusal(answer.accept) ? answer.accept : null;
   return {
     status: error.status,
     error: error.reason,
@@ -135,6 +147,7 @@ export function refusalOf(error: unknown, command?: Command): Refusal {
     ...(unwritten === null ? {} : { unwritten }),
     ...(refused === null ? {} : { refused }),
     ...(agent === null ? {} : { agent }),
+    ...(accept === null ? {} : { accept }),
     ...connectionRefusalOf(answer, error.status, command),
     ...sent,
   };
@@ -174,10 +187,11 @@ function appReason({ signIn, askToInstall }: Refusal): string | null {
 
 /**
  * A settings command refused (ADR 0049): the file that doesn't read and why, the one that couldn't be written, or the
- * refusal's code.
+ * refusal's code; or an "Accept as is" refused for its reason (ADR 0100).
  */
-function settingsReason({ invalid, unwritten, refused }: Refusal): string | null {
+function settingsReason({ invalid, unwritten, refused, accept }: Refusal): string | null {
   if (refused !== undefined) return REFUSED[refused];
+  if (accept !== undefined) return ACCEPT[accept];
   if (invalid !== undefined)
     return `${whereIs(invalid.file)} doesn't read: ${settingsFileProblemText(invalid)}. Fix the file, then try again.`;
   if (unwritten === undefined) return null;

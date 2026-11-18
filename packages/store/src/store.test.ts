@@ -1407,6 +1407,31 @@ test("a request is handled with the job it led to: 👀 waits once recorded, �
   expect(again.requests.handled(REPO, ["c1", "c2"])).toEqual(new Set(["c1", "c2"]));
 });
 
+test("a settle comment refused owes its 😕 once, across a restart, until it is sent or given up (ADR 0101)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  store.requests.refused(REPO, "c7");
+  store.requests.refused(REPO, "c8");
+  // Refused again (the poll read it again before marking it seen): owed once.
+  store.requests.refused(REPO, "c7");
+  expect(store.requests.unreacted()).toEqual([
+    { repo: REPO, commentId: "c7", reaction: "confused" },
+    { repo: REPO, commentId: "c8", reaction: "confused" },
+  ]);
+  expect(store.requests.owes(REPO, "c7", "confused")).toBe(true);
+  expect(store.requests.owes(REPO, "c9", "confused")).toBe(false);
+  store.requests.reacted(REPO, "c7", "confused");
+  store.close();
+
+  const again = open(dir);
+  expect(again.requests.unreacted()).toEqual([{ repo: REPO, commentId: "c8", reaction: "confused" }]);
+  // Sent once: refused again, it is not owed again.
+  again.requests.refused(REPO, "c7");
+  expect(again.requests.owes(REPO, "c7", "confused")).toBe(false);
+  again.requests.reacted(REPO, "c8", "confused");
+  expect(again.requests.unreacted()).toEqual([]);
+});
+
 test("a request skipped is handled and waits for 👀, never 🚀; a failed or cancelled job's never gets 🚀", () => {
   const dir = migrated();
   const store = open(dir);
@@ -1719,6 +1744,7 @@ const finding: Finding = {
   closedIn: null,
   verifiedSha: null,
   closedWhy: null,
+  decidedVia: null,
   claim: null,
   kept: 0,
 };
@@ -2816,6 +2842,9 @@ test("the replies Lookover kept for a change are its rounds' and its dismissals'
     id: "d1",
     changeId: CHANGE,
     findingId: finding.id,
+    decision: "wrong",
+    via: "app",
+    answering: null,
     runId: run.id,
     checkId: "111",
     dismiss: dismissing("F1"),
@@ -2856,6 +2885,9 @@ test("a dismissal after a preview reaches the round that posted too: that round'
     id: "d1",
     changeId: CHANGE,
     findingId: other.id,
+    decision: "wrong",
+    via: "app",
+    answering: null,
     runId: run.id,
     checkId: null,
     dismiss: dismissing("F2"),
@@ -2881,6 +2913,9 @@ test("a dismissal is saved in one write with the ledger it leaves and its posts 
     id: "d1",
     changeId: CHANGE,
     findingId: finding.id,
+    decision: "wrong",
+    via: "app",
+    answering: null,
     runId: run.id,
     checkId: "111",
     dismiss: dismissing("F1"),
@@ -2901,6 +2936,9 @@ test("a dismissal is saved in one write with the ledger it leaves and its posts 
     id: "d1",
     changeId: CHANGE,
     findingId: finding.id,
+    decision: "wrong",
+    via: "app",
+    answering: null,
     plan: PLAN,
     degraded: false,
     checkId: "111",
@@ -2925,6 +2963,9 @@ test("a dismissal is saved in one write with the ledger it leaves and its posts 
       id: "d2",
       changeId: CHANGE,
       findingId: finding.id,
+      decision: "wrong",
+      via: "app",
+      answering: null,
       runId: run.id,
       checkId: null,
       dismiss: dismissing("F1"),
@@ -2933,6 +2974,76 @@ test("a dismissal is saved in one write with the ledger it leaves and its posts 
     }),
   ).toBe("reviewing");
   expect(again.dismissals.of("d2")).toBeNull();
+});
+
+test("a settle saved keeps its comment in the same write: the comment is handled in its repository from then on, its 🚀 the last post (ADR 0101)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  postedRound(store, [finding]);
+  expect(store.requests.handled(REPO, ["IC_9", "IC_10"])).toEqual(new Set());
+  store.dismissals.saved({
+    id: "d1",
+    changeId: CHANGE,
+    findingId: finding.id,
+    decision: "wrong",
+    via: "agent",
+    answering: "IC_9",
+    runId: run.id,
+    checkId: "111",
+    dismiss: dismissing("F1"),
+    posts: [...DISMISSAL_POSTS, "react"],
+    at: T2,
+  });
+  store.close();
+
+  // Across a restart, before the poll said it saw the comment: handled all the same, and in its repository only.
+  const again = open(dir);
+  expect(again.requests.handled(REPO, ["IC_9", "IC_10"])).toEqual(new Set(["IC_9"]));
+  expect(again.requests.handled({ owner: "sasensi", name: "lookover" }, ["IC_9"])).toEqual(new Set());
+  expect(again.dismissals.of("d1")).toMatchObject({ via: "agent", answering: "IC_9" });
+  expect(again.dismissals.of("d1")?.posts.map((p) => p.kind)).toEqual([...DISMISSAL_POSTS, "react"]);
+  again.dismissals.sent("d1", "react", "IC_9");
+});
+
+test("an acceptance is kept as the owner's decision with its way, the ledger as it leaves it (ADR 0100, ADR 0101)", () => {
+  const dir = migrated();
+  const store = open(dir);
+  postedRound(store, [finding]);
+  const accepting = (ledger: Finding[]): Finding[] =>
+    ledger.map((f) => ({
+      ...f,
+      status: "accepted" as const,
+      closedIn: 1,
+      closedWhy: "Accepted deploy-window gap",
+    }));
+  store.dismissals.saved({
+    id: "d1",
+    changeId: CHANGE,
+    findingId: finding.id,
+    decision: "accepted",
+    via: "agent",
+    answering: null,
+    runId: run.id,
+    checkId: "111",
+    dismiss: accepting,
+    posts: ["reply", "status", "completed"],
+    at: T2,
+  });
+  store.close();
+
+  const again = open(dir);
+  expect(again.rounds.ledger(CHANGE)).toEqual([
+    { ...finding, status: "accepted", closedIn: 1, closedWhy: "Accepted deploy-window gap" },
+  ]);
+  expect(again.dismissals.of("d1")).toMatchObject({
+    decision: "accepted",
+    via: "agent",
+    posts: [
+      { kind: "reply", hostId: null, tries: 0 },
+      { kind: "status", hostId: null, tries: 0 },
+      { kind: "completed", hostId: null, tries: 0 },
+    ],
+  });
 });
 
 test("a dismissal's ledger reaches the round whose review hasn't landed: a late landing never undoes it", () => {
@@ -2960,6 +3071,9 @@ test("a dismissal's ledger reaches the round whose review hasn't landed: a late 
     id: "d1",
     changeId: CHANGE,
     findingId: other.id,
+    decision: "wrong",
+    via: "app",
+    answering: null,
     runId: run.id,
     checkId: null,
     dismiss: dismissing("F2"),
@@ -2983,6 +3097,9 @@ test("a dismissal owing posts keeps its change busy for the take until it ends",
     id: "d1",
     changeId: CHANGE,
     findingId: finding.id,
+    decision: "wrong",
+    via: "app",
+    answering: null,
     runId: run.id,
     checkId: "111",
     dismiss: dismissing("F1"),
@@ -3026,6 +3143,9 @@ test("a repository gone from the installation: its jobs cancelled, what it owes 
   // Another repository's job waits.
   const elsewhere: ReviewJob = { ...job, id: jobId("j9") };
   asked(store, ledgerChange, elsewhere);
+  // A settle comment refused owes its 😕; another repository's too.
+  store.requests.refused(REPO, "c7");
+  store.requests.refused(ledger, "c8");
 
   store.repos.removed(REPO, "sasensi/lookover-sandbox#", T2);
   store.close();
@@ -3039,7 +3159,7 @@ test("a repository gone from the installation: its jobs cancelled, what it owes 
   // Nothing is owed to a repository Lookover can't reach: no check's end, no post, no reaction.
   expect(again.jobs.checksEnding()).toEqual([]);
   expect(again.posts.of(run.id)?.posts).toEqual([{ kind: "check", hostId: "111", tries: 0 }]);
-  expect(again.requests.unreacted()).toEqual([]);
+  expect(again.requests.unreacted()).toEqual([{ repo: ledger, commentId: "c8", reaction: "confused" }]);
   // Its listing is forgotten: added again, it is new and switched on, its comments read from that first poll.
   expect(again.inbox.open(REPO)).toEqual([]);
   expect(again.requests.place(REPO)).toBeNull();
@@ -3077,7 +3197,9 @@ test("the sign-in changed: every job not ended cancelled, nothing owed to the ho
   store.jobs.checked(other.id, { id: "222", sha: other.sha });
   const elsewhere: ReviewJob = { ...job, id: jobId("j9") };
   asked(store, ledgerChange, elsewhere);
-  expect(store.requests.unreacted()).toHaveLength(2);
+  // A settle comment refused owes its 😕.
+  store.requests.refused(REPO, "c7");
+  expect(store.requests.unreacted()).toHaveLength(3);
 
   store.repos.signInChanged(T2);
   store.close();
@@ -3177,6 +3299,9 @@ test("a data folder from before ADR 0066 names its changes by owner and name: it
     id: "d1",
     changeId: old,
     findingId: finding.id,
+    decision: "wrong",
+    via: "app",
+    answering: null,
     runId: run.id,
     checkId: "111",
     dismiss: dismissing("F1"),

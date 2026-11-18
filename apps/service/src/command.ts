@@ -1,7 +1,7 @@
 // The one `lookover` command (ADR 0054, "One `lookover` command"): reads its first word and hands the rest on.
 // `serve` runs the service in the foreground, as its other arguments describe (`readConfig`), printing nothing with
-// `--background`; `start`, `open`, `status` and `stop` run it in the background and reach it (`background.ts`); `wait`, `feedback`
-// and `reply` are the agent's (`agent-cli`'s `run`, ADR 0043), handed their arguments without `--home=`: they read
+// `--background`; `start`, `open`, `status` and `stop` run it in the background and reach it (`background.ts`); `wait`, `feedback`,
+// `reply` and `settle` are the agent's (`agent-cli`'s `run`, ADR 0043), handed their arguments without `--home=`: they read
 // the one App, the shared App (ADR 0073), and never the data folder; plus
 // `--version` and `help`; and `--skill`, in no help, the skill it installs, for the build's check. `main.ts` runs it on this machine; a test, with its own.
 import { USAGE as AGENT_USAGE } from "@lookover/agent-cli";
@@ -49,7 +49,7 @@ export interface LookoverDeps {
   background: BackgroundPorts;
 }
 
-const AGENT_VERBS = new Set(["wait", "feedback", "reply"]);
+const AGENT_VERBS = new Set(["wait", "feedback", "reply", "settle"]);
 const HELP = new Set(["help", "--help", "-h"]);
 
 const LOOKOVER_USAGE = `${SERVE_USAGE} [--background]
@@ -66,8 +66,8 @@ help       This list.
 
 --home=<dir> may also come before the command: lookover --home=<dir> open.
 
-Exit (all but wait, feedback and reply): 0 done or running, 1 error, 2 usage, 3 not running (status
-and open; stop exits 0 then: nothing is left running).
+Exit (all but wait, feedback, reply and settle): 0 done or running, 1 error, 2 usage, 3 not running
+(status and open; stop exits 0 then: nothing is left running).
 
 ${AGENT_USAGE}`;
 

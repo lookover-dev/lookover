@@ -73,13 +73,18 @@
 // to `log`, and the rest go on. Once the check completed, the request comments the round answers (`requests`) and the
 // root comment of each finding it withdrew are minimized as `resolved`, one post each; a refusal that stands, after the
 // transient ones were tried again, never fails the round either: it goes to `log`, and the rest go on.
-// The owner's dismissal (ADR 0052, "This finding is wrong") posts outside any round, through an outbox of its own
-// keyed by the dismissal (`dismissalPostsOf`): "Dismissed by the owner." on the finding's thread, ending with a
-// hidden marker naming the dismissal and the finding (looked for before it is sent again), then the status block
-// (rewritten from where the change stands then) and, when the caller gives its id, the latest round's check, rendered
-// from that round restated over the ledger as it is when it is sent (the caller's `core.standing`: verdict,
-// conclusion and result block included), then the thread's root minimized as `resolved`. The thread is found in one
-// read made as the posts begin; a finding with none (in the status block only) gets no reply and nothing minimized.
+// The owner's decision on a finding, marked wrong (ADR 0052, "This finding is wrong") or accepted as is (ADR 0100),
+// posts outside any round, through an outbox of its own keyed by the dismissal (`dismissalPostsOf(checkId, decision,
+// answering)`):
+// "Dismissed by the owner" or "Accepted by the owner" (or, when the finding's `decidedVia` is `agent`, "… on the
+// owner's word, through their coding agent", ADR 0101) with the owner's reason, if any (the finding's `closedWhy`,
+// filtered with the round) on the finding's thread, ending with a hidden marker naming the dismissal and the finding
+// (looked for before it is sent again), then the status block (rewritten from where the change stands then) and, when
+// the caller gives its id, the latest round's check, rendered from that round restated over the ledger as it is when it
+// is sent (the caller's `core.standing`: verdict, conclusion and result block included), then, for one marked wrong
+// only, the thread's root minimized as `resolved`: an accepted finding stays readable; last, for the coding agent's
+// settle (ADR 0101), 🚀 on its settle comment (`answering`), a refusal of it to `log`. The thread is found in one read
+// made as the posts begin; a finding with none (in the status block only) gets no reply and nothing minimized.
 // The output filter (ADR 0056, SR-08): every text an engine or a person wrote that a round posts again (each
 // finding's category, title, body and reason for closing, the confirm pass's reason and evidence, its claim's text,
 // each reply's reason) is filtered once, as `publish`, `dismiss` and `findReview` receive the round, so the review,

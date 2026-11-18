@@ -130,6 +130,50 @@ test("a finding's suggestion (ADR 0074): a finding stored before it reads back w
   after.close();
 });
 
+test("the owner's decision (ADR 0100, 0101): 0.16.0's data folder opens, its owed dismissal a wrong one from the app", () => {
+  const home = migratedBefore("20261118090000-dismissals-decision.sql");
+  const path = join(home, "lookover.sqlite");
+  const db = new Database(path, { strict: true });
+  db.run("INSERT INTO plans (run_id, change_id, n, plan, ledger) VALUES ('r1', 'o/r#1', 1, '{}', '[]')");
+  db.run(
+    "INSERT INTO dismissals (id, change_id, finding_id, run_id, check_id, at) VALUES ('d1', 'o/r#1', 'F1', 'r1', NULL, 0)",
+  );
+  db.run(
+    "INSERT INTO dismissal_posts (dismissal_id, seq, kind, host_id, tries) VALUES ('d1', 0, 'reply', '7', 1)",
+  );
+  db.run(
+    "INSERT INTO dismissal_posts (dismissal_id, seq, kind, host_id, tries) VALUES ('d1', 1, 'status', NULL, 0)",
+  );
+  db.close();
+  const store = openStore({ home, migrations: ALL, durable: false });
+  expect(store.migrated[0]).toBe("20261118090000-dismissals-decision");
+  expect(store.dismissals.owing()).toEqual(["d1"]);
+  expect(store.dismissals.of("d1")).toMatchObject({
+    decision: "wrong",
+    via: "app",
+    answering: null,
+    posts: [
+      { kind: "reply", hostId: "7", tries: 1 },
+      { kind: "status", hostId: null, tries: 0 },
+    ],
+  });
+  store.close();
+  const after = new Database(path, { strict: true });
+  after.run(
+    "INSERT INTO dismissals (id, change_id, finding_id, decision, via, comment_id, run_id, check_id, at) VALUES ('d2', 'o/r#1', 'F2', 'accepted', 'agent', '42', 'r1', NULL, 0)",
+  );
+  after.run(
+    "INSERT INTO dismissal_posts (dismissal_id, seq, kind, host_id, tries) VALUES ('d2', 0, 'react', NULL, 0)",
+  );
+  after.run("INSERT INTO settle_refusals (repo_owner, repo_name, id) VALUES ('o', 'r', '43')");
+  expect(() =>
+    after.run(
+      "INSERT INTO dismissals (id, change_id, finding_id, decision, via, run_id, check_id, at) VALUES ('d3', 'o/r#1', 'F3', 'noisy', 'app', 'r1', NULL, 0)",
+    ),
+  ).toThrow();
+  after.close();
+});
+
 test("a file in a given migrations folder not named as a migration is refused", () => {
   const dir = folder();
   for (const file of ["20261001000000-a.sql", "notes.md"]) writeFileSync(join(dir, file), "");

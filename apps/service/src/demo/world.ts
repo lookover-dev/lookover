@@ -1,15 +1,15 @@
 // The fake world a scenario plays in (ADR 0046): the fake host, the scripted engines and the scripted retrieval,
-// built from the scenario's data, and each move of its script played on them. A move the host would show (a
-// change opened, pushed, asked about, closed) is followed by a listing now, so the service sees it at once; one
-// on an engine by a health check, so the state shows at once. An engine installed again is the exception: that
-// waits for the owner's "Check again", as it would on their machine; so does a reply on a finding's thread, which
-// the next round reads (ADR 0052). The lines the fake host accepts a comment
-// on are read from each commit's diff (`@lookover/diff`), never written twice. Who wrote a change is read as the
-// service reads it (`core.writerOf` over the commits' messages), so the drawer's "your agent opens a pull
-// request" and the round plan agree. The owner is signed in to the shared App (ADR 0066) unless the setup is before
-// its GitHub step; `World.shared` says which accounts the sign-in reaches. Signed in,
-// the host's App stands for its installation on the owner's account, and each organisation the world reaches has its
-// own, its repositories beside the owner's: a change is named by its repository and number, so two repositories of one name each have theirs.
+// built from the scenario's data, and each move of its script played on them. A move the host would show (a change
+// opened, pushed, asked about, a finding settled by the agent, closed) is followed by a listing now, so the service
+// sees it at once; one on an engine by a health check, so the state shows at once. An engine installed again is the
+// exception: that waits for the owner's "Check again", as it would on their machine; so does a reply on a finding's
+// thread, which the next round reads (ADR 0052). The lines the fake host accepts a comment on are read from each
+// commit's diff (`@lookover/diff`), never written twice. Who wrote a change is read as the service reads it
+// (`core.writerOf` over the commits' messages), so the drawer's "your agent opens a pull request" and the round plan
+// agree. The owner is signed in to the shared App (ADR 0066) unless the setup is before its GitHub step;
+// `World.shared` says which accounts the sign-in reaches. Signed in, the host's App stands for its installation on
+// the owner's account, and each organisation the world reaches has its own, its repositories beside the owner's: a
+// change is named by its repository and number, so two repositories of one name each have theirs.
 import {
   type ChangeRef,
   type CommitSha,
@@ -24,6 +24,7 @@ import {
   repositoryName,
   reviewRequest,
   sameLogin,
+  settleComment,
 } from "@lookover/contracts";
 import { writerOf } from "@lookover/core";
 import { indexDiff } from "@lookover/diff";
@@ -245,6 +246,11 @@ export function createWorld(scenario: Scenario, clock: DemoClock, worktrees: str
     },
     ask: async (move, room) => {
       await host.asAgent(world.owner).comment(move.change, reviewRequest(headOf(move.change)));
+      await listed(room);
+    },
+    settle: async (move, room) => {
+      const { finding, decision, reason } = move;
+      await host.asAgent(world.owner).comment(move.change, settleComment({ finding, decision, reason }));
       await listed(room);
     },
     reply: async (move) => {

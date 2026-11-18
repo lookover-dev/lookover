@@ -6,7 +6,9 @@
 // 0069), then spliced by `contracts`' `spliceStatus` and written whole, a 403 on it the person's permission
 // (`invalid`), never a sign-out. Both lookups read every page GitHub's `Link` header gives. GitHub's rules from
 // spike 03 (ADR 0022) are applied before a request leaves: the check output and every body are counted in UTF-8
-// bytes.
+// bytes. A check's PATCH that GitHub answers 404 within 30 s of the check's creation by this writer is sent again, a
+// second apart, until those 30 s are over (GitHub's lag on a check it just answered with, ADR 0102); any other 404 is
+// `not_found` at once.
 import type {
   ChangeRef,
   CheckOutput,
@@ -27,6 +29,7 @@ import {
   characterCount,
   DESCRIPTION_MAX_CHARACTERS,
   HostError,
+  repositoryName,
   showsStatus,
   spliceStatus,
   statusRoom,
@@ -80,7 +83,11 @@ const STATUS: Record<OpenCheckStatus, "queued" | "in_progress"> = {
 };
 
 /** A reaction as GitHub names it. */
-const CONTENT: Record<Reaction, "eyes" | "rocket"> = { eyes: "eyes", rocket: "rocket" };
+const CONTENT: Record<Reaction, "eyes" | "rocket" | "confused"> = {
+  eyes: "eyes",
+  rocket: "rocket",
+  confused: "confused",
+};
 
 /** Why a comment is hidden, as GitHub's `minimizeComment` names it. */
 const CLASSIFIER: Record<MinimizeReason, "RESOLVED" | "OUTDATED"> = {
@@ -124,12 +131,15 @@ const unprocessable = (words: string): HostError | null =>
  * hand on the port: a stopping service waits at most these 30 s on one status write. The block last sent is kept in
  * memory only (`sent`): after a restart, the first write of a change reads once and doesn't wait, so a read lagging
  * behind the write before the restart can lose an edit the author saved in that lag (accepted: ADR 0074's
- * read-modify-write race).
+ * read-modify-write race). The same 30 s after a check's creation, and the same pause, bound the PATCH of that check
+ * sent again while GitHub answers it 404 (ADR 0102); its memory (`created`) is in memory only too.
  */
 const LAG_MS = 30_000;
 const LAG_PAUSE_MS = 1_000;
+/** The sends of a check's PATCH at most: one, then one a pause apart for the 30 s, should the clock not move. */
+const MOST_SENDS = LAG_MS / LAG_PAUSE_MS + 1;
 
-/** The time and the pause the status block's write waits out GitHub's lag with. */
+/** The time and the pause the status block's write and a just-created check's write wait out GitHub's lag with. */
 export interface Waiting {
   clock: Clock;
   sleep(ms: number): Promise<void>;
@@ -154,6 +164,43 @@ export function createWriter(
   /** The block this writer last sent to each change, by its name: what a fresh read must show. */
   const sent = new Map<string, string>();
   const keyOf = (change: ChangeRef) => changeName(change).toLowerCase();
+  /**
+   * When this writer created each check of the last 30 s, by its repository and id, case ignored as GitHub ignores it;
+   * older ones are dropped as it is read.
+   */
+  const created = new Map<string, number>();
+  const checkKey = (repo: RepositoryRef, checkId: string) =>
+    `${repositoryName(repo).toLowerCase()}#${checkId}`;
+  const dropStale = () => {
+    const now = clock.now();
+    for (const [key, at] of created) if (now - at >= LAG_MS) created.delete(key);
+  };
+  const createdLately = (key: string) => {
+    dropStale();
+    return created.has(key);
+  };
+
+  /**
+   * A check's PATCH, sent again a second later while GitHub answers 404 for a check this writer created less than
+   * 30 s ago (ADR 0102), at most `MOST_SENDS` times whatever the clock says; each send one write of ADR 0080, any
+   * other refusal as it is. Only the PATCH is sent again: a 404 from the token's renewal ends at once.
+   */
+  async function patchCheck(repo: RepositoryRef, checkId: string, body: object) {
+    const path = `${repoPath(repo)}/check-runs/${checkId}`;
+    const key = checkKey(repo, checkId);
+    await session.withToken(repo, async (token) => {
+      for (let sends = 1; ; sends++) {
+        try {
+          await api.request({ method: "PATCH", path, bearer: token, body });
+          return;
+        } catch (error) {
+          const lag = error instanceof HostError && error.failure === "not_found";
+          if (!lag || sends >= MOST_SENDS || !createdLately(key)) throw error;
+          await sleep(LAG_PAUSE_MS);
+        }
+      }
+    });
+  }
 
   /** Every item of a listing, page after page as GitHub's `Link` header gives them. */
   async function everyPage<T>(path: string, token: string, read: (body: unknown, where: string) => T[]) {
@@ -181,7 +228,10 @@ export function createWriter(
           external_id: externalId,
         };
         const answer = await api.request({ method: "POST", path, bearer: token, body });
-        return String(parse(checkRun, answer.body, `POST ${path}`).id);
+        const id = String(parse(checkRun, answer.body, `POST ${path}`).id);
+        dropStale();
+        created.set(checkKey(repo, id), clock.now());
+        return id;
       });
     },
     async findCheck(repo, sha, externalId) {
@@ -198,23 +248,16 @@ export function createWriter(
     async updateCheck(repo, checkId, status, output) {
       allowed(repo);
       fits(output);
-      const path = `${repoPath(repo)}/check-runs/${checkId}`;
-      await session.withToken(repo, (token) =>
-        api.request({ method: "PATCH", path, bearer: token, body: { status: STATUS[status], output } }),
-      );
+      await patchCheck(repo, checkId, { status: STATUS[status], output });
     },
     async completeCheck(repo, checkId, conclusion, output) {
       allowed(repo);
       fits(output);
-      const path = `${repoPath(repo)}/check-runs/${checkId}`;
-      await session.withToken(repo, (token) =>
-        api.request({
-          method: "PATCH",
-          path,
-          bearer: token,
-          body: { status: "completed", conclusion, output },
-        }),
-      );
+      await patchCheck(repo, checkId, {
+        status: "completed",
+        conclusion,
+        output,
+      });
     },
     async publishReview(change, review) {
       allowed(change.repo);

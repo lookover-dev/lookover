@@ -1,12 +1,12 @@
 // Port: the Git host as the coding agent sees it, with its own login (ADR 0021, ADR 0043). `lookover wait`
 // (`agent-cli`) reads and writes through it with the agent's own token, never the person's sign-in: the token's own
 // account (ADR 0066), the open change of a branch, a change's head, the `Lookover` checks of a commit from one App, the
-// change's conversation comments with their reactions, and a comment written as the agent; Lookover's review threads, a
-// reply in one and resolving one (ADR 0052: the App can't resolve, the agent's login can). `agent-cli` holds the real
-// adapter (GitHub over HTTPS, GraphQL for the threads); `testkit`'s `FakeGitHost.asAgent` is the fake, over the same
-// memory the App's ports see.
-// It reports what the host shows; `wait` decides what it means (which comment is a request, which check counts,
-// which reply is a claim).
+// change's conversation comments with their reactions, who put each of Lookover's reactions on one, and a comment
+// written as the agent; Lookover's review threads, a reply in one and resolving one (ADR 0052: the App can't resolve,
+// the agent's login can). `agent-cli` holds the real adapter (GitHub over HTTPS, GraphQL for the threads); `testkit`'s
+// `FakeGitHost.asAgent` is the fake, over the same memory the App's ports see.
+// It reports what the host shows; `wait` and `settle` decide what it means (which comment is a request, which check
+// counts, which reply is a claim, whose reaction is Lookover's).
 // Error modes: every refusal is a `HostError` (`not_found` for a repository, change, commit, comment or thread the
 // host doesn't have; `too_large` for a reply over `COMMENT_MAX_BYTES`; `unauthorized` for a token refused, or one
 // without the right to resolve a thread, said plainly; `rate_limited`, `unavailable` as for the App's ports).
@@ -15,6 +15,7 @@ import type { HostLogin } from "./github-app.ts";
 import type { ChangeRef, RepositoryRef } from "./host.ts";
 import type { HostThread } from "./host-thread.ts";
 import type { HostCheck, HostComment } from "./host-view.ts";
+import type { Reaction } from "./host-writer.ts";
 import type { CommitSha } from "./ids.ts";
 
 /**
@@ -42,6 +43,15 @@ export interface AgentCheck extends HostCheck {
   externalId: string;
 }
 
+/**
+ * One of Lookover's reactions on a comment, with the numeric id of the account that put it: Lookover's are its
+ * person's (ADR 0066, 0073); anyone else's is a teammate's.
+ */
+export interface AgentReaction {
+  reaction: Reaction;
+  by: number;
+}
+
 export interface AgentHost {
   /**
    * The account the token belongs to (GitHub's `GET /user`): the person whose checks the agent waits on, among
@@ -66,6 +76,13 @@ export interface AgentHost {
    * reactions on it. Throws `HostError("not_found")` for a change that isn't one.
    */
   comments(change: ChangeRef): Promise<HostComment[]>;
+  /**
+   * Who put each of Lookover's reactions (`Reaction`) on the conversation comment `commentId` of the repository: one
+   * entry an account and a reaction; any other reaction, and one by a deleted account, is left out. `comments`' counts
+   * are everyone's; this tells Lookover's own. Throws `HostError("not_found")` for a comment the repository doesn't
+   * have.
+   */
+  reactions(repo: RepositoryRef, commentId: string): Promise<AgentReaction[]>;
   /**
    * Writes a comment on the change's conversation as the token's account. Returns its id. Throws
    * `HostError("not_found")` for a change that isn't one, and posts nothing then.

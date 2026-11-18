@@ -7,7 +7,7 @@ import type { RunActivity } from "./activity.ts";
 import type { Change } from "./change.ts";
 import type { Connection } from "./connection.ts";
 import type { Engine, EngineId } from "./engine.ts";
-import type { Finding } from "./finding.ts";
+import type { DecisionVia, Finding } from "./finding.ts";
 import type { ChangeId, CommitSha, FindingId, RepositoryId } from "./ids.ts";
 import type { PushedBy, ReviewJob } from "./job.ts";
 import type { LoopState } from "./loop.ts";
@@ -123,6 +123,19 @@ export type EventBody =
       findingIds: FindingId[];
       findings: Finding[];
       loop: LoopState;
+      /** How the decision came (ADR 0101). */
+      via: DecisionVia;
+    }
+  /** The owner accepted findings as is (ADR 0100): the ledger they leave, each `accepted` with the reason as its why. */
+  | {
+      type: "finding.accepted";
+      at: number;
+      changeId: ChangeId;
+      findingIds: FindingId[];
+      findings: Finding[];
+      loop: LoopState;
+      /** How the decision came (ADR 0101). */
+      via: DecisionVia;
     };
 
 /** An event as it is sent: what happened, and its number. */

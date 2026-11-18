@@ -32,6 +32,8 @@ export const changeId = brand<"change">("change ID", named);
 export const repositoryId = brand<"repository">("repository ID", named);
 export const connectionId = brand<"connection">("connection ID", named);
 export const findingId = brand<"finding">("finding ID", named);
+/** A finding's id as Lookover numbers them on a pull request (ADR 0032): `F` and a number from 1, `F1`, `F2`… */
+export const FINDING_PATTERN = /^F[1-9]\d*$/;
 export const jobId = brand<"job">("job ID", named);
 export const runId = brand<"run">("run ID", named);
 /** A commit SHA, full or abbreviated: 7 to 40 lowercase hex digits. */

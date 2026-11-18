@@ -63,6 +63,13 @@ const command = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setup.finish") }),
   z.object({ type: z.literal("review.request"), changeId: change }),
   z.object({ type: z.literal("noise.apply"), choice: noise }),
+  // Any reason parses: the service puts it on one line and refuses it over `REASON_MAX` characters (ADR 0100).
+  z.object({
+    type: z.literal("finding.accept"),
+    changeId: change,
+    findingId: finding,
+    reason: z.string().exactOptional(),
+  }),
   z.object({ type: z.literal("service.pause"), for: enumOf<PauseFor>()(["hour", "tomorrow", "forever"]) }),
   z.object({ type: z.literal("service.resume") }),
   z.object({ type: z.literal("service.runChecks") }),

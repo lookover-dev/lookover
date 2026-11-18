@@ -62,6 +62,7 @@ function finding(n: number, status: FindingStatus = "open", extra: Partial<Findi
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
     ...extra,

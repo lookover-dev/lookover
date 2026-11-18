@@ -41,8 +41,9 @@ Each exits 0 when done (for `status`: running), 1 on an error, 2 when it can't r
 | `lookover wait` | Asks for the review of the commit you pushed, if nobody has, waits for its check and says what to do next by its exit code |
 | `lookover feedback` | The findings waiting on you in the newest round, each with its thread |
 | `lookover reply <finding> <claim> <text>` | Answers a finding on its thread: `fixed`, `wont-fix`, `disputed`, `deferred` or `question` |
+| `lookover settle <finding> <accepted\|wrong> --confirmed-by-owner <reason>` | Settles a finding on your word, once you told your agent to: accepted as is, or wrong |
 
-They take `--pr N`; `wait` and `feedback` take `--json`; `wait` also takes `--timeout` and `--appear-timeout`. Their exit codes and the loop are in [Your coding agent](/docs/coding-agent/).
+They take `--pr N`; `wait` and `feedback` take `--json`; `wait` also takes `--timeout` and `--appear-timeout`, and `settle` takes `--timeout`. Their exit codes and the loop are in [Your coding agent](/docs/coding-agent/).
 
 ## The data folder
 

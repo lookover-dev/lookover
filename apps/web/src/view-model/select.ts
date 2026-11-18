@@ -435,14 +435,6 @@ export function reviewButtonPrimary(it: ChangeReview): boolean {
   return it.change.newCommits > 0 || (it.review.preview && unsettledFindings(it.review).length > 0);
 }
 
-/**
- * Whether Open on GitHub is the page's filled primary: on a review that needs the person, where they settle the
- * thread (design-system.md "Button"), unless the review button already is, on commits nobody looked at.
- */
-export function gitHubPrimary(it: ChangeReview): boolean {
-  return status(it).kind === "needs-you" && !reviewButtonPrimary(it);
-}
-
 /** What the review button asks for: "Review now" before any round ran, "Review again" after. */
 export function reviewLabel(it: ChangeReview): (typeof REVIEW_BUTTON)["now" | "again"] {
   return it.review.rounds.length === 0 ? REVIEW_BUTTON.now : REVIEW_BUTTON.again;

@@ -1,11 +1,12 @@
 // What `lookover` reads on Lookover's threads (ADR 0052): the agent's newest reply on an unsettled finding's thread,
-// which `wait` asks a round to answer; the threads of findings verified fixed, withdrawn or dismissed, which `wait`
-// resolves with the agent's own login (the App can't, ADR 0074); Lookover's last reply on a thread, in words, which
-// `feedback` shows.
+// which `wait` asks a round to answer; the threads of findings verified fixed, withdrawn, dismissed or accepted,
+// which `wait` resolves with the agent's own login (the App can't, ADR 0074); Lookover's last reply on a thread, in
+// words, which `feedback` shows.
 import {
   type AgentHost,
   type AgentThread,
   type ChangeRef,
+  enumOf,
   type FindingStatus,
   HostError,
   isUnsettled,
@@ -72,12 +73,40 @@ const SETTLED = {
   verified_fixed: ["Lookover verified it fixed.", "Lookover verified them fixed."],
   withdrawn: ["Lookover withdrew it.", "Lookover withdrew them."],
   dismissed: ["the owner dismissed it.", "the owner dismissed them."],
+  accepted: ["the owner accepted it as is.", "the owner accepted them as is."],
 } satisfies Partial<Record<FindingStatus, [string, string]>>;
 
 type Settled = keyof typeof SETTLED;
-/** The settled statuses, in the order `wait` says them. */
-const SAID_IN_ORDER: Settled[] = ["verified_fixed", "withdrawn", "dismissed"];
+/**
+ * Why a thread was resolved: its finding's status, and apart, the owner's decision the agent posted on their word
+ * (ADR 0101, the result's `resolution.via`): `wait` runs as that agent, so it says it was through it.
+ */
+type Why = Settled | "dismissed_through_you" | "accepted_through_you";
+const WORDS: Record<Why, [string, string]> = {
+  ...SETTLED,
+  dismissed_through_you: ["the owner dismissed it, through you.", "the owner dismissed them, through you."],
+  accepted_through_you: [
+    "the owner accepted it as is, through you.",
+    "the owner accepted them as is, through you.",
+  ],
+};
+/** The reasons, in the order `wait` says them: the typecheck refuses a list that leaves one out. */
+const SAID_IN_ORDER = enumOf<Why>()([
+  "verified_fixed",
+  "withdrawn",
+  "dismissed",
+  "dismissed_through_you",
+  "accepted",
+  "accepted_through_you",
+]).options;
 const isSettled = (status: FindingStatus): status is Settled => status in SETTLED;
+
+/** Why `finding`'s thread is resolved, by its status and, for the owner's decision, how it came. */
+function whyOf(finding: ReviewResult["findings"][number], status: Settled): Why {
+  if ((status === "dismissed" || status === "accepted") && finding.resolution?.via === "agent")
+    return `${status}_through_you`;
+  return status;
+}
 
 /** Resolves the finding's threads still open: whether one was; a refusal said plainly. */
 async function resolveOpen(
@@ -101,8 +130,9 @@ async function resolveOpen(
 
 /**
  * Resolves, with the agent's login, the threads still open of the findings the round verified fixed, withdrew or
- * saw dismissed by the owner (ADR 0074: Lookover doesn't resolve them itself until it may), and says which on stderr,
- * by why; a refusal is said plainly, never an exit of its own. Reads the threads it is given.
+ * saw dismissed or accepted as is by the owner (ADR 0074, ADR 0100: Lookover doesn't resolve them itself until it
+ * may), and says which on stderr, by why, the owner's decision through the agent on their word apart (ADR 0101); a
+ * refusal is said plainly, never an exit of its own. Reads the threads it is given.
  */
 export async function resolveSettled(
   host: AgentHost,
@@ -110,13 +140,21 @@ export async function resolveSettled(
   threads: AgentThread[],
   result: ReviewResult,
 ): Promise<void> {
-  const resolved: Record<Settled, string[]> = { verified_fixed: [], withdrawn: [], dismissed: [] };
+  const resolved: Record<Why, string[]> = {
+    verified_fixed: [],
+    withdrawn: [],
+    dismissed: [],
+    dismissed_through_you: [],
+    accepted: [],
+    accepted_through_you: [],
+  };
   for (const f of result.findings) {
-    if (isSettled(f.status) && (await resolveOpen(host, w, threads, f.id))) resolved[f.status].push(f.id);
+    if (isSettled(f.status) && (await resolveOpen(host, w, threads, f.id)))
+      resolved[whyOf(f, f.status)].push(f.id);
   }
-  for (const status of SAID_IN_ORDER) {
-    const ids = resolved[status];
-    const [one, several] = SETTLED[status];
+  for (const why of SAID_IN_ORDER) {
+    const ids = resolved[why];
+    const [one, several] = WORDS[why];
     if (ids.length === 1) w.err(`Resolved the thread of ${listed(ids)}: ${one}`);
     if (ids.length > 1) w.err(`Resolved the threads of ${listed(ids)}: ${several}`);
   }

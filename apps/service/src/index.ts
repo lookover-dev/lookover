@@ -346,7 +346,7 @@ export {
   WATCH_IGNORED,
 } from "./live-config.ts";
 export { acquireLiveLock, type LiveLock, LiveLockHeld } from "./live-lock.ts";
-export { droppedLine, logLineOf } from "./log-lines.ts";
+export { droppedLine, logLineOf, settleRefusedLine } from "./log-lines.ts";
 export { type LogReader, type LogSink, openLogSink } from "./log-sink.ts";
 export {
   DEV_VALUE_PREFIX,

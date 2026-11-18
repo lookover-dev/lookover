@@ -221,7 +221,7 @@ test("a request whose 👀 was still owed at the restart, the sign-in gone: no r
     () => snapshot(first.service, cookie),
     (s) => s.reviews[PLANTED]?.job?.state === "deferred",
   );
-  expect(host.view(PR1).comments.map((c) => c.reactions)).toEqual([{ eyes: 0, rocket: 0 }]);
+  expect(host.view(PR1).comments.map((c) => c.reactions)).toEqual([{ eyes: 0, rocket: 0, confused: 0 }]);
   await first.service.stop();
   engines.setHealth("claude", { installed: true, version: "2.4.1", signedIn: true });
 
@@ -231,7 +231,7 @@ test("a request whose 👀 was still owed at the restart, the sign-in gone: no r
     cancel: "sign-in-changed",
   });
   expect(sent).toEqual([]);
-  expect(host.view(PR1).comments.map((c) => c.reactions)).toEqual([{ eyes: 0, rocket: 0 }]);
+  expect(host.view(PR1).comments.map((c) => c.reactions)).toEqual([{ eyes: 0, rocket: 0, confused: 0 }]);
 });
 
 test("a request whose round was done but whose 🚀 GitHub refused, the sign-in gone at the restart: no 🚀 is sent later", async () => {
@@ -256,10 +256,10 @@ test("a request whose round was done but whose 🚀 GitHub refused, the sign-in 
     () => snapshot(first.service, cookie),
     (s) => s.reviews[PLANTED]?.job?.state === "done",
   );
-  expect(host.view(PR1).comments.map((c) => c.reactions)).toEqual([{ eyes: 1, rocket: 0 }]);
+  expect(host.view(PR1).comments.map((c) => c.reactions)).toEqual([{ eyes: 1, rocket: 0, confused: 0 }]);
   await first.service.stop();
 
   const { sent } = await nextPersonSignsIn(dir, { host, time, engines });
   expect(sent.filter((p) => p.kind === "reaction")).toEqual([]);
-  expect(host.view(PR1).comments.map((c) => c.reactions)).toEqual([{ eyes: 1, rocket: 0 }]);
+  expect(host.view(PR1).comments.map((c) => c.reactions)).toEqual([{ eyes: 1, rocket: 0, confused: 0 }]);
 });

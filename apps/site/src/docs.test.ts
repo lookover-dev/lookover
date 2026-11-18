@@ -1,8 +1,10 @@
 // The docs (ADR 0062, D5; ADR 0064): eight pages, each in the sidebar once, none pointing into the private tree, and
-// the coding agent's exit codes, `wait`'s defaults and `reply`'s claims as the agent's command has them.
+// the coding agent's exit codes, `wait`'s defaults, `reply`'s claims and `settle`'s line as the agent's command has
+// them, and what the pages say of settling on the owner's word (ADR 0101), the reason's limit as the service keeps it.
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { CLAIMS, USAGE } from "@lookover/agent-cli";
+import { REASON_MAX } from "@lookover/contracts";
 
 const DOCS = new URL("./content/docs/docs/", import.meta.url);
 const CONFIG = new URL("../astro.config.mjs", import.meta.url);
@@ -75,7 +77,7 @@ describe("the docs", () => {
   test("the coding agent's page names the threads `wait` resolves as its help does", () => {
     const words = (text: string) =>
       /resolves\s+the\s+threads\s+of\s+the\s+findings\s+it\s+([^.]+)\./.exec(text)?.[1]?.replace(/\s+/g, " ");
-    expect(words(USAGE)).toBe("verified fixed or withdrew");
+    expect(words(USAGE)).toBe("verified fixed or withdrew, or the owner settled");
     expect(words(page("coding-agent.md"))).toBe(words(USAGE));
   });
 
@@ -91,5 +93,33 @@ describe("the docs", () => {
       .filter((row) => row !== null)
       .map((row) => ({ word: row[1], opening: row[2] }));
     expect(rows).toEqual(Object.values(CLAIMS).map(({ word, opening }) => ({ word, opening })));
+  });
+
+  test("the commands page gives `settle`'s line as its help does, and the coding agent's page its timeout", () => {
+    const usage = /lookover settle (<finding> <accepted\|wrong> --confirmed-by-owner <reason>)/.exec(
+      USAGE,
+    )?.[1];
+    expect(usage).toBe("<finding> <accepted|wrong> --confirmed-by-owner <reason>");
+    expect(page("commands.md")).toContain(`\`lookover settle ${usage?.replace("|", "\\|")}\``);
+    const timeout = /\(settle: (\d+)m, for Lookover's answer\)/.exec(USAGE)?.[1];
+    expect(timeout).toBe("3");
+    expect(
+      /up to (\d+) minutes \(`--timeout`\)\. It exits 0 once the finding is settled/.exec(
+        page("coding-agent.md"),
+      )?.[1],
+    ).toBe(timeout);
+  });
+
+  test("the coding agent's page and the security page say when the agent settles, and what nothing proves", () => {
+    const words = (text: string) => text.replace(/\s+/g, " ");
+    const agent = words(page("coding-agent.md"));
+    expect(agent).toContain("`--confirmed-by-owner` is required and takes your reason");
+    expect(agent).toContain(`on one line of at most ${REASON_MAX} characters`);
+    expect(agent).toContain(
+      "only when you said so in the conversation: never on its own judgment, never to get past a finding it disagrees with",
+    );
+    expect(agent).toContain("nothing on GitHub proves you confirmed it");
+    expect(agent).not.toContain("No reply, comment or command settles it");
+    expect(words(page("security.md"))).toContain("nothing on GitHub proves you confirmed it");
   });
 });

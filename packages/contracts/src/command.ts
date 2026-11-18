@@ -16,6 +16,12 @@ export type NoiseChoice =
   | { kind: "blocking-only"; changeId: ChangeId }
   | { kind: "rule-off"; changeId: ChangeId; findingId: FindingId };
 
+/**
+ * Why `finding.accept` is refused besides what "This finding is wrong" is refused for: a reason over `REASON_MAX`
+ * characters once on one line (`oneLineReason`).
+ */
+export type AcceptRefusal = "reason_too_long";
+
 export type Command =
   | { type: "engine.signIn"; id: EngineId }
   | { type: "engine.check" }
@@ -56,6 +62,13 @@ export type Command =
   | { type: "setup.finish" }
   | { type: "review.request"; changeId: ChangeId }
   | { type: "noise.apply"; choice: NoiseChoice }
+  /**
+   * "Accept as is" (ADR 0100): the owner settles a posted, unsettled finding as correct and not to be fixed, with an
+   * optional one-line reason (whitespace collapsed, empty taken for none). Said on its thread, the status block and
+   * the check rewritten, never counted as noise, never raised again on the change. Refused as "This finding is wrong"
+   * is (`SettingsRefusal`'s `no_such_finding`, `settled`, `reviewing`), and as `AcceptRefusal` says.
+   */
+  | { type: "finding.accept"; changeId: ChangeId; findingId: FindingId; reason?: string }
   | { type: "service.pause"; for: PauseFor }
   | { type: "service.resume" }
   | { type: "service.runChecks" }

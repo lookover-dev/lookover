@@ -14,6 +14,7 @@ import {
   Empty,
   Eyes,
   Group,
+  Input,
   LiveLog,
   Notice,
   Ring,
@@ -38,6 +39,9 @@ import {
   severityLabel,
 } from "../view-model/confirm.ts";
 import {
+  ACCEPT_AS_IS,
+  type AcceptPopover,
+  acceptAsIs,
   doneLine,
   edgeNeedsYou,
   type FindingTab,
@@ -46,6 +50,7 @@ import {
   findingTabs,
   type NoiseOption,
   needsYou,
+  needsYouBanner,
   noiseChoices,
   onGitHub,
   placeText,
@@ -65,7 +70,6 @@ import {
   changeReviewAt,
   differences,
   failedNotice,
-  gitHubPrimary,
   lookedOver,
   nextStep,
   notReviewed,
@@ -200,6 +204,63 @@ function NoiseMenu({
   );
 }
 
+/**
+ * Accept as is (ADR 0100), on a finding that counts: a secondary on one that needs the person, a ghost on the others.
+ * Its popover keeps what it opened with, as "Too noisy?"'s does, so a round landing meanwhile moves nothing.
+ */
+function AcceptAsIs({ it, finding }: { it: ChangeReview; finding: Finding }) {
+  const accept = acceptAsIs(it.change.id, finding, roundOnHead(it.review, it.change));
+  if (accept === null) return null;
+  return (
+    <Layer
+      className="pop"
+      trigger={(props) => (
+        <Button variant={needsYou(finding) ? "secondary" : "ghost"} size="sm" {...props}>
+          {ACCEPT_AS_IS}
+        </Button>
+      )}
+    >
+      {(close) => <AcceptForm opened={accept} close={close} />}
+    </Layer>
+  );
+}
+
+/** Accept as is's popover, mounted while it is open: a title, its effect, the one optional line, Back and Accept. */
+function AcceptForm({ opened, close }: { opened: AcceptPopover; close: () => void }) {
+  const send = useSend();
+  const toast = useToast();
+  const [accept] = useState(opened);
+  const [reason, setReason] = useState("");
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        // Said once the service took it: a locked server asks to unlock first.
+        send(accept.command(reason), () => toast({ text: accept.saved }));
+        close();
+      }}
+    >
+      <h4>{accept.title}</h4>
+      <p>{accept.effect}</p>
+      <Input
+        label={accept.label}
+        help={accept.help}
+        maxLength={accept.max}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <div className="pop-acts">
+        <Button variant="ghost" size="sm" onClick={close}>
+          {accept.back}
+        </Button>
+        <Button variant="primary" size="sm" type="submit">
+          {accept.submit}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 function FindingCard({ it, finding }: { it: ChangeReview; finding: Finding }) {
   const toast = useToast();
   const checked = checkedBy(it.review, finding);
@@ -286,6 +347,7 @@ function FindingCard({ it, finding }: { it: ChangeReview; finding: Finding }) {
             View on GitHub
           </GitHubButton>
         ) : null}
+        <AcceptAsIs it={it} finding={finding} />
         <TooNoisy it={it} finding={finding} />
       </div>
     </Card>
@@ -437,16 +499,8 @@ function Outcome({ it, state }: { it: ChangeReview; state: State }) {
   const s = status(it);
 
   switch (s.kind) {
-    case "needs-you": {
-      const n = review.findings.filter(needsYou).length;
-      return (
-        <Notice>
-          {change.writtenBy ? "The agent" : "The author"} and the reviewer disagree on{" "}
-          {n === 1 ? "one finding" : `${n} findings`} after {plural(review.rounds.length, "round")}. Only you
-          can settle {n === 1 ? "it" : "them"}: read both sides below.
-        </Notice>
-      );
-    }
+    case "needs-you":
+      return <Notice>{needsYouBanner(change, review)}</Notice>;
     case "failed":
       // Before any round, the failure is all there is to say, and `FailedNotice` says it, as after a round.
       return null;
@@ -824,8 +878,8 @@ function ReviewActions({ it, again, copy }: ReviewActionsProps) {
       {busy || again ? (
         <ReviewButtonPlace shown={shown} primary={reviewButtonPrimary(it)} again={again} />
       ) : null}
-      {/* A review that needs the person: Open on GitHub is the primary, where they settle the thread. */}
-      <GitHubButton change={it.change} kbd="G" variant={gitHubPrimary(it) ? "primary" : "secondary"}>
+      {/* Never the primary: a finding that needs the person is settled on its card (ADR 0100). */}
+      <GitHubButton change={it.change} kbd="G" variant="secondary">
         Open on GitHub
       </GitHubButton>
       {/* Last, so the buttons keep their places when it comes and goes. */}

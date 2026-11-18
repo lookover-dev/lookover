@@ -17,6 +17,7 @@ import type {
   FindingId,
   GhRole,
   HostFailure,
+  OwnerDecision,
   RepositoryRef,
   RulesFile,
   SettingKey,
@@ -163,7 +164,9 @@ type Refusal = Extract<HostFailure, "unavailable" | "rate_limited">;
  * accounts each have their own #1, ADR 0066). `open`: the host lists the change, at its first commit; `open-several`: each
  * of `changes` so, then one listing, so a world with many pull requests opens them at the cost of one. `push`: its next commit
  * lands. `ask`: a `/lookover review` comment by the owner's agent (as the owner, naming the head commit, as
- * `lookover wait` writes it). `refuse`: the host refuses every call for `forMs` on the clock (as rate limited, with
+ * `lookover wait` writes it). `settle`: the owner's agent settles `finding` on the owner's word (ADR 0101), as
+ * `lookover settle` does: a settle comment by the owner's login, `decision` with the person's `reason`, which the
+ * poll that follows reads. `refuse`: the host refuses every call for `forMs` on the clock (as rate limited, with
  * that time as GitHub's reset), then answers again. `update`: the engine is a newer version, whose self-test passes
  * or fails on the wall. `too-old`: the engine's program is found at `version`, too old for the model it reviews on,
  * set as its health says it (the scripted engines run no version check). `installed`: the engine's program is
@@ -184,6 +187,7 @@ export type Move =
   | { kind: "open-several"; changes: ChangeRef[] }
   | { kind: "push"; change: ChangeRef }
   | { kind: "ask"; change: ChangeRef }
+  | { kind: "settle"; change: ChangeRef; finding: FindingId; decision: OwnerDecision; reason: string }
   | { kind: "reply"; change: ChangeRef; finding: FindingId; by: Account; text: string }
   | { kind: "close"; change: ChangeRef }
   | { kind: "sign-out"; engine: EngineId }

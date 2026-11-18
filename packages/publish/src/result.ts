@@ -115,7 +115,7 @@ function claimOf(finding: Finding): Pick<ReviewResultFinding, "claim"> {
 /**
  * What this round's reply on a finding still unsettled says as its resolution (ADR 0052, ADR 0081): kept against the
  * claim (a question answered is kept too), escalated to the owner, or still present after a push, with the finder's
- * reason as of now. A withdrawn or dismissed finding is settled: its status says it.
+ * reason as of now. A withdrawn, dismissed or accepted finding is settled: its status says it.
  */
 const REPLY_RESOLUTION: Record<ReplyKind, "kept" | "escalated" | "still_present" | null> = {
   kept: "kept",
@@ -124,6 +124,7 @@ const REPLY_RESOLUTION: Record<ReplyKind, "kept" | "escalated" | "still_present"
   still_present: "still_present",
   withdrawn: null,
   dismissed: null,
+  accepted: null,
 };
 
 function resultFinding(
@@ -160,16 +161,21 @@ function resultFinding(
 
 /** Why a settled finding was settled; for one still unsettled, what this round answered on its thread, if anything. */
 function resolutionOf(finding: Finding, round: RoundToPost): ReviewResultFinding["resolution"] {
-  const { status, closedIn, closedWhy } = finding;
+  const { status, closedIn, closedWhy, decidedVia } = finding;
   if (status === "open" || status === "escalated" || closedIn === null) {
     const reply = round.reconciled.replies.find((r) => r.findingId === finding.id);
     const kind = reply ? REPLY_RESOLUTION[reply.kind] : null;
     if (!reply || kind === null) return null;
     return { kind, round: round.round, explanation: reply.why };
   }
-  // An acknowledged finding's why is the author's reply.
+  // An acknowledged finding's why is the author's reply; the owner's decision says how it came (ADR 0101).
   const why = status === "acknowledged" && closedWhy ? clip(closedWhy, AUTHOR_MAX_BYTES) : closedWhy;
-  return { kind: status, round: closedIn, ...(why ? { explanation: why } : {}) };
+  return {
+    kind: status,
+    round: closedIn,
+    ...(why ? { explanation: why } : {}),
+    ...(decidedVia === null ? {} : { via: decidedVia }),
+  };
 }
 
 /** A placed finding with who must act on it, as `core` said. */
@@ -205,6 +211,7 @@ function resultCounts(c: FindingCounts, kept: number): ReviewResult["counts"] {
     withdrawn: c.withdrawn,
     acknowledged: c.acknowledged,
     dismissed: c.dismissed,
+    accepted: c.accepted,
     obsolete: c.obsolete,
     kept_in_app: kept,
   };
@@ -356,6 +363,7 @@ export function endedResult(job: JobCheck, ended: Ended, headline: string): Revi
         withdrawn: 0,
         acknowledged: 0,
         dismissed: 0,
+        accepted: 0,
         obsolete: 0,
       },
       0,

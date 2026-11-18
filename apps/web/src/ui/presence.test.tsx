@@ -88,15 +88,17 @@ test("a cancelled animation counts as done", async () => {
 });
 
 test("a leave held by a paused animation goes once the page's timeline is twice the longest motion token on", async () => {
-  // The token as the page's stylesheet sets it, short so the test waits little.
-  document.documentElement.style.setProperty("--d-4", "10ms");
+  // The token as the page's stylesheet sets it, short so the test waits little, but not so short that the leave is
+  // already gone when the test first looks: at 10 ms its 20 ms limit passed during the render under `check:full`'s
+  // load (2026-11-17), and the leave was gone before the test saw it held.
+  document.documentElement.style.setProperty("--d-4", "150ms");
   try {
     await render(<One present />);
     const exit = exiting(found(item()));
     await render(<One present={false} />);
     exit.pause();
     expect(item()).not.toBeNull();
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 80)));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 600)));
     expect(item()).toBeNull();
     await unmount();
   } finally {

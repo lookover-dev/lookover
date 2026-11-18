@@ -100,6 +100,7 @@ export function repos(db: Database): Repos {
   const forgetListing = [
     db.query("DELETE FROM comments WHERE repo_owner = ? AND repo_name = ?"),
     db.query("DELETE FROM comment_places WHERE repo_owner = ? AND repo_name = ?"),
+    db.query("DELETE FROM settle_refusals WHERE repo_owner = ? AND repo_name = ?"),
     db.query("DELETE FROM changes WHERE repo_owner = ? AND repo_name = ?"),
     db.query("DELETE FROM repositories WHERE owner = ? AND name = ?"),
   ];

@@ -1,11 +1,14 @@
-// The owner's dismissals (ADR 0052, "This finding is wrong"), in the service's and `publish`'s verbs: "the owner
-// dismissed this finding: write the ledger it leaves and save the posts it owes", "this dismissal and where its posts
-// are", "a send of this post began", "the host took it, and this is its id for it", "its posts are over".
+// The owner's dismissals, "This finding is wrong" (ADR 0052) and "Accept as is" (ADR 0100), each keeping which the
+// owner decided and how it came (ADR 0101: their app, or their coding agent on their word), in the service's and
+// `publish`'s verbs: "the owner dismissed this finding: write the ledger it leaves and save the posts it owes", "this
+// dismissal and where its posts are", "a send of this post began", "the host took it, and this is its id for it", "its
+// posts are over".
 // A dismissal is saved in one transaction, refused while a run of its change goes (a round would reconcile and post
 // over it): the change's ledger with the finding dismissed (its last round's, and that round's plan's ledger too, so a
 // review that lands late lands it dismissed; and the latest round that owes posts when a preview's came after it, so
 // the ledger that round's status block says holds it too), the dismissal, and the posts it owes, in order, under its
-// own key.
+// own key, and the coding agent's settle comment it answers, if any (ADR 0101): handled from then on, so a stop before
+// the poll's bookkeeping never reads it again.
 // Until it ends, its change is busy for the take (`jobs.take`): a round never posts while it does. Its posts are
 // rendered from the round it names (that run's plan, kept as the run gave it).
 // Programming errors, thrown: marking a post of a dismissal never saved, that has ended, or of a kind it doesn't owe.
@@ -13,19 +16,21 @@ import type { Database } from "bun:sqlite";
 import {
   type ChangeId,
   changeId,
+  type DecisionVia,
   enumOf,
   type Finding,
   type FindingId,
   findingId,
+  type OwnerDecision,
   type RunId,
 } from "@lookover/contracts";
 import { z } from "zod";
 
 /**
  * A post of a dismissal, in `publish`'s spelling: the reply, the status block in the description, the round's check,
- * the root minimized.
+ * the root minimized, the 🚀 on the coding agent's settle comment (ADR 0101).
  */
-export type DismissalPostKind = "reply" | "status" | "completed" | "minimize";
+export type DismissalPostKind = "reply" | "status" | "completed" | "minimize" | "react";
 
 /** What the service saves as the owner dismisses a finding. */
 export interface DismissalSaved {
@@ -33,6 +38,13 @@ export interface DismissalSaved {
   id: string;
   changeId: ChangeId;
   findingId: FindingId;
+  decision: OwnerDecision;
+  via: DecisionVia;
+  /**
+   * The coding agent's settle comment it answers (ADR 0101), kept in the same write: a comment of the change's
+   * repository handled from then on (`requests.handled`); null for the app's.
+   */
+  answering: string | null;
   /** The round its posts are rendered from: the run whose plan the change's latest posted round keeps. */
   runId: RunId;
   /** The round's check it rewrites; null leaves it. */
@@ -56,6 +68,10 @@ export interface Dismissal<P> {
   id: string;
   changeId: ChangeId;
   findingId: FindingId;
+  decision: OwnerDecision;
+  via: DecisionVia;
+  /** The settle comment it answers; null for the app's. */
+  answering: string | null;
   /** The plan of the round it restates, as its run gave it. */
   plan: P;
   /** That round's review went with every finding in the status block. */
@@ -87,6 +103,9 @@ const dismissalRow = z.object({
   id: z.string(),
   change_id: z.string(),
   finding_id: z.string(),
+  decision: enumOf<OwnerDecision>()(["wrong", "accepted"]),
+  via: enumOf<DecisionVia>()(["app", "agent"]),
+  comment_id: z.string().nullable(),
   check_id: z.string().nullable(),
   plan: z.string(),
   degraded: z.int(),
@@ -94,7 +113,7 @@ const dismissalRow = z.object({
 });
 const postRows = z.array(
   z.object({
-    kind: enumOf<DismissalPostKind>()(["reply", "status", "completed", "minimize"]),
+    kind: enumOf<DismissalPostKind>()(["reply", "status", "completed", "minimize", "react"]),
     host_id: z.string().nullable(),
     tries: z.int(),
   }),
@@ -117,13 +136,14 @@ export function dismissals(db: Database): Dismissals {
   const selectPlanLedger = db.query("SELECT ledger FROM plans WHERE change_id = ? AND n = ?");
   const updatePlanLedger = db.query("UPDATE plans SET ledger = ? WHERE change_id = ? AND n = ?");
   const insert = db.query(
-    "INSERT INTO dismissals (id, change_id, finding_id, run_id, check_id, at) VALUES (?, ?, ?, ?, ?, ?)",
+    `INSERT INTO dismissals (id, change_id, finding_id, decision, via, comment_id, run_id, check_id, at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertPost = db.query(
     "INSERT INTO dismissal_posts (dismissal_id, seq, kind, host_id, tries) VALUES (?, ?, ?, NULL, 0)",
   );
   const select = db.query(
-    `SELECT d.id, d.change_id, d.finding_id, d.check_id, d.ended_at, plans.plan, plans.degraded
+    `SELECT d.id, d.change_id, d.finding_id, d.decision, d.via, d.comment_id, d.check_id, d.ended_at, plans.plan, plans.degraded
      FROM dismissals AS d JOIN plans ON plans.run_id = d.run_id WHERE d.id = ?`,
   );
   const selectPosts = db.query(
@@ -164,7 +184,7 @@ export function dismissals(db: Database): Dismissals {
         updateRound.run(JSON.stringify(d.dismiss(JSON.parse(round.findings))), d.changeId, round.n);
       }
     }
-    insert.run(d.id, d.changeId, d.findingId, d.runId, d.checkId, d.at);
+    insert.run(d.id, d.changeId, d.findingId, d.decision, d.via, d.answering, d.runId, d.checkId, d.at);
     d.posts.forEach((kind, seq) => {
       insertPost.run(d.id, seq, kind);
     });
@@ -180,6 +200,9 @@ export function dismissals(db: Database): Dismissals {
         id: row.id,
         changeId: changeId(row.change_id),
         findingId: findingId(row.finding_id),
+        decision: row.decision,
+        via: row.via,
+        answering: row.comment_id,
         // Written by `posts.saved` from the run's value: reading it back is reading our own JSON.
         plan: JSON.parse(row.plan),
         degraded: row.degraded === 1,

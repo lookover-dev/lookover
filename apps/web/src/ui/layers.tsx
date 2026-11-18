@@ -20,9 +20,22 @@ function focusables(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input, [tabindex='0']")];
 }
 
-/** Arrow keys move between the items of a menu or a listbox. */
+/** The inputs whose arrow keys are the person's own: they move the caret or step the value. */
+const TYPED = new Set(["text", "search", "email", "url", "tel", "password", "number"]);
+
+/**
+ * Whether a key pressed on `target` is typing: in a textarea or a text input, where arrow keys stay its own. An
+ * element's `type` is an input's alone, read as it runs.
+ */
+export function typingIn(target: { tagName: string; type?: unknown } | null): boolean {
+  if (target?.tagName === "TEXTAREA") return true;
+  return target?.tagName === "INPUT" && TYPED.has(typeof target.type === "string" ? target.type : "text");
+}
+
+/** Arrow keys move between the items of a menu or a listbox; in a text field they stay the field's. */
 function arrowKeys(e: ReactKeyboardEvent<HTMLElement>) {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  if (typingIn(e.target instanceof Element ? e.target : null)) return;
   const list = focusables(e.currentTarget);
   const active = document.activeElement;
   const i = active instanceof HTMLElement ? list.indexOf(active) : -1;

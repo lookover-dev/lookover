@@ -3,6 +3,8 @@ import {
   bySeverity,
   type Change,
   type ChangeId,
+  type Command,
+  type DecisionVia,
   type Finding,
   type FindingStatus,
   isCounted,
@@ -10,6 +12,9 @@ import {
   NOT_RAISED_AGAIN,
   type NoiseChoice,
   type NoiseCounts,
+  type OwnerDecision,
+  ownerDecisionOf,
+  REASON_MAX,
   type Review,
   type Rule,
   ruleText,
@@ -118,22 +123,105 @@ export function roundOnHead(review: Review, change: Pick<Change, "headSha">): bo
 }
 
 /**
+ * What settling a finding does on GitHub beyond its thread: `update` is `withCheck` while the latest round is on the
+ * head (`onHead`), else `without`, and then `olderCheck` is the sentence saying the check stays on the older commit
+ * (null on the head).
+ */
+function onTheCheck(
+  onHead: boolean,
+  withCheck: string,
+  without: string,
+): { update: string; olderCheck: string | null } {
+  return onHead
+    ? { update: withCheck, olderCheck: null }
+    : { update: without, olderCheck: "The check stays: it is on an older commit." };
+}
+
+/** Whole sentences as one paragraph, the absent ones (null) left out. */
+function sentences(...each: (string | null)[]): string {
+  return each.filter((one) => one !== null).join(" ");
+}
+
+/**
  * "This finding is wrong" (ADR 0052): dismissed here and on GitHub, said on its thread when it has one (a finding in
  * the pull request's description only has none), its comment hidden, the status block in the description updated
  * (ADR 0074), and the check while the latest round is on the head (`onHead`): one on an older commit stays as it is.
  */
 function wrongChoice(changeId: ChangeId, finding: Finding, onHead: boolean): NoiseOption {
-  const updates = onHead
-    ? "updates the pull request's description and the check"
-    : "updates the pull request's description";
+  const { update: updates, olderCheck } = onTheCheck(
+    onHead,
+    "updates the pull request's description and the check",
+    "updates the pull request's description",
+  );
   const where = finding.commented ? `says so on its thread, hides its comment, and ${updates}` : updates;
-  const check = onHead ? "" : " The check stays: it is on an older commit.";
   return {
     label: "This finding is wrong",
     hint: "keep it out of future rounds",
     choice: { kind: "wrong", changeId, findingId: finding.id },
-    effect: `The finding is dismissed here and on GitHub: Lookover ${where}.${check} It ${NOT_RAISED_AGAIN}.`,
+    effect: sentences(
+      `The finding is dismissed here and on GitHub: Lookover ${where}.`,
+      olderCheck,
+      `It ${NOT_RAISED_AGAIN}.`,
+    ),
     saved: "Marked as wrong. The finding is dismissed.",
+  };
+}
+
+/** The owner's way to settle a correct finding they won't fix, on its card (ADR 0100); the banner names it too. */
+export const ACCEPT_AS_IS = "Accept as is";
+
+/**
+ * Accept as is's popover (ADR 0100): its title, what it does, its one optional field (label, help, the longest
+ * reason the service takes), what saving it says, its two buttons (`back` closes it, `submit` accepts), and the
+ * command for the reason typed (none sent when blank).
+ */
+export interface AcceptPopover {
+  title: string;
+  effect: string;
+  label: string;
+  help: string;
+  max: number;
+  saved: string;
+  back: string;
+  submit: string;
+  command: (reason: string) => Command;
+}
+
+/**
+ * Accept as is on a finding that counts (posted, unsettled); null on any other. As "This finding is wrong" says it:
+ * the reply only when the finding has a thread, the check only while the latest round is on the head (`onHead`).
+ */
+export function acceptAsIs(changeId: ChangeId, finding: Finding, onHead: boolean): AcceptPopover | null {
+  if (!isCounted(finding)) return null;
+  const { update: counting, olderCheck } = onTheCheck(
+    onHead,
+    "the description and the check stop counting it",
+    "the description stops counting it",
+  );
+  const where = finding.commented
+    ? `it replies on the thread that you accepted it, with your reason when you give one, and ${counting}`
+    : counting;
+  return {
+    title: `Accept ${finding.id} as is`,
+    effect: sentences(
+      "Lookover stops asking for a fix.",
+      `On GitHub ${where}.`,
+      olderCheck,
+      `It ${NOT_RAISED_AGAIN}.`,
+    ),
+    label: "Why, in one line",
+    // With no thread (the status block only), the reason has nowhere to be posted.
+    help: finding.commented ? "Optional. Posted on the thread as you write it." : "Optional.",
+    max: REASON_MAX,
+    saved: "Accepted as is. Lookover won't ask again.",
+    back: "Back",
+    submit: "Accept",
+    command: (reason) => ({
+      type: "finding.accept",
+      changeId,
+      findingId: finding.id,
+      ...(reason.trim() === "" ? {} : { reason }),
+    }),
   };
 }
 
@@ -197,6 +285,20 @@ export function needsYou(finding: Finding): boolean {
 }
 
 /**
+ * The needs-you banner (ADR 0100): who disagrees with the reviewer, on how many findings, after how many rounds, and
+ * the two ways the person settles them: a fix, or Accept as is on the card.
+ */
+export function needsYouBanner(change: Pick<Change, "writtenBy">, review: Review): string {
+  const n = review.findings.filter(needsYou).length;
+  const who = change.writtenBy ? "The agent" : "The author";
+  const settle =
+    n === 1
+      ? `it: fix it, or use ${ACCEPT_AS_IS} on its card`
+      : `them: fix them, or use ${ACCEPT_AS_IS} on their cards`;
+  return `${who} and the reviewer disagree on ${n === 1 ? "one finding" : `${n} findings`} after ${plural(review.rounds.length, "round")}. Only you can settle ${settle}.`;
+}
+
+/**
  * Whether a finding's card is marked as needing you by its edge, with "Needs you" in its heading for a screen reader
  * (design-system.md "Finding card"). The page's banner says "Needs you" once (ADR 0083, round 6): under it, a card
  * needs its own mark only when other open findings don't need the person, to tell which one does. With no banner (a
@@ -232,12 +334,17 @@ export function findingTabs(review: Review): { value: FindingTab; label: string;
     .map((tab) => ({ value: tab, label: label[tab], count: groups[tab].length }));
 }
 
-// For statuses set without a reason of their own. Withdrawn findings always carry one; the owner dismisses with
-// none (ADR 0052).
+// For statuses set without a reason of their own. Withdrawn findings always carry one; the owner's decisions are
+// worded by `OWNER_DECIDED`.
 const SETTLED_TEXT: Partial<Record<FindingStatus, string>> = {
   acknowledged: "The reviewer accepted the reply.",
-  dismissed: "You marked it as wrong.",
   obsolete: "No longer in the code.",
+};
+
+// What the owner decided, by the way they decided it: in the app, or through their coding agent on their word (#801).
+const OWNER_DECIDED: Record<OwnerDecision, Record<DecisionVia, string>> = {
+  wrong: { app: "You marked it as wrong", agent: "Your coding agent marked it as wrong, on your word" },
+  accepted: { app: "You accepted it as is", agent: "Your coding agent accepted it as is, on your word" },
 };
 
 /**
@@ -250,6 +357,13 @@ export function doneLine(
   if (finding.status === "verified_fixed" && finding.verifiedSha) {
     const round = finding.closedIn === null ? [] : [`, round ${finding.closedIn}`];
     return { kind: "verified", words: ["verified fixed in ", { commit: finding.verifiedSha }, ...round] };
+  }
+  // Who decided, then the owner's reason when they gave one (the finding's `closedWhy`, ADR 0100): never the bare
+  // reason.
+  const decision = ownerDecisionOf(finding.status);
+  if (decision !== null) {
+    const decided = OWNER_DECIDED[decision][finding.decidedVia ?? "app"];
+    return { kind: "why", text: finding.closedWhy ? `${decided}: ${finding.closedWhy}` : `${decided}.` };
   }
   return { kind: "why", text: finding.closedWhy ?? SETTLED_TEXT[finding.status] ?? "" };
 }

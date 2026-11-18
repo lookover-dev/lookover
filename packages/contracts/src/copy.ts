@@ -13,7 +13,7 @@ import type { ClaimKind, FindingClaim } from "./claim.ts";
 import type { ConfirmFailure } from "./confirm.ts";
 import type { EngineId } from "./engine.ts";
 import type { EngineHealth, EngineUnusable } from "./engines-port.ts";
-import type { Finding } from "./finding.ts";
+import type { DecisionVia, Finding } from "./finding.ts";
 import type { TransientHostFailure } from "./host.ts";
 import type {
   CancelReason,
@@ -577,14 +577,19 @@ export function failedHead<C>(commit: C): (string | C)[] {
 }
 
 /**
- * A posted round's counts over its posted findings, after its commit: "3 fixed, 1 withdrawn", withdrawn by the
- * finder or dismissed by the owner; "" for none.
+ * A posted round's counts over its posted findings, after its commit: "3 fixed, 1 withdrawn, 1 accepted", withdrawn by
+ * the finder or dismissed by the owner, accepted as is by the owner (ADR 0100), each part when not zero; "" for none.
  */
 export function roundCountsText(findings: Pick<Finding, "status" | "posted">[]): string {
   const on = findings.filter((f) => f.posted);
   const fixed = on.filter((f) => f.status === "verified_fixed").length;
   const withdrawn = on.filter((f) => f.status === "withdrawn" || f.status === "dismissed").length;
-  return [fixed > 0 ? `${fixed} fixed` : null, withdrawn > 0 ? `${withdrawn} withdrawn` : null]
+  const accepted = on.filter((f) => f.status === "accepted").length;
+  return [
+    fixed > 0 ? `${fixed} fixed` : null,
+    withdrawn > 0 ? `${withdrawn} withdrawn` : null,
+    accepted > 0 ? `${accepted} accepted` : null,
+  ]
     .filter((c) => c !== null)
     .join(", ");
 }
@@ -627,12 +632,14 @@ export function escalationText(claim: ClaimKind | null): string {
       : claim === null
         ? "Kept twice"
         : KEPT_TWICE[claim];
-  return `${why}: the owner decides on the thread.`;
+  return `${why}: the owner decides in Lookover's app.`;
 }
 
-/** Why the owner decides a finding kept twice against "won't fix" (ADR 0074), in the reply on its thread. */
-export const KEPT_TWICE_WONT_FIX =
-  'Kept twice against "won\'t fix". Fix it, or resolve this thread to keep the code as it is.';
+/**
+ * Why the owner decides a finding kept twice against "won't fix" (ADR 0074), in the reply on its thread: the owner
+ * accepts it in the app, never on the thread (ADR 0100).
+ */
+export const KEPT_TWICE_WONT_FIX = `Kept twice against "won't fix". Fix it, or the owner accepts it as is in Lookover's app.`;
 
 /**
  * The kind of a reply on the thread of a finding a round found still there after a push (ADR 0081): `lookover wait`
@@ -650,14 +657,29 @@ export interface ReplyWords {
   last: string | null;
 }
 
+/** The owner's decision on a thread, by its way (ADR 0101). */
+const DECIDED: Record<"dismissed" | "accepted", Record<DecisionVia, string>> = {
+  dismissed: {
+    app: "Dismissed by the owner",
+    agent: "Dismissed on the owner's word, through their coding agent",
+  },
+  accepted: {
+    app: "Accepted by the owner",
+    agent: "Accepted on the owner's word, through their coding agent",
+  },
+};
+
 /**
  * What a reply on a finding's thread is, by what the round decided (`reply`) and the finding as it left it. A finding
  * kept once against its author is escalated the next time (ADR 0052): the reply says so, unless the owner already
- * has it; one escalated after "won't fix" kept twice gets the fixed words, not the finder's.
+ * has it; one escalated after "won't fix" kept twice gets the fixed words, not the finder's. The owner's decision
+ * says its way (ADR 0101): by the owner in the app, or on their word through their coding agent.
  */
 export function replyKind(
   reply: ReplyKind,
-  finding: (Pick<Finding, "status" | "kept"> & { claim: Pick<FindingClaim, "kind"> | null }) | undefined,
+  finding:
+    | (Pick<Finding, "status" | "kept" | "decidedVia"> & { claim: Pick<FindingClaim, "kind"> | null })
+    | undefined,
 ): ReplyWords {
   const words = (kind: string, why: string | null = null, last: string | null = null) => ({
     kind,
@@ -677,8 +699,10 @@ export function replyKind(
       return words("Withdrawn");
     case "answered":
       return words("Answer");
+    // The owner's reason, if any, is the reply's why (ADR 0100, ADR 0101).
     case "dismissed":
-      return words("Dismissed by the owner", null, `It ${NOT_RAISED_AGAIN}.`);
+    case "accepted":
+      return words(DECIDED[reply][finding?.decidedVia ?? "app"], null, `It ${NOT_RAISED_AGAIN}.`);
     case "still_present":
       // Nothing is counted: no closing line, as for an answer.
       return words(STILL_PRESENT);

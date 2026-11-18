@@ -43,6 +43,6 @@ async function noThread(host: AgentHost, change: ChangeRef, me: number, id: stri
   const newest = (await ourChecks(host, change, head, me)).findLast((c) => c.status === "completed");
   const found = readResult(newest?.output.text ?? "")?.findings.find((f) => f.id === id);
   if (found?.placement === "status")
-    return `${id} is in the status block only, in the pull request's description: it has no thread, so it takes no reply. Fix it, or ask the owner to dismiss it.`;
+    return `${id} is in the status block only, in the pull request's description: it has no thread, so it takes no reply. Fix it, or ask the owner to accept it as is or mark it wrong: in Lookover's app, or on their word with lookover settle.`;
   return `Lookover has no thread for ${id} on pull request #${change.number}.`;
 }

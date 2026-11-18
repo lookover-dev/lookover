@@ -16,7 +16,7 @@ import {
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { AppContext, StateProvider } from "../store.tsx";
+import { AppContext, type AppServices, StateProvider } from "../store.tsx";
 import { app, world } from "./repositories.test-support.tsx";
 import { Review as ReviewScreen } from "./review.tsx";
 
@@ -69,6 +69,7 @@ export function finding(id: string, status: Finding["status"], more: Partial<Fin
     closedIn: status === "open" ? null : 1,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
     ...more,
@@ -82,9 +83,14 @@ export function page(review: Partial<Review>): string {
 
 /**
  * The same page as an element, for a test that renders it in a DOM and renders it again as the review moves; `id`,
- * the pull request's id, for one that puts another pull request at the same address.
+ * the pull request's id, for one that puts another pull request at the same address; `send`, what the page's
+ * commands go to (none taken by default).
  */
-export function pageOf(review: Partial<Review>, id: ChangeId = ID): ReactElement {
+export function pageOf(
+  review: Partial<Review>,
+  id: ChangeId = ID,
+  send: AppServices["send"] = () => undefined,
+): ReactElement {
   const base = world();
   const at = base.now - 60_000;
   const round = {
@@ -130,7 +136,7 @@ export function pageOf(review: Partial<Review>, id: ChangeId = ID): ReactElement
       <AppContext.Provider
         value={{
           store: app(),
-          send: () => undefined,
+          send,
           embedded: false,
           mode: "program",
           openPalette: () => undefined,

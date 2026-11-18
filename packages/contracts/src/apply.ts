@@ -190,12 +190,17 @@ function roundFinished(s: State, event: Of<"round.finished">): State {
   };
 }
 
-function findingDismissed(s: State, event: Of<"finding.dismissed">): State {
+/** The owner's decision on findings (ADR 0052, ADR 0100): the ledger it leaves, and the entry the log says it with. */
+function findingDecided(s: State, event: Of<"finding.dismissed" | "finding.accepted">): State {
+  const kind = event.type === "finding.dismissed" ? "dismissed" : "accepted";
   return withReview(s, event.changeId, event.at, (r) => ({
     ...r,
     findings: event.findings,
     loop: event.loop,
-    timeline: [...r.timeline, { at: event.at, sha: null, kind: "dismissed", findingIds: event.findingIds }],
+    timeline: [
+      ...r.timeline,
+      { at: event.at, sha: null, kind, findingIds: event.findingIds, via: event.via },
+    ],
   }));
 }
 
@@ -359,7 +364,8 @@ export function apply(state: State, event: Event): State {
     case "round.finished":
       return roundFinished(s, event);
     case "finding.dismissed":
-      return findingDismissed(s, event);
+    case "finding.accepted":
+      return findingDecided(s, event);
     default: {
       // One this version doesn't know (a log a newer version wrote, ADR 0085): never a state of nothing. Its caller
       // skips it as one it threw on, keeping the state it had.

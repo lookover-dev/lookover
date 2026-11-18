@@ -494,7 +494,7 @@ test("S6: a finding the author won't fix, kept twice, needs your look", async ()
         item(
           F2_BLOCKING,
           await w.thread("F2"),
-          "Said won't fix twice, kept twice: the owner decides on the thread.",
+          "Said won't fix twice, kept twice: the owner decides in Lookover's app.",
         ),
       ]),
     ),

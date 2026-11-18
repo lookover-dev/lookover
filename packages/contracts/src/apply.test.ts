@@ -236,6 +236,7 @@ function finding(id: string, status: Finding["status"]): Finding {
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
   };
@@ -860,8 +861,8 @@ test("the second look goes through as the events say: the run's confirmer, the r
   expect(reviewOf(after).findings).toEqual(findings);
 });
 
-test("dismissed findings and the loop are recorded as the event says", () => {
-  const findings = [finding("a", "dismissed")];
+test("dismissed findings and the loop are recorded as the event says, the entry naming the way", () => {
+  const findings = [{ ...finding("a", "dismissed"), decidedVia: "app" as const }];
   const after = apply(
     snapshot({ job: job("done"), loop: "needs_owner", findings: [finding("a", "escalated")] }),
     {
@@ -872,11 +873,35 @@ test("dismissed findings and the loop are recorded as the event says", () => {
       findingIds: [findingId("a")],
       findings,
       loop: "settled",
+      via: "app",
     },
   );
   expect(reviewOf(after)).toMatchObject({ findings, loop: "settled" });
   expect(reviewOf(after).timeline).toEqual([
-    { at: NOW, sha: null, kind: "dismissed", findingIds: [findingId("a")] },
+    { at: NOW, sha: null, kind: "dismissed", findingIds: [findingId("a")], via: "app" },
+  ]);
+});
+
+test("accepted findings and the loop are recorded as the event says, the entry naming the way", () => {
+  const findings = [
+    { ...finding("a", "accepted"), closedWhy: "Accepted deploy-window gap", decidedVia: "agent" as const },
+  ];
+  const after = apply(
+    snapshot({ job: job("done"), loop: "needs_owner", findings: [finding("a", "escalated")] }),
+    {
+      type: "finding.accepted",
+      at: NOW,
+      seq: 1,
+      changeId: ID,
+      findingIds: [findingId("a")],
+      findings,
+      loop: "settled",
+      via: "agent",
+    },
+  );
+  expect(reviewOf(after)).toMatchObject({ findings, loop: "settled" });
+  expect(reviewOf(after).timeline).toEqual([
+    { at: NOW, sha: null, kind: "accepted", findingIds: [findingId("a")], via: "agent" },
   ]);
 });
 

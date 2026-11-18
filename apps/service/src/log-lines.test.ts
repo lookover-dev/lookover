@@ -5,6 +5,7 @@ import {
   type Change,
   changeId,
   commitSha,
+  type DecisionVia,
   type Dropped,
   type EventBody,
   emptyReview,
@@ -21,7 +22,7 @@ import {
   runId,
   type State,
 } from "@lookover/contracts";
-import { droppedLine, logLineOf } from "./index.ts";
+import { droppedLine, logLineOf, settleRefusedLine } from "./index.ts";
 
 /** Sunday 11 October 2026, 10:00 in the machine's own zone. */
 const AT = new Date(2026, 9, 11, 10, 0).getTime();
@@ -451,16 +452,36 @@ test("a post that meets a refusal and waits says until when and why, once per wa
   expect(logLineOf(posting(3, null), posting1({ sent: 3, owed: 4, wait: limited }))).toBeNull();
 });
 
-test("findings dismissed say which", () => {
-  const dismissed: EventBody = {
+test("findings dismissed say which, and how the decision came", () => {
+  const dismissed = (via: DecisionVia): EventBody => ({
     type: "finding.dismissed",
     at: AT,
     changeId: ID,
     findingIds: [findingId("F2"), findingId("F3")],
     findings: [],
     loop: "open",
-  };
-  expect(logLineOf(dismissed, before())).toBe("sasensi/ledger-api#151 F2, F3 marked wrong by you");
+    via,
+  });
+  expect(logLineOf(dismissed("app"), before())).toBe("sasensi/ledger-api#151 F2, F3 marked wrong by you");
+  expect(logLineOf(dismissed("agent"), before())).toBe(
+    "sasensi/ledger-api#151 F2, F3 marked wrong through your coding agent, on your word",
+  );
+});
+
+test("findings accepted as is say which, and how the decision came", () => {
+  const accepted = (via: DecisionVia): EventBody => ({
+    type: "finding.accepted",
+    at: AT,
+    changeId: ID,
+    findingIds: [findingId("F1")],
+    findings: [],
+    loop: "settled",
+    via,
+  });
+  expect(logLineOf(accepted("app"), before())).toBe("sasensi/ledger-api#151 F1 accepted as is by you");
+  expect(logLineOf(accepted("agent"), before())).toBe(
+    "sasensi/ledger-api#151 F1 accepted as is through your coding agent, on your word",
+  );
 });
 
 test("the service paused until when, or until resumed, and resumed", () => {
@@ -538,5 +559,24 @@ test("each piece a start dropped says where it was and why, in the log's words (
     `dropped reviews ${ID}: its change was dropped`,
     "dropped repos sasensi/ledger-api: enabled: Invalid input: expected boolean",
     "dropped rules 1: unreadable",
+  ]);
+});
+
+test("a settle the coding agent asked for and Lookover refused is worded for people, never as a code (ADR 0101)", () => {
+  const refusals = [
+    "no_such_finding",
+    "settled",
+    "not_posted",
+    "reviewing",
+    "reason_too_long",
+    "no_such_change",
+  ] as const;
+  expect(refusals.map((why) => settleRefusedLine(ID, findingId("F9"), why))).toEqual([
+    `${ID}: the settle of F9 your coding agent asked for was refused: Lookover raised no F9 on it`,
+    `${ID}: the settle of F9 your coding agent asked for was refused: F9 is settled already`,
+    `${ID}: the settle of F9 your coding agent asked for was refused: F9 was kept off the pull request`,
+    `${ID}: the settle of F9 your coding agent asked for was refused: a review of the pull request was running`,
+    `${ID}: the settle of F9 your coding agent asked for was refused: its reason is longer than 200 characters`,
+    `${ID}: the settle of F9 your coding agent asked for was refused: Lookover doesn't watch this pull request`,
   ]);
 });

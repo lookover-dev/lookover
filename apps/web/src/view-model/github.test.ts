@@ -92,6 +92,7 @@ function finding(id: string, status: FindingStatus, extra: Partial<Finding> = {}
     closedIn: status === "open" || status === "escalated" ? null : 2,
     verifiedSha: status === "verified_fixed" ? commitSha("c40a7b9e2d4f6a8b0c2e4f6a8b0c2d4e6f8a0b2c") : null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
     ...extra,
@@ -410,12 +411,12 @@ test("a finding only the owner can settle heads the block, its second line sayin
   const shown = block(item([open, unclaimed, disputed, wontFix]));
   expect(shown?.head).toBe("Needs your look");
   expect(shown?.items.map((i) => [i.finding.id, i.note])).toEqual([
-    [findingId("Retries forever"), "Said won't fix twice, kept twice: the owner decides on the thread."],
+    [findingId("Retries forever"), "Said won't fix twice, kept twice: the owner decides in Lookover's app."],
     [
       findingId("Unbounded page"),
-      "Disputed, and the finder still calls it wrong: the owner decides on the thread.",
+      "Disputed, and the finder still calls it wrong: the owner decides in Lookover's app.",
     ],
-    [findingId("No limit"), "Kept twice: the owner decides on the thread."],
+    [findingId("No limit"), "Kept twice: the owner decides in Lookover's app."],
     [findingId("Key in the log"), null],
   ]);
 });
@@ -754,6 +755,23 @@ test("a withdrawn or dismissed comment is hidden by Lookover; the agent's lookov
   });
 });
 
+test("an accepted thread stays readable, not minimized; the agent's lookover wait resolves it (ADR 0100)", () => {
+  const agent = item([]).change;
+  expect(threadOf(agent, finding("k", "accepted"))).toEqual({
+    resolved: true,
+    hidden: false,
+    label: "Resolved",
+    note: "Accepted by the owner. sam resolved the thread with lookover wait.",
+  });
+  const own = item([], { author: "you", writtenBy: null }).change;
+  expect(threadOf(own, finding("k", "accepted"))).toEqual({
+    resolved: false,
+    hidden: false,
+    label: "Accepted by the owner",
+    note: "The thread is yours to resolve.",
+  });
+});
+
 test("Lookover's reply on a thread says what the round decided, as publish words it", () => {
   const claim = (kind: FindingClaim["kind"]): FindingClaim => ({
     kind,
@@ -774,7 +792,7 @@ test("Lookover's reply on a thread says what the round decided, as publish words
   });
   expect(replyOf(finding("k", "escalated", { claim: claim("wont_fix"), kept: 2 }))).toEqual({
     kind: "The owner decides this one",
-    said: ['Kept twice against "won\'t fix". Fix it, or resolve this thread to keep the code as it is.'],
+    said: [`Kept twice against "won't fix". Fix it, or the owner accepts it as is in Lookover's app.`],
   });
   expect(replyOf(finding("k", "escalated", { claim: claim("disputed"), kept: 0 }))).toEqual({
     kind: "The owner decides this one",
@@ -787,6 +805,25 @@ test("Lookover's reply on a thread says what the round decided, as publish words
   expect(replyOf(finding("k", "dismissed"))).toEqual({
     kind: "Dismissed by the owner",
     said: ["It won't be raised again on this pull request."],
+  });
+  // Accepted as is (ADR 0100): the owner's reason, when there is one, then the closing line.
+  expect(replyOf(finding("k", "accepted", { closedWhy: "Accepted deploy-window gap" }))).toEqual({
+    kind: "Accepted by the owner",
+    said: ["Accepted deploy-window gap", "It won't be raised again on this pull request."],
+  });
+  expect(replyOf(finding("k", "accepted"))).toEqual({
+    kind: "Accepted by the owner",
+    said: ["It won't be raised again on this pull request."],
+  });
+  // Through the coding agent, on the owner's word (ADR 0101): its words, and the reason for either decision.
+  const agent = { closedWhy: "Keep it simple", decidedVia: "agent" } as const;
+  expect(replyOf(finding("k", "accepted", agent))).toEqual({
+    kind: "Accepted on the owner's word, through their coding agent",
+    said: ["Keep it simple", "It won't be raised again on this pull request."],
+  });
+  expect(replyOf(finding("k", "dismissed", agent))).toEqual({
+    kind: "Dismissed on the owner's word, through their coding agent",
+    said: ["Keep it simple", "It won't be raised again on this pull request."],
   });
   // No claim answered, no reply: an open finding, one verified fixed.
   expect(replyOf(finding("k", "open"))).toBeNull();

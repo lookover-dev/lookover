@@ -41,6 +41,10 @@ function checkout(withDocs: boolean): string {
 
 const run = "run `bun run brand`";
 const format = asWritten;
+/** The copies the source renders as text: every check below that isn't about pictures runs on these alone. Encoding
+ * the pictures is most of a full write's time, and a test that wrote and checked them all ran over its limit under
+ * `check:full`'s load (#793, again on 2026-11-17). How pictures compare is the pixels test's. */
+const texts = { format, copies: COPIES.filter((c) => !("picture" in c)) };
 
 // One test per copy: each starts Biome at most once (the four it formats), never four in one test's time.
 test.each(COPIES.map((c) => [c.path, c] as const))(
@@ -109,7 +113,7 @@ test("the four copies Biome formats go through the formatter given, written and 
     const mark = `/* formatted as ${path} */\n`;
     return text.endsWith(mark) ? text : `${text}${mark}`;
   };
-  await writeCopies(root, { format: marked });
+  await writeCopies(root, { ...texts, format: marked });
   const formatted = [
     "apps/web/src/ui/eyes.generated.ts",
     "apps/web/src/styles/system.css",
@@ -120,10 +124,10 @@ test("the four copies Biome formats go through the formatter given, written and 
     expect(readFileSync(join(root, path), "utf8")).toEndWith(`/* formatted as ${path} */\n`);
   }
   expect(readFileSync(join(root, "apps/web/public/favicon.svg"), "utf8")).not.toContain("formatted as");
-  expect(await driftedCopies(root, { format: marked })).toEqual([]);
+  expect(await driftedCopies(root, { ...texts, format: marked })).toEqual([]);
   // A copy formatted otherwise than the check formats the source is not what the source draws (the stylesheet
   // keeps what follows its region as written by hand, the mark with it).
-  expect(await driftedCopies(root, { format })).toEqual([
+  expect(await driftedCopies(root, texts)).toEqual([
     `apps/web/src/ui/eyes.generated.ts is not what the source draws: ${run}.`,
     `apps/site/src/brand/eyes.generated.ts is not what the source draws: ${run}.`,
     `apps/site/src/brand/eyes.generated.css is not what the source draws: ${run}.`,
@@ -132,63 +136,67 @@ test("the four copies Biome formats go through the formatter given, written and 
 
 test("a copy changed by one number fails, naming that file", async () => {
   const root = checkout(true);
-  await writeCopies(root, { format });
-  expect(await driftedCopies(root, { format })).toEqual([]);
+  await writeCopies(root, texts);
+  expect(await driftedCopies(root, texts)).toEqual([]);
   const icon = join(root, "docs/product/brand/lookover-icon.svg");
   writeFileSync(icon, readFileSync(icon, "utf8").replace('rx="14.4"', 'rx="14.5"'));
-  expect(await driftedCopies(root, { format })).toEqual([
+  expect(await driftedCopies(root, texts)).toEqual([
     `docs/product/brand/lookover-icon.svg is not what the source draws: ${run}.`,
   ]);
 });
 
 test("a picture is compared by its pixels: compressed otherwise it is the same, one pixel changed it is not", async () => {
+  // The app's icon alone: rendering every copy for each of the five reads made this test the slowest of its file,
+  // over its limit under `check:full`'s load (#793). What the other copies are is the tests above's.
   const root = checkout(true);
-  await writeCopies(root, { format });
+  const only = { format, copies: COPIES.filter((c) => c.path === APP_ICON) };
+  expect(only.copies).toHaveLength(1);
+  await writeCopies(root, only);
   const file = join(root, APP_ICON);
   const written = new Uint8Array(readFileSync(file));
   expect([...written.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
   const recompressed = withPixels(written, (rows) => rows, { level: 1 });
   expect(Buffer.from(recompressed).equals(Buffer.from(written))).toBe(false);
   writeFileSync(file, recompressed);
-  expect(await driftedCopies(root, { format })).toEqual([]);
+  expect(await driftedCopies(root, only)).toEqual([]);
   const drifted = [`${APP_ICON} is not what the source draws: ${run}.`];
   // Row 0's first red byte, after its filter's byte.
   writeFileSync(
     file,
     withPixels(written, (rows) => rows.with(1, (rows[1] ?? 0) ^ 1)),
   );
-  expect(await driftedCopies(root, { format })).toEqual(drifted);
+  expect(await driftedCopies(root, only)).toEqual(drifted);
   // Row 0, all ink, filtered with Sub as an optimiser might: the same pixels, yet not the file `bun run brand`
   // writes, which it reads with no filter, so it says to run it again.
   const stride = 200 * 4;
   const sub = (rows: Uint8Array) => rows.map((b, i) => (i === 0 ? 1 : i > 4 && i <= stride ? 0 : b));
   writeFileSync(file, withPixels(written, sub));
-  expect(await driftedCopies(root, { format })).toEqual(drifted);
+  expect(await driftedCopies(root, only)).toEqual(drifted);
   writeFileSync(file, written.subarray(0, 40));
-  expect(await driftedCopies(root, { format })).toEqual(drifted);
+  expect(await driftedCopies(root, only)).toEqual(drifted);
   writeFileSync(file, "not a picture");
-  expect(await driftedCopies(root, { format })).toEqual(drifted);
+  expect(await driftedCopies(root, only)).toEqual(drifted);
 });
 
 test("a missing copy fails, naming that file", async () => {
   const root = checkout(true);
-  await writeCopies(root, { format });
+  await writeCopies(root, texts);
   rmSync(join(root, "apps/web/public/favicon.svg"));
-  expect(await driftedCopies(root, { format })).toEqual([`apps/web/public/favicon.svg is missing: ${run}.`]);
+  expect(await driftedCopies(root, texts)).toEqual([`apps/web/public/favicon.svg is missing: ${run}.`]);
 });
 
 test("a copy checked out with CRLF line endings is the same copy", async () => {
   const root = checkout(true);
-  await writeCopies(root, { format });
+  await writeCopies(root, texts);
   const mark = join(root, "docs/product/brand/lookover-wordmark.svg");
   writeFileSync(mark, readFileSync(mark, "utf8").replaceAll("\n", "\r\n"));
-  expect(await driftedCopies(root, { format })).toEqual([]);
+  expect(await driftedCopies(root, texts)).toEqual([]);
 });
 
 test("without docs/, the copies under it are neither written nor checked", async () => {
   const root = checkout(false);
-  await writeCopies(root, { format });
+  await writeCopies(root, texts);
   expect(existsSync(join(root, "docs"))).toBe(false);
   expect(existsSync(join(root, "apps/web/public/favicon.svg"))).toBe(true);
-  expect(await driftedCopies(root, { format })).toEqual([]);
+  expect(await driftedCopies(root, texts)).toEqual([]);
 });

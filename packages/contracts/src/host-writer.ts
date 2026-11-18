@@ -29,8 +29,11 @@ export type CheckConclusion = RoundConclusion | "skipped";
 /** Where a check not yet completed stands: `queued` while its job waits, `in_progress` while it runs. */
 export type OpenCheckStatus = "queued" | "in_progress";
 
-/** The reactions Lookover puts on a review request (ADR 0043): `eyes` (👀) recorded, `rocket` (🚀) posted. */
-export type Reaction = "eyes" | "rocket";
+/**
+ * The reactions Lookover puts on a comment: on a review request (ADR 0043), `eyes` (👀) recorded and `rocket` (🚀)
+ * posted; on a settle comment (ADR 0101), `rocket` once settled and `confused` (😕) when it refused the settle.
+ */
+export type Reaction = "eyes" | "rocket" | "confused";
 
 /**
  * Why Lookover hides a comment (ADR 0052): `resolved`, its visual "done", since the App can't resolve a thread (a

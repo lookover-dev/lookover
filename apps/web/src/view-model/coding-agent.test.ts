@@ -478,6 +478,7 @@ function finding(posted: boolean, status: Finding["status"] = "open"): Finding {
     closedIn: null,
     verifiedSha: null,
     closedWhy: null,
+    decidedVia: null,
     claim: null,
     kept: 0,
   };

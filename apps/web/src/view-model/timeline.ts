@@ -55,8 +55,15 @@ export function timelineText(entry: TimelineEntry): string {
     case "failed":
       // As the check on GitHub says it (ADR 0081).
       return failedTitle(entry.failure);
+    // Through the agent, on the owner's word (#801): the agent did it, the owner decided it.
     case "dismissed":
-      return `You marked ${listed(entry.findingIds)} as wrong`;
+      return entry.via === "agent"
+        ? `Your coding agent marked ${listed(entry.findingIds)} as wrong, on your word`
+        : `You marked ${listed(entry.findingIds)} as wrong`;
+    case "accepted":
+      return entry.via === "agent"
+        ? `Your coding agent accepted ${listed(entry.findingIds)} as is, on your word`
+        : `You accepted ${listed(entry.findingIds)} as is`;
   }
 }
 

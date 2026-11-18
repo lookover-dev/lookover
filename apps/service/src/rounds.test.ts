@@ -273,6 +273,7 @@ test("round 1 posts in order with a valid result", () => {
     withdrawn: 0,
     acknowledged: 0,
     dismissed: 0,
+    accepted: 0,
     obsolete: 0,
     kept_in_app: 0,
   });
@@ -410,6 +411,7 @@ test("the fix pushed, round 2 verifies it and posts what is new", async () => {
     withdrawn: 0,
     acknowledged: 0,
     dismissed: 0,
+    accepted: 0,
     obsolete: 0,
     kept_in_app: 0,
   });
